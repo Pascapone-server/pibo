@@ -1,0 +1,4 @@
+interface:
+  display_name: "Pi Agent Harness"
+  short_description: "Build modular systems around Pi Agent"
+  default_prompt: "Use $pi-agent-harness to design a minimal modular runtime around Pi Agent."
