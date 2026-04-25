@@ -2,13 +2,21 @@ import type { PiboOutputEvent, PiboSessionStatus } from "../core/events.js";
 import type { PiboChannel } from "../channels/types.js";
 import type { PiboAuthService } from "../auth/types.js";
 import type { PiboWebApp } from "../web/types.js";
-import type { ContextFileProfile, InitialSessionContext, SkillProfile, ToolProfile } from "../core/profiles.js";
+import type {
+	ContextFileProfile,
+	InitialSessionContext,
+	SkillProfile,
+	SubagentProfile,
+	ToolProfile,
+} from "../core/profiles.js";
 
 export type PiboProfileBuildContext = {
 	getTool(name: string): ToolProfile;
 	getTools(names: readonly string[]): ToolProfile[];
 	getSkill(name: string): SkillProfile;
 	getContextFile(key: string): ContextFileProfile;
+	getSubagent(name: string): SubagentProfile;
+	getSubagents(names: readonly string[]): SubagentProfile[];
 };
 
 export type PiboProfileDefinition = {
@@ -45,6 +53,8 @@ export type PiboPluginEventListener = (event: PiboOutputEvent) => void;
 export type PiboPluginApi = {
 	registerTool(tool: ToolProfile): void;
 	registerTools(tools: readonly ToolProfile[]): void;
+	registerSubagent(subagent: SubagentProfile): void;
+	registerSubagents(subagents: readonly SubagentProfile[]): void;
 	registerSkill(skill: SkillProfile): void;
 	registerContextFile(contextFile: ContextFileProfile): void;
 	registerProfile(profile: PiboProfileDefinition): void;

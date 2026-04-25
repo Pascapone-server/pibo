@@ -21,18 +21,25 @@ import {
 	type ToolProfile,
 } from "./profiles.js";
 import { createDefaultPiboProfile } from "../plugins/builtin.js";
+import {
+	createSubagentToolDefinitions,
+	createSubagentToolName,
+	type PiboSubagentRunner,
+} from "../subagents/tool.js";
 
 export type PiboRuntimeOptions = {
 	cwd?: string;
 	persistSession?: boolean;
 	profile?: InitialSessionContext;
 	extensionFactories?: ExtensionFactory[];
+	subagentRunner?: PiboSubagentRunner;
 };
 
 export type PiboProfileInspection = {
 	profileName: string;
 	skills: Array<{ name: string; path: string }>;
 	tools: Array<{ name: string; hasDefinition: boolean; registered: boolean; active: boolean }>;
+	subagents: Array<{ name: string; targetProfile: string; active: boolean }>;
 	contextFiles: Array<{ path: string; bytes: number }>;
 	diagnostics: AgentSessionRuntimeDiagnostic[];
 };
@@ -87,8 +94,18 @@ function getEnabledSkillPaths(cwd: string, profile: InitialSessionContext): stri
 		.map((skill) => resolveProfilePath(cwd, skill.path));
 }
 
-function getEnabledToolDefinitions(profile: InitialSessionContext): ToolDefinition[] {
-	return profile.tools.filter(hasEnabledToolDefinition).map((tool) => tool.definition);
+function getEnabledToolDefinitions(
+	profile: InitialSessionContext,
+	subagentRunner?: PiboSubagentRunner,
+): ToolDefinition[] {
+	const subagentTools = subagentRunner
+		? createSubagentToolDefinitions(profile.subagents, subagentRunner)
+		: [];
+
+	return [
+		...profile.tools.filter(hasEnabledToolDefinition).map((tool) => tool.definition),
+		...subagentTools,
+	];
 }
 
 function hasEnabledToolDefinition(tool: ToolProfile): tool is ToolProfile & { definition: ToolDefinition } {
@@ -99,7 +116,7 @@ function createSessionManager(cwd: string, profile: InitialSessionContext, persi
 	const sessionManager = persistSession ? SessionManager.create(cwd) : SessionManager.inMemory(cwd);
 
 	if (profile.sessionId) {
-		sessionManager.newSession({ id: profile.sessionId });
+		sessionManager.newSession({ id: profile.sessionId, parentSession: profile.parentSessionId });
 	}
 
 	return sessionManager;
@@ -120,7 +137,7 @@ export async function createPiboRuntime(options: PiboRuntimeOptions = {}): Promi
 	}) => {
 		const contextFiles = await loadContextFiles(runtimeCwd, profile.contextFiles);
 		const skillPaths = getEnabledSkillPaths(runtimeCwd, profile);
-		const customTools = getEnabledToolDefinitions(profile);
+		const customTools = getEnabledToolDefinitions(profile, options.subagentRunner);
 		const services = await createAgentSessionServices({
 			cwd: runtimeCwd,
 			agentDir: runtimeAgentDir,
@@ -188,6 +205,14 @@ export async function inspectPiboProfile(options: PiboRuntimeOptions = {}): Prom
 				registered: registeredToolNames.has(tool.name),
 				active: activeToolNames.has(tool.name),
 			})),
+			subagents: profile.subagents.map((subagent) => {
+				const toolName = createSubagentToolName(subagent.name);
+				return {
+					name: subagent.name,
+					targetProfile: subagent.targetProfile,
+					active: activeToolNames.has(toolName),
+				};
+			}),
 			contextFiles: resourceLoader.getAgentsFiles().agentsFiles.map((contextFile) => ({
 				path: contextFile.path,
 				bytes: Buffer.byteLength(contextFile.content, "utf-8"),

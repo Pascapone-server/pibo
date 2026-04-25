@@ -1,4 +1,10 @@
-import type { ContextFileProfile, InitialSessionContext, SkillProfile, ToolProfile } from "../core/profiles.js";
+import type {
+	ContextFileProfile,
+	InitialSessionContext,
+	SkillProfile,
+	SubagentProfile,
+	ToolProfile,
+} from "../core/profiles.js";
 import type { PiboOutputEvent } from "../core/events.js";
 import type { PiboChannel } from "../channels/types.js";
 import type { PiboAuthService } from "../auth/types.js";
@@ -44,6 +50,7 @@ function webRoutesOverlap(left: string, right: string): boolean {
 
 export class PiboPluginRegistry {
 	private readonly tools = new Map<string, ToolProfile>();
+	private readonly subagents = new Map<string, SubagentProfile>();
 	private readonly skills = new Map<string, SkillProfile>();
 	private readonly contextFiles = new Map<string, ContextFileProfile>();
 	private readonly profiles = new Map<string, PiboProfileDefinition>();
@@ -81,6 +88,16 @@ export class PiboPluginRegistry {
 	registerTools(tools: readonly ToolProfile[]): void {
 		for (const tool of tools) {
 			this.registerTool(tool);
+		}
+	}
+
+	registerSubagent(subagent: SubagentProfile): void {
+		this.addUnique(this.subagents, subagent.name, subagent, "subagent");
+	}
+
+	registerSubagents(subagents: readonly SubagentProfile[]): void {
+		for (const subagent of subagents) {
+			this.registerSubagent(subagent);
 		}
 	}
 
@@ -197,6 +214,8 @@ export class PiboPluginRegistry {
 		return {
 			registerTool: (tool) => this.registerTool(tool),
 			registerTools: (tools) => this.registerTools(tools),
+			registerSubagent: (subagent) => this.registerSubagent(subagent),
+			registerSubagents: (subagents) => this.registerSubagents(subagents),
 			registerSkill: (skill) => this.registerSkill(skill),
 			registerContextFile: (contextFile) => this.registerContextFile(contextFile),
 			registerProfile: (profile) => this.registerProfile(profile),
@@ -214,6 +233,8 @@ export class PiboPluginRegistry {
 			getTools: (names) => names.map((name) => this.getRequired(this.tools, name, "tool")),
 			getSkill: (name) => this.getRequired(this.skills, name, "skill"),
 			getContextFile: (key) => this.getRequired(this.contextFiles, key, "context file"),
+			getSubagent: (name) => this.getRequired(this.subagents, name, "subagent"),
+			getSubagents: (names) => names.map((name) => this.getRequired(this.subagents, name, "subagent")),
 		};
 	}
 

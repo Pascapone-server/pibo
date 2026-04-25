@@ -29,6 +29,7 @@ Execution events are wrapper-level actions such as status, queue clear, abort, a
 Plugins are static and internal for now. They register capabilities into `PiboPluginRegistry`:
 
 - tools
+- subagents
 - skills
 - context files
 - profiles
@@ -37,6 +38,34 @@ Plugins are static and internal for now. They register capabilities into `PiboPl
 - channels
 
 The registry is a catalog. It does not run sessions and does not own transport. Runtime code consumes the catalog when it creates profiles, exposes actions, or starts plugin channels.
+
+## Subagents
+
+Subagents are profile-scoped capabilities, exposed to Pi as generated tools. A plugin registers a subagent definition, and a profile chooses which subagents are visible in the same builder pattern used for tools, skills, and context files.
+
+```text
+Profile
+  -> tools
+  -> subagents
+  -> skills
+  -> context files
+```
+
+A subagent definition points at another registered profile. That target profile may have its own tools, skills, context files, and subagents. Nothing is inherited automatically from the parent profile; each target profile declares its own capabilities.
+
+At runtime, each subagent call creates or reuses a normal routed session:
+
+```text
+parent-session
+  -> pibo_subagent_<name> tool
+  -> parent-session::sub::<name>::<threadKey>
+  -> Session router
+  -> Pi runtime for targetProfile
+```
+
+If `threadKey` is omitted, pibo creates a new subagent session. If the caller passes the same `threadKey` again, the same subagent session is continued, which allows multi-turn delegation. The generated session key can be used through the gateway like any other session key while the router is running.
+
+Subagent tools support `sync` and `async` modes. Sync mode waits for the correlated assistant reply and returns it to the calling agent. Async mode enqueues the message and returns the child `sessionKey` and event id immediately. A depth guard prevents accidental recursive subagent loops.
 
 ## Channels
 

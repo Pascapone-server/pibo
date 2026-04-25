@@ -20,6 +20,8 @@ Pibo is a minimal TypeScript wrapper around Pi Coding Agent. This file is a shor
 - A minimal static plugin layer exists in `src/plugins/`.
 - Built-in plugins now register core tools, profiles, context files, skills, gateway actions, and event listeners through `PiboPluginRegistry`.
 - `src/plugins/example.ts` demonstrates adding a plugin-provided skill, tool, and profile.
+- The plugin registry supports subagent registration through `api.registerSubagent(...)`.
+- Profiles can expose subagents through the same builder pattern as tools, skills, and context files.
 - Plugins can register channels through `api.registerChannel(...)`.
 - Plugins can register same-origin web apps through `api.registerWebApp(...)`.
 - Gateway channel sessions are backed by SQLite session bindings in `.pibo/session-bindings.sqlite`.
@@ -48,6 +50,7 @@ The plugin layer is intentionally static and internal. It gives pibo a clean ext
 Plugins can currently register:
 
 - tools
+- subagents
 - skills
 - context files
 - agent profiles
@@ -58,6 +61,18 @@ Plugins can currently register:
 The registry is a catalog only. It does not run Pi sessions and does not own transport. The session router and gateway consume registered profiles and gateway actions while Pi Coding Agent remains the inner execution engine.
 
 The current example plugin registers the skill at `examples/skills/pibo-example-plugin/SKILL.md`, the tool `pibo_example_plugin_note`, the no-op channel `pibo-example-channel`, and the profile alias `example-plugin`. It is wired into the default static plugin list in `src/plugins/builtin.ts`.
+
+## Subagents
+
+Subagents are registered capabilities that profiles can opt into with `addSubagent(...)` or `addSubagents(...)`. Each subagent points at a target profile, so the called agent can have a different prompt context, skills, tools, and its own nested subagents.
+
+At runtime, pibo turns enabled subagents into generated Pi tools named `pibo_subagent_<name>`. Calling one of these tools routes a message into a normal pibo session whose key follows:
+
+```text
+<parentSessionKey>::sub::<subagentName>::<threadKey>
+```
+
+Omitting `threadKey` creates a fresh child session. Reusing `threadKey` continues the same child session, which keeps subagent work inspectable and multi-turn. Sync subagents wait for the correlated reply; async subagents enqueue the work and return the child session key immediately.
 
 ## Channels And Session Bindings
 

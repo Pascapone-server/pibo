@@ -20,7 +20,16 @@ export {
 	InitialSessionContext,
 	InitialSessionContextBuilder,
 } from "./core/profiles.js";
-export type { BuiltinToolsMode, ContextFileProfile, InitialSessionContextOptions, SkillProfile, ToolProfile } from "./core/profiles.js";
+export type {
+	BuiltinToolsMode,
+	ContextFileProfile,
+	InitialSessionContextOptions,
+	PiboSubagentExecutionMode,
+	PiboSubagentMode,
+	SkillProfile,
+	SubagentProfile,
+	ToolProfile,
+} from "./core/profiles.js";
 export { definePiboPlugin, PiboPluginRegistry } from "./plugins/registry.js";
 export type { PiboPluginRegistryOptions } from "./plugins/registry.js";
 export type {
@@ -82,6 +91,17 @@ export type {
 	RemoteAgentResponseFrame,
 } from "./remote/protocol.js";
 export { sendGatewayEvent, sendGatewayMessageAndWaitForReply } from "./gateway/request.js";
+export {
+	createSubagentSessionKey,
+	createSubagentToolDefinitions,
+	createSubagentToolName,
+	getSubagentSessionDepth,
+} from "./subagents/tool.js";
+export type {
+	PiboSubagentRunInput,
+	PiboSubagentRunner,
+	PiboSubagentRunResult,
+} from "./subagents/tool.js";
 export type {
 	BuiltinPiboExecutionAction,
 	PiboEventListener,
