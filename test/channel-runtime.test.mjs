@@ -43,6 +43,15 @@ test("gateway starts plugin channels with router and session binding context", a
 		definePiboPlugin({
 			id: "test.channel",
 			register(api) {
+				api.registerAuthService({
+					name: "test-auth",
+					getSession() {
+						return Promise.resolve(undefined);
+					},
+					requireSession() {
+						throw new Error("not used");
+					},
+				});
 				api.registerChannel({
 					name: "test-web-channel",
 					kind: "web",
@@ -76,4 +85,35 @@ test("gateway starts plugin channels with router and session binding context", a
 	assert.equal(startedBinding.originalProfile, "pibo-minimal");
 	assert.equal(store.get("web:user-1"), startedBinding);
 	assert.equal(stopped, true);
+});
+
+test("gateway rejects required-auth channels without an auth service", async () => {
+	const registry = PiboPluginRegistry.create({ plugins: [piboCorePlugin] });
+
+	registry.registerPlugin(
+		definePiboPlugin({
+			id: "test.required-channel",
+			register(api) {
+				api.registerChannel({
+					name: "required-web-channel",
+					kind: "web",
+					auth: { mode: "required" },
+					start() {},
+				});
+			},
+		}),
+	);
+
+	const server = new PiboGatewayServer({
+		port: 0,
+		persistSession: false,
+		pluginRegistry: registry,
+		bindingStore: new MemoryBindingStore(),
+	});
+
+	await assert.rejects(
+		() => server.start(),
+		/Channel "required-web-channel" requires auth, but no auth service is registered/,
+	);
+	await server.stop();
 });

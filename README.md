@@ -12,6 +12,7 @@ For the current architecture snapshot, see `docs/architecture.md`.
 - `npm run tui` starts the Pi TUI through the pibo wrapper.
 - `npm run tui:gateway` starts the Pi TUI with the gateway producer profile.
 - `npm run gateway` starts the local pibo gateway daemon.
+- `npm run gateway:web` starts the local gateway with Better Auth and the web test app.
 - `npm run client -- <sessionKey>` starts a console client connected to the gateway.
 - `npm run remote -- <sessionName> [profile]` starts the Pi-TUI remote controller.
 - `npm run remote:line -- <sessionName> [profile]` starts the minimal line-based remote client for debugging.
@@ -86,3 +87,35 @@ The default profile is registered by the core plugin. It loads the local `pi-age
 The gateway is the current local transport boundary. It owns the session router, accepts newline-delimited JSON frames over TCP, routes messages by `sessionKey`, and broadcasts normalized session events back to connected clients.
 
 The gateway producer profile adds `pibo_gateway_send`, a tool that sends a message into a target gateway session and returns the correlated assistant reply. See `examples/gateway/README.md` for the two supported manual flows.
+
+## Web Auth
+
+`npm run gateway:web` starts the normal gateway plus an authenticated local web channel. The command loads `.env` from the project root before it creates the Better Auth service.
+
+V1 uses Better Auth with Google OAuth, the Better Auth bearer plugin, and SQLite at `.pibo/auth.sqlite`. Add the exact Google OAuth redirect URI for your instance. For local QA with `BETTER_AUTH_URL=http://localhost:4788`, use:
+
+```text
+http://localhost:4788/api/auth/callback/google
+```
+
+For a deployed instance, replace the host with that instance's public HTTPS origin:
+
+```text
+https://pibo.example.com/api/auth/callback/google
+```
+
+Google OAuth redirect URIs are exact per instance. Wildcard or "all deployments" redirects are not supported for this web-server flow, so each self-hosted deployment needs its own Google OAuth client or an explicitly configured redirect URI.
+
+Required `.env` values:
+
+```text
+BETTER_AUTH_URL=http://localhost:4788
+BETTER_AUTH_SECRET=<32+ character secret>
+GOOGLE_CLIENT_ID=<google oauth client id>
+GOOGLE_CLIENT_SECRET=<google oauth client secret>
+PIBO_AUTH_ALLOWED_EMAILS=you@example.com,friend@example.com
+```
+
+`PIBO_AUTH_ALLOWED_EMAILS` is the server-side allowlist for the instance. Authenticated Google users whose email is not listed receive `403` from the pibo web API. Unauthenticated pibo API requests receive `401`.
+
+The Google provider requests `prompt=select_account`, so signing out of pibo and signing in again lets the user choose a different Google account. Pibo signout clears the Better Auth session; it does not sign the user out of Google globally.

@@ -1,5 +1,6 @@
 import { runGatewayClient } from "./gateway/client.js";
 import { runGatewayServer } from "./gateway/server.js";
+import { runWebGatewayServer } from "./gateway/web.js";
 import { runRemoteAgentClient } from "./remote/client.js";
 import { runRemoteAgentTui } from "./remote/examples/tui-controller.js";
 import { createDefaultPiboPluginRegistry } from "./plugins/builtin.js";
@@ -17,6 +18,11 @@ export {
 } from "./plugins/builtin.js";
 export { piboExamplePlugin } from "./plugins/example.js";
 export { piboRemoteAgentPlugin } from "./plugins/remote-agent.js";
+export { createPiboBetterAuthPlugin } from "./plugins/better-auth.js";
+export { createPiboWebPlugin } from "./plugins/web.js";
+export { createBetterAuthService } from "./auth/better-auth.js";
+export type { BetterAuthServiceOptions } from "./auth/better-auth.js";
+export type { PiboAuthIdentity, PiboAuthService, PiboAuthSession } from "./auth/types.js";
 export {
 	InitialSessionContext,
 	InitialSessionContextBuilder,
@@ -47,6 +53,8 @@ export { createPiboRuntime, inspectPiboProfile, runPiboTui } from "./core/runtim
 export type { PiboProfileInspection, PiboRuntimeOptions } from "./core/runtime.js";
 export { PiboSessionRouter } from "./core/session-router.js";
 export { PiboGatewayServer, runGatewayServer } from "./gateway/server.js";
+export { createWebPiboPluginRegistry, runWebGatewayServer } from "./gateway/web.js";
+export type { WebGatewayServerOptions } from "./gateway/web.js";
 export { runGatewayClient } from "./gateway/client.js";
 export { runRemoteAgentClient } from "./remote/client.js";
 export {
@@ -60,6 +68,8 @@ export type {
 } from "./remote/session-client.js";
 export { createRemoteAgentChannel } from "./remote/channel.js";
 export type { RemoteAgentChannel, RemoteAgentChannelOptions } from "./remote/channel.js";
+export { createWebChannel, DEFAULT_WEB_CHANNEL_HOST, DEFAULT_WEB_CHANNEL_PORT, WEB_CHANNEL_NAME } from "./web/channel.js";
+export type { WebChannel, WebChannelOptions } from "./web/channel.js";
 export {
 	DEFAULT_REMOTE_AGENT_HOST,
 	DEFAULT_REMOTE_AGENT_PORT,
@@ -119,6 +129,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 		await router.disposeAll();
 	} else if (command === "gateway") {
 		await runGatewayServer();
+	} else if (command === "gateway:web") {
+		await runWebGatewayServer();
 	} else if (command === "client") {
 		await runGatewayClient({ sessionKey: process.argv[3] ?? "default" });
 	} else if (command === "remote") {

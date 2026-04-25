@@ -89,6 +89,15 @@ test("plugins can register profiles, gateway actions, and event listeners", asyn
 						auth: { mode: "trusted-local" },
 						start() {},
 					});
+					api.registerAuthService({
+						name: "test_auth",
+						getSession() {
+							return Promise.resolve(undefined);
+						},
+						requireSession() {
+							throw new Error("not used");
+						},
+					});
 				},
 			}),
 		],
@@ -117,6 +126,7 @@ test("plugins can register profiles, gateway actions, and event listeners", asyn
 	registry.notifyEvent({ type: "message_finished", sessionKey: "abc" });
 	assert.deepEqual(observed, ["message_finished"]);
 	assert.equal(registry.getChannels()[0].name, "test_channel");
+	assert.equal(registry.getAuthService().name, "test_auth");
 	assert.deepEqual(registry.getGatewayActionInfos(), [
 		{
 			name: "test_action",
@@ -165,5 +175,30 @@ test("plugin registry rejects duplicate registrations", () => {
 				],
 			}),
 		/Duplicate slash command "same"/,
+	);
+
+	assert.throws(
+		() =>
+			PiboPluginRegistry.create({
+				plugins: [
+					definePiboPlugin({
+						id: "duplicate-auth",
+						register(api) {
+							const service = {
+								name: "auth",
+								getSession() {
+									return Promise.resolve(undefined);
+								},
+								requireSession() {
+									throw new Error("not used");
+								},
+							};
+							api.registerAuthService(service);
+							api.registerAuthService(service);
+						},
+					}),
+				],
+			}),
+		/Auth service "auth" is already registered/,
 	);
 });

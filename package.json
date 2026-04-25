@@ -13,6 +13,7 @@
     "tui": "tsx src/index.ts tui",
     "tui:gateway": "tsx src/index.ts tui gateway-producer",
     "gateway": "tsx src/index.ts gateway",
+    "gateway:web": "tsx src/index.ts gateway:web",
     "client": "tsx src/index.ts client",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
@@ -24,7 +25,8 @@
   },
   "dependencies": {
     "@mariozechner/pi-ai": "^0.70.2",
-    "@mariozechner/pi-coding-agent": "^0.70.2"
+    "@mariozechner/pi-coding-agent": "^0.70.2",
+    "better-auth": "^1.6.9"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",

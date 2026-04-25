@@ -51,6 +51,31 @@ The channel context intentionally exposes only:
 
 Session bindings are stored in SQLite by default at `.pibo/session-bindings.sqlite`. A binding keeps a stable `sessionKey` separate from the original agent profile and channel identity.
 
+## Auth
+
+Auth is a thin core service boundary exposed to channels through `PiboChannelContext`. The gateway validates that channels marked with `auth.mode: "required"` have an auth service before they start.
+
+The first concrete implementation is Better Auth, registered through a built-in plugin for the web gateway path. It is intentionally not loaded by the default local gateway so trusted-local TCP and remote-agent flows do not require Google OAuth configuration.
+
+```text
+Mini Web App
+  -> Better Auth /api/auth/*
+  -> Web Channel /api/pibo/*
+  -> auth.requireSession(headers)
+  -> resolveSession(channel=web, externalId=userId)
+  -> Session router
+```
+
+The V1 web channel uses Better Auth Google sign-in and maps the authenticated Better Auth user id to the session binding external id. The resulting default session key is `web:<userId>`.
+
+The auth boundary is enforced before channel input reaches the session router:
+
+- no Better Auth session returns `401`
+- a Google account outside `PIBO_AUTH_ALLOWED_EMAILS` returns `403`
+- allowed users resolve a persistent `web` session binding
+
+Google OAuth redirect URIs remain per deployment. Local QA can use `http://localhost:4788/api/auth/callback/google`; server deployments must configure their own `https://<host>/api/auth/callback/google` in Google Cloud Console and set `BETTER_AUTH_URL` to the same origin. Pibo does not attempt wildcard redirect support because Google requires exact redirect URI matching for web-server OAuth.
+
 ## Remote Agent Channel
 
 The built-in `pibo.remote-agent` plugin starts the local `remote-agent` channel on `127.0.0.1:4790`.
@@ -88,6 +113,7 @@ This is useful as a reference for future channel adapters, but Pi TUI is not tre
 
 ```bash
 npm run gateway
+npm run gateway:web
 npm run client -- <sessionKey>
 npm run remote -- <sessionName> [profile]
 npm run remote:line -- <sessionName> [profile]
