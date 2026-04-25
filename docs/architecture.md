@@ -123,6 +123,20 @@ The reusable pieces are:
 
 This is useful as a reference for future channel adapters, but Pi TUI is not treated as the long-term primary remote UI. A dedicated web or terminal client can reuse the same channel and `RemoteAgentSessionClient` without coupling itself to Pi TUI internals.
 
+## MCP CLI
+
+`pibo mcp` is a local operator tool for discovering and calling external MCP servers from the shell. It is separate from the pibo plugin/runtime boundary: MCP servers are configured in `mcp_servers.json`, not in `PiboPluginRegistry`, and their tools are invoked directly by the CLI.
+
+The CLI supports:
+
+- stdio MCP servers through `command`, `args`, `env`, and `cwd`.
+- HTTP MCP servers through `url` and optional `headers`.
+- per-server `allowedTools` and `disabledTools` glob filters.
+- listing tools, inspecting server/tool schemas, grep-style tool search, and JSON tool calls.
+- short-lived daemon connections for faster repeated calls, disabled with `MCP_NO_DAEMON=1`.
+
+The config helper commands live under `pibo mcp config ...` and can create, show, add, and remove server definitions. The runtime lookup order is explicit `-c/--config`, `MCP_CONFIG_PATH`, project-local `mcp_servers.json`, then the user-level MCP config paths.
+
 ## Current Scripts
 
 ```bash
@@ -133,6 +147,7 @@ npm run remote -- <sessionName> [profile]
 npm run remote:line -- <sessionName> [profile]
 npm run tui -- [profile]
 npm run profile -- [profile]
+npm run dev -- mcp
 ```
 
 `npm run remote` runs the Pi-TUI proof-of-concept controller. `npm run remote:line` runs the simpler debug client.

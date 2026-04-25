@@ -27,6 +27,7 @@ Pibo is a minimal TypeScript wrapper around Pi Coding Agent. This file is a shor
 - The Pi-TUI remote controller is kept as a proof-of-concept example in `src/remote/examples/tui-controller.ts`.
 - An authenticated web gateway path exists through `npm run gateway:web`, split into Better Auth, a same-origin web host, and the chat web app.
 - A minimal Commander-based CLI manages local config values in `.pibo/config.json`.
+- `pibo mcp` provides local MCP server discovery, schema inspection, search, tool calls, and `mcp_servers.json` config management.
 
 ## Session Routing
 

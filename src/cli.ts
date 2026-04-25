@@ -30,8 +30,26 @@ function printConfigKeys(): void {
 }
 
 export async function runPiboCli(argv = process.argv): Promise<void> {
+	if (argv[2] === "mcp") {
+		const { runMcpCli } = await import("./mcp/index.js");
+		await runMcpCli([argv[0] ?? "node", "pibo mcp", ...argv.slice(3)]);
+		return;
+	}
+
 	const program = new Command();
 	program.name("pibo").description("Pibo CLI").showHelpAfterError();
+
+	program
+		.command("mcp")
+		.description("Interact with configured MCP servers")
+		.helpOption(false)
+		.allowUnknownOption(true)
+		.allowExcessArguments(true)
+		.argument("[args...]")
+		.action(async (args: string[]) => {
+			const { runMcpCli } = await import("./mcp/index.js");
+			await runMcpCli([argv[0] ?? "node", "pibo mcp", ...args]);
+		});
 
 	const config = program.command("config").description(`Manage pibo config at ${DEFAULT_PIBO_CONFIG_PATH}`);
 	config

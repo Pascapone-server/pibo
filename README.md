@@ -16,6 +16,7 @@ For the current architecture snapshot, see `docs/architecture.md`.
 - `npm run client -- <sessionKey>` starts a console client connected to the gateway.
 - `npm run remote -- <sessionName> [profile]` starts the Pi-TUI remote controller.
 - `npm run remote:line -- <sessionName> [profile]` starts the minimal line-based remote client for debugging.
+- `npm run dev -- mcp` lists configured MCP servers and tools.
 - `npm run dev -- config keys` lists supported local config keys.
 - `npm run build` compiles to `dist/`.
 - `npm run start` runs the compiled entrypoint.
@@ -88,6 +89,29 @@ The default profile is registered by the core plugin. It loads the local `pi-age
 The gateway is the current local transport boundary. It owns the session router, accepts newline-delimited JSON frames over TCP, routes messages by `sessionKey`, and broadcasts normalized session events back to connected clients.
 
 The gateway producer profile adds `pibo_gateway_send`, a tool that sends a message into a target gateway session and returns the correlated assistant reply. See `examples/gateway/README.md` for the two supported manual flows.
+
+## MCP CLI
+
+Pibo includes an MCP helper CLI under `pibo mcp`. It reads MCP server definitions from `mcp_servers.json`, starts stdio or HTTP MCP servers, lists their tools, shows schemas, searches by glob, and calls tools from shell-friendly JSON input.
+
+```bash
+npm run dev -- mcp
+npm run dev -- mcp info filesystem
+npm run dev -- mcp grep "*file*"
+npm run dev -- mcp call filesystem read_file '{"path":"README.md"}'
+```
+
+The config file is created automatically as `mcp_servers.json` when needed. Manage it with:
+
+```bash
+npm run dev -- mcp config init
+npm run dev -- mcp config help
+npm run dev -- mcp config add filesystem '{"command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","."]}'
+npm run dev -- mcp config add deepwiki '{"url":"https://mcp.deepwiki.com/mcp"}'
+npm run dev -- mcp config remove filesystem
+```
+
+Config lookup order is `-c/--config`, `MCP_CONFIG_PATH`, `./mcp_servers.json`, `~/.mcp_servers.json`, then `~/.config/mcp/mcp_servers.json`. Use `MCP_NO_DAEMON=1` to force fresh MCP connections instead of using the short-lived connection cache.
 
 ## Web Auth
 
