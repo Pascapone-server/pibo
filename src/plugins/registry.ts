@@ -2,6 +2,7 @@ import type { ContextFileProfile, InitialSessionContext, SkillProfile, ToolProfi
 import type { PiboOutputEvent } from "../core/events.js";
 import type { PiboChannel } from "../channels/types.js";
 import type { PiboAuthService } from "../auth/types.js";
+import type { PiboWebApp } from "../web/types.js";
 import type {
 	PiboGatewayAction,
 	PiboGatewayActionInfo,
@@ -16,6 +17,31 @@ export type PiboPluginRegistryOptions = {
 	plugins?: readonly PiboPlugin[];
 };
 
+type WebAppRoute = {
+	label: "mountPath" | "apiPrefix";
+	prefix: string;
+};
+
+function getWebAppRoutes(app: PiboWebApp): WebAppRoute[] {
+	return [
+		{ label: "mountPath", prefix: app.mountPath },
+		{ label: "apiPrefix", prefix: app.apiPrefix },
+	];
+}
+
+function validateWebRoute(appName: string, label: string, prefix: string): void {
+	if (!prefix.startsWith("/")) {
+		throw new Error(`Web app "${appName}" ${label} must start with "/"`);
+	}
+	if (prefix.length > 1 && prefix.endsWith("/")) {
+		throw new Error(`Web app "${appName}" ${label} must not end with "/"`);
+	}
+}
+
+function webRoutesOverlap(left: string, right: string): boolean {
+	return left === right || left === "/" || right === "/" || left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
+}
+
 export class PiboPluginRegistry {
 	private readonly tools = new Map<string, ToolProfile>();
 	private readonly skills = new Map<string, SkillProfile>();
@@ -26,6 +52,7 @@ export class PiboPluginRegistry {
 	private readonly gatewaySlashCommands = new Map<string, string>();
 	private readonly channels = new Map<string, PiboChannel>();
 	private authService?: PiboAuthService;
+	private readonly webApps = new Map<string, PiboWebApp>();
 	private readonly eventListeners = new Set<PiboPluginEventListener>();
 	private readonly pluginIds = new Set<string>();
 	private readonly eventErrors: string[] = [];
@@ -94,6 +121,14 @@ export class PiboPluginRegistry {
 		this.authService = service;
 	}
 
+	registerWebApp(app: PiboWebApp): void {
+		if (this.webApps.has(app.name)) {
+			throw new Error(`Duplicate web app "${app.name}"`);
+		}
+		this.validateWebAppRoutes(app);
+		this.webApps.set(app.name, app);
+	}
+
 	onEvent(listener: PiboPluginEventListener): void {
 		this.eventListeners.add(listener);
 	}
@@ -140,6 +175,10 @@ export class PiboPluginRegistry {
 		return this.authService;
 	}
 
+	getWebApps(): PiboWebApp[] {
+		return [...this.webApps.values()];
+	}
+
 	getEventErrors(): string[] {
 		return [...this.eventErrors];
 	}
@@ -164,6 +203,7 @@ export class PiboPluginRegistry {
 			registerGatewayAction: (action) => this.registerGatewayAction(action),
 			registerChannel: (channel) => this.registerChannel(channel),
 			registerAuthService: (service) => this.registerAuthService(service),
+			registerWebApp: (app) => this.registerWebApp(app),
 			onEvent: (listener) => this.onEvent(listener),
 		};
 	}
@@ -190,6 +230,24 @@ export class PiboPluginRegistry {
 			throw new Error(`Duplicate ${label} "${key}"`);
 		}
 		map.set(key, value);
+	}
+
+	private validateWebAppRoutes(app: PiboWebApp): void {
+		const routes = getWebAppRoutes(app);
+		for (const route of routes) {
+			validateWebRoute(app.name, route.label, route.prefix);
+		}
+		for (const existing of this.webApps.values()) {
+			for (const route of routes) {
+				for (const existingRoute of getWebAppRoutes(existing)) {
+					if (webRoutesOverlap(route.prefix, existingRoute.prefix)) {
+						throw new Error(
+							`Web app route "${route.prefix}" for "${app.name}" overlaps ${existingRoute.label} "${existingRoute.prefix}" from web app "${existing.name}"`,
+						);
+					}
+				}
+			}
+		}
 	}
 
 	private getGatewaySlashCommandsToRegister(action: PiboGatewayAction): string[] {

@@ -2,14 +2,16 @@ import { createDefaultPiboPlugins } from "../plugins/builtin.js";
 import type { BetterAuthServiceOptions } from "../auth/better-auth.js";
 import { loadDotEnv } from "../env.js";
 import { createPiboBetterAuthPlugin } from "../plugins/better-auth.js";
+import { createPiboChatWebPlugin, type ChatWebAppOptions } from "../plugins/chat-web.js";
 import { PiboPluginRegistry } from "../plugins/registry.js";
-import { createPiboWebPlugin } from "../plugins/web.js";
-import { DEFAULT_WEB_CHANNEL_HOST, DEFAULT_WEB_CHANNEL_PORT, type WebChannelOptions } from "../web/channel.js";
+import { createPiboWebHostPlugin } from "../plugins/web.js";
+import { DEFAULT_WEB_CHANNEL_HOST, DEFAULT_WEB_CHANNEL_PORT, type WebHostChannelOptions } from "../web/channel.js";
 import { PiboGatewayServer, type GatewayServerOptions } from "./server.js";
 
 export type WebGatewayServerOptions = GatewayServerOptions & {
 	auth?: BetterAuthServiceOptions;
-	web?: WebChannelOptions;
+	web?: WebHostChannelOptions;
+	chat?: ChatWebAppOptions;
 };
 
 export function createWebPiboPluginRegistry(options: WebGatewayServerOptions = {}): PiboPluginRegistry {
@@ -17,7 +19,8 @@ export function createWebPiboPluginRegistry(options: WebGatewayServerOptions = {
 		plugins: [
 			...createDefaultPiboPlugins(),
 			createPiboBetterAuthPlugin(options.auth),
-			createPiboWebPlugin(options.web),
+			createPiboWebHostPlugin(options.web),
+			createPiboChatWebPlugin(options.chat),
 		],
 	});
 }
@@ -33,7 +36,7 @@ export async function runWebGatewayServer(options: WebGatewayServerOptions = {})
 
 	const host = options.web?.host ?? DEFAULT_WEB_CHANNEL_HOST;
 	const port = options.web?.port ?? DEFAULT_WEB_CHANNEL_PORT;
-	console.error(`pibo web app available at http://${host}:${port}`);
+	console.error(`pibo chat app available at http://${host}:${port}/apps/chat`);
 
 	const stop = async () => {
 		await server.stop();

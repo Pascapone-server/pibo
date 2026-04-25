@@ -22,6 +22,18 @@ function requiredOption(value: string | undefined, name: string): string {
 	return value;
 }
 
+function requiredSecret(value: string | undefined): string {
+	const secret = requiredOption(value, "BETTER_AUTH_SECRET");
+	if (secret.length < 32) {
+		throw new Error("BETTER_AUTH_SECRET must be at least 32 characters for pibo Better Auth");
+	}
+	return secret;
+}
+
+function createAllowedEmailSet(emails: string[]): Set<string> {
+	return new Set(emails.map((email) => email.trim().toLowerCase()).filter(Boolean));
+}
+
 function createDatabase(path: string): DatabaseSync {
 	const resolvedPath = path === ":memory:" ? path : resolve(path);
 	if (resolvedPath !== ":memory:") {
@@ -31,25 +43,31 @@ function createDatabase(path: string): DatabaseSync {
 }
 
 function parseAllowedEmails(value: string | undefined): Set<string> | undefined {
-	const emails = (value ?? "")
-		.split(",")
-		.map((email) => email.trim().toLowerCase())
-		.filter(Boolean);
-	return emails.length > 0 ? new Set(emails) : undefined;
+	const emails = (value ?? "").split(",");
+	const allowedEmails = createAllowedEmailSet(emails);
+	return allowedEmails.size > 0 ? allowedEmails : undefined;
+}
+
+function requiredAllowedEmails(options: BetterAuthServiceOptions): Set<string> {
+	const allowedEmails =
+		options.allowedEmails !== undefined
+			? createAllowedEmailSet(options.allowedEmails)
+			: parseAllowedEmails(process.env.PIBO_AUTH_ALLOWED_EMAILS);
+	if (!allowedEmails || allowedEmails.size === 0) {
+		throw new Error("PIBO_AUTH_ALLOWED_EMAILS must contain at least one email for pibo Better Auth");
+	}
+	return allowedEmails;
 }
 
 export function createBetterAuthService(options: BetterAuthServiceOptions = {}): PiboAuthService {
 	const baseURL = requiredOption(options.baseURL ?? process.env.BETTER_AUTH_URL, "BETTER_AUTH_URL");
-	const secret = requiredOption(options.secret ?? process.env.BETTER_AUTH_SECRET, "BETTER_AUTH_SECRET");
+	const secret = requiredSecret(options.secret ?? process.env.BETTER_AUTH_SECRET);
 	const googleClientId = requiredOption(options.googleClientId ?? process.env.GOOGLE_CLIENT_ID, "GOOGLE_CLIENT_ID");
 	const googleClientSecret = requiredOption(
 		options.googleClientSecret ?? process.env.GOOGLE_CLIENT_SECRET,
 		"GOOGLE_CLIENT_SECRET",
 	);
-	const allowedEmails =
-		options.allowedEmails && options.allowedEmails.length > 0
-			? new Set(options.allowedEmails.map((email) => email.trim().toLowerCase()).filter(Boolean))
-			: parseAllowedEmails(process.env.PIBO_AUTH_ALLOWED_EMAILS);
+	const allowedEmails = requiredAllowedEmails(options);
 	const database = createDatabase(options.databasePath ?? ".pibo/auth.sqlite");
 	const authOptions: BetterAuthOptions = {
 		appName: "Pibo",
@@ -82,7 +100,7 @@ export function createBetterAuthService(options: BetterAuthServiceOptions = {}):
 			if (!session) return undefined;
 
 			const user = session.user;
-			if (allowedEmails && !allowedEmails.has(user.email.toLowerCase())) {
+				if (!allowedEmails.has(user.email.toLowerCase())) {
 				throw createForbiddenAuthError();
 			}
 

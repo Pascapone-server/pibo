@@ -1,6 +1,7 @@
 import type { PiboEventListener, PiboInputEvent, PiboOutputEvent } from "../core/events.js";
 import type { PiboGatewayActionInfo } from "../plugins/types.js";
 import type { PiboAuthService } from "../auth/types.js";
+import type { PiboWebApp } from "../web/types.js";
 import type { PiboSessionBinding, ResolveSessionBindingInput } from "../sessions/bindings.js";
 
 export type PiboChannelAuthMode = "trusted-local" | "required" | "none";
@@ -17,6 +18,7 @@ export type PiboChannelContext = {
 	resolveSession(input: ResolveSessionBindingInput): PiboSessionBinding;
 	getGatewayActions(): PiboGatewayActionInfo[];
 	auth?: PiboAuthService;
+	getWebApps(): PiboWebApp[];
 };
 
 export type PiboChannel = {

@@ -98,6 +98,14 @@ test("plugins can register profiles, gateway actions, and event listeners", asyn
 							throw new Error("not used");
 						},
 					});
+					api.registerWebApp({
+						name: "test_web_app",
+						mountPath: "/apps/test",
+						apiPrefix: "/api/test",
+						handleRequest() {
+							return undefined;
+						},
+					});
 				},
 			}),
 		],
@@ -127,6 +135,7 @@ test("plugins can register profiles, gateway actions, and event listeners", asyn
 	assert.deepEqual(observed, ["message_finished"]);
 	assert.equal(registry.getChannels()[0].name, "test_channel");
 	assert.equal(registry.getAuthService().name, "test_auth");
+	assert.equal(registry.getWebApps()[0].name, "test_web_app");
 	assert.deepEqual(registry.getGatewayActionInfos(), [
 		{
 			name: "test_action",
@@ -200,5 +209,35 @@ test("plugin registry rejects duplicate registrations", () => {
 				],
 			}),
 		/Auth service "auth" is already registered/,
+	);
+
+	assert.throws(
+		() =>
+			PiboPluginRegistry.create({
+				plugins: [
+					definePiboPlugin({
+						id: "web-route-conflict",
+						register(api) {
+							api.registerWebApp({
+								name: "first",
+								mountPath: "/apps/chat",
+								apiPrefix: "/api/chat",
+								handleRequest() {
+									return undefined;
+								},
+							});
+							api.registerWebApp({
+								name: "second",
+								mountPath: "/apps/chat/admin",
+								apiPrefix: "/api/admin",
+								handleRequest() {
+									return undefined;
+								},
+							});
+						},
+					}),
+				],
+			}),
+		/Web app route "\/apps\/chat\/admin" for "second" overlaps mountPath "\/apps\/chat" from web app "first"/,
 	);
 });

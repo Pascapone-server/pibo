@@ -1,6 +1,7 @@
 import type { PiboOutputEvent, PiboSessionStatus } from "../core/events.js";
 import type { PiboChannel } from "../channels/types.js";
 import type { PiboAuthService } from "../auth/types.js";
+import type { PiboWebApp } from "../web/types.js";
 import type { ContextFileProfile, InitialSessionContext, SkillProfile, ToolProfile } from "../core/profiles.js";
 
 export type PiboProfileBuildContext = {
@@ -50,6 +51,7 @@ export type PiboPluginApi = {
 	registerGatewayAction(action: PiboGatewayAction): void;
 	registerChannel(channel: PiboChannel): void;
 	registerAuthService(service: PiboAuthService): void;
+	registerWebApp(app: PiboWebApp): void;
 	onEvent(listener: PiboPluginEventListener): void;
 };
 

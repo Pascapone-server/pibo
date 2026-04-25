@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createChatWebApp } from "../dist/apps/chat/web-app.js";
 import { PiboAuthError } from "../dist/auth/types.js";
-import { createWebChannel } from "../dist/web/channel.js";
+import { createWebHostChannel } from "../dist/web/channel.js";
 
 class MemoryBindingStore {
 	bindings = new Map();
@@ -49,21 +50,23 @@ function createFakeAuthService() {
 	};
 }
 
-test("web channel requires auth and maps authenticated users to web bindings", async () => {
+async function startWebHostChannel(options = {}) {
 	const emitted = [];
 	const bindings = new MemoryBindingStore();
-	const channel = createWebChannel({ port: 0, announce: false });
+	const channel = createWebHostChannel({ port: 0, announce: false });
 
 	await channel.start({
-		auth: createFakeAuthService(),
+		auth: options.auth,
 		emit(event) {
 			emitted.push(event);
 			return Promise.resolve({
-				type: "message_queued",
+				type: event.type === "message" ? "message_queued" : "execution_result",
 				sessionKey: event.sessionKey,
 				eventId: event.id,
-				queuedMessages: 1,
-				text: event.type === "message" ? event.text : "",
+				queuedMessages: event.type === "message" ? 1 : undefined,
+				text: event.type === "message" ? event.text : undefined,
+				action: event.type === "execution" ? event.action : undefined,
+				result: event.type === "execution" ? { ok: true } : undefined,
 			});
 		},
 		subscribe() {
@@ -75,46 +78,67 @@ test("web channel requires auth and maps authenticated users to web bindings", a
 		getGatewayActions() {
 			return [];
 		},
+		getWebApps() {
+			return [createChatWebApp()];
+		},
 	});
 
 	const address = channel.getAddress();
 	assert.ok(address);
-	const baseURL = `http://${address.host}:${address.port}`;
+	return {
+		channel,
+		emitted,
+		baseURL: `http://${address.host}:${address.port}`,
+	};
+}
+
+test("chat web app requires auth for localhost requests", async () => {
+	const { channel, baseURL } = await startWebHostChannel();
 
 	try {
-		const rejected = await fetch(`${baseURL}/api/pibo/session`);
-		assert.equal(rejected.status, 401);
+		const response = await fetch(`${baseURL}/api/chat/session`);
+		assert.equal(response.status, 401);
+		assert.deepEqual(await response.json(), { error: "Unauthenticated" });
+	} finally {
+		await channel.stop?.();
+	}
+});
 
-		const accepted = await fetch(`${baseURL}/api/pibo/session`, {
+test("chat web app maps authenticated users to chat bindings", async () => {
+	const { channel, baseURL, emitted } = await startWebHostChannel({
+		auth: createFakeAuthService(),
+	});
+
+	try {
+		const accepted = await fetch(`${baseURL}/api/chat/session`, {
 			headers: { "x-test-user": "user-1" },
 		});
 		assert.equal(accepted.status, 200);
 		const session = await accepted.json();
 		assert.equal(session.identity.userId, "user-1");
-		assert.equal(session.binding.sessionKey, "web:user-1");
+		assert.equal(session.binding.sessionKey, "chat-web:user-1");
 		assert.equal(session.binding.originalProfile, "pibo-minimal");
 
-		const message = await fetch(`${baseURL}/api/pibo/message`, {
+		const message = await fetch(`${baseURL}/api/chat/message`, {
 			method: "POST",
 			headers: {
 				"content-type": "application/json",
+				origin: baseURL,
 				"x-test-user": "user-1",
 			},
 			body: JSON.stringify({ text: "hello" }),
 		});
 		assert.equal(message.status, 200);
 		assert.equal(emitted.length, 1);
-		assert.equal(emitted[0].sessionKey, "web:user-1");
+		assert.equal(emitted[0].sessionKey, "chat-web:user-1");
 		assert.equal(emitted[0].text, "hello");
 	} finally {
 		await channel.stop?.();
 	}
 });
 
-test("web channel rejects authenticated users that auth marks forbidden", async () => {
-	const channel = createWebChannel({ port: 0, announce: false });
-
-	await channel.start({
+test("chat web app rejects authenticated users that auth marks forbidden", async () => {
+	const { channel, baseURL } = await startWebHostChannel({
 		auth: {
 			name: "forbidden-auth",
 			async getSession() {
@@ -124,29 +148,59 @@ test("web channel rejects authenticated users that auth marks forbidden", async 
 				throw new PiboAuthError("Forbidden", 403);
 			},
 		},
-		emit() {
-			throw new Error("should not emit");
-		},
-		subscribe() {
-			return () => {};
-		},
-		resolveSession() {
-			throw new Error("should not resolve");
-		},
-		getGatewayActions() {
-			return [];
-		},
 	});
 
-	const address = channel.getAddress();
-	assert.ok(address);
-
 	try {
-		const response = await fetch(`http://${address.host}:${address.port}/api/pibo/session`, {
+		const response = await fetch(`${baseURL}/api/chat/session`, {
 			headers: { "x-test-user": "user-1" },
 		});
 		assert.equal(response.status, 403);
 		assert.deepEqual(await response.json(), { error: "Forbidden" });
+	} finally {
+		await channel.stop?.();
+	}
+});
+
+test("chat web app rejects cross-origin mutation requests", async () => {
+	const { channel, baseURL, emitted } = await startWebHostChannel({
+		auth: createFakeAuthService(),
+	});
+
+	try {
+		const response = await fetch(`${baseURL}/api/chat/message`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				origin: "https://attacker.example",
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({ text: "hello" }),
+		});
+		assert.equal(response.status, 403);
+		assert.deepEqual(await response.json(), { error: "Origin is not allowed" });
+		assert.equal(emitted.length, 0);
+	} finally {
+		await channel.stop?.();
+	}
+});
+
+test("web host rejects oversized request bodies", async () => {
+	const { channel, baseURL } = await startWebHostChannel({
+		auth: createFakeAuthService(),
+	});
+
+	try {
+		const response = await fetch(`${baseURL}/api/chat/message`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({ text: "x".repeat(4 * 1024 * 1024) }),
+		});
+		assert.equal(response.status, 413);
+		assert.deepEqual(await response.json(), { error: "Request body too large" });
 	} finally {
 		await channel.stop?.();
 	}

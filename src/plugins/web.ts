@@ -1,12 +1,12 @@
-import { createWebChannel, type WebChannelOptions } from "../web/channel.js";
+import { createWebHostChannel, type WebHostChannelOptions } from "../web/channel.js";
 import { definePiboPlugin } from "./registry.js";
 
-export function createPiboWebPlugin(options: WebChannelOptions = {}) {
+export function createPiboWebHostPlugin(options: WebHostChannelOptions = {}) {
 	return definePiboPlugin({
-		id: "pibo.web",
-		name: "Pibo Web",
+		id: "pibo.web-host",
+		name: "Pibo Web Host",
 		register(api) {
-			api.registerChannel(createWebChannel(options));
+			api.registerChannel(createWebHostChannel(options));
 		},
 	});
 }

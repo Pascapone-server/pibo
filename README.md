@@ -12,7 +12,7 @@ For the current architecture snapshot, see `docs/architecture.md`.
 - `npm run tui` starts the Pi TUI through the pibo wrapper.
 - `npm run tui:gateway` starts the Pi TUI with the gateway producer profile.
 - `npm run gateway` starts the local pibo gateway daemon.
-- `npm run gateway:web` starts the local gateway with Better Auth and the web test app.
+- `npm run gateway:web` starts the local gateway with Better Auth, the same-origin web host, and the chat app.
 - `npm run client -- <sessionKey>` starts a console client connected to the gateway.
 - `npm run remote -- <sessionName> [profile]` starts the Pi-TUI remote controller.
 - `npm run remote:line -- <sessionName> [profile]` starts the minimal line-based remote client for debugging.
@@ -90,7 +90,13 @@ The gateway producer profile adds `pibo_gateway_send`, a tool that sends a messa
 
 ## Web Auth
 
-`npm run gateway:web` starts the normal gateway plus an authenticated local web channel. The command loads `.env` from the project root before it creates the Better Auth service.
+`npm run gateway:web` starts three separate pieces on the same origin:
+
+- `pibo.better-auth` registers the Better Auth service and owns `/api/auth/*`.
+- `pibo.web-host` owns the HTTP server and dispatches same-origin web apps.
+- `pibo.chat-web` registers the chat app under `/apps/chat` and `/api/chat/*`.
+
+The command loads `.env` from the project root before it creates the Better Auth service.
 
 V1 uses Better Auth with Google OAuth, the Better Auth bearer plugin, and SQLite at `.pibo/auth.sqlite`. Add the exact Google OAuth redirect URI for your instance. For local QA with `BETTER_AUTH_URL=http://localhost:4788`, use:
 
@@ -116,6 +122,8 @@ GOOGLE_CLIENT_SECRET=<google oauth client secret>
 PIBO_AUTH_ALLOWED_EMAILS=you@example.com,friend@example.com
 ```
 
-`PIBO_AUTH_ALLOWED_EMAILS` is the server-side allowlist for the instance. Authenticated Google users whose email is not listed receive `403` from the pibo web API. Unauthenticated pibo API requests receive `401`.
+`BETTER_AUTH_SECRET` must be at least 32 characters. `PIBO_AUTH_ALLOWED_EMAILS` must contain at least one email; pibo fails closed if the allowlist is missing or empty. Authenticated Google users whose email is not listed receive `403` from the pibo web API. Unauthenticated pibo API requests receive `401`.
+
+All web chat API requests require Better Auth, including localhost. Private LAN IP Google OAuth redirects are not part of the supported V1 setup.
 
 The Google provider requests `prompt=select_account`, so signing out of pibo and signing in again lets the user choose a different Google account. Pibo signout clears the Better Auth session; it does not sign the user out of Google globally.

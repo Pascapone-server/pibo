@@ -31,10 +31,10 @@ export class PiboAuthError extends Error {
 	}
 }
 
-export function createUnauthenticatedError(): Error {
+export function createUnauthenticatedError(): PiboAuthError {
 	return new PiboAuthError("Unauthenticated", 401);
 }
 
-export function createForbiddenAuthError(): Error {
+export function createForbiddenAuthError(): PiboAuthError {
 	return new PiboAuthError("Forbidden", 403);
 }

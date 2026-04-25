@@ -55,26 +55,38 @@ Session bindings are stored in SQLite by default at `.pibo/session-bindings.sqli
 
 Auth is a thin core service boundary exposed to channels through `PiboChannelContext`. The gateway validates that channels marked with `auth.mode: "required"` have an auth service before they start.
 
-The first concrete implementation is Better Auth, registered through a built-in plugin for the web gateway path. It is intentionally not loaded by the default local gateway so trusted-local TCP and remote-agent flows do not require Google OAuth configuration.
+The first concrete implementation is Better Auth, registered through a built-in plugin for the web gateway path. It is intentionally not loaded by the default local gateway so trusted-local TCP and remote-agent flows do not require Google OAuth configuration. Web apps always require the web auth service, including localhost. The Auth plugin owns identity and allowlist checks; it does not own chat UI or agent routing.
 
 ```text
-Mini Web App
+Same-Origin Web Host
   -> Better Auth /api/auth/*
-  -> Web Channel /api/pibo/*
-  -> auth.requireSession(headers)
-  -> resolveSession(channel=web, externalId=userId)
+  -> Chat Web App /apps/chat and /api/chat/*
+  -> auth/session policy
+  -> resolveSession(channel=chat-web, externalId=userId)
   -> Session router
 ```
 
-The V1 web channel uses Better Auth Google sign-in and maps the authenticated Better Auth user id to the session binding external id. The resulting default session key is `web:<userId>`.
+The V1 chat web app uses Better Auth Google sign-in for every request path, including localhost. The authenticated Better Auth user id maps to the session binding external id, producing `chat-web:<userId>`.
 
 The auth boundary is enforced before channel input reaches the session router:
 
 - no Better Auth session returns `401`
+- a missing or empty `PIBO_AUTH_ALLOWED_EMAILS` allowlist prevents Better Auth startup
 - a Google account outside `PIBO_AUTH_ALLOWED_EMAILS` returns `403`
-- allowed users resolve a persistent `web` session binding
+- allowed users resolve a persistent `chat-web` session binding
+- chat mutation routes require same-origin JSON requests
 
-Google OAuth redirect URIs remain per deployment. Local QA can use `http://localhost:4788/api/auth/callback/google`; server deployments must configure their own `https://<host>/api/auth/callback/google` in Google Cloud Console and set `BETTER_AUTH_URL` to the same origin. Pibo does not attempt wildcard redirect support because Google requires exact redirect URI matching for web-server OAuth.
+Google OAuth redirect URIs remain per deployment. Local QA can use `http://localhost:4788/api/auth/callback/google`; internet-facing deployments must configure their own `https://<host>/api/auth/callback/google` in Google Cloud Console and set `BETTER_AUTH_URL` to the same origin. Pibo does not attempt wildcard redirect support because Google requires exact redirect URI matching for web-server OAuth. Private LAN IP Google OAuth redirects are intentionally not a supported V1 mode.
+
+## Web Host And Apps
+
+The same-origin web path is intentionally split:
+
+- `pibo.web-host` starts the HTTP channel and routes `/api/auth/*` plus registered web apps.
+- `pibo.chat-web` registers the current chat UI/API as a web app.
+- Future apps can register additional web apps without becoming part of the Auth plugin.
+
+This avoids iframe and cross-origin complexity for V1. Apps can use normal same-origin cookies and call their own API routes while sharing the gateway auth boundary.
 
 ## Remote Agent Channel
 

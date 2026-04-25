@@ -19,7 +19,10 @@ export {
 export { piboExamplePlugin } from "./plugins/example.js";
 export { piboRemoteAgentPlugin } from "./plugins/remote-agent.js";
 export { createPiboBetterAuthPlugin } from "./plugins/better-auth.js";
-export { createPiboWebPlugin } from "./plugins/web.js";
+export { createPiboChatWebPlugin } from "./plugins/chat-web.js";
+export { createPiboWebHostPlugin } from "./plugins/web.js";
+export { createChatWebApp } from "./apps/chat/web-app.js";
+export type { ChatWebAppOptions } from "./apps/chat/web-app.js";
 export { createBetterAuthService } from "./auth/better-auth.js";
 export type { BetterAuthServiceOptions } from "./auth/better-auth.js";
 export type { PiboAuthIdentity, PiboAuthService, PiboAuthSession } from "./auth/types.js";
@@ -68,8 +71,9 @@ export type {
 } from "./remote/session-client.js";
 export { createRemoteAgentChannel } from "./remote/channel.js";
 export type { RemoteAgentChannel, RemoteAgentChannelOptions } from "./remote/channel.js";
-export { createWebChannel, DEFAULT_WEB_CHANNEL_HOST, DEFAULT_WEB_CHANNEL_PORT, WEB_CHANNEL_NAME } from "./web/channel.js";
-export type { WebChannel, WebChannelOptions } from "./web/channel.js";
+export { createWebHostChannel, DEFAULT_WEB_CHANNEL_HOST, DEFAULT_WEB_CHANNEL_PORT, WEB_CHANNEL_NAME } from "./web/channel.js";
+export type { WebHostChannel, WebHostChannelOptions } from "./web/channel.js";
+export type { PiboWebApp, PiboWebAppContext, PiboWebSession } from "./web/types.js";
 export {
 	DEFAULT_REMOTE_AGENT_HOST,
 	DEFAULT_REMOTE_AGENT_PORT,

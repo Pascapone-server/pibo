@@ -224,6 +224,7 @@ export class PiboGatewayServer {
 			},
 			getGatewayActions: () => this.pluginRegistry.getGatewayActionInfos(),
 			auth: this.pluginRegistry.getAuthService(),
+			getWebApps: () => this.pluginRegistry.getWebApps(),
 		};
 	}
 

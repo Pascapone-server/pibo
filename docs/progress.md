@@ -21,10 +21,11 @@ Pibo is a minimal TypeScript wrapper around Pi Coding Agent. This file is a shor
 - Built-in plugins now register core tools, profiles, context files, skills, gateway actions, and event listeners through `PiboPluginRegistry`.
 - `src/plugins/example.ts` demonstrates adding a plugin-provided skill, tool, and profile.
 - Plugins can register channels through `api.registerChannel(...)`.
+- Plugins can register same-origin web apps through `api.registerWebApp(...)`.
 - Gateway channel sessions are backed by SQLite session bindings in `.pibo/session-bindings.sqlite`.
 - The built-in `remote-agent` channel exposes a local remote-control path on `127.0.0.1:4790`.
 - The Pi-TUI remote controller is kept as a proof-of-concept example in `src/remote/examples/tui-controller.ts`.
-- An authenticated web gateway path exists through `npm run gateway:web`, using Better Auth Google OAuth, `PIBO_AUTH_ALLOWED_EMAILS`, and the `web` channel.
+- An authenticated web gateway path exists through `npm run gateway:web`, split into Better Auth, a same-origin web host, and the chat web app.
 
 ## Session Routing
 
@@ -178,5 +179,5 @@ flowchart LR
 - Keep reusable remote-channel code under `src/remote/`; keep controller experiments under `src/remote/examples/`.
 - Keep plugins static until external loading has a concrete requirement.
 - Build real web or messaging channels on top of `PiboChannel`, not directly against Pi.
-- Keep auth as a gateway/channel boundary service; concrete providers such as Better Auth can be plugin-registered.
+- Keep auth as a gateway/channel boundary service; web apps such as chat should consume auth rather than live inside the auth plugin.
 - Add disk resume by `sessionKey` later only when we introduce a real session index.
