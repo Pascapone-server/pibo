@@ -278,7 +278,18 @@ export async function inspectPiboProfile(options: PiboRuntimeOptions = {}): Prom
 }
 
 export async function runPiboTui(options: PiboRuntimeOptions = {}): Promise<void> {
-	const runtime = await createPiboRuntime(options);
+	const profile = options.profile ?? createDefaultPiboProfile();
+	const hasEnabledSubagents = profile.subagents.some((subagent) => subagent.enabled !== false);
+	if (hasEnabledSubagents && (!options.subagentRunner || !options.runToolController)) {
+		console.error(
+			`Error: Profile "${profile.profileName}" uses subagents and requires the routed pibo runtime. ` +
+				`Use "npm run gateway" plus "npm run remote -- <sessionName> ${profile.profileName}" for TUI QA.`,
+		);
+		process.exitCode = 1;
+		return;
+	}
+
+	const runtime = await createPiboRuntime({ ...options, profile });
 
 	try {
 		const fatal = runtime.diagnostics.find((diagnostic) => diagnostic.type === "error");

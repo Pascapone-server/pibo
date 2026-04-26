@@ -97,8 +97,11 @@ The `run-yield-qa` profile adds two simple QA subagents and the generated run-co
 
 ```bash
 npm run profile -- run-yield-qa
-npm run tui -- run-yield-qa
+npm run gateway
+npm run remote -- yield-qa run-yield-qa
 ```
+
+Subagent profiles require the routed runtime. Do not use direct `npm run tui -- run-yield-qa` for this profile.
 
 ## Gateway
 
