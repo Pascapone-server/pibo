@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { PiboOutputEvent } from "../../core/events.js";
+import type { PiboJsonValue, PiboOutputEvent } from "../../core/events.js";
 import { PiboWebHttpError, readJsonBody, responseHtml, responseJson } from "../../web/http.js";
 import type { PiboWebApp, PiboWebAppContext, PiboWebSession } from "../../web/types.js";
 
@@ -32,6 +32,27 @@ function requireSameOriginJsonRequest(request: Request): void {
 	if (origin !== new URL(request.url).origin) {
 		throw new PiboWebHttpError("Origin is not allowed", 403);
 	}
+}
+
+function isJsonValue(value: unknown): value is PiboJsonValue {
+	if (
+		value === null ||
+		typeof value === "string" ||
+		typeof value === "boolean" ||
+		(typeof value === "number" && Number.isFinite(value))
+	) {
+		return true;
+	}
+
+	if (Array.isArray(value)) {
+		return value.every(isJsonValue);
+	}
+
+	if (typeof value === "object") {
+		return Object.values(value).every(isJsonValue);
+	}
+
+	return false;
 }
 
 function createEventStream(session: PiboWebSession, context: PiboWebAppContext): Response {
@@ -403,15 +424,19 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				if (url.pathname === `${CHAT_WEB_API_PREFIX}/action` && request.method === "POST") {
 					requireSameOriginJsonRequest(request);
 					const session = await requireSession(request, context);
-					const body = await readJsonBody<{ action?: unknown }>(request);
+					const body = await readJsonBody<{ action?: unknown; params?: unknown }>(request);
 				if (typeof body.action !== "string" || body.action.length === 0) {
 					return responseJson({ error: "Action is required" }, { status: 400 });
+				}
+				if (body.params !== undefined && !isJsonValue(body.params)) {
+					return responseJson({ error: "Params must be JSON serializable" }, { status: 400 });
 				}
 				const output = await context.channelContext.emit({
 					type: "execution",
 					sessionKey: session.binding.sessionKey,
 					id: randomUUID(),
 					action: body.action,
+					...(body.params === undefined ? {} : { params: body.params }),
 				});
 				return responseJson(output);
 			}

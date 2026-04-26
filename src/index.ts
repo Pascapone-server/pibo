@@ -104,14 +104,25 @@ export type {
 } from "./subagents/tool.js";
 export type {
 	BuiltinPiboExecutionAction,
+	PiboForkCandidate,
 	PiboEventListener,
 	PiboEventSource,
 	PiboExecutionAction,
 	PiboExecutionEvent,
 	PiboInputEvent,
+	PiboJsonObject,
+	PiboJsonValue,
 	PiboMessageEvent,
 	PiboOutputEvent,
+	PiboPiSessionSnapshot,
+	PiboSessionForkParams,
+	PiboSessionListItem,
+	PiboSessionOperationResult,
 	PiboSessionStatus,
+	PiboSessionSwitchParams,
+	PiboSessionTreeNavigateParams,
+	PiboSessionTreeNode,
+	PiboSessionTreeResult,
 } from "./core/events.js";
 export type {
 	PiboSessionBinding,

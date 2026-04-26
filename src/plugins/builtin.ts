@@ -1,4 +1,11 @@
 import { createPiboGatewayToolProfiles } from "../gateway/tool.js";
+import type {
+	PiboExecutionEvent,
+	PiboJsonObject,
+	PiboSessionForkParams,
+	PiboSessionSwitchParams,
+	PiboSessionTreeNavigateParams,
+} from "../core/events.js";
 import { InitialSessionContextBuilder, type InitialSessionContext } from "../core/profiles.js";
 import { createPiboTestToolProfiles } from "./core-tools.js";
 import { piboExamplePlugin } from "./example.js";
@@ -8,6 +15,45 @@ import type { PiboPlugin, PiboProfileBuildContext } from "./types.js";
 
 const CORE_PROFILE_TOOLS = ["pibo_echo", "pibo_workspace_info"] as const;
 const GATEWAY_PROFILE_TOOLS = [...CORE_PROFILE_TOOLS, "pibo_gateway_send"] as const;
+
+function getObjectParams(event: PiboExecutionEvent): PiboJsonObject | undefined {
+	const params = "params" in event ? event.params : undefined;
+	if (!params || typeof params !== "object" || Array.isArray(params)) return undefined;
+	return params;
+}
+
+function requireForkParams(event: PiboExecutionEvent): PiboSessionForkParams {
+	const params = getObjectParams(event);
+	if (!params || typeof params.entryId !== "string" || params.entryId.length === 0) {
+		throw new Error("session.fork requires params.entryId");
+	}
+	return { entryId: params.entryId };
+}
+
+function requireTreeNavigateParams(event: PiboExecutionEvent): PiboSessionTreeNavigateParams {
+	const raw = getObjectParams(event);
+	if (!raw || typeof raw.entryId !== "string" || raw.entryId.length === 0) {
+		throw new Error("session.tree_navigate requires params.entryId");
+	}
+
+	const params: PiboSessionTreeNavigateParams = { entryId: raw.entryId };
+	if (typeof raw.summarize === "boolean") params.summarize = raw.summarize;
+	if (typeof raw.customInstructions === "string") params.customInstructions = raw.customInstructions;
+	if (typeof raw.replaceInstructions === "boolean") params.replaceInstructions = raw.replaceInstructions;
+	if (typeof raw.label === "string") params.label = raw.label;
+	return params;
+}
+
+function requireSwitchParams(event: PiboExecutionEvent): PiboSessionSwitchParams {
+	const raw = getObjectParams(event);
+	if (!raw || typeof raw.sessionFile !== "string" || raw.sessionFile.length === 0) {
+		throw new Error("session.switch requires params.sessionFile");
+	}
+
+	const params: PiboSessionSwitchParams = { sessionFile: raw.sessionFile };
+	if (typeof raw.cwdOverride === "string") params.cwdOverride = raw.cwdOverride;
+	return params;
+}
 
 function createBaseProfileBuilder(
 	profileName: string,
@@ -86,6 +132,68 @@ export const piboCorePlugin = definePiboPlugin({
 			async execute(context) {
 				await context.dispose();
 				return { disposed: true };
+			},
+		});
+		api.registerGatewayAction({
+			name: "session.current",
+			description: "Return the active Pi session metadata for this routed session.",
+			slashCommands: ["session-current"],
+			execute(context) {
+				return context.getCurrentSession();
+			},
+		});
+		api.registerGatewayAction({
+			name: "session.list",
+			description: "List persisted Pi sessions for this workspace.",
+			slashCommands: ["sessions"],
+			execute(context) {
+				return context.listSessions();
+			},
+		});
+		api.registerGatewayAction({
+			name: "session.fork_candidates",
+			description: "Return user messages that can be used as fork targets.",
+			slashCommands: ["fork-candidates"],
+			execute(context) {
+				return { messages: context.getForkCandidates() };
+			},
+		});
+		api.registerGatewayAction({
+			name: "session.fork",
+			description: "Fork before a selected user message and make the fork the active Pi session.",
+			async execute(context, event) {
+				const params = requireForkParams(event);
+				return await context.forkSession(params.entryId);
+			},
+		});
+		api.registerGatewayAction({
+			name: "session.clone",
+			description: "Clone the current leaf and make the clone the active Pi session.",
+			slashCommands: ["clone"],
+			execute(context) {
+				return context.cloneSession();
+			},
+		});
+		api.registerGatewayAction({
+			name: "session.tree",
+			description: "Return the current Pi session tree and active leaf.",
+			slashCommands: ["tree"],
+			execute(context) {
+				return context.getSessionTree();
+			},
+		});
+		api.registerGatewayAction({
+			name: "session.tree_navigate",
+			description: "Move the current Pi session leaf to a selected tree entry.",
+			async execute(context, event) {
+				return await context.navigateSessionTree(requireTreeNavigateParams(event));
+			},
+		});
+		api.registerGatewayAction({
+			name: "session.switch",
+			description: "Switch the active Pi session to a persisted session file.",
+			async execute(context, event) {
+				return await context.switchSession(requireSwitchParams(event));
 			},
 		});
 	},

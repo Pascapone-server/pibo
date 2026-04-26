@@ -1,4 +1,4 @@
-import type { PiboExecutionAction, PiboOutputEvent } from "../core/events.js";
+import type { PiboExecutionAction, PiboJsonValue, PiboOutputEvent } from "../core/events.js";
 import type { PiboGatewayActionInfo } from "../plugins/types.js";
 import type { PiboSessionBinding } from "../sessions/bindings.js";
 
@@ -21,6 +21,7 @@ export type RemoteAgentInput =
 	| {
 			type: "execution";
 			action: PiboExecutionAction;
+			params?: PiboJsonValue;
 	  };
 
 export type RemoteAgentInputRequestFrame = {
@@ -64,6 +65,27 @@ export type RemoteAgentCapabilities = {
 
 export type RemoteAgentFrame = RemoteAgentRequestFrame | RemoteAgentResponseFrame | RemoteAgentEventFrame;
 
+function isJsonValue(value: unknown): boolean {
+	if (
+		value === null ||
+		typeof value === "string" ||
+		typeof value === "boolean" ||
+		(typeof value === "number" && Number.isFinite(value))
+	) {
+		return true;
+	}
+
+	if (Array.isArray(value)) {
+		return value.every(isJsonValue);
+	}
+
+	if (typeof value === "object") {
+		return Object.values(value).every(isJsonValue);
+	}
+
+	return false;
+}
+
 export function encodeRemoteAgentFrame(frame: RemoteAgentFrame): string {
 	return `${JSON.stringify(frame)}\n`;
 }
@@ -99,9 +121,11 @@ export function isRemoteAgentRequestFrame(value: unknown): value is RemoteAgentR
 
 	if (frame.type === "remote_input") {
 		if (!frame.input || typeof frame.input !== "object") return false;
-		const input = frame.input as { type?: unknown; text?: unknown; action?: unknown };
+		const input = frame.input as { type?: unknown; text?: unknown; action?: unknown; params?: unknown };
 		if (input.type === "message") return typeof input.text === "string";
-		if (input.type === "execution") return typeof input.action === "string";
+		if (input.type === "execution") {
+			return typeof input.action === "string" && (input.params === undefined || isJsonValue(input.params));
+		}
 	}
 
 	if (frame.type === "remote_capabilities") {

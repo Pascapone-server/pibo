@@ -1,5 +1,15 @@
 export type PiboEventSource = "user" | "ui" | "service" | "actor";
 
+export type PiboJsonValue =
+	| null
+	| boolean
+	| number
+	| string
+	| PiboJsonValue[]
+	| { [key: string]: PiboJsonValue };
+
+export type PiboJsonObject = { [key: string]: PiboJsonValue };
+
 export type PiboMessageEvent = {
 	type: "message";
 	sessionKey: string;
@@ -10,14 +20,74 @@ export type PiboMessageEvent = {
 
 export type BuiltinPiboExecutionAction = "status" | "session_id" | "clear_queue" | "abort" | "dispose";
 
-export type PiboExecutionAction = BuiltinPiboExecutionAction | (string & {});
+export type PiboSessionExecutionAction =
+	| "session.current"
+	| "session.list"
+	| "session.fork_candidates"
+	| "session.fork"
+	| "session.clone"
+	| "session.tree"
+	| "session.tree_navigate"
+	| "session.switch";
 
-export type PiboExecutionEvent = {
+export type PiboExecutionAction = BuiltinPiboExecutionAction | PiboSessionExecutionAction | (string & {});
+
+export type PiboSessionForkParams = {
+	entryId: string;
+};
+
+export type PiboSessionTreeNavigateParams = {
+	entryId: string;
+	summarize?: boolean;
+	customInstructions?: string;
+	replaceInstructions?: boolean;
+	label?: string;
+};
+
+export type PiboSessionSwitchParams = {
+	sessionFile: string;
+	cwdOverride?: string;
+};
+
+export type PiboExecutionEventBase<TAction extends PiboExecutionAction = PiboExecutionAction> = {
 	type: "execution";
 	sessionKey: string;
-	action: PiboExecutionAction;
+	action: TAction;
 	id?: string;
 };
+
+export type PiboNoParamsExecutionEvent = PiboExecutionEventBase<
+	| BuiltinPiboExecutionAction
+	| "session.current"
+	| "session.list"
+	| "session.fork_candidates"
+	| "session.clone"
+	| "session.tree"
+>;
+
+export type PiboSessionForkEvent = PiboExecutionEventBase<"session.fork"> & {
+	params: PiboSessionForkParams;
+};
+
+export type PiboSessionTreeNavigateEvent = PiboExecutionEventBase<"session.tree_navigate"> & {
+	params: PiboSessionTreeNavigateParams;
+};
+
+export type PiboSessionSwitchEvent = PiboExecutionEventBase<"session.switch"> & {
+	params: PiboSessionSwitchParams;
+};
+
+export type PiboKnownExecutionEvent =
+	| PiboNoParamsExecutionEvent
+	| PiboSessionForkEvent
+	| PiboSessionTreeNavigateEvent
+	| PiboSessionSwitchEvent;
+
+export type PiboCustomExecutionEvent = PiboExecutionEventBase<string & {}> & {
+	params?: PiboJsonValue;
+};
+
+export type PiboExecutionEvent = PiboKnownExecutionEvent | PiboCustomExecutionEvent;
 
 export type PiboInputEvent = PiboMessageEvent | PiboExecutionEvent;
 
@@ -29,6 +99,54 @@ export type PiboSessionStatus = {
 	activeTools: string[];
 	cwd: string;
 	disposed: boolean;
+};
+
+export type PiboPiSessionSnapshot = {
+	sessionId: string;
+	sessionFile?: string;
+	leafId: string | null;
+	cwd: string;
+	sessionName?: string;
+	parentSessionFile?: string;
+};
+
+export type PiboSessionOperationResult = {
+	routeSessionKey: string;
+	previous: PiboPiSessionSnapshot;
+	current: PiboPiSessionSnapshot;
+	cancelled: boolean;
+	selectedText?: string;
+	editorText?: string;
+	summaryEntryId?: string;
+};
+
+export type PiboForkCandidate = {
+	entryId: string;
+	text: string;
+};
+
+export type PiboSessionListItem = {
+	path: string;
+	id: string;
+	cwd: string;
+	name?: string;
+	parentSessionPath?: string;
+	created: string;
+	modified: string;
+	messageCount: number;
+	firstMessage: string;
+};
+
+export type PiboSessionTreeNode = {
+	entry: PiboJsonObject;
+	children: PiboSessionTreeNode[];
+	label?: string;
+	labelTimestamp?: string;
+};
+
+export type PiboSessionTreeResult = {
+	current: PiboPiSessionSnapshot;
+	tree: PiboSessionTreeNode[];
 };
 
 export type PiboMessageQueuedEvent = {

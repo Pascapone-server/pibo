@@ -30,7 +30,26 @@ The core contracts live in:
 
 Message events are user input. They are queued per session and sent into Pi.
 
-Execution events are wrapper-level actions such as status, queue clear, abort, and dispose. They are not model messages.
+Execution events are wrapper-level actions such as status, queue clear, abort, dispose, and Pi session controls. They are not model messages. Parameterized execution actions use typed params in `src/core/events.ts`; JSON transports validate those params at the protocol boundary before the router sees them.
+
+## Pi Session Controls
+
+Pibo follows Pi Coding Agent's session behavior instead of reimplementing it. The stable `sessionKey` belongs to the channel route, while the active Pi session underneath that route may change.
+
+The built-in session actions are:
+
+- `session.current` returns the active Pi session id, session file, leaf id, cwd, and parent session file.
+- `session.list` lists persisted Pi sessions for the current workspace/session directory.
+- `session.fork_candidates` returns user message entry ids that can be used as fork targets.
+- `session.fork` calls Pi's fork behavior for a selected user message and makes the fork the active Pi session for the same route.
+- `session.clone` clones the current leaf and makes the clone active for the same route.
+- `session.tree` returns Pi's current session tree plus the active leaf.
+- `session.tree_navigate` moves the active leaf inside the current Pi session tree.
+- `session.switch` switches the active Pi runtime to a persisted session file.
+
+Fork and clone intentionally replace the active Pi runtime inside the existing routed session, matching Pi Coding Agent. The previous session file is preserved by Pi and returned in the action result. Channels can keep their own UI history and call `session.switch` when they want to move back to an older fork or clone.
+
+Tree navigation stays inside the current Pi session file. It changes the active leaf and returns any editor text Pi would prefill for a user-message target. Channels decide how to render tree selection; Pibo only exposes the typed infrastructure.
 
 ## Plugin Layer
 

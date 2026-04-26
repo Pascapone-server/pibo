@@ -15,6 +15,7 @@ Pibo is a minimal TypeScript wrapper around Pi Coding Agent. This file is a shor
 - A console gateway client exists through `npm run client -- <sessionKey>`.
 - A gateway producer profile exists through `npm run tui:gateway`.
 - Core event contracts live in `src/core/events.ts`.
+- Execution events now include typed Pi session controls for current session metadata, session listing, fork candidates, fork, clone, tree navigation, and session switching.
 - Gateway transport examples live in `examples/gateway/`.
 - Gateway request/reply behavior is covered by `npm test`.
 - A minimal static plugin layer exists in `src/plugins/`.
@@ -39,11 +40,24 @@ The router is intentionally small. Producers emit events with a `sessionKey`. Th
 
 Message events are agent input. They enter the session FIFO and are sent to Pi with `session.prompt(...)`.
 
-Execution events are wrapper actions. They do not become user messages and do not directly modify agent history. Current actions are `status`, `session_id`, `clear_queue`, `abort`, and `dispose`.
+Execution events are wrapper actions. They do not become user messages. Current non-session actions are `status`, `session_id`, `clear_queue`, `abort`, and `dispose`.
+
+Pi session actions are also exposed through the same execution path:
+
+- `session.current`
+- `session.list`
+- `session.fork_candidates`
+- `session.fork`
+- `session.clone`
+- `session.tree`
+- `session.tree_navigate`
+- `session.switch`
+
+Fork and clone follow Pi Coding Agent semantics: the active Pi runtime for the current routed `sessionKey` is replaced with the forked or cloned session. The old Pi session remains persisted and can be reactivated with `session.switch`. Tree navigation stays in the current Pi session and moves the active leaf.
 
 Slash commands are independent from this event naming. A slash command such as `/compact` can still be sent as a normal message event when it should wait behind queued messages.
 
-The gateway daemon is the local transport boundary for now. It owns one session router, accepts newline-delimited JSON frames over TCP, and broadcasts normalized router events to connected clients. The current gateway tool, `pibo_gateway_send`, sends a message into a target session and waits for the correlated assistant reply.
+The gateway daemon is the local transport boundary for now. It owns one session router, accepts newline-delimited JSON frames over TCP, and broadcasts normalized router events to connected clients. Execution frames may include typed JSON params for parameterized actions such as `session.fork`, `session.tree_navigate`, and `session.switch`. The current gateway tool, `pibo_gateway_send`, sends a message into a target session and waits for the correlated assistant reply.
 
 ## Plugin Layer
 

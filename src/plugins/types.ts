@@ -1,4 +1,14 @@
-import type { PiboOutputEvent, PiboSessionStatus } from "../core/events.js";
+import type {
+	PiboExecutionEvent,
+	PiboForkCandidate,
+	PiboOutputEvent,
+	PiboSessionListItem,
+	PiboSessionOperationResult,
+	PiboSessionStatus,
+	PiboSessionSwitchParams,
+	PiboSessionTreeNavigateParams,
+	PiboSessionTreeResult,
+} from "../core/events.js";
 import type { PiboChannel } from "../channels/types.js";
 import type { PiboAuthService } from "../auth/types.js";
 import type { PiboWebApp } from "../web/types.js";
@@ -32,6 +42,14 @@ export type PiboGatewayActionContext = {
 	clearQueue(): number;
 	abort(): Promise<void>;
 	dispose(): Promise<void>;
+	getCurrentSession(): PiboSessionOperationResult["current"];
+	listSessions(): Promise<PiboSessionListItem[]>;
+	getForkCandidates(): PiboForkCandidate[];
+	forkSession(entryId: string): Promise<PiboSessionOperationResult>;
+	cloneSession(): Promise<PiboSessionOperationResult>;
+	getSessionTree(): PiboSessionTreeResult;
+	navigateSessionTree(params: PiboSessionTreeNavigateParams): Promise<PiboSessionOperationResult>;
+	switchSession(params: PiboSessionSwitchParams): Promise<PiboSessionOperationResult>;
 };
 
 export type PiboGatewayAction = {
@@ -39,7 +57,7 @@ export type PiboGatewayAction = {
 	description?: string;
 	slashCommands?: readonly string[];
 	hidden?: boolean;
-	execute(context: PiboGatewayActionContext): Promise<unknown> | unknown;
+	execute(context: PiboGatewayActionContext, event: PiboExecutionEvent): Promise<unknown> | unknown;
 };
 
 export type PiboGatewayActionInfo = {

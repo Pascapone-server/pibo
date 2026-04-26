@@ -25,6 +25,27 @@ export type GatewayEventFrame = {
 
 export type GatewayFrame = GatewayRequestFrame | GatewayResponseFrame | GatewayEventFrame;
 
+function isJsonValue(value: unknown): boolean {
+	if (
+		value === null ||
+		typeof value === "string" ||
+		typeof value === "boolean" ||
+		(typeof value === "number" && Number.isFinite(value))
+	) {
+		return true;
+	}
+
+	if (Array.isArray(value)) {
+		return value.every(isJsonValue);
+	}
+
+	if (typeof value === "object") {
+		return Object.values(value).every(isJsonValue);
+	}
+
+	return false;
+}
+
 export function isGatewayRequestFrame(value: unknown): value is GatewayRequestFrame {
 	if (!value || typeof value !== "object") return false;
 
@@ -32,10 +53,18 @@ export function isGatewayRequestFrame(value: unknown): value is GatewayRequestFr
 	if (frame.type !== "req" || typeof frame.id !== "string") return false;
 	if (!frame.event || typeof frame.event !== "object") return false;
 
-	const event = frame.event as { type?: unknown; sessionKey?: unknown; text?: unknown; action?: unknown };
+	const event = frame.event as {
+		type?: unknown;
+		sessionKey?: unknown;
+		text?: unknown;
+		action?: unknown;
+		params?: unknown;
+	};
 	if (typeof event.sessionKey !== "string" || event.sessionKey.length === 0) return false;
 	if (event.type === "message") return typeof event.text === "string";
-	if (event.type === "execution") return typeof event.action === "string";
+	if (event.type === "execution") {
+		return typeof event.action === "string" && (event.params === undefined || isJsonValue(event.params));
+	}
 	return false;
 }
 

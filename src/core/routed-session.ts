@@ -1,14 +1,25 @@
-import type { AgentSessionRuntime } from "@mariozechner/pi-coding-agent";
+import { SessionManager, type AgentSessionRuntime } from "@mariozechner/pi-coding-agent";
 import type { PiboPluginRegistry } from "../plugins/registry.js";
 import type {
+	PiboForkCandidate,
+	PiboJsonObject,
 	PiboEventListener,
 	PiboEventSource,
 	PiboExecutionAction,
 	PiboExecutionEvent,
 	PiboMessageEvent,
 	PiboOutputEvent,
+	PiboPiSessionSnapshot,
+	PiboSessionListItem,
+	PiboSessionOperationResult,
 	PiboSessionStatus,
+	PiboSessionSwitchParams,
+	PiboSessionTreeNavigateParams,
+	PiboSessionTreeNode,
+	PiboSessionTreeResult,
 } from "./events.js";
+
+type PiSessionTreeNode = ReturnType<SessionManager["getTree"]>[number];
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
@@ -75,14 +86,22 @@ export class RoutedSession {
 		private readonly runtime: AgentSessionRuntime,
 		private readonly emit: PiboEventListener,
 		private readonly pluginRegistry: PiboPluginRegistry,
-		forwardPiEvents: boolean,
+		private readonly forwardPiEvents: boolean,
 	) {
+		this.bindRuntimeSession();
+		this.runtime.setRebindSession(async () => {
+			this.bindRuntimeSession();
+		});
+	}
+
+	private bindRuntimeSession(): void {
+		this.unsubscribe?.();
 		this.unsubscribe = this.runtime.session.subscribe((event) => {
 			const normalized = normalizePiEvent(this.sessionKey, event);
 			if (normalized) {
 				this.emit(this.withActiveMessage(normalized));
 			}
-			if (forwardPiEvents) {
+			if (this.forwardPiEvents) {
 				this.emit({ type: "pi_event", sessionKey: this.sessionKey, event });
 			}
 		});
@@ -108,7 +127,7 @@ export class RoutedSession {
 	async executeAction(event: PiboExecutionEvent): Promise<PiboOutputEvent> {
 		this.assertActive();
 
-		const result = await this.runAction(event.action);
+		const result = await this.runAction(event);
 		const output: PiboOutputEvent = {
 			type: "execution_result",
 			sessionKey: this.sessionKey,
@@ -129,6 +148,98 @@ export class RoutedSession {
 			activeTools: this.runtime.session.getActiveToolNames(),
 			cwd: this.runtime.cwd,
 			disposed: this.disposed,
+		};
+	}
+
+	getCurrentSession(): PiboPiSessionSnapshot {
+		return this.createSessionSnapshot();
+	}
+
+	async listSessions(): Promise<PiboSessionListItem[]> {
+		const manager = this.runtime.session.sessionManager;
+		const sessions = await SessionManager.list(this.runtime.cwd, manager.getSessionDir());
+		return sessions.map((session) => ({
+			path: session.path,
+			id: session.id,
+			cwd: session.cwd,
+			name: session.name,
+			parentSessionPath: session.parentSessionPath,
+			created: session.created.toISOString(),
+			modified: session.modified.toISOString(),
+			messageCount: session.messageCount,
+			firstMessage: session.firstMessage,
+		}));
+	}
+
+	getForkCandidates(): PiboForkCandidate[] {
+		return this.runtime.session.getUserMessagesForForking();
+	}
+
+	async forkSession(entryId: string): Promise<PiboSessionOperationResult> {
+		this.assertActive();
+		const previous = this.createSessionSnapshot();
+		const result = await this.runtime.fork(entryId);
+		return {
+			routeSessionKey: this.sessionKey,
+			previous,
+			current: this.createSessionSnapshot(),
+			cancelled: result.cancelled,
+			selectedText: result.selectedText,
+		};
+	}
+
+	async cloneSession(): Promise<PiboSessionOperationResult> {
+		this.assertActive();
+		const leafId = this.runtime.session.sessionManager.getLeafId();
+		if (!leafId) {
+			throw new Error("Cannot clone session: no current entry selected");
+		}
+		const previous = this.createSessionSnapshot();
+		const result = await this.runtime.fork(leafId, { position: "at" });
+		return {
+			routeSessionKey: this.sessionKey,
+			previous,
+			current: this.createSessionSnapshot(),
+			cancelled: result.cancelled,
+		};
+	}
+
+	getSessionTree(): PiboSessionTreeResult {
+		this.assertActive();
+		return {
+			current: this.createSessionSnapshot(),
+			tree: normalizeSessionTree(this.runtime.session.sessionManager.getTree()),
+		};
+	}
+
+	async navigateSessionTree(params: PiboSessionTreeNavigateParams): Promise<PiboSessionOperationResult> {
+		this.assertActive();
+		const previous = this.createSessionSnapshot();
+		const result = await this.runtime.session.navigateTree(params.entryId, {
+			summarize: params.summarize,
+			customInstructions: params.customInstructions,
+			replaceInstructions: params.replaceInstructions,
+			label: params.label,
+		});
+		return {
+			routeSessionKey: this.sessionKey,
+			previous,
+			current: this.createSessionSnapshot(),
+			cancelled: result.cancelled,
+			editorText: result.editorText,
+			summaryEntryId: result.summaryEntry?.id,
+		};
+	}
+
+	async switchSession(params: PiboSessionSwitchParams): Promise<PiboSessionOperationResult> {
+		this.assertActive();
+		const previous = this.createSessionSnapshot();
+		const result = await this.runtime.switchSession(params.sessionFile, { cwdOverride: params.cwdOverride });
+		return {
+			routeSessionKey: this.sessionKey,
+			previous,
+			current: this.createSessionSnapshot(),
+			cancelled: result.cancelled,
 		};
 	}
 
@@ -177,21 +288,33 @@ export class RoutedSession {
 		}
 	}
 
-	private async runAction(action: PiboExecutionAction): Promise<unknown> {
+	private async runAction(event: PiboExecutionEvent): Promise<unknown> {
+		const action = event.action;
 		const gatewayAction = this.pluginRegistry.getGatewayAction(action);
 		if (!gatewayAction) {
 			throw new Error(`Unknown execution action "${action}"`);
 		}
 
-		return await gatewayAction.execute({
-			sessionKey: this.sessionKey,
-			getStatus: () => this.getStatus(),
-			clearQueue: () => this.clearQueue(),
-			abort: async () => {
-				await this.runtime.session.abort();
+		return await gatewayAction.execute(
+			{
+				sessionKey: this.sessionKey,
+				getStatus: () => this.getStatus(),
+				clearQueue: () => this.clearQueue(),
+				abort: async () => {
+					await this.runtime.session.abort();
+				},
+				dispose: () => this.dispose(),
+				getCurrentSession: () => this.getCurrentSession(),
+				listSessions: () => this.listSessions(),
+				getForkCandidates: () => this.getForkCandidates(),
+				forkSession: (entryId) => this.forkSession(entryId),
+				cloneSession: () => this.cloneSession(),
+				getSessionTree: () => this.getSessionTree(),
+				navigateSessionTree: (params) => this.navigateSessionTree(params),
+				switchSession: (params) => this.switchSession(params),
 			},
-			dispose: () => this.dispose(),
-		});
+			event,
+		);
 	}
 
 	private assertActive(): void {
@@ -206,6 +329,19 @@ export class RoutedSession {
 		return cleared;
 	}
 
+	private createSessionSnapshot(): PiboPiSessionSnapshot {
+		const session = this.runtime.session;
+		const manager = session.sessionManager;
+		return {
+			sessionId: session.sessionId,
+			sessionFile: session.sessionFile,
+			leafId: manager.getLeafId(),
+			cwd: this.runtime.cwd,
+			sessionName: session.sessionName,
+			parentSessionFile: manager.getHeader()?.parentSession,
+		};
+	}
+
 	private withActiveMessage(event: PiboOutputEvent): PiboOutputEvent {
 		if (
 			this.activeMessage?.id &&
@@ -216,4 +352,13 @@ export class RoutedSession {
 
 		return event;
 	}
+}
+
+function normalizeSessionTree(nodes: PiSessionTreeNode[]): PiboSessionTreeNode[] {
+	return nodes.map((node) => ({
+		entry: JSON.parse(JSON.stringify(node.entry)) as PiboJsonObject,
+		children: normalizeSessionTree(node.children),
+		label: node.label,
+		labelTimestamp: node.labelTimestamp,
+	}));
 }

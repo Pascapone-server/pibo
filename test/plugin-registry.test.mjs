@@ -55,6 +55,46 @@ test("default plugin registry builds profiles from registered resources", () => 
 			description: "Abort the active Pi agent run.",
 			slashCommands: ["abort"],
 		},
+		{
+			name: "session.current",
+			description: "Return the active Pi session metadata for this routed session.",
+			slashCommands: ["session-current"],
+		},
+		{
+			name: "session.list",
+			description: "List persisted Pi sessions for this workspace.",
+			slashCommands: ["sessions"],
+		},
+		{
+			name: "session.fork_candidates",
+			description: "Return user messages that can be used as fork targets.",
+			slashCommands: ["fork-candidates"],
+		},
+		{
+			name: "session.fork",
+			description: "Fork before a selected user message and make the fork the active Pi session.",
+			slashCommands: [],
+		},
+		{
+			name: "session.clone",
+			description: "Clone the current leaf and make the clone the active Pi session.",
+			slashCommands: ["clone"],
+		},
+		{
+			name: "session.tree",
+			description: "Return the current Pi session tree and active leaf.",
+			slashCommands: ["tree"],
+		},
+		{
+			name: "session.tree_navigate",
+			description: "Move the current Pi session leaf to a selected tree entry.",
+			slashCommands: [],
+		},
+		{
+			name: "session.switch",
+			description: "Switch the active Pi session to a persisted session file.",
+			slashCommands: [],
+		},
 	]);
 });
 

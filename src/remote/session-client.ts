@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { connect, type Socket } from "node:net";
-import type { PiboExecutionAction, PiboOutputEvent } from "../core/events.js";
+import type { PiboExecutionAction, PiboJsonValue, PiboOutputEvent } from "../core/events.js";
 import type { PiboSessionBinding } from "../sessions/bindings.js";
 import {
 	DEFAULT_REMOTE_AGENT_HOST,
@@ -112,8 +112,8 @@ export class RemoteAgentSessionClient {
 		return this.sendInput({ type: "message", text });
 	}
 
-	sendExecution(action: PiboExecutionAction): Promise<RemoteAgentResponseFrame> {
-		return this.sendInput({ type: "execution", action });
+	sendExecution(action: PiboExecutionAction, params?: PiboJsonValue): Promise<RemoteAgentResponseFrame> {
+		return this.sendInput(params === undefined ? { type: "execution", action } : { type: "execution", action, params });
 	}
 
 	close(): void {

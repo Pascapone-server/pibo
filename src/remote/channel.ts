@@ -118,6 +118,7 @@ export function createRemoteAgentChannel(options: RemoteAgentChannelOptions = {}
 						sessionKey,
 						id: frame.id,
 						action: frame.input.action,
+						params: frame.input.params,
 					});
 
 		return { type: "remote_res", id: frame.id, ok: true, payload: output };
