@@ -8,6 +8,7 @@ test("default plugin registry builds profiles from registered resources", () => 
 	const registry = createDefaultPiboPluginRegistry();
 
 	const minimal = registry.createProfile("minimal");
+	const runYieldQa = registry.createProfile("run-yield-qa");
 	const gatewayProducer = registry.createProfile("gateway-producer");
 	const example = registry.createProfile("example-plugin");
 
@@ -20,6 +21,11 @@ test("default plugin registry builds profiles from registered resources", () => 
 	assert.deepEqual(
 		gatewayProducer.tools.map((tool) => tool.name),
 		["pibo_echo", "pibo_workspace_info", "pibo_gateway_send"],
+	);
+	assert.equal(runYieldQa.profileName, "pibo-run-yield-qa");
+	assert.deepEqual(
+		runYieldQa.subagents.map((subagent) => subagent.name),
+		["qa-researcher", "qa-reviewer"],
 	);
 	assert.equal(example.profileName, "pibo-example-plugin");
 	assert.deepEqual(

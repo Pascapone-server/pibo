@@ -15,6 +15,7 @@ import type { PiboPlugin, PiboProfileBuildContext } from "./types.js";
 
 const CORE_PROFILE_TOOLS = ["pibo_echo", "pibo_workspace_info"] as const;
 const GATEWAY_PROFILE_TOOLS = [...CORE_PROFILE_TOOLS, "pibo_gateway_send"] as const;
+const RUN_YIELD_QA_SUBAGENTS = ["qa-researcher", "qa-reviewer"] as const;
 
 function getObjectParams(event: PiboExecutionEvent): PiboJsonObject | undefined {
 	const params = "params" in event ? event.params : undefined;
@@ -82,6 +83,24 @@ export const piboCorePlugin = definePiboPlugin({
 			path: "examples/context/workspace-policy.md",
 		});
 		api.registerTools(createPiboTestToolProfiles());
+		api.registerSubagents([
+			{
+				name: "qa-researcher",
+				description:
+					"QA helper subagent for run-yield testing. Use it for small research or inspection tasks.",
+				targetProfile: "pibo-minimal",
+				mode: "async",
+				executionMode: "parallel",
+			},
+			{
+				name: "qa-reviewer",
+				description:
+					"QA reviewer subagent for run-yield testing. Use it for independent review or validation tasks.",
+				targetProfile: "pibo-minimal",
+				mode: "async",
+				executionMode: "parallel",
+			},
+		]);
 		api.registerProfile({
 			name: "pibo-minimal",
 			aliases: ["minimal"],
@@ -89,6 +108,17 @@ export const piboCorePlugin = definePiboPlugin({
 			create(context) {
 				return createBaseProfileBuilder("pibo-minimal", context)
 					.addTools(context.getTools(CORE_PROFILE_TOOLS))
+					.createSession();
+			},
+		});
+		api.registerProfile({
+			name: "pibo-run-yield-qa",
+			aliases: ["run-yield-qa", "yield-qa"],
+			description: "QA profile with two simple subagents for testing yielded run control.",
+			create(context) {
+				return createBaseProfileBuilder("pibo-run-yield-qa", context)
+					.addTools(context.getTools(CORE_PROFILE_TOOLS))
+					.addSubagents(context.getSubagents(RUN_YIELD_QA_SUBAGENTS))
 					.createSession();
 			},
 		});

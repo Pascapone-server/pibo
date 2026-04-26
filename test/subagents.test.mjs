@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { InitialSessionContextBuilder } from "../dist/core/profiles.js";
+import { inspectPiboProfile } from "../dist/core/runtime.js";
 import { PiboSessionRouter } from "../dist/core/session-router.js";
 import {
 	createSubagentSessionKey,
@@ -9,6 +10,7 @@ import {
 	getSubagentSessionDepth,
 } from "../dist/subagents/tool.js";
 import { piboCorePlugin } from "../dist/plugins/builtin.js";
+import { createDefaultPiboPluginRegistry } from "../dist/plugins/builtin.js";
 import { definePiboPlugin, PiboPluginRegistry } from "../dist/plugins/registry.js";
 
 const noopSubagentRunner = {
@@ -176,4 +178,28 @@ test("profiles can expose subagents as active router tools", async () => {
 	} finally {
 		await router.disposeAll();
 	}
+});
+
+test("default run-yield QA profile exposes run control tools", async () => {
+	const registry = createDefaultPiboPluginRegistry();
+	const profile = registry.createProfile("run-yield-qa");
+	const inspection = await inspectPiboProfile({ profile, persistSession: false });
+	const activeTools = new Set(inspection.tools.map((tool) => tool.name));
+
+	assert.deepEqual(
+		inspection.subagents.map((subagent) => subagent.name),
+		["qa-researcher", "qa-reviewer"],
+	);
+	assert.equal(activeTools.has("pibo_echo"), true);
+	assert.equal(activeTools.has("pibo_workspace_info"), true);
+	assert.equal(activeTools.has("pibo_subagent_qa_researcher"), true);
+	assert.equal(activeTools.has("pibo_subagent_qa_reviewer"), true);
+	assert.equal(activeTools.has("pibo_subagent_start"), true);
+	assert.equal(activeTools.has("pibo_run_list"), true);
+	assert.equal(activeTools.has("pibo_run_wait"), true);
+	assert.equal(activeTools.has("pibo_run_read"), true);
+	assert.equal(activeTools.has("pibo_run_cancel"), true);
+	assert.equal(activeTools.has("pibo_run_ack"), true);
+	assert.equal(inspection.subagents.every((subagent) => subagent.active), true);
+	assert.equal(inspection.diagnostics.length, 0);
 });

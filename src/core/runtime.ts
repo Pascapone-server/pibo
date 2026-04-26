@@ -120,6 +120,33 @@ function hasEnabledToolDefinition(tool: ToolProfile): tool is ToolProfile & { de
 	return tool.enabled !== false && tool.definition !== undefined;
 }
 
+function isGeneratedPiboTool(name: string): boolean {
+	return name === "pibo_subagent_start" || name.startsWith("pibo_subagent_") || name.startsWith("pibo_run_");
+}
+
+function createInspectionSubagentRunner(): PiboSubagentRunner {
+	return {
+		async runSubagent() {
+			throw new Error("Profile inspection cannot execute subagents");
+		},
+	};
+}
+
+function createInspectionRunToolController(): PiboRunToolController {
+	const fail = () => {
+		throw new Error("Profile inspection cannot execute run-control tools");
+	};
+	return {
+		startSubagent: fail,
+		listRuns: () => [],
+		getRunStatus: fail,
+		waitForRun: fail,
+		readRun: fail,
+		cancelRun: fail,
+		ackRun: fail,
+	};
+}
+
 function createSessionManager(cwd: string, profile: InitialSessionContext, persistSession: boolean): SessionManager {
 	const sessionManager = persistSession ? SessionManager.create(cwd) : SessionManager.inMemory(cwd);
 
@@ -194,12 +221,30 @@ export async function createPiboRuntime(options: PiboRuntimeOptions = {}): Promi
 export async function inspectPiboProfile(options: PiboRuntimeOptions = {}): Promise<PiboProfileInspection> {
 	const cwd = options.cwd ?? process.cwd();
 	const profile = options.profile ?? createDefaultPiboProfile();
-	const runtime = await createPiboRuntime({ cwd, profile, persistSession: false });
+	const hasEnabledSubagents = profile.subagents.some((subagent) => subagent.enabled !== false);
+	const runtime = await createPiboRuntime({
+		cwd,
+		profile,
+		persistSession: false,
+		subagentRunner: options.subagentRunner ?? (hasEnabledSubagents ? createInspectionSubagentRunner() : undefined),
+		runToolController:
+			options.runToolController ?? (hasEnabledSubagents ? createInspectionRunToolController() : undefined),
+	});
 
 	try {
 		const resourceLoader = runtime.services.resourceLoader;
 		const activeToolNames = new Set(runtime.session.getActiveToolNames());
 		const registeredToolNames = new Set(runtime.session.getAllTools().map((tool) => tool.name));
+		const profileToolNames = new Set(profile.tools.map((tool) => tool.name));
+		const generatedTools = runtime.session
+			.getAllTools()
+			.filter((tool) => isGeneratedPiboTool(tool.name) && !profileToolNames.has(tool.name))
+			.map((tool) => ({
+				name: tool.name,
+				hasDefinition: true,
+				registered: true,
+				active: activeToolNames.has(tool.name),
+			}));
 
 		return {
 			profileName: profile.profileName,
@@ -212,7 +257,7 @@ export async function inspectPiboProfile(options: PiboRuntimeOptions = {}): Prom
 				hasDefinition: Boolean(tool.definition),
 				registered: registeredToolNames.has(tool.name),
 				active: activeToolNames.has(tool.name),
-			})),
+			})).concat(generatedTools),
 			subagents: profile.subagents.map((subagent) => {
 				const toolName = createSubagentToolName(subagent.name);
 				return {
