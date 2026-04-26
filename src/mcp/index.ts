@@ -30,10 +30,19 @@ import {
   unknownOptionError,
   unknownSubcommandError,
 } from './errors.js';
+import { type RegistryAction, registryCommand } from './registry.js';
 import { VERSION } from './version.js';
 
 interface ParsedArgs {
-  command: 'list' | 'info' | 'grep' | 'call' | 'config' | 'help' | 'version';
+  command:
+    | 'list'
+    | 'info'
+    | 'grep'
+    | 'call'
+    | 'config'
+    | 'registry'
+    | 'help'
+    | 'version';
   server?: string;
   tool?: string;
   pattern?: string;
@@ -41,6 +50,10 @@ interface ParsedArgs {
   configAction?: ConfigAction;
   configName?: string;
   configJson?: string;
+  registryAction?: RegistryAction;
+  registryName?: string;
+  registryRunSetup?: boolean;
+  registryBrowserMode?: 'headless' | 'headful';
   withDescriptions: boolean;
   configPath?: string;
 }
@@ -48,7 +61,7 @@ interface ParsedArgs {
 /**
  * Known subcommands
  */
-const SUBCOMMANDS = ['info', 'grep', 'call', 'config'] as const;
+const SUBCOMMANDS = ['info', 'grep', 'call', 'config', 'registry'] as const;
 
 /**
  * Check if a string looks like a subcommand (not a server name)
@@ -112,6 +125,7 @@ function parseArgs(args: string[]): ParsedArgs {
   const result: ParsedArgs = {
     command: 'info',
     withDescriptions: false,
+    registryRunSetup: true,
   };
 
   const positional: string[] = [];
@@ -144,6 +158,19 @@ function parseArgs(args: string[]): ParsedArgs {
           );
           process.exit(ErrorCode.CLIENT_ERROR);
         }
+        break;
+
+      case '--no-setup':
+      case '--skip-setup':
+        result.registryRunSetup = false;
+        break;
+
+      case '--headful':
+        result.registryBrowserMode = 'headful';
+        break;
+
+      case '--headless':
+        result.registryBrowserMode = 'headless';
         break;
 
       default:
@@ -244,6 +271,31 @@ function parseArgs(args: string[]): ParsedArgs {
 
       default:
         console.error(formatCliError(unknownSubcommandError(`config ${action}`)));
+        process.exit(ErrorCode.CLIENT_ERROR);
+    }
+  }
+
+  if (firstArg === 'registry') {
+    const action = positional[1] ?? 'help';
+    result.command = 'registry';
+
+    switch (action) {
+      case 'help':
+      case 'list':
+        result.registryAction = action;
+        return result;
+
+      case 'show':
+      case 'install':
+      case 'doctor':
+      case 'remove':
+      case 'rm':
+        result.registryAction = action === 'rm' ? 'remove' : action;
+        result.registryName = positional[2];
+        return result;
+
+      default:
+        console.error(formatCliError(unknownSubcommandError(`registry ${action}`)));
         process.exit(ErrorCode.CLIENT_ERROR);
     }
   }
@@ -386,6 +438,7 @@ Usage:
   pibo mcp [options] call <server> <tool>         Call tool (reads JSON from stdin if no args)
   pibo mcp [options] call <server> <tool> <json>  Call tool with JSON arguments
   pibo mcp [options] config <action>              Manage MCP server config
+  pibo mcp [options] registry <action>            Install built-in MCP server presets
 
 Formats (both work):
   pibo mcp info server tool                       Space-separated
@@ -398,12 +451,21 @@ Config:
   pibo mcp config help                            Show config schema and examples
   pibo mcp config add <name> <json>               Add or replace a server
   pibo mcp config remove <name>                   Remove a server
+  pibo mcp registry list                          List built-in presets
+  pibo mcp registry show <name>                   Show preset details
+  pibo mcp registry doctor <name>                 Check runtime prerequisites
+  pibo mcp registry install <name>                Install setup deps and add preset
+  pibo mcp registry install <name> --headful      Install preset for a visible local browser
+  pibo mcp registry remove <name>                 Remove preset config and runtime
 
 Options:
   -h, --help               Show this help message
   -v, --version            Show version number
   -d, --with-descriptions  Include tool descriptions
   -c, --config <path>      Path to mcp_servers.json config file
+  --no-setup               Skip registry setup commands during install
+  --headful                Registry install: configure a visible browser when supported
+  --headless               Registry install: configure headless browser mode when supported
 
 Output:
   pibo mcp/info/grep       Human-readable text to stdout
@@ -419,6 +481,7 @@ Examples:
   pibo mcp call filesystem read_file '{}'       # Call tool
   cat input.json | pibo mcp call server tool    # Read from stdin (no '-' needed)
   pibo mcp config help                          # Show config file schema
+  pibo mcp registry install browser-use         # Install Browser Use MCP preset
 
 Environment Variables:
   MCP_NO_DAEMON=1        Disable connection caching (force fresh connections)
@@ -512,6 +575,16 @@ export async function runMcpCli(argv = process.argv): Promise<void> {
           name: args.configName,
           serverJson: args.configJson,
           configPath: args.configPath,
+        });
+        break;
+
+      case 'registry':
+        await registryCommand({
+          action: args.registryAction ?? 'help',
+          name: args.registryName,
+          configPath: args.configPath,
+          runSetup: args.registryRunSetup,
+          browserMode: args.registryBrowserMode,
         });
         break;
     }

@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .pibo/
+mcp_servers.json
 .env
 .env.*
 client_secret*.json

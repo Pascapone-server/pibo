@@ -166,6 +166,8 @@ The CLI supports:
 
 The config helper commands live under `pibo mcp config ...` and can create, show, add, and remove server definitions. The runtime lookup order is explicit `-c/--config`, `MCP_CONFIG_PATH`, project-local `mcp_servers.json`, then the user-level MCP config paths.
 
+`pibo mcp registry ...` is a thin convenience layer over the same config file. Registry entries are curated presets for optional MCP servers and are not active until installed. Python-based presets get isolated virtual environments under `~/.pibo/mcp-tools/<name>`, managed on demand through `uv`. Installing a preset writes a normal `mcpServers` entry, so the runtime path stays identical to manually added servers. The first built-in preset is `browser-use`; it is installed into its own venv and exposed through that venv's `browser-use --mcp` executable instead of being bundled as a Pibo package dependency. The preset sets `BROWSER_USE_HEADLESS=true` by default for VPS-friendly local MCP startup; `pibo mcp registry install browser-use --headful` writes display environment variables for a visible local browser when a usable display is detected, otherwise it warns and falls back to headless mode.
+
 ## Current Scripts
 
 ```bash

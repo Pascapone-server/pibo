@@ -176,6 +176,7 @@ export const DEFAULT_CONCURRENCY = 5;
 export const DEFAULT_MAX_RETRIES = 3;
 export const DEFAULT_RETRY_DELAY_MS = 1000; // 1 second base delay
 export const DEFAULT_DAEMON_TIMEOUT_SECONDS = 60; // 60 seconds idle timeout
+export const DEFAULT_DAEMON_REQUEST_TIMEOUT_SECONDS = 60;
 
 /**
  * Debug logging utility - only logs when MCP_DEBUG is set
@@ -271,6 +272,21 @@ export function getDaemonTimeoutMs(): number {
     }
   }
   return DEFAULT_DAEMON_TIMEOUT_SECONDS * 1000;
+}
+
+/**
+ * Get daemon request timeout in milliseconds
+ * @env MCP_DAEMON_REQUEST_TIMEOUT - timeout in seconds (default: 60)
+ */
+export function getDaemonRequestTimeoutMs(): number {
+  const envTimeout = process.env.MCP_DAEMON_REQUEST_TIMEOUT;
+  if (envTimeout) {
+    const seconds = Number.parseInt(envTimeout, 10);
+    if (!Number.isNaN(seconds) && seconds > 0) {
+      return seconds * 1000;
+    }
+  }
+  return DEFAULT_DAEMON_REQUEST_TIMEOUT_SECONDS * 1000;
 }
 
 /**

@@ -111,6 +111,18 @@ npm run dev -- mcp config add deepwiki '{"url":"https://mcp.deepwiki.com/mcp"}'
 npm run dev -- mcp config remove filesystem
 ```
 
+Pibo also ships a small MCP registry for common optional servers. Presets are not active by default; install one when you want it:
+
+```bash
+npm run dev -- mcp registry list
+npm run dev -- mcp registry show browser-use
+npm run dev -- mcp registry doctor browser-use
+npm run dev -- mcp registry install browser-use
+npm run dev -- mcp registry install browser-use --headful
+```
+
+`browser-use` is installed on demand into its own Python virtual environment under `~/.pibo/mcp-tools/browser-use` and is not bundled as a Pibo dependency. The registry install requires `uv` on PATH and configures the MCP server to run headless by default. Use `--headful` when a local display is available and you want a visible browser window; if no usable display is detected, Pibo prints a warning and falls back to headless mode.
+
 Config lookup order is `-c/--config`, `MCP_CONFIG_PATH`, `./mcp_servers.json`, `~/.mcp_servers.json`, then `~/.config/mcp/mcp_servers.json`. Use `MCP_NO_DAEMON=1` to force fresh MCP connections instead of using the short-lived connection cache.
 
 ## Web Auth

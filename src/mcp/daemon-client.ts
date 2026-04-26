@@ -14,6 +14,7 @@ import {
   type ServerConfig,
   debug,
   getConfigHash,
+  getDaemonRequestTimeoutMs,
   getSocketDir,
   getSocketPath,
 } from './config.js';
@@ -104,11 +105,10 @@ async function sendRequest(
       settle(() => reject(error));
     });
 
-    // Timeout after 5 seconds (fast fallback to direct connection)
     const timeoutId = setTimeout(() => {
       socket.destroy();
       settle(() => reject(new Error('Daemon request timeout')));
-    }, 5000);
+    }, getDaemonRequestTimeoutMs());
   });
 }
 
@@ -179,6 +179,7 @@ async function spawnDaemon(
     serverName,
     configJson,
   ], {
+    detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env },
   });
