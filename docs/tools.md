@@ -111,11 +111,9 @@ npm run dev -- tools env browser-use
 On Linux/macOS this prints:
 
 ```bash
-export PATH=".../.venv/bin:$PATH"
+export PATH=".../.venv/bin:.../home/bin:$PATH"
 export BROWSER_USE_HOME=".../home"
 ```
-
-The PATH also includes `.../home/bin` so helper binaries installed by Browser Use, such as `profile-use`, are available after applying the environment.
 
 On Linux desktops, `env` also prints detected browser display variables when available:
 

@@ -205,6 +205,7 @@ npm run remote:line -- <sessionName> [profile]
 npm run tui -- [profile]
 npm run profile -- [profile]
 npm run dev -- mcp
+npm run dev -- tools
 ```
 
 `npm run remote` runs the Pi-TUI proof-of-concept controller. `npm run remote:line` runs the simpler debug client.

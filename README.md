@@ -26,7 +26,7 @@ Minimal TypeScript wrapper project around Pi Coding Agent.
 - `npm run dev -- config keys` lists supported local config keys.
 - `npm run build` compiles to `dist/`.
 - `npm run start` runs the compiled entrypoint.
-- `npm test` builds and runs gateway transport tests.
+- `npm test` builds and runs the test suite.
 - `npm run typecheck` checks TypeScript without emitting files.
 - `npm run clean` removes `dist/`.
 
@@ -145,7 +145,7 @@ npm run dev -- tools guides browser-use
 npm run dev -- tools guide browser-use browser-use
 ```
 
-The first curated tool is `browser-use`. It is installed into an isolated runtime under `~/.pibo/tools/browser-use` and uses `~/.pibo/tools/browser-use/home` as its tool home. See `docs/tools.md`.
+The first curated tool is `browser-use`, pinned to `browser-use[cli]==0.12.6` so the CLI surface stays aligned with the bundled guides. It is installed into an isolated runtime under `~/.pibo/tools/browser-use` and uses `~/.pibo/tools/browser-use/home` as its tool home. See `docs/tools.md`.
 
 ## Web Auth
 
