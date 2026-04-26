@@ -2,7 +2,11 @@
 
 Minimal TypeScript wrapper project around Pi Coding Agent.
 
-For the current architecture snapshot, see `docs/architecture.md`.
+## Docs
+
+- `docs/architecture.md` describes the current runtime architecture and boundaries.
+- `docs/mcp.md` documents the MCP CLI, registry, and Browser Use preset.
+- `docs/progress.md` is the short implementation status snapshot.
 
 ## Scripts
 
@@ -27,6 +31,8 @@ For the current architecture snapshot, see `docs/architecture.md`.
 ## Philosophy
 
 Keep the wrapper thin. Pi Coding Agent should remain the inner engine; pibo adds only the small runtime, tool, prompt, and policy layer we actually need.
+
+Optional integrations stay outside the core package until the user installs them. MCP servers, Python virtual environments, browser runtimes, and third-party CLIs are configured on demand through `pibo mcp`, not bundled into pibo itself.
 
 ## Plugin Layer
 
@@ -92,7 +98,7 @@ The gateway producer profile adds `pibo_gateway_send`, a tool that sends a messa
 
 ## MCP CLI
 
-Pibo includes an MCP helper CLI under `pibo mcp`. It reads MCP server definitions from `mcp_servers.json`, starts stdio or HTTP MCP servers, lists their tools, shows schemas, searches by glob, and calls tools from shell-friendly JSON input.
+Pibo includes an MCP helper CLI under `pibo mcp`. It reads MCP server definitions from `mcp_servers.json`, starts stdio or HTTP MCP servers, lists their tools, shows schemas, searches by glob, and calls tools from shell-friendly JSON input. See `docs/mcp.md` for the full guide.
 
 ```bash
 npm run dev -- mcp

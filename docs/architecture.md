@@ -2,6 +2,14 @@
 
 Pibo is a thin TypeScript harness around Pi Coding Agent. Pi remains the inner engine for model turns, tools, streaming, sessions, and compaction. Pibo owns the outer product boundary: profiles, plugin registration, channels, routing, session bindings, and transport-specific adapters.
 
+## Design Principles
+
+- Keep Pi Coding Agent embedded as the execution engine, not expanded into the whole product.
+- Keep pibo responsible for product boundaries: profiles, plugins, channels, auth, policy, and routing.
+- Keep optional integrations opt-in. External MCP servers, Python runtimes, browsers, and third-party CLIs are installed only when a user asks for them.
+- Keep runtime configuration explicit and local. Project config lives in `.pibo/config.json`; MCP server definitions live in `mcp_servers.json`.
+- Prefer ordinary, inspectable boundaries over hidden coupling: plugins register capabilities, channels translate transports, and MCP servers remain external processes.
+
 ## Core Boundary
 
 ```text
@@ -154,7 +162,7 @@ This is useful as a reference for future channel adapters, but Pi TUI is not tre
 
 ## MCP CLI
 
-`pibo mcp` is a local operator tool for discovering and calling external MCP servers from the shell. It is separate from the pibo plugin/runtime boundary: MCP servers are configured in `mcp_servers.json`, not in `PiboPluginRegistry`, and their tools are invoked directly by the CLI.
+`pibo mcp` is a local operator tool for discovering and calling external MCP servers from the shell. It is separate from the pibo plugin/runtime boundary: MCP servers are configured in `mcp_servers.json`, not in `PiboPluginRegistry`, and their tools are invoked directly by the CLI. The usage guide lives in `docs/mcp.md`.
 
 The CLI supports:
 
@@ -167,6 +175,8 @@ The CLI supports:
 The config helper commands live under `pibo mcp config ...` and can create, show, add, and remove server definitions. The runtime lookup order is explicit `-c/--config`, `MCP_CONFIG_PATH`, project-local `mcp_servers.json`, then the user-level MCP config paths.
 
 `pibo mcp registry ...` is a thin convenience layer over the same config file. Registry entries are curated presets for optional MCP servers and are not active until installed. Python-based presets get isolated virtual environments under `~/.pibo/mcp-tools/<name>`, managed on demand through `uv`. Installing a preset writes a normal `mcpServers` entry, so the runtime path stays identical to manually added servers. The first built-in preset is `browser-use`; it is installed into its own venv and exposed through that venv's `browser-use --mcp` executable instead of being bundled as a Pibo package dependency. The preset sets `BROWSER_USE_HEADLESS=true` by default for VPS-friendly local MCP startup; `pibo mcp registry install browser-use --headful` writes display environment variables for a visible local browser when a usable display is detected, otherwise it warns and falls back to headless mode.
+
+The MCP daemon keeps expensive stdio server connections warm between CLI invocations. It is a local convenience cache only; server state and security still belong to the configured MCP server.
 
 ## Current Scripts
 

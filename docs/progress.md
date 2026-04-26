@@ -1,6 +1,6 @@
 # Pibo Progress
 
-Pibo is a minimal TypeScript wrapper around Pi Coding Agent. This file is a short project status note. The architectural snapshot lives in `docs/architecture.md`.
+Pibo is a minimal TypeScript wrapper around Pi Coding Agent. This file is a short project status note. The architectural snapshot lives in `docs/architecture.md`; MCP usage lives in `docs/mcp.md`.
 
 ## Current State
 
@@ -30,6 +30,8 @@ Pibo is a minimal TypeScript wrapper around Pi Coding Agent. This file is a shor
 - An authenticated web gateway path exists through `npm run gateway:web`, split into Better Auth, a same-origin web host, and the chat web app.
 - A minimal Commander-based CLI manages local config values in `.pibo/config.json`.
 - `pibo mcp` provides local MCP server discovery, schema inspection, search, tool calls, `mcp_servers.json` config management, and a small opt-in registry for common external MCP servers such as Browser Use.
+- Browser Use can be installed on demand as an MCP preset into an isolated Python venv under `~/.pibo/mcp-tools/browser-use`.
+- The Browser Use preset defaults to headless mode, supports checked headful setup when a display is available, and falls back to headless with a warning when no display is usable.
 
 ## Session Routing
 
@@ -197,4 +199,6 @@ flowchart LR
 - Keep plugins static until external loading has a concrete requirement.
 - Build real web or messaging channels on top of `PiboChannel`, not directly against Pi.
 - Keep auth as a gateway/channel boundary service; web apps such as chat should consume auth rather than live inside the auth plugin.
+- Keep MCP presets optional and externally installed; do not turn registry entries into core package dependencies.
+- Design explicit model-provider configuration for MCP-backed agent tools before sharing credentials with external servers.
 - Add disk resume by `sessionKey` later only when we introduce a real session index.
