@@ -183,7 +183,7 @@ export const DEFAULT_DAEMON_REQUEST_TIMEOUT_SECONDS = 60;
  */
 export function debug(message: string): void {
   if (process.env.MCP_DEBUG) {
-    console.error(`[mcp-cli] ${message}`);
+    console.error(`[pibo mcp] ${message}`);
   }
 }
 
@@ -367,7 +367,7 @@ function substituteEnvVars(value: string): string {
       );
     }
     // Non-strict mode: warn but continue
-    console.error(`[mcp-cli] Warning: ${message}`);
+    console.error(`[pibo mcp] Warning: ${message}`);
   }
 
   return result;
@@ -497,13 +497,6 @@ export async function loadConfig(
   // Validate structure
   if (!config.mcpServers || typeof config.mcpServers !== 'object') {
     throw new Error(formatCliError(configMissingFieldError(configPath)));
-  }
-
-  // Warn if no servers are configured
-  if (Object.keys(config.mcpServers).length === 0) {
-    console.error(
-      '[mcp-cli] Warning: No servers configured in mcpServers. Add server configurations to use MCP tools.',
-    );
   }
 
   // Validate individual server configs

@@ -9,10 +9,33 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 const cliPath = resolve("dist/bin/pibo.js");
 
+test("pibo without args prints compact discovery", async () => {
+	const { stdout } = await execFileAsync("node", [cliPath]);
+
+	assert.match(stdout, /pibo - agent-oriented CLI/);
+	assert.match(stdout, /pibo <command> --help/);
+	assert.doesNotMatch(stdout, /"profileName"/);
+});
+
 test("pibo exposes the MCP CLI as a subcommand", async () => {
 	const { stdout } = await execFileAsync("node", [cliPath, "mcp", "--version"]);
 
 	assert.match(stdout, /pibo mcp \(mcp-cli v\d+\.\d+\.\d+\)/);
+});
+
+test("pibo mcp help stays progressive", async () => {
+	const help = await execFileAsync("node", [cliPath, "mcp", "--help"]);
+	assert.match(help.stdout, /pibo mcp config help/);
+	assert.doesNotMatch(help.stdout, /Server schema:/);
+	assert.doesNotMatch(help.stdout, /Full example:/);
+
+	const configHelp = await execFileAsync("node", [cliPath, "mcp", "config", "help"]);
+	assert.match(configHelp.stdout, /pibo mcp config schema/);
+	assert.doesNotMatch(configHelp.stdout, /Full example:/);
+
+	const schema = await execFileAsync("node", [cliPath, "mcp", "config", "schema"]);
+	assert.match(schema.stdout, /Server schema:/);
+	assert.match(schema.stdout, /Full example:/);
 });
 
 test("pibo mcp config can create, add, show, and remove servers", async () => {

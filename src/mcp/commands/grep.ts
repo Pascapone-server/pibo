@@ -163,9 +163,8 @@ export async function grepCommand(options: GrepOptions): Promise<void> {
   const serverNames = listServerNames(config);
 
   if (serverNames.length === 0) {
-    console.error(
-      'Warning: No servers configured. Add servers to mcp_servers.json',
-    );
+    console.log('No MCP servers configured.');
+    console.log('Next: pibo mcp config help');
     return;
   }
 
@@ -203,7 +202,7 @@ export async function grepCommand(options: GrepOptions): Promise<void> {
     console.log(`No tools found matching "${options.pattern}"`);
     console.log('  Tip: Pattern matches tool names only (not server names)');
     console.log(`  Tip: Use '*' for wildcards, e.g. '*file*' or 'read_*'`);
-    console.log(`  Tip: Run 'mcp-cli' to list all available tools`);
+    console.log(`  Tip: Run 'pibo mcp' to list all available tools`);
     return;
   }
 

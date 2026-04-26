@@ -6,6 +6,14 @@ This keeps pibo small. Optional tools can be added when needed without becoming 
 
 ## Commands
 
+The MCP CLI is intentionally progressive:
+
+- `pibo mcp --help` shows only the top-level MCP commands.
+- `pibo mcp config help` shows only config actions.
+- `pibo mcp config schema` prints server JSON examples.
+- `pibo mcp config paths` prints config lookup order.
+- `pibo mcp registry help` shows only registry actions.
+
 ```bash
 npm run dev -- mcp
 npm run dev -- mcp info <server>
@@ -37,7 +45,10 @@ Manage the file with:
 
 ```bash
 npm run dev -- mcp config init
+npm run dev -- mcp config path
+npm run dev -- mcp config paths
 npm run dev -- mcp config show
+npm run dev -- mcp config schema
 npm run dev -- mcp config add filesystem '{"command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","."]}'
 npm run dev -- mcp config remove filesystem
 ```

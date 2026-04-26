@@ -8,7 +8,7 @@ import {
 } from './config.js';
 import { ErrorCode, formatCliError } from './errors.js';
 
-export type ConfigAction = 'help' | 'init' | 'path' | 'show' | 'add' | 'remove';
+export type ConfigAction = 'help' | 'schema' | 'paths' | 'init' | 'path' | 'show' | 'add' | 'remove';
 
 export interface ConfigCommandOptions {
   action: ConfigAction;
@@ -33,22 +33,31 @@ export function printConfigHelp(): void {
   console.log(`
 MCP server configuration
 
-Config file:
-  pibo mcp reads mcp_servers.json from:
-    1. -c/--config <path>
-    2. MCP_CONFIG_PATH
-    3. ./mcp_servers.json
-    4. ~/.mcp_servers.json
-    5. ~/.config/mcp/mcp_servers.json
-
 Commands:
   pibo mcp config init                         Create mcp_servers.json if missing
   pibo mcp config path                         Print the config path that will be used
+  pibo mcp config paths                        Show config path lookup order
   pibo mcp config show                         Print the current config JSON
   pibo mcp config add <name> <json>            Add or replace one server
   pibo mcp config remove <name>                Remove one server
+  pibo mcp config schema                       Show server JSON schema and examples
   pibo mcp config help                         Show this help
+`);
+}
 
+export function printConfigPaths(): void {
+  console.log(`
+MCP config lookup order:
+  1. -c/--config <path>
+  2. MCP_CONFIG_PATH
+  3. ./mcp_servers.json
+  4. ~/.mcp_servers.json
+  5. ~/.config/mcp/mcp_servers.json
+`);
+}
+
+export function printConfigSchema(): void {
+  console.log(`
 Server schema:
   Stdio server:
     {
@@ -172,6 +181,16 @@ export async function configCommand(
 ): Promise<void> {
   if (options.action === 'help') {
     printConfigHelp();
+    return;
+  }
+
+  if (options.action === 'schema') {
+    printConfigSchema();
+    return;
+  }
+
+  if (options.action === 'paths') {
+    printConfigPaths();
     return;
   }
 

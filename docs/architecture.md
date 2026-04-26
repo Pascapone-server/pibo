@@ -181,6 +181,8 @@ This is useful as a reference for future channel adapters, but Pi TUI is not tre
 
 ## Operator CLIs
 
+The operator CLIs are optimized for agent-driven discovery. Each level should answer only the question for that level and point to the next command. Broad usage guides, schemas, and environment details are printed only by explicit deeper commands such as `schema`, `show`, `doctor`, or `guide`.
+
 `pibo mcp` is a local operator tool for discovering and calling external MCP servers from the shell. It is separate from the pibo plugin/runtime boundary: MCP servers are configured in `mcp_servers.json`, not in `PiboPluginRegistry`, and their tools are invoked directly by the CLI. The usage guide lives in `docs/mcp.md`.
 
 `pibo tools` is the matching operator surface for curated external CLI tools. These are not MCP servers and are not Pibo profile skills. A tool entry can install an isolated runtime, expose doctor/path/env commands, and print on-demand guides for agents. The first curated tool is `browser-use`, installed under `~/.pibo/tools/browser-use` with its own Python venv and tool home.

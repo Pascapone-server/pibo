@@ -107,9 +107,8 @@ export async function listCommand(options: ListOptions): Promise<void> {
   const serverNames = listServerNames(config);
 
   if (serverNames.length === 0) {
-    console.error(
-      'Warning: No servers configured. Add servers to mcp_servers.json',
-    );
+    console.log('No MCP servers configured.');
+    console.log('Next: pibo mcp config help');
     return;
   }
 

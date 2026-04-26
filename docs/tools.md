@@ -10,6 +10,8 @@ The tool registry answers three questions:
 
 Guides are printed by the CLI. They are not loaded into every agent profile.
 
+List-style commands use compact line output so agents can discover the next step without reading full guides. Detailed instructions stay behind explicit `show`, `doctor`, and `guide` commands.
+
 ## Commands
 
 ```bash

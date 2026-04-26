@@ -43,7 +43,10 @@ function printList(installedOnly: boolean): void {
     return;
   }
 
-  console.table(rows);
+  for (const row of rows) {
+    const executable = row.executable ? `\t${row.executable}` : '';
+    console.log(`${row.name}\t${row.status}\t${row.description}${executable}`);
+  }
 }
 
 function printShow(name: string): void {
@@ -51,6 +54,7 @@ function printShow(name: string): void {
   const status = getCliToolStatus(entry);
   console.log(`${entry.name}`);
   console.log(`  ${entry.description}`);
+  console.log(`  package: ${entry.runtime.packageName}`);
   console.log(`  status: ${status.installed ? 'installed' : 'available'}`);
   console.log(`  runtime: ${status.rootDir}`);
   console.log(`  home: ${status.homeDir}`);

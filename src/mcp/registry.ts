@@ -55,12 +55,6 @@ Commands:
   pibo mcp registry install <name> --no-setup    Only add preset to mcp_servers.json
   pibo mcp registry remove <name>                Remove config and local runtime
   pibo mcp registry help                         Show this help
-
-Examples:
-  pibo mcp registry list
-  pibo mcp registry show <name>
-  pibo mcp registry doctor <name>
-  pibo mcp registry install <name>
 `);
 }
 

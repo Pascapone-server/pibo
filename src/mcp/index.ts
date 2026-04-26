@@ -242,6 +242,8 @@ function parseArgs(args: string[]): ParsedArgs {
 
     switch (action) {
       case 'help':
+      case 'schema':
+      case 'paths':
       case 'init':
       case 'path':
       case 'show':
@@ -421,66 +423,24 @@ function printHelp(): void {
   console.log(`
 pibo mcp (mcp-cli v${VERSION}) - A lightweight CLI for MCP servers
 
-Usage:
-  pibo mcp [options]                              List all servers and tools
-  pibo mcp [options] info <server>                Show server details
-  pibo mcp [options] info <server> <tool>         Show tool schema
-  pibo mcp [options] grep <pattern>               Search tools by glob pattern
-  pibo mcp [options] call <server> <tool>         Call tool (reads JSON from stdin if no args)
-  pibo mcp [options] call <server> <tool> <json>  Call tool with JSON arguments
-  pibo mcp [options] config <action>              Manage MCP server config
-  pibo mcp [options] registry <action>            Install built-in MCP server presets
-
-Formats (both work):
-  pibo mcp info server tool                       Space-separated
-  pibo mcp info server/tool                       Slash-separated
-  pibo mcp call server tool '{}'                  Space-separated
-  pibo mcp call server/tool '{}'                  Slash-separated
-
-Config:
-  pibo mcp config init                            Create mcp_servers.json if missing
-  pibo mcp config help                            Show config schema and examples
-  pibo mcp config add <name> <json>               Add or replace a server
-  pibo mcp config remove <name>                   Remove a server
-  pibo mcp registry list                          List built-in presets
-  pibo mcp registry show <name>                   Show preset details
-  pibo mcp registry doctor <name>                 Check runtime prerequisites
-  pibo mcp registry install <name>                Install setup deps and add preset
-  pibo mcp registry remove <name>                 Remove preset config and runtime
+Commands:
+  pibo mcp                                      List configured servers and tools
+  pibo mcp info <server>                       Show server tools
+  pibo mcp info <server> <tool>                Show one tool schema
+  pibo mcp grep <pattern>                      Search tool names
+  pibo mcp call <server> <tool> [json]         Call one tool
+  pibo mcp config                              Discover config commands
+  pibo mcp registry                            Discover curated server presets
 
 Options:
-  -h, --help               Show this help message
   -v, --version            Show version number
   -d, --with-descriptions  Include tool descriptions
   -c, --config <path>      Path to mcp_servers.json config file
   --no-setup               Skip registry setup commands during install
 
-Output:
-  pibo mcp/info/grep       Human-readable text to stdout
-  call                     Raw JSON to stdout (for piping)
-  Errors                   Always to stderr
-
-Examples:
-  pibo mcp                                      # List all servers
-  pibo mcp -d                                   # List with descriptions
-  pibo mcp grep "*file*"                        # Search for file tools
-  pibo mcp info filesystem                      # Show server tools
-  pibo mcp info filesystem read_file            # Show tool schema
-  pibo mcp call filesystem read_file '{}'       # Call tool
-  cat input.json | pibo mcp call server tool    # Read from stdin (no '-' needed)
-  pibo mcp config help                          # Show config file schema
-  pibo mcp registry list                        # List bundled MCP presets
-
-Environment Variables:
-  MCP_NO_DAEMON=1        Disable connection caching (force fresh connections)
-  MCP_DAEMON_TIMEOUT=N   Set daemon idle timeout in seconds (default: 60)
-
-Config File:
-  The CLI looks for mcp_servers.json in:
-    1. Path specified by MCP_CONFIG_PATH or -c/--config
-    2. ./mcp_servers.json (current directory)
-    3. ~/.mcp_servers.json
-    4. ~/.config/mcp/mcp_servers.json
+Next:
+  pibo mcp config help
+  pibo mcp registry help
 `);
 }
 

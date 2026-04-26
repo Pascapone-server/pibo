@@ -74,7 +74,7 @@ export function serverNotFoundError(
     details: `Available servers: ${availableList}`,
     suggestion:
       available.length > 0
-        ? `Use one of: ${available.map((s) => `mcp-cli ${s}`).join(', ')}`
+        ? `Use one of: ${available.map((s) => `pibo mcp info ${s}`).join(', ')}`
         : `Add server to mcp_servers.json: { "mcpServers": { "${serverName}": { ... } } }`,
   };
 }
@@ -133,7 +133,7 @@ export function toolNotFoundError(
     details: availableTools
       ? `Available tools: ${toolList}${moreCount}`
       : undefined,
-    suggestion: `Run 'mcp-cli ${serverName}' to see all available tools`,
+    suggestion: `Run 'pibo mcp info ${serverName}' to see all available tools`,
   };
 }
 
@@ -146,9 +146,9 @@ export function toolExecutionError(
 
   // Detect common MCP error patterns
   if (cause.includes('validation') || cause.includes('invalid_type')) {
-    suggestion = `Run 'mcp-cli ${serverName}/${toolName}' to see the input schema, then fix arguments`;
+    suggestion = `Run 'pibo mcp info ${serverName} ${toolName}' to see the input schema, then fix arguments`;
   } else if (cause.includes('required')) {
-    suggestion = `Missing required argument. Run 'mcp-cli ${serverName}/${toolName}' to see required fields`;
+    suggestion = `Missing required argument. Run 'pibo mcp info ${serverName} ${toolName}' to see required fields`;
   } else if (cause.includes('permission') || cause.includes('denied')) {
     suggestion = 'Permission denied. Check file/resource permissions';
   } else if (cause.includes('not found') || cause.includes('ENOENT')) {
@@ -187,7 +187,7 @@ export function invalidTargetError(target: string): CliError {
     type: 'INVALID_TARGET',
     message: `Invalid target format: "${target}"`,
     details: 'Expected format: server/tool',
-    suggestion: `Use 'mcp-cli <server>/<tool> <json>' format, e.g., 'mcp-cli github/search_repos \'{"query":"mcp"}\''`,
+    suggestion: `Use 'pibo mcp call <server> <tool> <json>', e.g. 'pibo mcp call github search_repos \'{"query":"mcp"}\''`,
   };
 }
 
@@ -204,7 +204,7 @@ export function invalidJsonArgsError(
     type: 'INVALID_JSON_ARGUMENTS',
     message: 'Invalid JSON in tool arguments',
     details: parseError ? `Parse error: ${parseError}` : `Input: ${truncated}`,
-    suggestion: `Use valid JSON: '{"path": "./file.txt"}'. Run 'mcp-cli info <server> <tool>' for the schema.`,
+    suggestion: `Use valid JSON: '{"path": "./file.txt"}'. Run 'pibo mcp info <server> <tool>' for the schema.`,
   };
 }
 
@@ -215,17 +215,17 @@ export function unknownOptionError(option: string): CliError {
   const optionLower = option.toLowerCase().replace(/^-+/, '');
 
   if (['server', 's'].includes(optionLower)) {
-    suggestion = `Server is a positional argument. Use 'mcp-cli info <server>'`;
+    suggestion = `Server is a positional argument. Use 'pibo mcp info <server>'`;
   } else if (['tool', 't'].includes(optionLower)) {
-    suggestion = `Tool is a positional argument. Use 'mcp-cli call <server> <tool>'`;
+    suggestion = `Tool is a positional argument. Use 'pibo mcp call <server> <tool>'`;
   } else if (['args', 'arguments', 'a', 'input'].includes(optionLower)) {
-    suggestion = `Pass JSON directly: 'mcp-cli call <server> <tool> '{\"key\": \"value\"}''`;
+    suggestion = `Pass JSON directly: 'pibo mcp call <server> <tool> '{\"key\": \"value\"}''`;
   } else if (['pattern', 'p', 'search', 'query'].includes(optionLower)) {
-    suggestion = `Use 'mcp-cli grep \"*pattern*\"'`;
+    suggestion = `Use 'pibo mcp grep \"*pattern*\"'`;
   } else if (['call', 'run', 'exec'].includes(optionLower)) {
-    suggestion = `Use 'call' as a subcommand, not option: 'mcp-cli call <server> <tool>'`;
+    suggestion = `Use 'call' as a subcommand, not option: 'pibo mcp call <server> <tool>'`;
   } else if (['info', 'list', 'get'].includes(optionLower)) {
-    suggestion = `Use 'info' as a subcommand, not option: 'mcp-cli info <server>'`;
+    suggestion = `Use 'info' as a subcommand, not option: 'pibo mcp info <server>'`;
   } else {
     suggestion =
       'Valid options: -c/--config, -j/--json, -d/--with-descriptions, -r/--raw';
@@ -249,19 +249,19 @@ export function missingArgumentError(
   switch (command) {
     case 'call':
       if (argument.includes('server')) {
-        suggestion = `Use 'mcp-cli call <server> <tool> '{\"key\": \"value\"}''`;
+        suggestion = `Use 'pibo mcp call <server> <tool> '{\"key\": \"value\"}''`;
       } else {
-        suggestion = `Use 'mcp-cli call <server> <tool> '{\"key\": \"value\"}''`;
+        suggestion = `Use 'pibo mcp call <server> <tool> '{\"key\": \"value\"}''`;
       }
       break;
     case 'grep':
-      suggestion = `Use 'mcp-cli grep \"*pattern*\"'`;
+      suggestion = `Use 'pibo mcp grep \"*pattern*\"'`;
       break;
     case '-c/--config':
-      suggestion = `Use 'mcp-cli -c /path/to/mcp_servers.json'`;
+      suggestion = `Use 'pibo mcp -c /path/to/mcp_servers.json'`;
       break;
     default:
-      suggestion = `Run 'mcp-cli --help' for usage examples`;
+      suggestion = `Run 'pibo mcp --help' for available commands`;
   }
 
   return {
@@ -277,7 +277,7 @@ export function missingArgumentError(
 // ============================================================================
 
 /**
- * Error when user provides ambiguous command like "mcp-cli server tool"
+ * Error when user provides ambiguous command like "pibo mcp server tool"
  */
 export function ambiguousCommandError(
   serverName: string,
@@ -285,14 +285,14 @@ export function ambiguousCommandError(
   hasArgs?: boolean,
 ): CliError {
   const cmd = hasArgs
-    ? `mcp-cli call ${serverName} ${toolName} '<json>'`
-    : `mcp-cli call ${serverName} ${toolName}`;
+    ? `pibo mcp call ${serverName} ${toolName} '<json>'`
+    : `pibo mcp call ${serverName} ${toolName}`;
   return {
     code: ErrorCode.CLIENT_ERROR,
     type: 'AMBIGUOUS_COMMAND',
     message: 'Ambiguous command: did you mean to call a tool or view info?',
-    details: `Received: mcp-cli ${serverName} ${toolName}${hasArgs ? ' ...' : ''}`,
-    suggestion: `Use '${cmd}' to execute, or 'mcp-cli info ${serverName} ${toolName}' to view schema`,
+    details: `Received: pibo mcp ${serverName} ${toolName}${hasArgs ? ' ...' : ''}`,
+    suggestion: `Use '${cmd}' to execute, or 'pibo mcp info ${serverName} ${toolName}' to view schema`,
   };
 }
 
@@ -325,8 +325,8 @@ export function unknownSubcommandError(subcommand: string): CliError {
     message: `Unknown subcommand: "${subcommand}"`,
     details: `Valid subcommands: ${validCommands}`,
     suggestion: suggested
-      ? `Did you mean 'mcp-cli ${suggested}'?`
-      : `Use 'mcp-cli --help' to see available commands`,
+      ? `Did you mean 'pibo mcp ${suggested}'?`
+      : `Use 'pibo mcp --help' to see available commands`,
   };
 }
 
@@ -343,6 +343,6 @@ export function tooManyArgumentsError(
     type: 'TOO_MANY_ARGUMENTS',
     message: `Too many arguments for ${command}`,
     details: `Received ${received} arguments, maximum is ${max}`,
-    suggestion: `Run 'mcp-cli --help' for correct usage`,
+    suggestion: `Run 'pibo mcp --help' for correct usage`,
   };
 }
