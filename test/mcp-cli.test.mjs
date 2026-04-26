@@ -17,6 +17,26 @@ test("pibo without args prints compact discovery", async () => {
 	assert.doesNotMatch(stdout, /"profileName"/);
 });
 
+test("pibo root help prints compact discovery", async () => {
+	const { stdout } = await execFileAsync("node", [cliPath, "--help"]);
+
+	assert.match(stdout, /pibo - agent-oriented CLI/);
+	assert.match(stdout, /pibo <command> --help/);
+	assert.doesNotMatch(stdout, /Usage:/);
+});
+
+test("pibo config and tools help print compact discovery", async () => {
+	const config = await execFileAsync("node", [cliPath, "config", "--help"]);
+	assert.match(config.stdout, /pibo config - local config/);
+	assert.match(config.stdout, /pibo config keys/);
+	assert.doesNotMatch(config.stdout, /Usage:/);
+
+	const tools = await execFileAsync("node", [cliPath, "tools", "--help"]);
+	assert.match(tools.stdout, /pibo tools - curated external CLI tools/);
+	assert.match(tools.stdout, /pibo tools list/);
+	assert.doesNotMatch(tools.stdout, /Usage:/);
+});
+
 test("pibo exposes the MCP CLI as a subcommand", async () => {
 	const { stdout } = await execFileAsync("node", [cliPath, "mcp", "--version"]);
 

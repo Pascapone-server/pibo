@@ -133,11 +133,35 @@ function printEnv(name: string): void {
   }
 }
 
+function printToolsDiscovery(): void {
+  console.log(`pibo tools - curated external CLI tools
+
+Commands:
+  list                      List curated tools
+  installed                 List installed tools
+  show <name>               Show one tool
+  install <name>            Install one tool
+  doctor <name>             Check one tool
+  guides <name>             List tool guides
+  guide <name> [guide]      Print one guide
+  path <name>               Print executable path
+  env <name>                Print shell exports
+
+Next:
+  pibo tools list`);
+}
+
 export async function runToolsCli(argv = process.argv): Promise<void> {
+  if (argv[2] === '--help' || argv[2] === '-h') {
+    printToolsDiscovery();
+    return;
+  }
+
   const program = new Command();
   program
     .name('pibo tools')
     .description('Install and inspect curated external CLI tools')
+    .helpOption(false)
     .showHelpAfterError();
 
   program
@@ -206,7 +230,10 @@ export async function runToolsCli(argv = process.argv): Promise<void> {
     .description('Print shell exports for using the tool directly')
     .action(printEnv);
 
-  if (argv.length <= 2) argv = [...argv, 'list'];
+  if (argv.length <= 2) {
+    printList(false);
+    return;
+  }
 
   try {
     await program.parseAsync(argv);

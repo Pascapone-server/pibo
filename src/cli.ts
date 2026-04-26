@@ -27,22 +27,19 @@ function printConfigKeys(): void {
 }
 
 function printRootDiscovery(): void {
-	console.log(`pibo - agent-oriented CLI
+	console.log(printRootDiscoveryText());
+}
 
-Commands:
-  config       Manage local pibo config
-  mcp          Discover and call configured MCP servers
-  tools        Install and inspect curated external CLI tools
-  profile      Inspect a pibo profile
-  gateway      Start the local gateway daemon
-  gateway:web  Start the authenticated web gateway
-  remote       Start the Pi-TUI remote controller
-
-Next:
-  pibo <command> --help`);
+function printConfigDiscovery(): void {
+	console.log(printConfigDiscoveryText());
 }
 
 export async function runPiboCli(argv = process.argv): Promise<void> {
+	if (argv[2] === "--help" || argv[2] === "-h") {
+		printRootDiscovery();
+		return;
+	}
+
 	if (argv[2] === "mcp") {
 		const { runMcpCli } = await import("./mcp/index.js");
 		await runMcpCli([argv[0] ?? "node", "pibo mcp", ...argv.slice(3)]);
@@ -55,8 +52,13 @@ export async function runPiboCli(argv = process.argv): Promise<void> {
 		return;
 	}
 
+	if (argv[2] === "config" && (argv[3] === "--help" || argv[3] === "-h" || argv.length === 3)) {
+		printConfigDiscovery();
+		return;
+	}
+
 	const program = new Command();
-	program.name("pibo").description("Agent-oriented CLI for Pibo").showHelpAfterError();
+	program.name("pibo").description("Agent-oriented CLI for Pibo").helpOption(false).showHelpAfterError();
 
 	program
 		.command("mcp")
@@ -82,9 +84,9 @@ export async function runPiboCli(argv = process.argv): Promise<void> {
 			await runToolsCli([argv[0] ?? "node", "pibo tools", ...args]);
 		});
 
-	const config = program.command("config").description(`Manage pibo config at ${DEFAULT_PIBO_CONFIG_PATH}`);
+	const config = program.command("config").description(`Manage pibo config at ${DEFAULT_PIBO_CONFIG_PATH}`).helpOption(false);
 	config.action(() => {
-		config.outputHelp();
+		printConfigDiscovery();
 	});
 	config
 		.command("set")
@@ -202,4 +204,36 @@ export async function runPiboCli(argv = process.argv): Promise<void> {
 		return;
 	}
 	await program.parseAsync(argv);
+}
+
+function printRootDiscoveryText(): string {
+	return `pibo - agent-oriented CLI
+
+Commands:
+  config       Manage local pibo config
+  mcp          Discover and call configured MCP servers
+  tools        Install and inspect curated external CLI tools
+  profile      Inspect a pibo profile
+  gateway      Start the local gateway daemon
+  gateway:web  Start the authenticated web gateway
+  remote       Start the Pi-TUI remote controller
+
+Next:
+  pibo <command> --help
+`;
+}
+
+function printConfigDiscoveryText(): string {
+	return `pibo config - local config at ${DEFAULT_PIBO_CONFIG_PATH}
+
+Commands:
+  keys               List supported config keys
+  show               Print redacted config JSON
+  get <key>          Print one redacted config value
+  set <key> <value>  Set one config value
+  del <key>          Delete one config value
+
+Next:
+  pibo config keys
+`;
 }
