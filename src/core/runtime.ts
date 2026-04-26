@@ -26,6 +26,7 @@ import {
 	createSubagentToolName,
 	type PiboSubagentRunner,
 } from "../subagents/tool.js";
+import { createRunToolDefinitions, type PiboRunToolController } from "../runs/tools.js";
 
 export type PiboRuntimeOptions = {
 	cwd?: string;
@@ -33,6 +34,7 @@ export type PiboRuntimeOptions = {
 	profile?: InitialSessionContext;
 	extensionFactories?: ExtensionFactory[];
 	subagentRunner?: PiboSubagentRunner;
+	runToolController?: PiboRunToolController;
 };
 
 export type PiboProfileInspection = {
@@ -97,14 +99,20 @@ function getEnabledSkillPaths(cwd: string, profile: InitialSessionContext): stri
 function getEnabledToolDefinitions(
 	profile: InitialSessionContext,
 	subagentRunner?: PiboSubagentRunner,
+	runToolController?: PiboRunToolController,
 ): ToolDefinition[] {
 	const subagentTools = subagentRunner
 		? createSubagentToolDefinitions(profile.subagents, subagentRunner)
+		: [];
+	const hasEnabledSubagents = profile.subagents.some((subagent) => subagent.enabled !== false);
+	const runTools = runToolController && hasEnabledSubagents
+		? createRunToolDefinitions(profile.subagents, runToolController)
 		: [];
 
 	return [
 		...profile.tools.filter(hasEnabledToolDefinition).map((tool) => tool.definition),
 		...subagentTools,
+		...runTools,
 	];
 }
 
@@ -137,7 +145,7 @@ export async function createPiboRuntime(options: PiboRuntimeOptions = {}): Promi
 	}) => {
 		const contextFiles = await loadContextFiles(runtimeCwd, profile.contextFiles);
 		const skillPaths = getEnabledSkillPaths(runtimeCwd, profile);
-		const customTools = getEnabledToolDefinitions(profile, options.subagentRunner);
+		const customTools = getEnabledToolDefinitions(profile, options.subagentRunner, options.runToolController);
 		const services = await createAgentSessionServices({
 			cwd: runtimeCwd,
 			agentDir: runtimeAgentDir,

@@ -253,6 +253,23 @@ export class RoutedSession {
 		await this.runtime.dispose();
 	}
 
+	async cancelMessage(eventId: string): Promise<boolean> {
+		this.assertActive();
+
+		const queuedIndex = this.queue.findIndex((event) => event.id === eventId);
+		if (queuedIndex >= 0) {
+			this.queue.splice(queuedIndex, 1);
+			return true;
+		}
+
+		if (this.activeMessage?.id === eventId) {
+			await this.runtime.session.abort();
+			return true;
+		}
+
+		return false;
+	}
+
 	private async drain(): Promise<void> {
 		if (this.processing || this.disposed) return;
 
@@ -271,7 +288,12 @@ export class RoutedSession {
 				try {
 					this.activeMessage = event;
 					await this.runtime.session.prompt(event.text, { source: promptSource(event.source) });
-					this.emit({ type: "message_finished", sessionKey: this.sessionKey, eventId: event.id });
+					this.emit({
+						type: "message_finished",
+						sessionKey: this.sessionKey,
+						eventId: event.id,
+						source: event.source,
+					});
 				} catch (error) {
 					this.emit({
 						type: "session_error",

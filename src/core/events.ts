@@ -176,7 +176,7 @@ export type PiboAssistantMessageEvent = {
 export type PiboOutputEvent =
 	| PiboMessageQueuedEvent
 	| PiboMessageStartedEvent
-	| { type: "message_finished"; sessionKey: string; eventId?: string }
+	| { type: "message_finished"; sessionKey: string; eventId?: string; source?: PiboEventSource }
 	| { type: "assistant_delta"; sessionKey: string; eventId?: string; text: string }
 	| PiboAssistantMessageEvent
 	| { type: "execution_result"; sessionKey: string; eventId?: string; action: PiboExecutionAction; result: unknown }

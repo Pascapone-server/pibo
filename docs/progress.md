@@ -23,6 +23,8 @@ Pibo is a minimal TypeScript wrapper around Pi Coding Agent. This file is a shor
 - `src/plugins/example.ts` demonstrates adding a plugin-provided skill, tool, and profile.
 - The plugin registry supports subagent registration through `api.registerSubagent(...)`.
 - Profiles can expose subagents through the same builder pattern as tools, skills, and context files.
+- Profiles with enabled subagents expose yielded-run tools for tracked or detached subagent runs.
+- Yielded runs are tracked in-memory by the session router with compact parent notifications, bounded waits, read/cancel/ack controls, and simple TTL cleanup.
 - Plugins can register channels through `api.registerChannel(...)`.
 - Plugins can register same-origin web apps through `api.registerWebApp(...)`.
 - Gateway channel sessions are backed by SQLite session bindings in `.pibo/session-bindings.sqlite`.
@@ -89,6 +91,8 @@ At runtime, pibo turns enabled subagents into generated Pi tools named `pibo_sub
 ```
 
 Omitting `threadKey` creates a fresh child session. Reusing `threadKey` continues the same child session, which keeps subagent work inspectable and multi-turn. Sync subagents wait for the correlated reply; async subagents enqueue the work and return the child session key immediately.
+
+Profiles that expose subagents also expose run-control tools. `pibo_subagent_start` starts a subagent as a yielded run and returns a `runId`; `pibo_run_list`, `pibo_run_status`, `pibo_run_wait`, `pibo_run_read`, `pibo_run_cancel`, and `pibo_run_ack` manage the run afterward. Tracked runs are the default and remind the parent agent with compact `<pibo_run_notification>` service messages until they are read, cancelled, or acknowledged. Detached runs are explicit fire-and-forget work and do not create automatic reminders.
 
 ## Channels And Session Bindings
 

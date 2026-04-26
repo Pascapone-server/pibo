@@ -22,6 +22,8 @@ import {
 	type PiboSubagentRunner,
 } from "../subagents/tool.js";
 import { randomUUID } from "node:crypto";
+import { PiboRunRegistry, type PiboRunNotification } from "../runs/registry.js";
+import type { PiboRunToolController } from "../runs/tools.js";
 
 export type {
 	PiboEventListener,
@@ -34,7 +36,10 @@ export type {
 	PiboSessionStatus,
 } from "./events.js";
 
-export type PiboSessionRouterOptions = Omit<PiboRuntimeOptions, "profile" | "subagentRunner"> & {
+export type PiboSessionRouterOptions = Omit<
+	PiboRuntimeOptions,
+	"profile" | "subagentRunner" | "runToolController"
+> & {
 	profile?: InitialSessionContext;
 	pluginRegistry?: PiboPluginRegistry;
 	bindingStore?: PiboSessionBindingStore;
@@ -60,10 +65,47 @@ function profileForSession(
 	return new InitialSessionContext(options);
 }
 
+function formatRunNotification(notification: PiboRunNotification): string {
+	return [
+		"<pibo_run_notification>",
+		JSON.stringify({
+			completed: notification.completed.map((run) => ({
+				runId: run.runId,
+				kind: run.kind,
+				status: run.status,
+				summary: run.summary,
+			})),
+			failed: notification.failed.map((run) => ({
+				runId: run.runId,
+				kind: run.kind,
+				status: run.status,
+				summary: run.summary,
+			})),
+			cancelled: notification.cancelled.map((run) => ({
+				runId: run.runId,
+				kind: run.kind,
+				status: run.status,
+				summary: run.summary,
+			})),
+			running: notification.running.map((run) => ({
+				runId: run.runId,
+				kind: run.kind,
+				status: run.status,
+				summary: run.summary,
+			})),
+			instruction:
+				"Use pibo_run_read for completed or failed runs. Use pibo_run_wait, pibo_run_status, pibo_run_cancel, or pibo_run_ack for runs you still need to manage.",
+		}),
+		"</pibo_run_notification>",
+	].join("\n");
+}
+
 export class PiboSessionRouter {
 	private readonly sessions = new Map<string, RoutedSession>();
 	private readonly pendingSessions = new Map<string, Promise<RoutedSession>>();
 	private readonly listeners = new Set<PiboEventListener>();
+	private readonly runRegistry = new PiboRunRegistry();
+	private readonly scheduledRunNotifications = new Map<string, boolean>();
 	private readonly baseProfile: InitialSessionContext;
 	private readonly pluginRegistry: PiboPluginRegistry;
 	private readonly bindingStore?: PiboSessionBindingStore;
@@ -92,6 +134,8 @@ export class PiboSessionRouter {
 
 		const output = await session.executeAction(event);
 		if (event.action === "dispose") {
+			this.runRegistry.cancelOwnerRuns(event.sessionKey);
+			this.scheduledRunNotifications.delete(event.sessionKey);
 			this.sessions.delete(event.sessionKey);
 			this.sessionProfileOverrides.delete(event.sessionKey);
 			this.sessionParentIds.delete(event.sessionKey);
@@ -148,6 +192,8 @@ export class PiboSessionRouter {
 	async disposeAll(): Promise<void> {
 		const sessions = [...this.sessions.values()];
 		this.sessions.clear();
+		this.runRegistry.cancelAll("Pibo session router was disposed.");
+		this.scheduledRunNotifications.clear();
 		this.sessionProfileOverrides.clear();
 		this.sessionParentIds.clear();
 		await Promise.all(sessions.map((session) => session.dispose()));
@@ -176,6 +222,7 @@ export class PiboSessionRouter {
 			persistSession: this.options.persistSession,
 			profile: profileForSession(profile, sessionKey, this.sessionParentIds.get(sessionKey)),
 			subagentRunner: this.createSubagentRunner(sessionKey),
+			runToolController: this.createRunToolController(sessionKey),
 		});
 		const session = new RoutedSession(
 			sessionKey,
@@ -229,6 +276,64 @@ export class PiboSessionRouter {
 		};
 	}
 
+	private createRunToolController(parentSessionKey: string): PiboRunToolController {
+		return {
+			startSubagent: async ({ subagent, message, threadKey, completionPolicy }) => {
+				this.assertSubagentDepth(parentSessionKey, subagent);
+				const sessionKey = createSubagentSessionKey(parentSessionKey, subagent.name, threadKey);
+				const targetProfile = this.resolveSubagentBinding(sessionKey, subagent);
+				this.sessionParentIds.set(sessionKey, parentSessionKey);
+				if (!this.bindingStore) {
+					this.sessionProfileOverrides.set(sessionKey, targetProfile);
+				}
+
+				const event: PiboMessageEvent = {
+					type: "message",
+					sessionKey,
+					text: message,
+					source: "actor",
+					id: randomUUID(),
+				};
+				const run = this.runRegistry.startSubagentRun({
+					ownerSessionKey: parentSessionKey,
+					subagentName: subagent.name,
+					childSessionKey: sessionKey,
+					eventId: event.id!,
+					threadKey,
+					completionPolicy,
+				});
+
+				try {
+					await this.emit(event);
+				} catch (error) {
+					this.runRegistry.failByChildEvent(
+						sessionKey,
+						event.id,
+						error instanceof Error ? error.message : String(error),
+					);
+					this.scheduleRunNotification(parentSessionKey, false);
+				}
+
+				return run;
+			},
+			listRuns: (options) => this.runRegistry.list(parentSessionKey, options),
+			getRunStatus: (runId) => this.runRegistry.status(parentSessionKey, runId),
+			waitForRun: (runId, timeoutMs) => this.runRegistry.wait(parentSessionKey, runId, timeoutMs),
+			readRun: (runId) => this.runRegistry.read(parentSessionKey, runId),
+			cancelRun: async (runId) => {
+				const run = this.runRegistry.getRunForCancellation(parentSessionKey, runId);
+				const cancelled = this.runRegistry.cancel(parentSessionKey, runId);
+				const pendingChild = this.pendingSessions.get(run.childSessionKey);
+				const child =
+					this.sessions.get(run.childSessionKey) ??
+					(pendingChild ? await pendingChild : undefined);
+				await child?.cancelMessage(run.eventId);
+				return cancelled;
+			},
+			ackRun: (runId) => this.runRegistry.ack(parentSessionKey, runId),
+		};
+	}
+
 	private assertSubagentDepth(parentSessionKey: string, subagent: SubagentProfile): void {
 		const maxDepth = subagent.maxDepth ?? 3;
 		if (getSubagentSessionDepth(parentSessionKey) >= maxDepth) {
@@ -261,9 +366,59 @@ export class PiboSessionRouter {
 	}
 
 	private readonly emitOutput = (event: PiboOutputEvent): void => {
+		if (event.type === "assistant_message") {
+			const run = this.runRegistry.completeByChildEvent(event);
+			if (run) this.scheduleRunNotification(run.ownerSessionKey, false);
+		} else if (event.type === "session_error") {
+			const run = this.runRegistry.failByChildEvent(event.sessionKey, event.eventId, event.error);
+			if (run) this.scheduleRunNotification(run.ownerSessionKey, false);
+		}
+
 		this.pluginRegistry.notifyEvent(event);
 		for (const listener of this.listeners) {
 			listener(event);
 		}
+
+		if (event.type === "message_finished" && event.source !== "service") {
+			this.scheduleRunNotification(event.sessionKey, true);
+		}
 	};
+
+	private scheduleRunNotification(sessionKey: string, includeAlreadyNotified: boolean): void {
+		if (!this.runRegistry.hasPendingNotification(sessionKey, { includeAlreadyNotified })) return;
+		const previous = this.scheduledRunNotifications.get(sessionKey);
+		if (previous !== undefined) {
+			this.scheduledRunNotifications.set(sessionKey, previous || includeAlreadyNotified);
+			return;
+		}
+
+		this.scheduledRunNotifications.set(sessionKey, includeAlreadyNotified);
+		queueMicrotask(() => {
+			void this.deliverRunNotification(sessionKey);
+		});
+	}
+
+	private async deliverRunNotification(sessionKey: string): Promise<void> {
+		const includeAlreadyNotified = this.scheduledRunNotifications.get(sessionKey) ?? false;
+		this.scheduledRunNotifications.delete(sessionKey);
+		const notification = this.runRegistry.createNotification(sessionKey, { includeAlreadyNotified });
+		if (!notification) return;
+
+		try {
+			const session = await this.getOrCreateSession(sessionKey);
+			session.enqueueMessage({
+				type: "message",
+				sessionKey,
+				text: formatRunNotification(notification),
+				source: "service",
+				id: randomUUID(),
+			});
+		} catch (error) {
+			this.emitOutput({
+				type: "session_error",
+				sessionKey,
+				error: error instanceof Error ? error.message : String(error),
+			});
+		}
+	}
 }

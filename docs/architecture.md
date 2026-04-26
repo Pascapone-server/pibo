@@ -94,6 +94,26 @@ If `threadKey` is omitted, pibo creates a new subagent session. If the caller pa
 
 Subagent tools support `sync` and `async` modes. Sync mode waits for the correlated assistant reply and returns it to the calling agent. Async mode enqueues the message and returns the child `sessionKey` and event id immediately. A depth guard prevents accidental recursive subagent loops.
 
+## Yielded Runs
+
+Profiles with enabled subagents also receive run-control tools. These are agent-facing tools, not gateway actions:
+
+```text
+pibo_subagent_start
+pibo_run_list
+pibo_run_status
+pibo_run_wait
+pibo_run_read
+pibo_run_cancel
+pibo_run_ack
+```
+
+`pibo_subagent_start` starts a subagent message as a yielded run and returns a `runId`. The run registry in the session router maps that `runId` to the child `sessionKey` and input `eventId`, then completes or fails the run when the router observes the correlated child output.
+
+Yielded runs use `tracked` by default. Tracked runs create compact `<pibo_run_notification>` service messages for the parent agent when they start, finish, fail, or remain unconsumed across natural turn boundaries. Notifications contain only run ids and summaries; the agent must call `pibo_run_read` to retrieve the full result. `detached` runs are explicit fire-and-forget work: they remain inspectable with `includeDetached`, but they do not create automatic reminders.
+
+The router keeps one active parent turn at a time by enqueuing notifications as normal service messages. Service notifications do not immediately re-trigger themselves. Running runs are cancelled when their owning session or router is disposed, detached terminal runs are pruned after a short TTL, and consumed terminal tracked runs are kept briefly for debugging.
+
 ## Channels
 
 Channels are plugin-owned adapters. They translate an external transport into pibo events and translate pibo output events back to that transport.

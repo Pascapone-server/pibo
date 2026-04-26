@@ -1,0 +1,273 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { PiboRunRegistry } from "../dist/runs/registry.js";
+import { createRunToolDefinitions } from "../dist/runs/tools.js";
+import { PiboSessionRouter } from "../dist/core/session-router.js";
+
+function startRun(registry, options = {}) {
+	return registry.startSubagentRun({
+		ownerSessionKey: options.ownerSessionKey ?? "parent",
+		subagentName: options.subagentName ?? "helper",
+		childSessionKey: options.childSessionKey ?? "child",
+		eventId: options.eventId ?? "event-1",
+		threadKey: options.threadKey,
+		completionPolicy: options.completionPolicy,
+	});
+}
+
+test("tracked runs create compact notifications until consumed", () => {
+	const registry = new PiboRunRegistry();
+	const run = startRun(registry);
+
+	assert.equal(registry.hasPendingNotification("parent"), true);
+	const running = registry.createNotification("parent");
+	assert.equal(running.running.length, 1);
+	assert.equal(running.running[0].runId, run.runId);
+	assert.equal(registry.hasPendingNotification("parent"), false);
+
+	registry.completeByChildEvent({
+		type: "assistant_message",
+		sessionKey: "child",
+		eventId: "event-1",
+		text: "done",
+	});
+
+	assert.equal(registry.hasPendingNotification("parent"), true);
+	const completed = registry.createNotification("parent");
+	assert.equal(completed.completed.length, 1);
+	assert.equal(completed.completed[0].runId, run.runId);
+
+	const read = registry.read("parent", run.runId);
+	assert.equal(read.status, "completed");
+	assert.equal(read.result.text, "done");
+	assert.equal(registry.hasPendingNotification("parent"), false);
+});
+
+test("detached runs are inspectable but do not notify", () => {
+	const registry = new PiboRunRegistry();
+	const run = startRun(registry, { completionPolicy: "detached" });
+
+	assert.equal(registry.hasPendingNotification("parent"), false);
+	assert.deepEqual(registry.list("parent"), []);
+	assert.equal(registry.list("parent", { includeDetached: true }).length, 1);
+
+	registry.completeByChildEvent({
+		type: "assistant_message",
+		sessionKey: "child",
+		eventId: "event-1",
+		text: "background done",
+	});
+
+	assert.equal(registry.hasPendingNotification("parent"), false);
+	assert.equal(registry.status("parent", run.runId).status, "completed");
+});
+
+test("wait returns timeout as normal state and resolves on completion", async () => {
+	const registry = new PiboRunRegistry();
+	const timedOutRun = startRun(registry, { eventId: "event-timeout" });
+
+	const timedOut = await registry.wait("parent", timedOutRun.runId, 1);
+	assert.equal(timedOut.status, "running");
+	assert.equal(timedOut.timedOut, true);
+
+	const completedRun = startRun(registry, { eventId: "event-complete" });
+	const waited = registry.wait("parent", completedRun.runId, 1000);
+	setTimeout(() => {
+		registry.completeByChildEvent({
+			type: "assistant_message",
+			sessionKey: "child",
+			eventId: "event-complete",
+			text: "finished",
+		});
+	}, 1);
+
+	const completed = await waited;
+	assert.equal(completed.status, "completed");
+	assert.equal(completed.timedOut, false);
+});
+
+test("disposing an owner cancels running runs and resolves waiters", async () => {
+	const registry = new PiboRunRegistry();
+	const run = startRun(registry);
+	const waited = registry.wait("parent", run.runId, 1000);
+
+	const cancelled = registry.cancelOwnerRuns("parent", "test dispose");
+	assert.equal(cancelled.length, 1);
+	assert.equal(cancelled[0].status, "cancelled");
+
+	const result = await waited;
+	assert.equal(result.status, "cancelled");
+	assert.equal(result.timedOut, false);
+	assert.equal(registry.list("parent").length, 0);
+	assert.equal(registry.list("parent", { includeConsumed: true }).length, 1);
+});
+
+test("registry prunes detached terminal and consumed tracked runs only", () => {
+	const registry = new PiboRunRegistry({
+		consumedTerminalTtlMs: 0,
+		detachedTerminalTtlMs: 0,
+	});
+	const tracked = startRun(registry, { eventId: "tracked" });
+	const detached = startRun(registry, { eventId: "detached", completionPolicy: "detached" });
+	const consumed = startRun(registry, { eventId: "consumed" });
+
+	registry.completeByChildEvent({
+		type: "assistant_message",
+		sessionKey: "child",
+		eventId: "tracked",
+		text: "tracked result",
+	});
+	registry.completeByChildEvent({
+		type: "assistant_message",
+		sessionKey: "child",
+		eventId: "detached",
+		text: "detached result",
+	});
+	registry.completeByChildEvent({
+		type: "assistant_message",
+		sessionKey: "child",
+		eventId: "consumed",
+		text: "consumed result",
+	});
+	registry.read("parent", consumed.runId);
+
+	assert.equal(registry.prune(), 2);
+	assert.equal(registry.status("parent", tracked.runId).status, "completed");
+	assert.throws(() => registry.status("parent", detached.runId), /Unknown run/);
+	assert.throws(() => registry.status("parent", consumed.runId), /Unknown run/);
+});
+
+test("ack suppresses current-state reminders and terminal ack consumes", () => {
+	const registry = new PiboRunRegistry();
+	const run = startRun(registry);
+
+	registry.ack("parent", run.runId);
+	assert.equal(registry.hasPendingNotification("parent"), false);
+
+	registry.completeByChildEvent({
+		type: "assistant_message",
+		sessionKey: "child",
+		eventId: "event-1",
+		text: "done",
+	});
+	assert.equal(registry.hasPendingNotification("parent"), true);
+
+	const acked = registry.ack("parent", run.runId);
+	assert.equal(acked.status, "completed");
+	assert.equal(acked.consumed, true);
+	assert.equal(registry.hasPendingNotification("parent"), false);
+});
+
+test("turn-end reminders can repeat until a tracked run is acknowledged", () => {
+	const registry = new PiboRunRegistry();
+	const run = startRun(registry);
+
+	const first = registry.createNotification("parent");
+	assert.equal(first.running[0].runId, run.runId);
+	assert.equal(registry.hasPendingNotification("parent"), false);
+	assert.equal(registry.hasPendingNotification("parent", { includeAlreadyNotified: true }), true);
+
+	registry.ack("parent", run.runId);
+	assert.equal(registry.hasPendingNotification("parent", { includeAlreadyNotified: true }), false);
+
+	registry.completeByChildEvent({
+		type: "assistant_message",
+		sessionKey: "child",
+		eventId: "event-1",
+		text: "done",
+	});
+	assert.equal(registry.hasPendingNotification("parent"), true);
+});
+
+test("run tools start subagent runs with explicit completion policy", async () => {
+	let observed;
+	const [startTool] = createRunToolDefinitions(
+		[{ name: "helper", targetProfile: "helper-profile" }],
+		{
+			async startSubagent(input) {
+				observed = input;
+				return {
+					runId: "run_1",
+					kind: "subagent",
+					ownerSessionKey: "parent",
+					status: "running",
+					completionPolicy: input.completionPolicy ?? "tracked",
+					consumed: false,
+					subagentName: input.subagent.name,
+					childSessionKey: "child",
+					eventId: "event-1",
+					createdAt: "2026-01-01T00:00:00.000Z",
+					updatedAt: "2026-01-01T00:00:00.000Z",
+				};
+			},
+			listRuns() {
+				return [];
+			},
+			getRunStatus() {
+				throw new Error("not used");
+			},
+			waitForRun() {
+				throw new Error("not used");
+			},
+			readRun() {
+				throw new Error("not used");
+			},
+			cancelRun() {
+				throw new Error("not used");
+			},
+			ackRun() {
+				throw new Error("not used");
+			},
+		},
+	);
+
+	const result = await startTool.execute("tool-call-1", {
+		subagentName: "helper",
+		message: "do background work",
+		completionPolicy: "detached",
+	});
+
+	assert.equal(observed.subagent.name, "helper");
+	assert.equal(observed.message, "do background work");
+	assert.equal(observed.completionPolicy, "detached");
+	assert.equal(result.details.runId, "run_1");
+});
+
+test("router coalesces run completion into a compact parent notification", async () => {
+	const router = new PiboSessionRouter({ persistSession: false });
+	const messages = [];
+	router.getOrCreateSession = async () => ({
+		enqueueMessage(event) {
+			messages.push(event);
+			return {
+				type: "message_queued",
+				sessionKey: event.sessionKey,
+				eventId: event.id,
+				queuedMessages: 1,
+				text: event.text,
+				source: event.source,
+			};
+		},
+	});
+
+	router.runRegistry.startSubagentRun({
+		ownerSessionKey: "parent",
+		subagentName: "helper",
+		childSessionKey: "child",
+		eventId: "event-1",
+	});
+	router.emitOutput({
+		type: "assistant_message",
+		sessionKey: "child",
+		eventId: "event-1",
+		text: "done",
+	});
+	await new Promise((resolve) => setImmediate(resolve));
+
+	assert.equal(messages.length, 1);
+	assert.equal(messages[0].sessionKey, "parent");
+	assert.equal(messages[0].source, "service");
+	assert.match(messages[0].text, /<pibo_run_notification>/);
+	assert.match(messages[0].text, /"completed"/);
+	assert.match(messages[0].text, /"runId":"run_/);
+});
