@@ -18,6 +18,7 @@ export type {
 	LocalRoutedTuiOptions,
 } from "./client.js";
 export { createLocalRoutedTuiExtension } from "./extension.js";
+export type { LocalRoutedTuiExtensionOptions } from "./extension.js";
 
 function createLocalControllerProfile(): InitialSessionContext {
 	return new InitialSessionContextBuilder("pibo-local-routed-controller")
@@ -33,7 +34,7 @@ export async function runLocalRoutedTui(options: LocalRoutedTuiOptions = {}): Pr
 			cwd: options.cwd,
 			persistSession: false,
 			profile: createLocalControllerProfile(),
-			extensionFactories: [createLocalRoutedTuiExtension(client)],
+			extensionFactories: [createLocalRoutedTuiExtension(client, { showThinking: options.showThinking })],
 		});
 	} finally {
 		await client.close();

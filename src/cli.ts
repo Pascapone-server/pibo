@@ -145,11 +145,12 @@ export async function runPiboCli(argv = process.argv): Promise<void> {
 		});
 	program
 		.command("tui:routed")
+		.option("--show-thinking", "Show routed thinking deltas in the local TUI")
 		.argument("[profile]")
 		.description("Start the local routed Pibo TUI")
-		.action(async (profile?: string) => {
+		.action(async (profile: string | undefined, options: { showThinking?: boolean }) => {
 			const { runLocalRoutedTui } = await import("./local/tui.js");
-			await runLocalRoutedTui({ profile });
+			await runLocalRoutedTui({ profile, showThinking: options.showThinking === true });
 		});
 	program
 		.command("router")

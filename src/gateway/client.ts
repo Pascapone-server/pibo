@@ -25,6 +25,8 @@ export type GatewayClientOptions = {
 type GatewayClientRenderState = {
 	visibleIncomingEventIds: Set<string>;
 	sawAssistantDelta: boolean;
+	showThinking: boolean;
+	sawThinkingDelta: boolean;
 };
 
 function parseJsonLine(line: string): GatewayFrame | undefined {
@@ -98,6 +100,24 @@ function printEvent(frame: GatewayFrame, sessionKey: string, state: GatewayClien
 		output.write(event.text);
 		return;
 	}
+	if (event.type === "thinking_started") {
+		state.sawThinkingDelta = false;
+		if (state.showThinking) output.write("\nthinking> ");
+		return;
+	}
+	if (event.type === "thinking_delta") {
+		if (!state.showThinking) return;
+		state.sawThinkingDelta = true;
+		output.write(event.text);
+		return;
+	}
+	if (event.type === "thinking_finished") {
+		if (!state.showThinking) return;
+		if (!state.sawThinkingDelta && event.text) output.write(event.text);
+		state.sawThinkingDelta = false;
+		output.write("\n");
+		return;
+	}
 	if (event.type === "assistant_message") {
 		if (!state.sawAssistantDelta) {
 			output.write(event.text);
@@ -136,12 +156,14 @@ export async function runGatewayClient(options: GatewayClientOptions = {}): Prom
 
 	console.error(`connected to pibo gateway at ${host}:${port}`);
 	console.error(`session: ${sessionKey}`);
-	console.error("type a message, /status, /clear, /abort, or /quit");
+	console.error("type a message, /status, /clear, /abort, /thinking, or /quit");
 
 	let buffer = "";
 	const renderState: GatewayClientRenderState = {
 		visibleIncomingEventIds: new Set<string>(),
 		sawAssistantDelta: false,
+		showThinking: false,
+		sawThinkingDelta: false,
 	};
 	socket.on("data", (chunk) => {
 		buffer += chunk;
@@ -166,6 +188,11 @@ export async function runGatewayClient(options: GatewayClientOptions = {}): Prom
 			const text = (await rl.question("you> ")).trim();
 			if (!text) continue;
 			if (text === "/quit" || text === "/exit") break;
+			if (text === "/thinking") {
+				renderState.showThinking = !renderState.showThinking;
+				console.error(`thinking: ${renderState.showThinking ? "on" : "off"}`);
+				continue;
+			}
 
 			if (text === "/status" || text === "/clear" || text === "/abort") {
 				const action = text === "/status" ? "status" : text === "/clear" ? "clear_queue" : "abort";

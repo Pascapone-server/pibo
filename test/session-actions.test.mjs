@@ -188,6 +188,67 @@ test("routed session surfaces assistant provider errors with the active event id
 	assert.equal(error.error, "Invalid prompt_cache_key");
 });
 
+test("routed session normalizes assistant thinking events", async () => {
+	let listener;
+	const events = [];
+	const runtime = {
+		cwd: process.cwd(),
+		session: {
+			subscribe(callback) {
+				listener = callback;
+				return () => {};
+			},
+			isStreaming: false,
+			getActiveToolNames() {
+				return [];
+			},
+			getAllTools() {
+				return [];
+			},
+			sessionManager: {
+				getSessionId() {
+					return "session-id";
+				},
+				getSessionFile() {
+					return undefined;
+				},
+				getLeafId() {
+					return null;
+				},
+				getHeader() {
+					return undefined;
+				},
+			},
+		},
+		setRebindSession() {},
+		async dispose() {},
+	};
+	const registry = PiboPluginRegistry.create({ plugins: [piboCorePlugin] });
+	const routed = new RoutedSession("route:test", runtime, (event) => events.push(event), registry, false);
+
+	routed.activeMessage = {
+		type: "message",
+		sessionKey: "route:test",
+		id: "event-1",
+		text: "hello",
+		source: "actor",
+	};
+	listener({ type: "message_update", assistantMessageEvent: { type: "thinking_start" } });
+	listener({ type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "plan" } });
+	listener({ type: "message_update", assistantMessageEvent: { type: "thinking_end", content: "plan done" } });
+
+	assert.deepEqual(
+		events.map((event) => event.type),
+		["thinking_started", "thinking_delta", "thinking_finished"],
+	);
+	assert.equal(events[1].text, "plan");
+	assert.equal(events[1].eventId, "event-1");
+	assert.equal(events[2].text, "plan done");
+	assert.equal(events[2].eventId, "event-1");
+
+	await routed.dispose();
+});
+
 test("session tree navigation moves the active leaf inside the current Pi session", async () => {
 	const harness = await createSessionHarness();
 	try {

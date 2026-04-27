@@ -50,7 +50,7 @@ function normalizePiEvent(sessionKey: string, event: unknown): PiboOutputEvent |
 	const candidate = event as {
 		type?: unknown;
 		message?: unknown;
-		assistantMessageEvent?: { type?: unknown; delta?: unknown };
+		assistantMessageEvent?: { type?: unknown; delta?: unknown; content?: unknown };
 	};
 
 	if (
@@ -59,6 +59,24 @@ function normalizePiEvent(sessionKey: string, event: unknown): PiboOutputEvent |
 		typeof candidate.assistantMessageEvent.delta === "string"
 	) {
 		return { type: "assistant_delta", sessionKey, text: candidate.assistantMessageEvent.delta };
+	}
+
+	if (candidate.type === "message_update" && candidate.assistantMessageEvent?.type === "thinking_start") {
+		return { type: "thinking_started", sessionKey };
+	}
+
+	if (
+		candidate.type === "message_update" &&
+		candidate.assistantMessageEvent?.type === "thinking_delta" &&
+		typeof candidate.assistantMessageEvent.delta === "string"
+	) {
+		return { type: "thinking_delta", sessionKey, text: candidate.assistantMessageEvent.delta };
+	}
+
+	if (candidate.type === "message_update" && candidate.assistantMessageEvent?.type === "thinking_end") {
+		const text =
+			typeof candidate.assistantMessageEvent.content === "string" ? candidate.assistantMessageEvent.content : undefined;
+		return text === undefined ? { type: "thinking_finished", sessionKey } : { type: "thinking_finished", sessionKey, text };
 	}
 
 	if (candidate.type === "message_end") {
@@ -382,6 +400,9 @@ export class RoutedSession {
 			this.activeMessage?.id &&
 			(event.type === "assistant_delta" ||
 				event.type === "assistant_message" ||
+				event.type === "thinking_started" ||
+				event.type === "thinking_delta" ||
+				event.type === "thinking_finished" ||
 				event.type === "session_error")
 		) {
 			return { ...event, eventId: this.activeMessage.id };

@@ -173,11 +173,34 @@ export type PiboAssistantMessageEvent = {
 	text: string;
 };
 
+export type PiboThinkingStartedEvent = {
+	type: "thinking_started";
+	sessionKey: string;
+	eventId?: string;
+};
+
+export type PiboThinkingDeltaEvent = {
+	type: "thinking_delta";
+	sessionKey: string;
+	eventId?: string;
+	text: string;
+};
+
+export type PiboThinkingFinishedEvent = {
+	type: "thinking_finished";
+	sessionKey: string;
+	eventId?: string;
+	text?: string;
+};
+
 export type PiboOutputEvent =
 	| PiboMessageQueuedEvent
 	| PiboMessageStartedEvent
 	| { type: "message_finished"; sessionKey: string; eventId?: string; source?: PiboEventSource }
 	| { type: "assistant_delta"; sessionKey: string; eventId?: string; text: string }
+	| PiboThinkingStartedEvent
+	| PiboThinkingDeltaEvent
+	| PiboThinkingFinishedEvent
 	| PiboAssistantMessageEvent
 	| { type: "execution_result"; sessionKey: string; eventId?: string; action: PiboExecutionAction; result: unknown }
 	| { type: "session_error"; sessionKey: string; eventId?: string; error: string }

@@ -149,6 +149,19 @@ function createChatHtml(): string {
 			font-size: 14px;
 			color: #4d5d70;
 		}
+		#controls {
+			display: flex;
+			align-items: center;
+			justify-content: flex-end;
+			gap: 12px;
+			color: #4d5d70;
+			font-size: 14px;
+		}
+		#controls label {
+			display: inline-flex;
+			align-items: center;
+			gap: 6px;
+		}
 		#status {
 			padding: 10px 12px;
 			border: 1px solid #d9e1ec;
@@ -172,6 +185,10 @@ function createChatHtml(): string {
 			border-bottom: 1px solid #eef2f6;
 		}
 		.message:last-child { border-bottom: 0; }
+		.message.thinking {
+			color: #6a7482;
+			font-style: italic;
+		}
 		.role {
 			display: block;
 			margin-bottom: 3px;
@@ -213,6 +230,9 @@ function createChatHtml(): string {
 	</header>
 	<main>
 		<div id="status">Checking session...</div>
+		<div id="controls" class="hidden">
+			<label><input id="show-thinking" type="checkbox"> Show thinking</label>
+		</div>
 		<div id="messages" aria-live="polite"></div>
 		<form id="composer" class="hidden">
 			<textarea id="message" name="message" placeholder="Message pibo" required></textarea>
@@ -223,10 +243,15 @@ function createChatHtml(): string {
 		const statusEl = document.querySelector("#status");
 		const userEl = document.querySelector("#user");
 		const messagesEl = document.querySelector("#messages");
+		const controls = document.querySelector("#controls");
+		const showThinkingInput = document.querySelector("#show-thinking");
 		const composer = document.querySelector("#composer");
 		const messageInput = document.querySelector("#message");
 		let events;
 		let activeAssistant;
+		let activeThinking;
+		let showThinking = localStorage.getItem("pibo.chat.showThinking") === "true";
+		showThinkingInput.checked = showThinking;
 
 		function setStatus(text) {
 			statusEl.textContent = text;
@@ -234,7 +259,7 @@ function createChatHtml(): string {
 
 		function addMessage(role, text) {
 			const item = document.createElement("div");
-			item.className = "message";
+			item.className = "message " + role;
 			const label = document.createElement("span");
 			label.className = "role";
 			label.textContent = role;
@@ -282,6 +307,7 @@ function createChatHtml(): string {
 				button.addEventListener("click", signIn);
 				userEl.append(button);
 				composer.classList.add("hidden");
+				controls.classList.add("hidden");
 				setStatus(message || "Sign in to start a pibo session.");
 			}
 
@@ -295,6 +321,7 @@ function createChatHtml(): string {
 				button.addEventListener("click", signOut);
 				userEl.append(button);
 				composer.classList.remove("hidden");
+				controls.classList.remove("hidden");
 				setStatus("Session " + session.binding.sessionKey);
 			}
 
@@ -305,6 +332,24 @@ function createChatHtml(): string {
 				const payload = JSON.parse(event.data);
 				if (payload.type === "message_started") {
 					activeAssistant = addMessage("assistant", "");
+					activeThinking = undefined;
+					return;
+				}
+				if (payload.type === "thinking_started") {
+					if (showThinking) activeThinking = addMessage("thinking", "");
+					return;
+				}
+				if (payload.type === "thinking_delta") {
+					if (!showThinking) return;
+					if (!activeThinking) activeThinking = addMessage("thinking", "");
+					activeThinking.textContent += payload.text;
+					messagesEl.scrollTop = messagesEl.scrollHeight;
+					return;
+				}
+				if (payload.type === "thinking_finished") {
+					if (showThinking && payload.text && (!activeThinking || !activeThinking.textContent)) {
+						activeThinking = addMessage("thinking", payload.text);
+					}
 					return;
 				}
 				if (payload.type === "assistant_delta") {
@@ -318,11 +363,13 @@ function createChatHtml(): string {
 						activeAssistant = addMessage("assistant", payload.text);
 					}
 					activeAssistant = undefined;
+					activeThinking = undefined;
 					return;
 				}
 				if (payload.type === "session_error") {
 					addMessage("error", payload.error);
 					activeAssistant = undefined;
+					activeThinking = undefined;
 				}
 			});
 			events.onerror = () => setStatus("Event stream disconnected.");
@@ -364,6 +411,11 @@ function createChatHtml(): string {
 				const error = await response.json().catch(() => ({ error: "Request failed" }));
 				addMessage("error", error.error || "Request failed");
 			}
+		});
+
+		showThinkingInput.addEventListener("change", () => {
+			showThinking = showThinkingInput.checked;
+			localStorage.setItem("pibo.chat.showThinking", String(showThinking));
 		});
 
 		loadSession();

@@ -23,6 +23,7 @@ export type LocalRoutedTuiOptions = {
 	persistSession?: boolean;
 	profile?: string;
 	sessionName?: string;
+	showThinking?: boolean;
 	pluginRegistry?: PiboPluginRegistry;
 };
 

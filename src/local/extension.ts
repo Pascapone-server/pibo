@@ -33,22 +33,36 @@ const BLOCKED_PI_TUI_COMMANDS = new Set([
 const SUBMIT_KEYS = new Set(["\r", "\n"]);
 
 type LocalMessageDetails = {
-	role: "system" | "user" | "assistant" | "execution" | "error";
+	role: "system" | "user" | "assistant" | "thinking" | "execution" | "error";
 	event?: PiboOutputEvent;
 };
 
 class LocalStreamingMessageWidget extends Container {
-	private content = "";
+	private assistantContent = "";
+	private thinkingContent = "";
 	private renderTimer: ReturnType<typeof setTimeout> | undefined;
 
-	constructor(private readonly tui: TUI) {
+	constructor(
+		private readonly tui: TUI,
+		private readonly showThinking: () => boolean,
+	) {
 		super();
 		this.rebuild();
 	}
 
-	setContent(content: string): void {
-		if (content === this.content) return;
-		this.content = content;
+	setContent(input: { assistantContent?: string; thinkingContent?: string }): void {
+		const nextAssistantContent = input.assistantContent ?? this.assistantContent;
+		const nextThinkingContent = input.thinkingContent ?? this.thinkingContent;
+		if (nextAssistantContent === this.assistantContent && nextThinkingContent === this.thinkingContent) {
+			return;
+		}
+		this.assistantContent = nextAssistantContent;
+		this.thinkingContent = nextThinkingContent;
+		this.rebuild();
+		this.scheduleRender();
+	}
+
+	refresh(): void {
 		this.rebuild();
 		this.scheduleRender();
 	}
@@ -62,7 +76,11 @@ class LocalStreamingMessageWidget extends Container {
 
 	private rebuild(): void {
 		this.clear();
-		this.addChild(createLocalMessageComponent(this.content || " ", { role: "assistant" }));
+		if (this.showThinking() && this.thinkingContent.trim()) {
+			this.addChild(createLocalMessageComponent(this.thinkingContent, { role: "thinking" }));
+			this.addChild(new Spacer(1));
+		}
+		this.addChild(createLocalMessageComponent(this.assistantContent || " ", { role: "assistant" }));
 	}
 
 	private scheduleRender(): void {
@@ -119,6 +137,9 @@ function getLocalMessageStyle(role: LocalMessageDetails["role"]): {
 	}
 	if (role === "assistant") {
 		return { label: "local assistant", labelColor: 120 };
+	}
+	if (role === "thinking") {
+		return { label: "local thinking", labelColor: 244 };
 	}
 	if (role === "execution") {
 		return { label: "local execution", bgColor: 58, labelColor: 229 };
@@ -207,10 +228,19 @@ function formatConnectedMessage(client: LocalRoutedTuiClientLike, slashCommands:
 	].join("\n");
 }
 
-export function createLocalRoutedTuiExtension(client: LocalRoutedTuiClientLike): ExtensionFactory {
+export type LocalRoutedTuiExtensionOptions = {
+	showThinking?: boolean;
+};
+
+export function createLocalRoutedTuiExtension(
+	client: LocalRoutedTuiClientLike,
+	options: LocalRoutedTuiExtensionOptions = {},
+): ExtensionFactory {
 	return (pi) => {
 		let context: ExtensionContext | undefined;
 		let assistantBuffer = "";
+		let thinkingBuffer = "";
+		let showThinking = options.showThinking === true;
 		let autocompleteRefreshed = false;
 		let connected = false;
 		let unsubscribeEvents: (() => void) | undefined;
@@ -232,8 +262,11 @@ export function createLocalRoutedTuiExtension(client: LocalRoutedTuiClientLike):
 			context.ui.setWidget(
 				STREAMING_WIDGET_KEY,
 				(tui) => {
-					streamingWidget = new LocalStreamingMessageWidget(tui);
-					streamingWidget.setContent(assistantBuffer);
+					streamingWidget = new LocalStreamingMessageWidget(tui, () => showThinking);
+					streamingWidget.setContent({
+						assistantContent: assistantBuffer,
+						thinkingContent: thinkingBuffer,
+					});
 					return streamingWidget;
 				},
 				{ placement: "aboveEditor" },
@@ -248,14 +281,34 @@ export function createLocalRoutedTuiExtension(client: LocalRoutedTuiClientLike):
 		const handleLocalEvent = (event: PiboOutputEvent) => {
 			if (event.type === "message_started") {
 				assistantBuffer = "";
+				thinkingBuffer = "";
 				ensureStreamingWidget();
 				setStatus("local running");
+				return;
+			}
+			if (event.type === "thinking_started") {
+				thinkingBuffer = "";
+				ensureStreamingWidget();
+				streamingWidget?.setContent({ thinkingContent: thinkingBuffer });
+				return;
+			}
+			if (event.type === "thinking_delta") {
+				thinkingBuffer += event.text;
+				ensureStreamingWidget();
+				streamingWidget?.setContent({ thinkingContent: thinkingBuffer });
+				return;
+			}
+			if (event.type === "thinking_finished") {
+				if (event.text !== undefined) {
+					thinkingBuffer = event.text;
+				}
+				streamingWidget?.setContent({ thinkingContent: thinkingBuffer });
 				return;
 			}
 			if (event.type === "assistant_delta") {
 				assistantBuffer += event.text;
 				ensureStreamingWidget();
-				streamingWidget?.setContent(assistantBuffer);
+				streamingWidget?.setContent({ assistantContent: assistantBuffer });
 				return;
 			}
 			if (event.type === "assistant_message") {
@@ -297,10 +350,22 @@ export function createLocalRoutedTuiExtension(client: LocalRoutedTuiClientLike):
 					},
 				});
 			}
+			if (!registeredCommands.has("thinking")) {
+				registeredCommands.add("thinking");
+				pi.registerCommand("thinking", {
+					description: "Toggle routed thinking display in the local TUI.",
+					async handler() {
+						showThinking = !showThinking;
+						streamingWidget?.refresh();
+						sendTuiMessage(pi, `Thinking display: ${showThinking ? "on" : "off"}`, { role: "system" });
+					},
+				});
+			}
 
 			if (!autocompleteRefreshed) {
 				const allowedCommands = new Set([...slashCommands.keys()].map((command) => command.slice(1)));
 				allowedCommands.add("quit");
+				allowedCommands.add("thinking");
 				ctx.ui.addAutocompleteProvider((current) => createLocalAutocompleteProvider(current, allowedCommands));
 				autocompleteRefreshed = true;
 			}

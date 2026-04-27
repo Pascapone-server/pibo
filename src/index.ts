@@ -67,6 +67,7 @@ export type {
 	LocalRoutedTuiCapabilities,
 	LocalRoutedTuiClientLike,
 	LocalRoutedTuiEventListener,
+	LocalRoutedTuiExtensionOptions,
 	LocalRoutedTuiOptions,
 } from "./local/tui.js";
 export { createWebHostChannel, DEFAULT_WEB_CHANNEL_HOST, DEFAULT_WEB_CHANNEL_PORT, WEB_CHANNEL_NAME } from "./web/channel.js";

@@ -95,6 +95,14 @@ The extension also closes the client on Pi `session_shutdown`, but the entry poi
 
 Assistant deltas from the routed session are rendered into a temporary live widget above the editor. The widget is updated in place so streaming does not append one chat entry per delta. When the final assistant message arrives, the widget is removed and the completed assistant response is rendered as the normal local assistant message.
 
+Thinking deltas use the same live widget but are hidden by default. Start with:
+
+```bash
+npm run tui:routed -- --show-thinking <profile>
+```
+
+or toggle them during a session with `/thinking`. Thinking visibility is local to the routed TUI display; the router still emits thinking events for other channels that want to opt in.
+
 ## Verification
 
 Run:

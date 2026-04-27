@@ -150,7 +150,7 @@ test("local routed TUI extension routes input through the local client", async (
 	assert.match(fake.messages[0].content, /Routed commands: \/status, \/session-current/);
 	assert.doesNotMatch(fake.messages[0].content, /Routed commands: .*\/session(?:,|\n|$)/);
 	assert.doesNotMatch(fake.messages[0].content, /\/tree\b/);
-	assert.deepEqual([...fake.commands.keys()], ["status", "session-current"]);
+	assert.deepEqual([...fake.commands.keys()], ["status", "session-current", "thinking"]);
 	assert.equal(typeof fake.renderers.get("pibo.local-routed"), "function");
 	assert.equal(ctx.autocompleteProviders.length, 1);
 	assert.equal(statuses.get("pibo.local"), "local connected");
@@ -243,6 +243,54 @@ test("local routed TUI streams assistant deltas into a live widget", async () =>
 	assert.equal(ctx.widgets.has("pibo.local.streaming"), false);
 	assert.equal(fake.messages.at(-1).content, "Hallo streaming");
 	assert.equal(statuses.get("pibo.local"), "local connected");
+});
+
+test("local routed TUI shows thinking deltas only when enabled", async () => {
+	const client = createFakeClient();
+	const statuses = new Map();
+	const fake = createFakeExtensionApi();
+	const ctx = createFakeExtensionContext(statuses);
+
+	createLocalRoutedTuiExtension(client, { showThinking: true })(fake.api);
+	await fake.handlers.get("session_start")({ type: "session_start", reason: "startup" }, ctx);
+
+	for (const listener of client.eventListeners) {
+		listener({
+			type: "message_started",
+			sessionKey: "local-tui:pibo-run-yield-qa:default",
+			eventId: "msg-1",
+			text: "",
+		});
+		listener({
+			type: "thinking_delta",
+			sessionKey: "local-tui:pibo-run-yield-qa:default",
+			eventId: "msg-1",
+			text: "Ich denke",
+		});
+		listener({
+			type: "assistant_delta",
+			sessionKey: "local-tui:pibo-run-yield-qa:default",
+			eventId: "msg-1",
+			text: "Antwort",
+		});
+	}
+
+	let widget = ctx.widgets.get("pibo.local.streaming");
+	assert.ok(widget);
+	assert.equal(widget.render(80).some((line) => line.includes("Ich denke")), true);
+	assert.equal(widget.render(80).some((line) => line.includes("Antwort")), true);
+
+	await fake.commands.get("thinking").handler("");
+	widget = ctx.widgets.get("pibo.local.streaming");
+	assert.ok(widget);
+	assert.equal(widget.render(80).some((line) => line.includes("Ich denke")), false);
+	assert.match(fake.messages.at(-1).content, /Thinking display: off/);
+
+	await fake.commands.get("thinking").handler("");
+	widget = ctx.widgets.get("pibo.local.streaming");
+	assert.ok(widget);
+	assert.equal(widget.render(80).some((line) => line.includes("Ich denke")), true);
+	assert.match(fake.messages.at(-1).content, /Thinking display: on/);
 });
 
 test("local routed TUI submit guard blocks leading conflicting Pi commands only", async () => {
