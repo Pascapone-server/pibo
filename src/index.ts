@@ -7,7 +7,6 @@ export {
 	piboGatewayProducerPlugin,
 } from "./plugins/builtin.js";
 export { piboExamplePlugin } from "./plugins/example.js";
-export { piboRemoteAgentPlugin } from "./plugins/remote-agent.js";
 export { createPiboBetterAuthPlugin } from "./plugins/better-auth.js";
 export { createPiboChatWebPlugin } from "./plugins/chat-web.js";
 export { createPiboWebHostPlugin } from "./plugins/web.js";
@@ -70,38 +69,9 @@ export type {
 	LocalRoutedTuiEventListener,
 	LocalRoutedTuiOptions,
 } from "./local/tui.js";
-export { runRemoteAgentClient } from "./remote/client.js";
-export {
-	createRemoteSlashCommandMap,
-	RemoteAgentSessionClient,
-} from "./remote/session-client.js";
-export type {
-	AttachedRemoteAgent,
-	RemoteAgentEventListener,
-	RemoteAgentSessionClientOptions,
-} from "./remote/session-client.js";
-export { createRemoteAgentChannel } from "./remote/channel.js";
-export type { RemoteAgentChannel, RemoteAgentChannelOptions } from "./remote/channel.js";
 export { createWebHostChannel, DEFAULT_WEB_CHANNEL_HOST, DEFAULT_WEB_CHANNEL_PORT, WEB_CHANNEL_NAME } from "./web/channel.js";
 export type { WebHostChannel, WebHostChannelOptions } from "./web/channel.js";
 export type { PiboWebApp, PiboWebAppContext, PiboWebSession } from "./web/types.js";
-export {
-	DEFAULT_REMOTE_AGENT_HOST,
-	DEFAULT_REMOTE_AGENT_PORT,
-	REMOTE_AGENT_CHANNEL_NAME,
-} from "./remote/protocol.js";
-export type {
-	RemoteAgentAttachRequestFrame,
-	RemoteAgentAttachedPayload,
-	RemoteAgentCapabilities,
-	RemoteAgentCapabilitiesRequestFrame,
-	RemoteAgentEventFrame,
-	RemoteAgentFrame,
-	RemoteAgentInput,
-	RemoteAgentInputRequestFrame,
-	RemoteAgentRequestFrame,
-	RemoteAgentResponseFrame,
-} from "./remote/protocol.js";
 export { sendGatewayEvent, sendGatewayMessageAndWaitForReply } from "./gateway/request.js";
 export {
 	createSubagentSessionKey,

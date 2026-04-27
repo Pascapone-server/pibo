@@ -1,6 +1,6 @@
 # Local Routed TUI Spec
 
-This document describes a local native-feeling Pibo TUI that uses the same routed runtime as the gateway, remote controller, and future channels.
+This document describes a local native-feeling Pibo TUI that uses the same routed runtime as the gateway, web channel, and future channels.
 
 The local TUI is an optional adapter. It must not become a required product path, a hidden daemon, or a second place where Pibo runtime behavior is implemented.
 
@@ -12,7 +12,7 @@ Pibo should be usable directly over SSH with a native terminal workflow:
 pibo tui:routed <profile>
 ```
 
-When the selected profile contains Pibo capabilities such as plugin tools, skills, subagents, or yielded runs, the TUI should still expose those capabilities without requiring a separate gateway or remote controller process.
+When the selected profile contains Pibo capabilities such as plugin tools, skills, subagents, or yielded runs, the TUI should still expose those capabilities without requiring a separate gateway process.
 
 The user experience should feel local and direct. The architecture should stay routed.
 
@@ -52,12 +52,11 @@ The local TUI should therefore use an in-process router instead of duplicating r
 ## Non-Goals
 
 - Do not replace the existing gateway.
-- Do not remove the remote controller proof of concept.
 - Do not duplicate subagent or run-registry logic inside the TUI.
 - Do not make Pi TUI the owner of Pibo plugin behavior.
 - Do not reimplement Pi Coding Agent's session storage or model loop.
 - Do not add a large UI framework or long-lived daemon for local use.
-- Do not make local TUI behavior required for gateway, web, remote-agent, plugins, or profile development.
+- Do not make local TUI behavior required for gateway, web, plugins, or profile development.
 - Do not introduce a local TUI-specific tool catalog, profile format, run registry, or subagent manager.
 
 ## Plugin Compatibility
@@ -189,15 +188,13 @@ Minimal implementation:
 
 - add a `runLocalRoutedTui` entry point
 - create an in-process `PiboSessionRouter`
-- reuse the remote TUI controller pattern for input interception and event rendering
-- replace `RemoteAgentSessionClient` with a tiny local client that calls `router.emit` directly
+- use a small local client that calls `router.emit` directly
+- keep TUI input interception and event rendering inside the local adapter
 - add the explicit `pibo tui:routed` CLI command
 - leave `pibo tui` direct-mode behavior unchanged in V1
 
 Cleaner follow-up:
 
-- extract shared TUI rendering helpers from the remote controller
-- share slash-command filtering between remote and local routed TUI
 - consider conservative auto-routing in `pibo tui` only after the explicit path is stable
 - keep transport-specific code small
 
@@ -211,7 +208,7 @@ Cleaner follow-up:
 - A detached run does not automatically re-prompt the parent.
 - New profile tools and skills registered through plugins are visible without local TUI-specific code.
 - TUI shutdown disposes the router and does not leave running child sessions unmanaged.
-- Gateway, web gateway, remote-agent, profile inspection, and direct `pibo tui` behavior do not depend on the local routed TUI module.
+- Gateway, web gateway, profile inspection, and direct `pibo tui` behavior do not depend on the local routed TUI module.
 
 ## Risks
 

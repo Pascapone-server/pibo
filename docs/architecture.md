@@ -131,7 +131,7 @@ Session bindings are stored in SQLite by default at `.pibo/session-bindings.sqli
 
 Auth is a thin core service boundary exposed to channels through `PiboChannelContext`. The gateway validates that channels marked with `auth.mode: "required"` have an auth service before they start.
 
-The first concrete implementation is Better Auth, registered through a built-in plugin for the web gateway path. It is intentionally not loaded by the default local gateway so trusted-local TCP and remote-agent flows do not require Google OAuth configuration. Web apps always require the web auth service, including localhost. The Auth plugin owns identity and allowlist checks; it does not own chat UI or agent routing.
+The first concrete implementation is Better Auth, registered through a built-in plugin for the web gateway path. It is intentionally not loaded by the default local gateway so trusted-local TCP flows do not require Google OAuth configuration. Web apps always require the web auth service, including localhost. The Auth plugin owns identity and allowlist checks; it does not own chat UI or agent routing.
 
 Runtime config lives in `.pibo/config.json` and is managed through `pibo config ...`. Better Auth reads this local config; environment variables are not part of the auth configuration path.
 
@@ -165,39 +165,6 @@ The same-origin web path is intentionally split:
 - Future apps can register additional web apps without becoming part of the Auth plugin.
 
 This avoids iframe and cross-origin complexity for V1. Apps can use normal same-origin cookies and call their own API routes while sharing the gateway auth boundary.
-
-## Remote Agent Channel
-
-The built-in `pibo.remote-agent` plugin starts the local `remote-agent` channel on `127.0.0.1:4790`.
-
-```text
-Controller
-  -> remote_attach(sessionName, profile)
-  -> capabilities(gateway actions)
-  -> remote_input(message | execution)
-  -> Session router
-  -> Pi runtime
-  -> remote_event
-```
-
-The reusable pieces are:
-
-- `src/remote/protocol.ts` for newline-delimited frame types.
-- `src/remote/channel.ts` for the server-side channel.
-- `src/remote/session-client.ts` for client-side attach, discovery, request/response correlation, and remote events.
-- `src/remote/client.ts` for the minimal line-based debug client.
-
-## Remote TUI Example
-
-`src/remote/examples/tui-controller.ts` is intentionally an example, not a product direction. It proves that a Pi Coding Agent TUI can act as a local remote controller by using Pi extension hooks:
-
-- `session_start` attaches to the `remote-agent` channel.
-- `input` intercepts normal TUI input and forwards it as remote messages.
-- discovered gateway actions are registered as Pi extension slash commands.
-- autocomplete is filtered to the remote commands plus `/quit`.
-- remote output is rendered back into the TUI as styled custom messages.
-
-This is useful as a reference for future channel adapters, but Pi TUI is not treated as the long-term primary remote UI. A dedicated web or terminal client can reuse the same channel and `RemoteAgentSessionClient` without coupling itself to Pi TUI internals.
 
 ## Local Routed TUI
 
@@ -253,8 +220,6 @@ npm run dev -- tools guide browser-use remote-browser
 npm run gateway
 npm run gateway:web
 npm run client -- <sessionKey>
-npm run remote -- <sessionName> [profile]
-npm run remote:line -- <sessionName> [profile]
 npm run tui -- [profile]
 npm run tui:routed -- [profile]
 npm run profile -- [profile]
@@ -262,4 +227,4 @@ npm run dev -- mcp
 npm run dev -- tools
 ```
 
-`npm run remote` runs the Pi-TUI proof-of-concept controller. `npm run remote:line` runs the simpler debug client. `npm run tui:routed` runs the explicit local routed TUI adapter without requiring the gateway daemon.
+`npm run tui:routed` runs the explicit local routed TUI adapter without requiring the gateway daemon.

@@ -38,7 +38,7 @@ test("default plugin registry builds profiles from registered resources", () => 
 	);
 	assert.deepEqual(
 		registry.getChannels().map((channel) => channel.name),
-		["pibo-example-channel", "remote-agent"],
+		["pibo-example-channel"],
 	);
 	assert.deepEqual(registry.getGatewayActionInfos(), [
 		{

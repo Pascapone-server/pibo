@@ -188,24 +188,6 @@ export async function runPiboCli(argv = process.argv): Promise<void> {
 			const { runGatewayClient } = await import("./gateway/client.js");
 			await runGatewayClient({ sessionKey });
 		});
-	program
-		.command("remote")
-		.argument("[sessionName]", "Remote session name", "default")
-		.argument("[profile]")
-		.description("Start the Pi-TUI remote controller")
-		.action(async (sessionName: string, profile?: string) => {
-			const { runRemoteAgentTui } = await import("./remote/examples/tui-controller.js");
-			await runRemoteAgentTui({ sessionName, profile });
-		});
-	program
-		.command("remote-line")
-		.argument("[sessionName]", "Remote session name", "default")
-		.argument("[profile]")
-		.description("Start the minimal line-based remote client")
-		.action(async (sessionName: string, profile?: string) => {
-			const { runRemoteAgentClient } = await import("./remote/client.js");
-			await runRemoteAgentClient({ sessionName, profile });
-		});
 
 	if (argv.length <= 2) {
 		printRootDiscovery();
@@ -226,7 +208,6 @@ Commands:
   tui:routed   Start the local routed Pibo TUI
   gateway      Start the local gateway daemon
   gateway:web  Start the authenticated web gateway
-  remote       Start the Pi-TUI remote controller
 
 Next:
   pibo <command> --help

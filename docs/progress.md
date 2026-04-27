@@ -30,8 +30,6 @@ Pibo is a minimal TypeScript wrapper around Pi Coding Agent. This file is a shor
 - Plugins can register channels through `api.registerChannel(...)`.
 - Plugins can register same-origin web apps through `api.registerWebApp(...)`.
 - Gateway channel sessions are backed by SQLite session bindings in `.pibo/session-bindings.sqlite`.
-- The built-in `remote-agent` channel exposes a local remote-control path on `127.0.0.1:4790`.
-- The Pi-TUI remote controller is kept as a proof-of-concept example in `src/remote/examples/tui-controller.ts`.
 - The local routed TUI adapter lives in `src/local/` and uses an in-process router instead of a gateway daemon.
 - An authenticated web gateway path exists through `npm run gateway:web`, split into Better Auth, a same-origin web host, and the chat web app.
 - A minimal Commander-based CLI manages local config values in `.pibo/config.json` and uses progressive, agent-oriented discovery output.
@@ -125,23 +123,20 @@ type PiboSessionBinding = {
 
 The gateway uses SQLite for bindings by default. Channels and tools route by stable `sessionKey`; Pi persistence and provider cache affinity use the short `sessionId`. Subagent bindings also store their parent key/id pair so the Pi session tree stays linked without overloading the routed key.
 
-## Remote Agent Channel
-
-The first real channel plugin is `pibo.remote-agent`. It starts a local remote-control server and lets a local controller attach to a pibo session.
+## Channel Examples
 
 ```text
-Pi TUI Remote Controller
-  -> remote_attach(sessionName, profile)
-  -> capabilities(gateway actions)
-  -> remote_input(message | execution)
-  -> PiboChannelContext.emit(...)
+Chat Web App
+  -> same-origin API request
+  -> auth/session policy
+  -> resolveSession(channel=chat-web, externalId=userId)
   -> PiboSessionRouter
   -> Core Pi Coding Agent
   -> PiboOutputEvent
-  -> remote_event
+  -> HTTP response / streamed UI update
 ```
 
-The Pi-TUI remote controller is intentionally kept as a proof of concept. `npm run remote -- <sessionName> [profile]` starts a local Pi TUI with a pibo extension. The extension intercepts normal input, forwards it through the remote channel, and renders remote output as styled TUI custom messages. Execution slash commands are discovered from the gateway action registry during attach, registered as Pi extension commands, and shown in slash autocomplete. Pi TUI built-in commands stay local; the line-based debug client is available through `npm run remote:line`.
+The chat web path is the primary concrete channel example. It shows how a channel resolves identity to a stable session binding, emits routed input events, observes normalized output events, and keeps auth outside the agent runtime.
 
 ```mermaid
 flowchart LR
@@ -219,7 +214,6 @@ flowchart LR
 - Add only execution actions that are clearly wrapper-level controls.
 - Let Pi handle agent execution, tool calls, compaction, persistence, and TUI behavior.
 - Keep transport-specific gateway code under `src/gateway/`.
-- Keep reusable remote-channel code under `src/remote/`; keep controller experiments under `src/remote/examples/`.
 - Keep plugins static until external loading has a concrete requirement.
 - Build real web or messaging channels on top of `PiboChannel`, not directly against Pi.
 - Keep auth as a gateway/channel boundary service; web apps such as chat should consume auth rather than live inside the auth plugin.

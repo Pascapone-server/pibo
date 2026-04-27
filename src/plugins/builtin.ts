@@ -9,7 +9,6 @@ import type {
 import { InitialSessionContextBuilder, type InitialSessionContext } from "../core/profiles.js";
 import { createPiboTestToolProfiles } from "./core-tools.js";
 import { piboExamplePlugin } from "./example.js";
-import { piboRemoteAgentPlugin } from "./remote-agent.js";
 import { definePiboPlugin, PiboPluginRegistry } from "./registry.js";
 import type { PiboPlugin, PiboProfileBuildContext } from "./types.js";
 
@@ -246,7 +245,7 @@ export const piboGatewayProducerPlugin = definePiboPlugin({
 });
 
 export function createDefaultPiboPlugins(): PiboPlugin[] {
-	return [piboCorePlugin, piboGatewayProducerPlugin, piboExamplePlugin, piboRemoteAgentPlugin];
+	return [piboCorePlugin, piboGatewayProducerPlugin, piboExamplePlugin];
 }
 
 export function createDefaultPiboPluginRegistry(): PiboPluginRegistry {

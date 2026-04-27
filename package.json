@@ -23,9 +23,7 @@
     "start": "node dist/bin/pibo.js",
     "test": "npm run build && node --test test/*.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "clean": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\"",
-    "remote": "tsx src/bin/pibo.ts remote",
-    "remote:line": "tsx src/bin/pibo.ts remote-line"
+    "clean": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\""
   },
   "dependencies": {
     "@mariozechner/pi-ai": "^0.70.2",

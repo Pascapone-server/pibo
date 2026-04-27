@@ -41,14 +41,14 @@ test("sqlite session binding store persists parent session identity", async () =
 
 	try {
 		const parent = store.resolve({
-			channel: "remote-agent",
+			channel: "chat-web",
 			externalId: "yield-qa",
 			defaultProfile: "run-yield-qa",
 		});
 		const child = store.resolve({
 			channel: "subagent",
-			externalId: "remote-agent:yield-qa::sub::qa-researcher::thread-1",
-			sessionKey: "remote-agent:yield-qa::sub::qa-researcher::thread-1",
+			externalId: "chat-web:yield-qa::sub::qa-researcher::thread-1",
+			sessionKey: "chat-web:yield-qa::sub::qa-researcher::thread-1",
 			parentSessionKey: parent.sessionKey,
 			parentSessionId: parent.sessionId,
 			defaultProfile: "pibo-minimal",
