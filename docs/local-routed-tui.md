@@ -91,6 +91,10 @@ Because Pi handles built-in slash commands before extension `input` events, the 
 
 The extension also closes the client on Pi `session_shutdown`, but the entry point remains the hard cleanup boundary.
 
+## Streaming
+
+Assistant deltas from the routed session are rendered into a temporary live widget above the editor. The widget is updated in place so streaming does not append one chat entry per delta. When the final assistant message arrives, the widget is removed and the completed assistant response is rendered as the normal local assistant message.
+
 ## Verification
 
 Run:

@@ -1,9 +1,10 @@
 import type { ExtensionContext, ExtensionFactory } from "@mariozechner/pi-coding-agent";
-import { Box, type AutocompleteProvider, Container, Spacer, Text } from "@mariozechner/pi-tui";
+import { Box, type AutocompleteProvider, Container, Spacer, Text, type TUI } from "@mariozechner/pi-tui";
 import type { PiboOutputEvent, PiboSessionStatus } from "../core/events.js";
 import type { LocalRoutedTuiCapabilities, LocalRoutedTuiClientLike } from "./client.js";
 
 const LOCAL_MESSAGE_TYPE = "pibo.local-routed";
+const STREAMING_WIDGET_KEY = "pibo.local.streaming";
 
 const BLOCKED_PI_TUI_COMMANDS = new Set([
 	"settings",
@@ -35,6 +36,43 @@ type LocalMessageDetails = {
 	role: "system" | "user" | "assistant" | "execution" | "error";
 	event?: PiboOutputEvent;
 };
+
+class LocalStreamingMessageWidget extends Container {
+	private content = "";
+	private renderTimer: ReturnType<typeof setTimeout> | undefined;
+
+	constructor(private readonly tui: TUI) {
+		super();
+		this.rebuild();
+	}
+
+	setContent(content: string): void {
+		if (content === this.content) return;
+		this.content = content;
+		this.rebuild();
+		this.scheduleRender();
+	}
+
+	dispose(): void {
+		if (this.renderTimer) {
+			clearTimeout(this.renderTimer);
+			this.renderTimer = undefined;
+		}
+	}
+
+	private rebuild(): void {
+		this.clear();
+		this.addChild(createLocalMessageComponent(this.content || " ", { role: "assistant" }));
+	}
+
+	private scheduleRender(): void {
+		if (this.renderTimer) return;
+		this.renderTimer = setTimeout(() => {
+			this.renderTimer = undefined;
+			this.tui.requestRender();
+		}, 33);
+	}
+}
 
 function createSlashCommandMap(capabilities: LocalRoutedTuiCapabilities): Map<string, string> {
 	const commands = new Map<string, string>();
@@ -177,6 +215,7 @@ export function createLocalRoutedTuiExtension(client: LocalRoutedTuiClientLike):
 		let connected = false;
 		let unsubscribeEvents: (() => void) | undefined;
 		let unsubscribeSubmitGuard: (() => void) | undefined;
+		let streamingWidget: LocalStreamingMessageWidget | undefined;
 		const slashCommands = createSlashCommandMap(client.capabilities);
 		const registeredCommands = new Set<string>();
 
@@ -188,17 +227,39 @@ export function createLocalRoutedTuiExtension(client: LocalRoutedTuiClientLike):
 			context?.ui.setStatus("pibo.local", text);
 		};
 
+		const ensureStreamingWidget = () => {
+			if (streamingWidget || !context) return;
+			context.ui.setWidget(
+				STREAMING_WIDGET_KEY,
+				(tui) => {
+					streamingWidget = new LocalStreamingMessageWidget(tui);
+					streamingWidget.setContent(assistantBuffer);
+					return streamingWidget;
+				},
+				{ placement: "aboveEditor" },
+			);
+		};
+
+		const clearStreamingWidget = () => {
+			context?.ui.setWidget(STREAMING_WIDGET_KEY, undefined);
+			streamingWidget = undefined;
+		};
+
 		const handleLocalEvent = (event: PiboOutputEvent) => {
 			if (event.type === "message_started") {
 				assistantBuffer = "";
+				ensureStreamingWidget();
 				setStatus("local running");
 				return;
 			}
 			if (event.type === "assistant_delta") {
 				assistantBuffer += event.text;
+				ensureStreamingWidget();
+				streamingWidget?.setContent(assistantBuffer);
 				return;
 			}
 			if (event.type === "assistant_message") {
+				clearStreamingWidget();
 				sendTuiMessage(pi, event.text || assistantBuffer, { role: "assistant", event });
 				assistantBuffer = "";
 				setStatus("local connected");
@@ -210,6 +271,7 @@ export function createLocalRoutedTuiExtension(client: LocalRoutedTuiClientLike):
 				return;
 			}
 			if (event.type === "session_error") {
+				clearStreamingWidget();
 				sendTuiMessage(pi, `Local routed error: ${event.error}`, { role: "error", event });
 				setStatus("local error");
 			}
@@ -272,6 +334,7 @@ export function createLocalRoutedTuiExtension(client: LocalRoutedTuiClientLike):
 			unsubscribeEvents = undefined;
 			unsubscribeSubmitGuard?.();
 			unsubscribeSubmitGuard = undefined;
+			clearStreamingWidget();
 			connected = false;
 			void client.close();
 		});

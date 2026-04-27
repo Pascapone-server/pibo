@@ -33,10 +33,16 @@ function createFakeExtensionApi() {
 function createFakeExtensionContext(statuses) {
 	const autocompleteProviders = [];
 	const terminalInputHandlers = [];
+	const widgets = new Map();
+	let renderCount = 0;
 	let editorText = "";
 	return {
 		autocompleteProviders,
 		terminalInputHandlers,
+		widgets,
+		get renderCount() {
+			return renderCount;
+		},
 		get editorText() {
 			return editorText;
 		},
@@ -49,6 +55,21 @@ function createFakeExtensionContext(statuses) {
 			},
 			addAutocompleteProvider(provider) {
 				autocompleteProviders.push(provider);
+			},
+			setWidget(key, content) {
+				const existing = widgets.get(key);
+				existing?.dispose?.();
+				widgets.delete(key);
+				if (content === undefined) return;
+				const widget =
+					typeof content === "function"
+						? content({
+								requestRender() {
+									renderCount += 1;
+								},
+							})
+						: content;
+				widgets.set(key, widget);
 			},
 			onTerminalInput(handler) {
 				terminalInputHandlers.push(handler);
@@ -171,6 +192,57 @@ test("local routed TUI extension routes input through the local client", async (
 
 	await fake.handlers.get("session_shutdown")?.({ type: "session_shutdown" }, ctx);
 	assert.equal(client.closeCount, 1);
+});
+
+test("local routed TUI streams assistant deltas into a live widget", async () => {
+	const client = createFakeClient();
+	const statuses = new Map();
+	const fake = createFakeExtensionApi();
+	const ctx = createFakeExtensionContext(statuses);
+
+	createLocalRoutedTuiExtension(client)(fake.api);
+	await fake.handlers.get("session_start")({ type: "session_start", reason: "startup" }, ctx);
+
+	const initialMessageCount = fake.messages.length;
+	for (const listener of client.eventListeners) {
+		listener({
+			type: "message_started",
+			sessionKey: "local-tui:pibo-run-yield-qa:default",
+			eventId: "msg-1",
+			text: "",
+		});
+		listener({
+			type: "assistant_delta",
+			sessionKey: "local-tui:pibo-run-yield-qa:default",
+			eventId: "msg-1",
+			text: "Hallo",
+		});
+		listener({
+			type: "assistant_delta",
+			sessionKey: "local-tui:pibo-run-yield-qa:default",
+			eventId: "msg-1",
+			text: " streaming",
+		});
+	}
+
+	const widget = ctx.widgets.get("pibo.local.streaming");
+	assert.ok(widget);
+	assert.equal(fake.messages.length, initialMessageCount);
+	assert.equal(widget.render(80).some((line) => line.includes("Hallo streaming")), true);
+	assert.equal(statuses.get("pibo.local"), "local running");
+
+	for (const listener of client.eventListeners) {
+		listener({
+			type: "assistant_message",
+			sessionKey: "local-tui:pibo-run-yield-qa:default",
+			eventId: "msg-1",
+			text: "Hallo streaming",
+		});
+	}
+
+	assert.equal(ctx.widgets.has("pibo.local.streaming"), false);
+	assert.equal(fake.messages.at(-1).content, "Hallo streaming");
+	assert.equal(statuses.get("pibo.local"), "local connected");
 });
 
 test("local routed TUI submit guard blocks leading conflicting Pi commands only", async () => {
