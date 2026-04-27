@@ -66,3 +66,6 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 ## Pi Coding Agent
 If you have to dig deeper into the Pi Coding Agent: `~/code/pi-mono/packages/coding-agent`
+
+## Rules
+Always read `RULES.md`. It contains all relevant rules for development and our project.
