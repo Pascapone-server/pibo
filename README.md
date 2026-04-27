@@ -1,12 +1,15 @@
 # pibo
 
-Minimal TypeScript wrapper project around Pi Coding Agent.
+Pibo turns Pi Coding Agent into an agent-native runtime with discoverable CLI tools, plugins, channels, and local gateways.
+
+Pi remains the inner engine for model turns, tools, streaming, sessions, and compaction. Pibo owns the outer product boundary: profiles, plugin registration, channels, routing, session bindings, auth, policy, and transport-specific adapters.
 
 ## Docs
 
 - `docs/architecture.md` describes the current runtime architecture and boundaries.
 - `docs/mcp.md` documents the MCP CLI and registry.
 - `docs/tools.md` documents curated external CLI tools.
+- `docs/agent-run-yield-spec.md` documents yielded agent runs and run-control tools.
 - `docs/progress.md` is the short implementation status snapshot.
 
 ## Scripts
@@ -33,15 +36,15 @@ Minimal TypeScript wrapper project around Pi Coding Agent.
 
 ## Philosophy
 
-Keep the wrapper thin. Pi Coding Agent should remain the inner engine; pibo adds only the small runtime, tool, prompt, and policy layer we actually need.
+Keep the wrapper thin. Pi Coding Agent should remain the inner engine; pibo adds only the product boundary we actually need: profiles, plugins, channels, auth, policy, routing, and opt-in operator tooling.
 
 Optional integrations stay outside the core package until the user installs them. MCP servers, Python virtual environments, and third-party CLIs are configured on demand through `pibo mcp` and `pibo tools`, not bundled into pibo itself.
 
 ## Plugin Layer
 
-`src/plugins/` contains the minimal static plugin layer. Built-in plugins register tools, skills, context files, profiles, gateway actions, and event listeners through `PiboPluginRegistry`.
+`src/plugins/` contains the minimal static plugin layer. Built-in plugins register tools, subagents, skills, context files, profiles, gateway actions, event listeners, channels, auth services, and web apps through `PiboPluginRegistry`.
 
-This is an extension boundary, not a marketplace. Plugins are internal and statically loaded for now, which keeps the runtime simple while leaving room for web auth, new tools, new skills, and future transports.
+This is an extension boundary, not a marketplace. Plugins are internal and statically loaded for now, which keeps the runtime simple while supporting web auth, web apps, new tools, new skills, subagents, and future transports.
 
 `src/plugins/example.ts` shows the smallest plugin workflow:
 
@@ -88,12 +91,28 @@ The main source folders are:
 - `src/sessions/` for session binding storage
 - `src/gateway/` for the local TCP gateway transport
 - `src/remote/` for the local Pi-like remote-control channel
+- `src/runs/` for yielded run tracking and run-control tools
+- `src/auth/`, `src/web/`, and `src/apps/` for Better Auth, the same-origin web host, and web apps
 
 ## Profiles
 
 The default profile is registered by the core plugin. It loads the local `pi-agent-harness` skill, registers the core tools `pibo_echo`, `pibo_workspace_info`, and `pibo_exec`, and appends the example context files from `examples/context/`.
 
-The `run-yield-qa` profile adds two simple QA subagents. The routed runtime exposes generated run-control tools such as `pibo_run_start` for yieldable tools:
+Profiles can opt into registered subagents. Pibo exposes enabled subagents to Pi as generated tools named `pibo_subagent_<name>`, routed through normal pibo sessions.
+
+The `run-yield-qa` profile adds two simple QA subagents. Profiles with yieldable tools expose generated run-control tools for tracked or detached work:
+
+```text
+pibo_run_start
+pibo_run_list
+pibo_run_status
+pibo_run_wait
+pibo_run_read
+pibo_run_cancel
+pibo_run_ack
+```
+
+Try the QA profile through the routed runtime:
 
 ```bash
 npm run profile -- run-yield-qa
@@ -125,6 +144,9 @@ The config file is created automatically as `mcp_servers.json` when needed. Mana
 ```bash
 npm run dev -- mcp config init
 npm run dev -- mcp config help
+npm run dev -- mcp config path
+npm run dev -- mcp config paths
+npm run dev -- mcp config schema
 npm run dev -- mcp config add filesystem '{"command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","."]}'
 npm run dev -- mcp config add deepwiki '{"url":"https://mcp.deepwiki.com/mcp"}'
 npm run dev -- mcp config remove filesystem
@@ -137,6 +159,7 @@ npm run dev -- mcp registry list
 npm run dev -- mcp registry show <name>
 npm run dev -- mcp registry doctor <name>
 npm run dev -- mcp registry install <name>
+npm run dev -- mcp registry remove <name>
 ```
 
 The registry currently has no bundled presets. The command surface remains in place so curated external MCP servers can be added later without changing the config model.
@@ -149,11 +172,16 @@ Pibo includes a separate `pibo tools` registry for curated external CLI tools. T
 
 ```bash
 npm run dev -- tools list
+npm run dev -- tools installed
 npm run dev -- tools show browser-use
 npm run dev -- tools install browser-use
+npm run dev -- tools remove browser-use
 npm run dev -- tools doctor browser-use
 npm run dev -- tools guides browser-use
 npm run dev -- tools guide browser-use browser-use
+npm run dev -- tools guide browser-use remote-browser
+npm run dev -- tools path browser-use
+npm run dev -- tools env browser-use
 ```
 
 The first curated tool is `browser-use`, pinned to `browser-use[cli]==0.12.6` so the CLI surface stays aligned with the bundled guides. It is installed into an isolated runtime under `~/.pibo/tools/browser-use` and uses `~/.pibo/tools/browser-use/home` as its tool home. See `docs/tools.md`.
