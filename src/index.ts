@@ -112,6 +112,12 @@ export type {
 	PiboSessionBindingStore,
 	ResolveSessionBindingInput,
 } from "./sessions/bindings.js";
+export {
+	InMemorySessionBindingStore,
+	createDefaultSessionKey,
+	createPiboSessionId,
+	createSessionBinding,
+} from "./sessions/bindings.js";
 export type { PiboSessionRouterOptions } from "./core/session-router.js";
 export { runPiboCli } from "./cli.js";
 export {

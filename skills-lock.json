@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "create-specification": {
+      "source": "github/awesome-copilot",
+      "sourceType": "github",
+      "skillPath": "skills/create-specification/SKILL.md",
+      "computedHash": "45b9ef98b0fb82ba0e1aee65dfb464fa1f8494a14a557b9788d73aae87e9e618"
+    },
+    "update-specification": {
+      "source": "github/awesome-copilot",
+      "sourceType": "github",
+      "skillPath": "skills/update-specification/SKILL.md",
+      "computedHash": "56832dcff10483e3b9755c73d8d88286e5ae4274b3ae75092b9a6aa245a943cb"
+    }
+  }
+}

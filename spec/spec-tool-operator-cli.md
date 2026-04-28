@@ -1,0 +1,199 @@
+---
+title: Pibo Operator CLI Specification
+version: 1.0
+date_created: 2026-04-28
+last_updated: 2026-04-28
+owner: Pibo maintainers
+tags: [tool, cli, mcp, external-tools, config]
+---
+
+# Introduction
+
+This specification defines the current operator CLI behavior for Pibo. Pibo is primarily operated by agents, so command discovery is progressive and compact.
+
+## 1. Purpose & Scope
+
+This specification covers:
+
+- Top-level `pibo` discovery behavior.
+- `pibo config`.
+- `pibo mcp`.
+- `pibo tools`.
+- Runtime expectations for profile, TUI, gateway, and client commands.
+
+This specification does not define internal runtime event contracts.
+
+## 2. Definitions
+
+- **Operator CLI**: The command surface exposed through `src/bin/pibo.ts` and `src/cli.ts`.
+- **Progressive discovery**: CLI output style where each level shows only immediate commands and next useful commands.
+- **MCP CLI**: The `pibo mcp` helper for configured Model Context Protocol servers.
+- **Curated CLI tool**: An external command-line tool managed by `pibo tools`.
+- **Pibo config**: Local JSON config stored at `.pibo/config.json`.
+
+## 3. Requirements, Constraints & Guidelines
+
+- **REQ-001**: Top-level `pibo` with no arguments MUST print compact discovery output.
+- **REQ-002**: Top-level `pibo --help` and `pibo -h` MUST print compact discovery output, not a full Commander help dump.
+- **REQ-003**: Each CLI level MUST provide only immediate commands and a next-step hint.
+- **REQ-004**: Long guides, schemas, environment details, and detailed operational instructions MUST live behind explicit deeper commands.
+- **REQ-005**: `pibo config` with no action or help flags MUST print config discovery output.
+- **REQ-006**: `pibo config keys` MUST list supported config keys with key, type, visibility, and description.
+- **REQ-007**: `pibo config show` MUST redact secret values.
+- **REQ-008**: `pibo config get <secret-key>` MUST return the redacted display value, not the raw secret.
+- **REQ-009**: `pibo config set auth.secret <value>` MUST reject secrets shorter than 32 characters.
+- **REQ-010**: `auth.allowedEmails` MUST accept comma-separated strings or JSON string arrays.
+- **REQ-011**: `pibo mcp` MUST use `mcp_servers.json` as the default project config file when no higher-priority config path exists.
+- **REQ-012**: MCP config lookup order MUST be explicit `-c/--config`, `MCP_CONFIG_PATH`, `./mcp_servers.json`, `~/.mcp_servers.json`, then `~/.config/mcp/mcp_servers.json`.
+- **REQ-013**: `pibo mcp` MUST support stdio servers with `command`, `args`, `env`, and `cwd`.
+- **REQ-014**: `pibo mcp` MUST support HTTP servers with `url`, optional `headers`, and optional `timeout`.
+- **REQ-015**: MCP tool filtering MUST apply `disabledTools` before `allowedTools`.
+- **REQ-016**: MCP glob filters MUST support `*` and `?`, case-insensitively.
+- **REQ-017**: `MCP_NO_DAEMON=1` MUST disable daemon connection reuse.
+- **REQ-018**: `pibo tools` with no arguments MUST list curated tools.
+- **REQ-019**: `pibo tools --help` MUST print compact tools discovery output.
+- **REQ-020**: `pibo tools guide <name> [guide]` MUST print one guide only.
+- **REQ-021**: Curated tool guides MUST NOT be loaded automatically into Pibo agent profiles.
+- **REQ-022**: `browser-use` MUST be pinned to `browser-use[cli]==0.12.6` in the curated tool registry.
+- **REQ-023**: Curated tools MUST install into isolated runtimes under `~/.pibo/tools/<name>`.
+- **REQ-024**: Runtime commands MUST remain available: `profile`, `tui`, `tui:routed`, `gateway`, `gateway:web`, and `client`.
+- **CON-001**: The CLI is agent-facing; avoid large all-in-one help text.
+- **CON-002**: Optional external tools and MCP servers are configured on demand and are not bundled into the core runtime.
+
+## 4. Interfaces & Data Contracts
+
+### Top-Level Commands
+
+| Command | Purpose |
+| --- | --- |
+| `config` | Manage local Pibo config |
+| `mcp` | Discover and call configured MCP servers |
+| `tools` | Install and inspect curated external CLI tools |
+| `profile` | Inspect a Pibo profile |
+| `tui` | Start direct Pi TUI |
+| `tui:routed` | Start local routed Pibo TUI |
+| `gateway` | Start local gateway daemon |
+| `gateway:web` | Start authenticated web gateway |
+| `client` | Start console gateway client |
+
+### Pibo Config Keys
+
+| Key | Type | Secret | Meaning |
+| --- | --- | --- | --- |
+| `auth.baseURL` | string | no | Better Auth base URL |
+| `auth.secret` | string | yes | Better Auth secret, at least 32 characters |
+| `auth.googleClientId` | string | no | Google OAuth client id |
+| `auth.googleClientSecret` | string | yes | Google OAuth client secret |
+| `auth.allowedEmails` | string[] | no | Allowed Google account emails |
+| `auth.databasePath` | string | no | SQLite path for Better Auth data |
+
+### MCP Server Config
+
+```ts
+type StdioServerConfig = {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+  allowedTools?: string[];
+  disabledTools?: string[];
+};
+
+type HttpServerConfig = {
+  url: string;
+  headers?: Record<string, string>;
+  timeout?: number;
+  allowedTools?: string[];
+  disabledTools?: string[];
+};
+```
+
+### Curated Tool Entry
+
+```ts
+type CliToolEntry = {
+  name: string;
+  description: string;
+  runtime: {
+    packageName: string;
+    executableName: string;
+    pythonVersion: string;
+    homeEnvVar?: string;
+  };
+  guides: readonly ToolGuide[];
+  notes: readonly string[];
+};
+```
+
+## 5. Acceptance Criteria
+
+- **AC-001**: Given `pibo`, When executed without args, Then output includes immediate commands and `Next: pibo <command> --help`.
+- **AC-002**: Given `pibo config`, When executed without action, Then output includes config commands and `Next: pibo config keys`.
+- **AC-003**: Given `pibo config set auth.secret short`, When executed, Then it fails.
+- **AC-004**: Given a saved secret, When `pibo config show` runs, Then the secret is masked.
+- **AC-005**: Given `pibo mcp --help`, When executed, Then help remains progressive.
+- **AC-006**: Given `pibo tools guide browser-use browser-use`, When executed, Then one browser-use guide is printed.
+- **AC-007**: Given `pibo tools install browser-use --no-setup`, When executed, Then it prints the install target without installing runtime setup.
+
+## 6. Test Automation Strategy
+
+- **Test Levels**: CLI integration tests with built assets.
+- **Frameworks**: Node.js built-in test runner.
+- **Primary Command**: `npm test`.
+- **Focused Commands**: `node --test test/mcp-cli.test.mjs`, `node --test test/tools-cli.test.mjs`, `node --test test/config.test.mjs`.
+- **Manual Smoke Checks**: `npm run dev -- config keys`, `npm run dev -- tools list`, `npm run dev -- mcp`.
+
+## 7. Rationale & Context
+
+Pibo command output is optimized for agents discovering an unfamiliar CLI. Compact command surfaces reduce context waste and encourage stepwise exploration. Optional integrations remain outside default profile context to keep agent prompts small.
+
+## 8. Dependencies & External Integrations
+
+### External Systems
+
+- **EXT-001**: MCP servers launched as local stdio processes or reached through HTTP.
+- **EXT-002**: Curated CLI tools installed on demand.
+
+### Infrastructure Dependencies
+
+- **INF-001**: Project-local `.pibo/config.json`.
+- **INF-002**: Project-local or user-level MCP config files.
+- **INF-003**: Tool runtime directories under `~/.pibo/tools`.
+
+### Technology Platform Dependencies
+
+- **PLT-001**: Node.js `>=24`.
+- **PLT-002**: Python runtime installation support for curated Python CLI tools.
+
+## 9. Examples & Edge Cases
+
+### Progressive Discovery Flow
+
+```bash
+pibo
+pibo tools
+pibo tools show browser-use
+pibo tools guides browser-use
+pibo tools guide browser-use browser-use
+```
+
+### Config List Values
+
+Both values are valid inputs for `auth.allowedEmails`:
+
+```bash
+pibo config set auth.allowedEmails alice@example.com,bob@example.com
+pibo config set auth.allowedEmails '["alice@example.com","bob@example.com"]'
+```
+
+## 10. Validation Criteria
+
+- CLI tests pass.
+- `RULES.md` progressive discovery rule is preserved.
+- New CLI help text does not duplicate long guides across levels.
+
+## 11. Related Specifications / Further Reading
+
+- [RULES.md](../RULES.md)
+- [docs/mcp.md](../docs/mcp.md)
+- [docs/tools.md](../docs/tools.md)

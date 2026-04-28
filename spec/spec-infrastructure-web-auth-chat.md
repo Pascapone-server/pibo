@@ -1,0 +1,212 @@
+---
+title: Pibo Web Gateway Auth And Chat Specification
+version: 1.0
+date_created: 2026-04-28
+last_updated: 2026-04-28
+owner: Pibo maintainers
+tags: [infrastructure, web, auth, gateway, chat]
+---
+
+# Introduction
+
+This specification defines the current authenticated web gateway and chat app behavior implemented by Pibo.
+
+## 1. Purpose & Scope
+
+This specification covers:
+
+- Web gateway plugin composition.
+- Better Auth service requirements.
+- Same-origin web host behavior.
+- Chat web app routes and security checks.
+- HTTP request and response handling constraints.
+
+This specification does not define non-web local gateway behavior except where web gateway composition uses the same gateway server.
+
+## 2. Definitions
+
+- **Web gateway**: A `PiboGatewayServer` started with Better Auth, web host, and chat web plugins.
+- **Web host channel**: The same-origin HTTP channel named `web-host`.
+- **Chat web app**: The app named `pibo.chat-web`, mounted at `/apps/chat` with API prefix `/api/chat`.
+- **Better Auth service**: The auth implementation named `better-auth`.
+- **Allowed email allowlist**: Configured set of Google account emails allowed to use the web app.
+- **Same-origin mutation**: A non-GET request that requires `Content-Type: application/json` and an `Origin` equal to the request origin.
+
+## 3. Requirements, Constraints & Guidelines
+
+- **REQ-001**: `gateway:web` MUST create a plugin registry containing default Pibo plugins plus Better Auth, web host, and chat web plugins.
+- **REQ-002**: The web host channel MUST have auth mode `"required"`.
+- **REQ-003**: The gateway MUST reject startup for any channel with auth mode `"required"` when no auth service is registered.
+- **REQ-004**: The default web host MUST listen on `127.0.0.1:4788` unless overridden.
+- **REQ-005**: `/api/auth/*` routes MUST be delegated to the registered auth service HTTP handler.
+- **REQ-006**: Registered web apps MUST receive requests whose pathname matches their mount path or API prefix.
+- **REQ-007**: Root `/` MUST redirect to the first registered web app mount path when at least one app exists.
+- **REQ-008**: Root `/` MUST return a minimal HTML page when no web apps are registered.
+- **REQ-009**: Unknown web routes MUST return JSON `404`.
+- **REQ-010**: HTTP request bodies MUST be capped at `4 MiB`.
+- **REQ-011**: Oversized request bodies MUST fail with status `413`.
+- **REQ-012**: Better Auth MUST require `auth.baseURL`, `auth.secret`, `auth.googleClientId`, `auth.googleClientSecret`, and at least one `auth.allowedEmails` entry.
+- **REQ-013**: Better Auth secret MUST be at least 32 characters.
+- **REQ-014**: Better Auth MUST use Google as the social provider.
+- **REQ-015**: Better Auth MUST use the bearer plugin.
+- **REQ-016**: Better Auth MUST default its SQLite database path to `.pibo/auth.sqlite`.
+- **REQ-017**: Better Auth startup MUST run database migrations.
+- **REQ-018**: Users whose email is not in the allowlist MUST receive `403`.
+- **REQ-019**: Missing auth sessions MUST receive `401`.
+- **REQ-020**: The chat web app page MUST be served at `GET /apps/chat`.
+- **REQ-021**: `GET /api/chat/session` MUST require an auth session and return identity, session binding, and available gateway actions.
+- **REQ-022**: Chat session resolution MUST use channel `chat-web`, external id equal to the authenticated user id, and default profile `pibo-minimal` unless overridden.
+- **REQ-023**: `POST /api/chat/message` MUST require same-origin JSON, an authenticated session, and non-empty string `text`.
+- **REQ-024**: `POST /api/chat/message` MUST emit a `message` input event with source `"user"`.
+- **REQ-025**: `POST /api/chat/action` MUST require same-origin JSON, an authenticated session, a non-empty string `action`, and JSON-serializable optional `params`.
+- **REQ-026**: `GET /api/chat/events` MUST return a Server-Sent Events stream.
+- **REQ-027**: The SSE stream MUST send an initial `ready` event containing the session key.
+- **REQ-028**: The SSE stream MUST forward only router output events whose `sessionKey` matches the authenticated user's binding.
+- **REQ-029**: Chat UI thinking output MUST be user-toggleable and hidden by default.
+- **SEC-001**: Chat mutation routes MUST reject non-JSON content types with `415`.
+- **SEC-002**: Chat mutation routes MUST reject missing `Origin` headers with `403`.
+- **SEC-003**: Chat mutation routes MUST reject cross-origin `Origin` headers with `403`.
+- **SEC-004**: Web apps MUST use same-origin cookies and MUST NOT require iframe or cross-origin auth flow.
+- **CON-001**: Google OAuth redirect URIs are exact per deployment and are not wildcarded by Pibo.
+
+## 4. Interfaces & Data Contracts
+
+### Auth Session
+
+```ts
+type PiboAuthSession = {
+  identity: {
+    userId: string;
+    email?: string;
+    name?: string;
+    image?: string;
+    provider?: string;
+  };
+  sessionId?: string;
+  expiresAt?: Date;
+};
+```
+
+### Web App
+
+```ts
+type PiboWebApp = {
+  name: string;
+  mountPath: string;
+  apiPrefix: string;
+  handleRequest(request: Request, context: PiboWebAppContext): Promise<Response | undefined> | Response | undefined;
+};
+```
+
+### Chat Routes
+
+| Route | Method | Auth | Behavior |
+| --- | --- | --- | --- |
+| `/apps/chat` | GET | UI handles auth state | Returns HTML chat app |
+| `/api/chat/session` | GET | required | Returns identity, binding, capabilities |
+| `/api/chat/message` | POST | required | Emits message event |
+| `/api/chat/action` | POST | required | Emits execution event |
+| `/api/chat/events` | GET | required | Opens SSE stream |
+| `/api/auth/*` | any | auth-service-owned | Delegates to Better Auth |
+
+### Session Response
+
+```json
+{
+  "identity": {
+    "userId": "user-id",
+    "email": "user@example.com",
+    "provider": "google"
+  },
+  "binding": {
+    "sessionKey": "chat-web:user-id",
+    "sessionId": "uuid",
+    "channel": "chat-web",
+    "externalId": "user-id",
+    "originalProfile": "pibo-minimal",
+    "createdAt": "2026-04-28T00:00:00.000Z",
+    "updatedAt": "2026-04-28T00:00:00.000Z"
+  },
+  "capabilities": {
+    "actions": []
+  }
+}
+```
+
+## 5. Acceptance Criteria
+
+- **AC-001**: Given web gateway startup without an auth service, When the web host channel is registered, Then startup fails.
+- **AC-002**: Given missing Better Auth config, When creating the Better Auth service, Then creation fails with a config-specific error.
+- **AC-003**: Given an unauthenticated request to `/api/chat/session`, When handled, Then response status is `401`.
+- **AC-004**: Given an authenticated user outside the allowlist, When `/api/chat/session` is requested, Then response status is `403`.
+- **AC-005**: Given an authenticated allowed user, When `/api/chat/session` is requested, Then a persistent `chat-web` binding is returned.
+- **AC-006**: Given a cross-origin POST to `/api/chat/message`, When handled, Then response status is `403`.
+- **AC-007**: Given a request body larger than `4 MiB`, When converted to a web request, Then status `413` is returned.
+- **AC-008**: Given an SSE subscription, When another session emits an event, Then that event is not written to this user's stream.
+
+## 6. Test Automation Strategy
+
+- **Test Levels**: Unit and integration tests.
+- **Frameworks**: Node.js built-in test runner and TypeScript compiler.
+- **Primary Command**: `npm test`.
+- **Focused Commands**: `node --test test/better-auth-config.test.mjs`, `node --test test/web-channel.test.mjs`, `node --test test/channel-runtime.test.mjs`.
+
+## 7. Rationale & Context
+
+The web implementation keeps auth, web hosting, and chat as separate plugin capabilities. This preserves the plugin boundary and avoids cross-origin complexity by serving auth and apps from the same origin.
+
+## 8. Dependencies & External Integrations
+
+### Third-Party Services
+
+- **SVC-001**: Google OAuth - Required social login provider for the current Better Auth implementation.
+
+### Infrastructure Dependencies
+
+- **INF-001**: `.pibo/config.json` for auth configuration.
+- **INF-002**: `.pibo/auth.sqlite` by default for Better Auth persistence.
+- **INF-003**: Session binding store, default `.pibo/session-bindings.sqlite` when the gateway owns the store.
+
+### Technology Platform Dependencies
+
+- **PLT-001**: Better Auth library.
+- **PLT-002**: Node.js HTTP server APIs.
+- **PLT-003**: SQLite through Node.js database APIs.
+
+## 9. Examples & Edge Cases
+
+### Required Local OAuth Redirect
+
+```text
+http://localhost:4788/api/auth/callback/google
+```
+
+### Same-Origin Message Request
+
+```http
+POST /api/chat/message
+Content-Type: application/json
+Origin: http://localhost:4788
+
+{"text":"Hello"}
+```
+
+### Invalid Action Params
+
+`POST /api/chat/action` rejects params containing non-JSON values such as functions, symbols, `undefined`, or non-finite numbers.
+
+## 10. Validation Criteria
+
+- Web channel and Better Auth tests pass.
+- `npm run typecheck` passes.
+- Manual local smoke flow works after required auth config is set:
+
+```bash
+npm run gateway:web
+```
+
+## 11. Related Specifications / Further Reading
+
+- [docs/architecture.md](../docs/architecture.md)
+- [README.md](../README.md)
+- [spec-schema-events-and-gateway.md](./spec-schema-events-and-gateway.md)

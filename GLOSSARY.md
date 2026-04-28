@@ -1,0 +1,162 @@
+# Pibo Glossary
+
+This glossary is the shared vocabulary for Pibo design, specs, docs, and implementation discussion.
+
+## Terms
+
+**Pibo**:
+The thin TypeScript product harness around Pi Coding Agent.
+
+**Pi Coding Agent**:
+The embedded inner agent engine responsible for model turns, tools, streaming, sessions, and compaction.
+
+**Product Boundary**:
+The outer layer owned by Pibo, including profiles, plugins, channels, routing, auth, policy, session bindings, and transport adapters.
+
+**Runtime**:
+The executable agent environment created from a selected profile and backed by Pi Coding Agent.
+
+**Routed Runtime**:
+A Pibo runtime reached through the session router instead of by talking to Pi Coding Agent directly.
+
+**Profile**:
+A named selection of tools, subagents, skills, context files, and runtime options exposed to an agent session.
+
+**Plugin**:
+A statically loaded internal module that registers Pibo capabilities with the plugin registry.
+
+**Plugin Registry**:
+The catalog where plugins register tools, subagents, skills, context files, profiles, gateway actions, event listeners, channels, auth services, and web apps.
+
+**Channel**:
+A plugin-owned adapter that maps an external transport into Pibo input events and maps Pibo output events back to that transport.
+
+**Transport**:
+The external communication mechanism used by a channel, such as local TCP, same-origin HTTP, or an in-process TUI adapter.
+
+**Session Router**:
+The Pibo component that owns routed sessions, queues input by session key, and emits normalized output events.
+
+**Routed Session**:
+A single Pibo conversation managed by the session router.
+
+**Session Binding**:
+A persistent mapping between a channel identity and a routed Pibo session.
+
+**sessionKey**:
+The stable semantic identifier used by channels, tools, and clients to route to a Pibo session.
+
+**sessionId**:
+The short technical Pi session identifier used for Pi persistence and provider cache affinity.
+
+**Input Event**:
+A normalized event sent into Pibo, either as user message input or as a wrapper-level execution request.
+
+**Message Event**:
+An input event that carries user-facing conversation text into the routed runtime.
+
+**Execution Event**:
+An input event that asks Pibo to perform a wrapper-level action such as status, abort, queue clear, dispose, or Pi session control.
+
+**Output Event**:
+A normalized event emitted by the router, such as assistant text, thinking, tool status, errors, or execution results.
+
+**Gateway**:
+The local transport boundary that accepts newline-delimited JSON frames over TCP, routes messages by session key, and broadcasts session events.
+
+**Gateway Action**:
+A discoverable execution action exposed through the gateway for channel UIs or clients.
+
+**Remote Agent Channel**:
+The built-in local channel that lets a controller attach to a Pibo session without speaking directly to Pi Coding Agent.
+
+**Local Routed TUI**:
+An optional terminal adapter that routes local TUI input through Pibo's session router without starting the gateway daemon.
+
+**Subagent**:
+A profile-scoped capability exposed to Pi as a generated tool that calls another registered profile through a routed child session.
+
+**Yielded Run**:
+A long-running tool invocation started through run-control tools so the agent can continue work and inspect the result later.
+
+**Run Registry**:
+The in-memory Pibo component that tracks yielded run ids, owners, status, policy, summaries, results, cancellation, and cleanup.
+
+**runId**:
+The stable identifier for one yielded run.
+
+**Completion Policy**:
+The yielded-run policy that controls reminder behavior, currently `tracked` or `detached`.
+
+**Tracked Run**:
+The default yielded run type that reminds the owning agent until the result is read, cancelled, or acknowledged.
+
+**Detached Run**:
+A fire-and-forget yielded run that remains inspectable but does not create automatic reminders.
+
+**Run-Control Tool**:
+An agent-facing tool for managing yielded runs, such as `pibo_run_start`, `pibo_run_status`, or `pibo_run_read`.
+
+**Yieldable Tool**:
+A normal synchronous tool that can also be wrapped by `pibo_run_start`.
+
+**MCP CLI**:
+The `pibo mcp` operator CLI for configuring, discovering, and calling external MCP servers from the shell.
+
+**MCP Server**:
+An external stdio or HTTP Model Context Protocol server configured outside the Pibo plugin runtime.
+
+**MCP Registry**:
+A curated list of optional MCP server presets that can be installed into the normal MCP config path.
+
+**Curated CLI Tool**:
+An optional external command-line tool managed by `pibo tools` instead of by the Pibo profile or MCP systems.
+
+**Tool Guide**:
+On-demand usage documentation printed by an operator CLI command instead of loaded into every agent profile.
+
+**Progressive Discovery**:
+The CLI design rule that each command level shows only the immediate command surface and points to the next useful command.
+
+**Auth Service**:
+A Pibo service boundary that validates identity for channels that require authentication.
+
+**Same-Origin Web Host**:
+The web gateway host that serves auth routes and registered web apps from one HTTP origin.
+
+**Web App**:
+A plugin-registered same-origin application served by the Pibo web host.
+
+**Chat Web App**:
+The current web app registered under `/apps/chat` and `/api/chat/*`.
+
+**Config CLI**:
+The `pibo config` operator CLI for managing local runtime config in `.pibo/config.json`.
+
+**Local Config**:
+Machine-local Pibo configuration stored in `.pibo/config.json`.
+
+## Relationships
+
+- **Pibo** embeds **Pi Coding Agent** and owns the **Product Boundary**.
+- A **Profile** selects tools, subagents, skills, context files, and runtime options for a **Runtime**.
+- A **Plugin** registers capabilities in the **Plugin Registry**.
+- A **Channel** translates a **Transport** into **Input Events** and translates **Output Events** back to that transport.
+- The **Session Router** owns many **Routed Sessions**.
+- A **Session Binding** maps a channel identity to one stable **sessionKey** and one technical **sessionId**.
+- A **Subagent** call creates or reuses a routed child session.
+- A **Yielded Run** is tracked in the **Run Registry** and identified by a **runId**.
+- A **Run-Control Tool** manages a **Yielded Run**; a **Yieldable Tool** is the wrapped work.
+- The **MCP CLI** manages **MCP Servers** outside the Pibo plugin runtime.
+- `pibo tools` manages **Curated CLI Tools** outside profiles and MCP.
+- The **Same-Origin Web Host** serves **Auth Service** routes and registered **Web Apps**.
+
+## Ambiguities
+
+- Use **Pibo** for the product harness and **Pi Coding Agent** for the embedded engine; do not call both "the agent runtime" without context.
+- Use **sessionKey** for semantic routing identity and **sessionId** for Pi's technical persistence/cache identity.
+- Use **Channel** for Pibo transport adapters and **Transport** for the underlying communication mechanism.
+- Use **Plugin** for internal static extension modules and **MCP Server** for external Model Context Protocol processes.
+- Use **Curated CLI Tool** for `pibo tools` entries and **Tool** for capabilities exposed to agents in profiles.
+- Use **Gateway Action** for channel/client execution actions and **Run-Control Tool** for agent-facing yielded-run tools.
+- Use **Local Routed TUI** for `npm run tui:routed` and direct **Pi TUI** for `npm run tui`.

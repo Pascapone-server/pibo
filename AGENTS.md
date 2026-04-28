@@ -69,3 +69,6 @@ If you have to dig deeper into the Pi Coding Agent: `~/code/pi-mono/packages/cod
 
 ## Rules
 Always read `RULES.md`. It contains all relevant rules for development and our project.
+
+## Glossary
+Always read `GLOSSARY.md`. It contains a shared vocabulary for our project.

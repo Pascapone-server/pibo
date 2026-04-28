@@ -11,10 +11,8 @@ import { createDefaultPiboPluginRegistry } from "../plugins/builtin.js";
 import type { PiboPluginRegistry } from "../plugins/registry.js";
 import type { PiboGatewayActionInfo } from "../plugins/types.js";
 import {
-	createPiboSessionId,
+	InMemorySessionBindingStore,
 	type PiboSessionBinding,
-	type PiboSessionBindingStore,
-	type ResolveSessionBindingInput,
 } from "../sessions/bindings.js";
 
 export const LOCAL_TUI_CHANNEL_NAME = "local-tui";
@@ -43,38 +41,6 @@ export type LocalRoutedTuiClientLike = {
 	sendExecution(action: PiboExecutionAction, params?: PiboJsonValue): Promise<unknown>;
 	close(): void | Promise<void>;
 };
-
-class InMemorySessionBindingStore implements PiboSessionBindingStore {
-	private readonly bySessionKey = new Map<string, PiboSessionBinding>();
-	private readonly byChannelExternalId = new Map<string, PiboSessionBinding>();
-
-	get(sessionKey: string): PiboSessionBinding | undefined {
-		return this.bySessionKey.get(sessionKey);
-	}
-
-	resolve(input: ResolveSessionBindingInput): PiboSessionBinding {
-		const channelExternalId = `${input.channel}:${input.externalId}`;
-		const existing = this.byChannelExternalId.get(channelExternalId);
-		if (existing) return existing;
-
-		const now = new Date().toISOString();
-		const binding: PiboSessionBinding = {
-			sessionKey: input.sessionKey ?? `${input.channel}:${input.externalId}`,
-			sessionId: input.sessionId ?? createPiboSessionId(),
-			parentSessionKey: input.parentSessionKey,
-			parentSessionId: input.parentSessionId,
-			channel: input.channel,
-			externalId: input.externalId,
-			originalProfile: input.defaultProfile,
-			workspace: input.workspace,
-			createdAt: now,
-			updatedAt: now,
-		};
-		this.bySessionKey.set(binding.sessionKey, binding);
-		this.byChannelExternalId.set(channelExternalId, binding);
-		return binding;
-	}
-}
 
 export class LocalRoutedTuiClient implements LocalRoutedTuiClientLike {
 	readonly capabilities: LocalRoutedTuiCapabilities;

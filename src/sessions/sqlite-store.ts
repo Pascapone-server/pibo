@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
+	createSessionBinding,
 	createPiboSessionId,
 	type PiboSessionBinding,
 	type PiboSessionBindingStore,
@@ -61,9 +62,7 @@ export class SqliteSessionBindingStore implements PiboSessionBindingStore {
 		const existing = this.findByChannelExternalId(input.channel, input.externalId);
 		if (existing) return existing;
 
-		const now = new Date().toISOString();
-		const sessionKey = input.sessionKey ?? `${input.channel}:${input.externalId}`;
-		const sessionId = input.sessionId ?? createPiboSessionId();
+		const binding = createSessionBinding(input);
 		this.db
 			.prepare(`
 				INSERT INTO session_bindings (
@@ -81,21 +80,21 @@ export class SqliteSessionBindingStore implements PiboSessionBindingStore {
 				) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
 			`)
 			.run(
-				sessionKey,
-				sessionId,
-				input.parentSessionKey ?? null,
-				input.parentSessionId ?? null,
-				input.channel,
-				input.externalId,
-				input.defaultProfile,
-				input.workspace ?? null,
-				now,
-				now,
+				binding.sessionKey,
+				binding.sessionId,
+				binding.parentSessionKey ?? null,
+				binding.parentSessionId ?? null,
+				binding.channel,
+				binding.externalId,
+				binding.originalProfile,
+				binding.workspace ?? null,
+				binding.createdAt,
+				binding.updatedAt,
 			);
 
-		const created = this.get(sessionKey);
+		const created = this.get(binding.sessionKey);
 		if (!created) {
-			throw new Error(`Failed to create session binding "${sessionKey}"`);
+			throw new Error(`Failed to create session binding "${binding.sessionKey}"`);
 		}
 		return created;
 	}
