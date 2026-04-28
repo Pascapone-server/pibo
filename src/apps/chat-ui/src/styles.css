@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+	--color-primary: #11a4d4;
+	--color-background-light: #f6f8f8;
+	--color-background-dark: #101d22;
+	--color-matrix-green: #0bda57;
+	--color-warning-orange: #ff6b00;
+	--color-surface-dark: #1a262b;
+	--color-surface-light: #ffffff;
+}
+
+html,
+body,
+#root {
+	height: 100%;
+}
+
+body {
+	margin: 0;
+	background: #101d22;
+	font-family:
+		-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue",
+		sans-serif;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+}
+
+button,
+textarea {
+	font: inherit;
+}
+
+code,
+pre {
+	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}

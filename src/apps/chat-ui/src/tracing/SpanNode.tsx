@@ -1,0 +1,497 @@
+import { useEffect, useMemo, useState } from "react";
+import {
+	ArrowDownToLine,
+	Bolt,
+	Bot,
+	Brain,
+	Check,
+	ChevronDown,
+	ChevronRight,
+	Eye,
+	EyeOff,
+	GitBranch,
+	Lightbulb,
+	MessageSquare,
+	User,
+} from "lucide-react";
+import type { Span, SpanStatus, SpanType } from "../types";
+import { JsonRenderer } from "./JsonRenderer";
+
+type SpanNodeProps = {
+	span: Span;
+	startTime: number;
+	depth?: number;
+	forceExpanded?: boolean;
+	forceExpandedSignal?: number;
+	forceContentExpanded?: boolean;
+	forceContentExpandedSignal?: number;
+	onFork?: (entryId: string) => void;
+	onOpenSession?: (sessionKey: string) => void;
+};
+
+type SpanTypeConfig = {
+	color: string;
+	bgColor: string;
+	borderColor: string;
+	label: string;
+};
+
+const spanTypeConfigs: Record<SpanType, SpanTypeConfig> = {
+	"agent.run": {
+		color: "text-[#11a4d4]",
+		bgColor: "bg-[#11a4d4]/20",
+		borderColor: "border-[#11a4d4]",
+		label: "Agent Run",
+	},
+	"tool.call": {
+		color: "text-purple-500",
+		bgColor: "bg-purple-500/20",
+		borderColor: "border-purple-500",
+		label: "Tool Call",
+	},
+	"tool.result": {
+		color: "text-green-500",
+		bgColor: "bg-green-500/20",
+		borderColor: "border-green-500",
+		label: "Tool Result",
+	},
+	"model.request": {
+		color: "text-blue-500",
+		bgColor: "bg-blue-500/20",
+		borderColor: "border-blue-500",
+		label: "Model Request",
+	},
+	"model.response": {
+		color: "text-[#0bda57]",
+		bgColor: "bg-[#0bda57]/20",
+		borderColor: "border-[#0bda57]",
+		label: "Model Response",
+	},
+	"model.reasoning": {
+		color: "text-amber-500",
+		bgColor: "bg-amber-500/20",
+		borderColor: "border-amber-500",
+		label: "Reasoning",
+	},
+	"agent.delegation": {
+		color: "text-orange-500",
+		bgColor: "bg-orange-500/20",
+		borderColor: "border-orange-500",
+		label: "Agent Delegation",
+	},
+	"user.prompt": {
+		color: "text-cyan-500",
+		bgColor: "bg-cyan-500/20",
+		borderColor: "border-cyan-500",
+		label: "User Prompt",
+	},
+	user_input: {
+		color: "text-slate-500",
+		bgColor: "bg-slate-800",
+		borderColor: "border-slate-600",
+		label: "User Input",
+	},
+};
+
+const NESTING_INDENT_PX = 12;
+
+export function SpanNode({
+	span,
+	startTime,
+	depth = 0,
+	forceExpanded,
+	forceExpandedSignal,
+	forceContentExpanded,
+	forceContentExpandedSignal,
+	onFork,
+	onOpenSession,
+}: SpanNodeProps) {
+	const [childrenExpanded, setChildrenExpanded] = useState(() => {
+		if (typeof forceExpanded === "boolean") return forceExpanded;
+		return false;
+	});
+	const [contentExpanded, setContentExpanded] = useState(() => {
+		if (typeof forceContentExpanded === "boolean") return forceContentExpanded;
+		return false;
+	});
+
+	useEffect(() => {
+		if (typeof forceExpanded === "boolean") setChildrenExpanded(forceExpanded);
+	}, [forceExpanded, forceExpandedSignal]);
+
+	useEffect(() => {
+		if (typeof forceContentExpanded === "boolean") setContentExpanded(forceContentExpanded);
+	}, [forceContentExpanded, forceContentExpandedSignal]);
+
+	const config = spanTypeConfigs[span.spanType] || spanTypeConfigs["agent.run"];
+	const isActive = span.status === "UNSET";
+	const statusStyles = getStatusStyles(span.status, isActive);
+	const hasChildren = Boolean(span.children?.length);
+	const relativeTime = formatRelativeTime(span.startTime, startTime);
+	const duration = span.durationUs
+		? `${(span.durationUs / 1000).toFixed(1)}ms`
+		: span.endTime
+			? `${((span.endTime - span.startTime) / 1000).toFixed(1)}ms`
+			: null;
+	const subtreeIndentPx = useMemo(() => getMaxDescendantDepth(span) * NESTING_INDENT_PX, [span]);
+
+	const handleToggle = () => {
+		setContentExpanded((current) => !current);
+		if (hasChildren) setChildrenExpanded((current) => !current);
+	};
+
+	return (
+		<div
+			className="relative mb-4 group"
+			style={{
+				marginLeft: depth > 0 ? NESTING_INDENT_PX : 0,
+				width: `calc(var(--trace-readable-width) + ${subtreeIndentPx}px)`,
+			}}
+		>
+			<div
+				className={`bg-white dark:bg-[#1a262b] border ${statusStyles.cardClass} rounded-sm shadow-sm transition-all hover:border-opacity-70 ${
+					isActive ? statusStyles.glowClass : ""
+				}`}
+			>
+				<button
+					type="button"
+					className={`w-full px-4 py-2 ${contentExpanded ? `border-b ${config.borderColor}/20` : ""} ${
+						statusStyles.headerClass
+					} cursor-pointer text-left`}
+					onClick={handleToggle}
+				>
+					<div className="box-border flex w-full min-w-0 items-center gap-3" style={{ maxWidth: "var(--trace-readable-width)" }}>
+						<span className={`min-w-0 flex-1 text-xs font-bold ${config.color} uppercase tracking-wider flex items-center gap-2`}>
+							{contentExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+							<span
+								className={`relative inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${config.bgColor} border-2 ${config.borderColor} ${
+									isActive ? "shadow-[0_0_10px_rgba(17,164,212,0.4)]" : ""
+								}`}
+							>
+								<SpanIcon type={span.spanType} className={config.color} />
+								{isActive ? <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-[#11a4d4] animate-pulse" /> : null}
+							</span>
+							{config.label}
+							{span.name ? (
+								<span className="min-w-0 truncate font-normal text-slate-500 dark:text-slate-400 normal-case">
+									: {span.name}
+								</span>
+							) : null}
+							{isActive ? <span className="w-1.5 h-1.5 rounded-full bg-[#11a4d4] animate-pulse" /> : null}
+						</span>
+						<div className="ml-auto flex w-36 shrink-0 items-center justify-end gap-2 font-mono tabular-nums">
+							{duration ? <span className="text-[10px] text-slate-500 dark:text-slate-400">{duration}</span> : null}
+							<span className="text-xs text-slate-400 dark:text-slate-500">{relativeTime}</span>
+						</div>
+					</div>
+				</button>
+
+				{contentExpanded ? (
+					<SpanContent span={span} onFork={onFork} onOpenSession={onOpenSession} />
+				) : null}
+
+				{hasChildren && childrenExpanded && contentExpanded ? (
+					<div className="border-t border-slate-700 bg-slate-900/50 py-4">
+						{span.children?.map((child) => (
+							<SpanNode
+								key={child.id}
+								span={child}
+								startTime={startTime}
+								depth={depth + 1}
+								forceExpanded={forceExpanded}
+								forceExpandedSignal={forceExpandedSignal}
+								forceContentExpanded={forceContentExpanded}
+								forceContentExpandedSignal={forceContentExpandedSignal}
+								onFork={onFork}
+								onOpenSession={onOpenSession}
+							/>
+						))}
+					</div>
+				) : null}
+			</div>
+		</div>
+	);
+}
+
+function SpanContent({
+	span,
+	onFork,
+	onOpenSession,
+}: {
+	span: Span;
+	onFork?: (entryId: string) => void;
+	onOpenSession?: (sessionKey: string) => void;
+}) {
+	const [showDetails, setShowDetails] = useState(false);
+	const { spanType, attributes, name } = span;
+	const content = attributes.content || attributes.input || attributes.output || attributes.message;
+	const rawToolName = attributes.tool_name || (attributes.tool as Record<string, unknown> | undefined)?.name || attributes["tool.name"];
+	const toolName = typeof rawToolName === "string" ? rawToolName : null;
+	const toolOutput = attributes.output || attributes.result || attributes["tool.result"];
+	const toolArgs = attributes.arguments || attributes.args || attributes["tool.arguments"];
+
+	const actions = (
+		<SpanActions
+			entryId={span.pibo?.entryId}
+			linkedSessionKey={span.pibo?.linkedSessionKey}
+			onFork={onFork}
+			onOpenSession={onOpenSession}
+		/>
+	);
+
+	const errorBanner =
+		span.status === "ERROR" ? (
+			<div className="mx-4 mt-4 p-3 bg-red-500/10 border border-red-500/20 rounded-sm text-xs">
+				<div className="flex items-center gap-2 font-semibold text-red-500 mb-1">Error</div>
+				{span.statusMessage ? <div className="font-mono text-red-400 mb-2">{span.statusMessage}</div> : null}
+			</div>
+		) : null;
+
+	if (spanType === "user.prompt" || spanType === "user_input") {
+		return (
+			<div className="flex flex-col">
+				{actions}
+				{errorBanner}
+				<div className="p-4 font-mono text-sm text-slate-300 whitespace-pre-wrap">
+					"{typeof content === "string" ? content : JSON.stringify(content)}"
+				</div>
+			</div>
+		);
+	}
+
+	if (spanType === "model.response") {
+		return (
+			<div className="flex flex-col">
+				{actions}
+				{errorBanner}
+				<div className="p-4 text-sm text-slate-200 whitespace-pre-wrap leading-relaxed">
+					{typeof content === "string" ? content : <JsonRenderer value={content} />}
+				</div>
+			</div>
+		);
+	}
+
+	if (spanType === "tool.result") {
+		return (
+			<div className="flex flex-col">
+				{actions}
+				{errorBanner}
+				<div className="p-4 bg-green-500/5 border-t border-green-500/20">
+					<div className="text-xs font-medium text-green-400 mb-2">Returned from {toolName || name}:</div>
+					<JsonRenderer value={toolOutput ?? content} />
+				</div>
+			</div>
+		);
+	}
+
+	if (spanType === "tool.call") {
+		const argsRecord = isRecord(toolArgs) ? toolArgs : {};
+		const hasArgs = Object.keys(argsRecord).length > 0;
+		const displayName = toolName ?? name;
+		return (
+			<>
+				{actions}
+				<div className="p-4 bg-[#0e1116] border-b border-slate-800">
+					<ToolSignature name={displayName} args={argsRecord} />
+				</div>
+				{toolOutput != null ? (
+					<div className="px-4 py-2 bg-[#1a262b] flex items-center gap-2">
+						<ArrowDownToLine size={14} className="text-slate-400" />
+						<span className="text-xs font-mono text-slate-500">Output:</span>
+						<code className="text-xs font-mono text-slate-300 truncate max-w-md">
+							{typeof toolOutput === "string" ? toolOutput.slice(0, 100) : JSON.stringify(toolOutput).slice(0, 100)}
+						</code>
+					</div>
+				) : null}
+				<button
+					type="button"
+					onClick={() => setShowDetails((current) => !current)}
+					className="w-full px-4 py-1.5 flex items-center gap-1.5 text-[11px] font-medium text-slate-400 hover:text-slate-200 bg-slate-900/40 hover:bg-slate-800/60 border-t border-slate-700/40 transition-colors"
+				>
+					{showDetails ? <EyeOff size={12} /> : <Eye size={12} />}
+					{showDetails ? "Hide Details" : "Show Details"}
+				</button>
+				{showDetails ? (
+					<div className="border-t border-slate-700/40 bg-[#0e1116]">
+						{hasArgs ? (
+							<div className="px-4 pt-3 pb-2">
+								<div className="text-[10px] font-semibold text-blue-400 uppercase tracking-wider mb-1.5">Input</div>
+								<JsonRenderer value={argsRecord} />
+							</div>
+						) : null}
+						{toolOutput != null ? (
+							<div className="px-4 pt-2 pb-3 border-t border-slate-700/30">
+								<div className="text-[10px] font-semibold text-green-400 uppercase tracking-wider mb-1.5">Output</div>
+								<JsonRenderer value={toolOutput} />
+							</div>
+						) : null}
+					</div>
+				) : null}
+				{errorBanner}
+			</>
+		);
+	}
+
+	if (spanType === "model.reasoning") {
+		const reasoning = attributes.reasoning || attributes["model.reasoning"] || content;
+		return (
+			<div className="flex flex-col">
+				{actions}
+				{errorBanner}
+				<div className="p-4 font-mono text-sm text-slate-300 bg-amber-500/5 leading-relaxed whitespace-pre-wrap">
+					<span className="text-amber-500 opacity-60">// Model reasoning</span>
+					<br />
+					{typeof reasoning === "string" ? reasoning : JSON.stringify(reasoning, null, 2)}
+				</div>
+			</div>
+		);
+	}
+
+	if (spanType === "agent.delegation") {
+		const targetAgent = attributes["delegation.target_agent"] as string | undefined;
+		const query = attributes["delegation.query"];
+		const resultStatus = attributes["result.status"] as string | undefined;
+		return (
+			<>
+				{actions}
+				{errorBanner}
+				<div className="p-4 border-b border-orange-500/20 bg-orange-500/5">
+					<div className="flex items-center gap-2 mb-2">
+						<GitBranch size={14} className="text-orange-500" />
+						<span className="text-sm font-medium text-orange-500">Delegated to:</span>
+						<span className="text-sm font-semibold text-slate-200">{targetAgent || "unknown"} agent</span>
+						{resultStatus ? <span className="ml-2 px-2 py-0.5 text-[10px] font-bold rounded-sm bg-green-500/20 text-green-500">{resultStatus.toUpperCase()}</span> : null}
+					</div>
+					{query ? <div className="text-xs text-slate-400 font-mono italic line-clamp-2">"{stringify(query)}"</div> : null}
+				</div>
+			</>
+		);
+	}
+
+	if (spanType === "agent.run") {
+		return (
+			<div className="flex flex-col">
+				{actions}
+				{errorBanner}
+			</div>
+		);
+	}
+
+	return (
+		<div className="flex flex-col">
+			{actions}
+			{errorBanner}
+			<div className="p-4 font-mono text-sm text-slate-300">
+				<JsonRenderer value={attributes} />
+			</div>
+		</div>
+	);
+}
+
+function SpanActions({
+	entryId,
+	linkedSessionKey,
+	onFork,
+	onOpenSession,
+}: {
+	entryId?: string;
+	linkedSessionKey?: string;
+	onFork?: (entryId: string) => void;
+	onOpenSession?: (sessionKey: string) => void;
+}) {
+	if (!entryId && !linkedSessionKey) return null;
+	return (
+		<div className="px-4 py-2 flex gap-2 border-b border-slate-800 bg-slate-900/20">
+			{entryId ? (
+				<button type="button" onClick={() => onFork?.(entryId)} className="px-2 py-1 text-[11px] border border-slate-700 rounded-sm hover:border-[#11a4d4]">
+					Fork From Here
+				</button>
+			) : null}
+			{linkedSessionKey ? (
+				<button type="button" onClick={() => onOpenSession?.(linkedSessionKey)} className="px-2 py-1 text-[11px] border border-slate-700 rounded-sm hover:border-[#11a4d4]">
+					Open Child Session
+				</button>
+			) : null}
+		</div>
+	);
+}
+
+function ToolSignature({ name, args }: { name: string; args: Record<string, unknown> }) {
+	return (
+		<code className="font-mono text-xs text-green-400">
+			<span className="text-purple-400">def</span> <span className="text-yellow-300">{name}</span>
+			{Object.keys(args).length > 0 ? (
+				<span>
+					(
+					{Object.entries(args).map(([key, value], index) => (
+						<span key={key}>
+							{index > 0 ? ", " : null}
+							<span className="text-blue-400">{key}</span>=
+							<span className="text-green-300">{typeof value === "string" ? `'${value.slice(0, 50)}${value.length > 50 ? "..." : ""}'` : stringify(value).slice(0, 50)}</span>
+						</span>
+					))}
+					)
+				</span>
+			) : null}
+		</code>
+	);
+}
+
+function SpanIcon({ type, className }: { type: SpanType; className?: string }) {
+	const props = { size: 14, className };
+	switch (type) {
+		case "agent.run":
+			return <Brain {...props} />;
+		case "tool.call":
+			return <Bolt {...props} />;
+		case "tool.result":
+			return <ArrowDownToLine {...props} />;
+		case "model.request":
+			return <Bot {...props} />;
+		case "model.response":
+			return <ArrowDownToLine {...props} />;
+		case "model.reasoning":
+			return <Lightbulb {...props} />;
+		case "agent.delegation":
+			return <GitBranch {...props} />;
+		case "user.prompt":
+			return <MessageSquare {...props} />;
+		case "user_input":
+			return <User {...props} />;
+		default:
+			return <Check {...props} />;
+	}
+}
+
+function getStatusStyles(status: SpanStatus, isActive: boolean) {
+	if (status === "ERROR") return { cardClass: "border-[#ff6b00]/50", headerClass: "bg-[#ff6b00]/5", glowClass: "" };
+	if (status === "OK") return { cardClass: "border-[#0bda57]/30", headerClass: "bg-[#0bda57]/5", glowClass: "" };
+	if (isActive) return { cardClass: "border-[#11a4d4]/50", headerClass: "bg-[#11a4d4]/5", glowClass: "shadow-[0_0_10px_rgba(17,164,212,0.1)]" };
+	return { cardClass: "border-slate-700", headerClass: "bg-[#151f24]", glowClass: "" };
+}
+
+function formatRelativeTime(currentUs: number, startUs: number): string {
+	const diffMs = (currentUs - startUs) / 1000;
+	const minutes = Math.floor(diffMs / 60000);
+	const seconds = Math.floor((diffMs % 60000) / 1000);
+	const milliseconds = Math.floor(diffMs % 1000);
+	return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${String(milliseconds).padStart(3, "0")}`;
+}
+
+function getMaxDescendantDepth(span: Span): number {
+	if (!span.children?.length) return 0;
+	return 1 + Math.max(...span.children.map(getMaxDescendantDepth));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function stringify(value: unknown): string {
+	if (typeof value === "string") return value;
+	try {
+		return JSON.stringify(value);
+	} catch {
+		return String(value);
+	}
+}

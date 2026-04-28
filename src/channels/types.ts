@@ -16,7 +16,9 @@ export type PiboChannelContext = {
 	emit(event: PiboInputEvent): Promise<PiboOutputEvent>;
 	subscribe(listener: PiboEventListener): () => void;
 	resolveSession(input: ResolveSessionBindingInput): PiboSessionBinding;
+	listSessions?(): PiboSessionBinding[];
 	getGatewayActions(): PiboGatewayActionInfo[];
+	getProfiles?(): Array<{ name: string; description?: string; aliases: string[] }>;
 	auth?: PiboAuthService;
 	getWebApps(): PiboWebApp[];
 };

@@ -38,6 +38,12 @@ export type PiboProfileDefinition = {
 	create(context: PiboProfileBuildContext): InitialSessionContext;
 };
 
+export type PiboProfileInfo = {
+	name: string;
+	description?: string;
+	aliases: string[];
+};
+
 export type PiboGatewayActionContext = {
 	sessionKey: string;
 	getStatus(): PiboSessionStatus;

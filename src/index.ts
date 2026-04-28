@@ -46,6 +46,7 @@ export type {
 	PiboPluginEventListener,
 	PiboProfileBuildContext,
 	PiboProfileDefinition,
+	PiboProfileInfo,
 } from "./plugins/types.js";
 export { createPiboGatewayToolProfiles } from "./gateway/tool.js";
 export { createPiboTestToolProfiles } from "./plugins/core-tools.js";

@@ -1,0 +1,107 @@
+export type PiboTraceNodeType =
+	| "user.message"
+	| "assistant.message"
+	| "agent.turn"
+	| "model.reasoning"
+	| "tool.call"
+	| "tool.result"
+	| "agent.delegation"
+	| "execution.command"
+	| "yielded.run"
+	| "error";
+
+export type PiboTraceNodeStatus = "running" | "done" | "error";
+
+export type PiboTraceNode = {
+	id: string;
+	parentId?: string;
+	entryId?: string;
+	sessionKey: string;
+	eventId?: string;
+	toolCallId?: string;
+	runId?: string;
+	type: PiboTraceNodeType;
+	title: string;
+	status: PiboTraceNodeStatus;
+	startedAt?: string;
+	completedAt?: string;
+	durationMs?: number;
+	summary?: string;
+	input?: unknown;
+	output?: unknown;
+	error?: string;
+	linkedSessionKey?: string;
+	children: PiboTraceNode[];
+};
+
+export type PiboWebSessionNode = {
+	sessionKey: string;
+	sessionId: string;
+	parentSessionKey?: string;
+	profile: string;
+	title: string;
+	subtitle?: string;
+	status: "idle" | "running" | "error";
+	lastActivityAt?: string;
+	children: PiboWebSessionNode[];
+};
+
+export type PiboSessionTraceView = {
+	sessionKey: string;
+	sessionId: string;
+	title: string;
+	nodes: PiboTraceNode[];
+	rawEvents: Array<{ id: string; type: string; createdAt: string; payload: unknown }>;
+};
+
+export type BootstrapData = {
+	identity: { userId: string; email?: string; name?: string };
+	binding: { sessionKey: string; sessionId: string };
+	selectedSessionKey: string;
+	sessions: PiboWebSessionNode[];
+	agents: Array<{ name: string; description?: string; aliases: string[] }>;
+	capabilities: { actions: Array<{ name: string; description?: string; slashCommands: string[] }> };
+};
+
+export type SpanType =
+	| "agent.run"
+	| "tool.call"
+	| "tool.result"
+	| "model.request"
+	| "model.response"
+	| "model.reasoning"
+	| "agent.delegation"
+	| "user.prompt"
+	| "user_input";
+
+export type SpanStatus = "UNSET" | "OK" | "ERROR";
+
+export type Span = {
+	id: string;
+	parentId?: string;
+	name: string;
+	spanType: SpanType;
+	startTime: number;
+	endTime?: number;
+	durationUs?: number;
+	attributes: Record<string, unknown>;
+	status: SpanStatus;
+	statusMessage?: string;
+	events: Array<{ name: string; timestamp: number; attributes: Record<string, unknown> }>;
+	children?: Span[];
+	pibo?: {
+		entryId?: string;
+		linkedSessionKey?: string;
+		traceNodeType: PiboTraceNodeType;
+	};
+};
+
+export type Trace = {
+	id: string;
+	name: string;
+	status: SpanStatus;
+	spans: Span[];
+	startedAt: Date;
+	completedAt?: Date;
+	totalDurationMs: number;
+};

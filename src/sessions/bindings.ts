@@ -27,6 +27,7 @@ export type ResolveSessionBindingInput = {
 
 export type PiboSessionBindingStore = {
 	get(sessionKey: string): PiboSessionBinding | undefined;
+	list?(): PiboSessionBinding[];
 	resolve(input: ResolveSessionBindingInput): PiboSessionBinding;
 	close?(): void;
 };
@@ -60,6 +61,10 @@ export class InMemorySessionBindingStore implements PiboSessionBindingStore {
 
 	get(sessionKey: string): PiboSessionBinding | undefined {
 		return this.bySessionKey.get(sessionKey);
+	}
+
+	list(): PiboSessionBinding[] {
+		return [...this.bySessionKey.values()];
 	}
 
 	resolve(input: ResolveSessionBindingInput): PiboSessionBinding {

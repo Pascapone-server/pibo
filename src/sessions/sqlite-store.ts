@@ -58,6 +58,12 @@ export class SqliteSessionBindingStore implements PiboSessionBindingStore {
 		return row ? bindingFromRow(row) : undefined;
 	}
 
+	list(): PiboSessionBinding[] {
+		return (this.db.prepare("SELECT * FROM session_bindings ORDER BY updated_at DESC").all() as BindingRow[]).map(
+			bindingFromRow,
+		);
+	}
+
 	resolve(input: ResolveSessionBindingInput): PiboSessionBinding {
 		const existing = this.findByChannelExternalId(input.channel, input.externalId);
 		if (existing) return existing;

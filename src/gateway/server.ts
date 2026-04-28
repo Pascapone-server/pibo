@@ -222,7 +222,9 @@ export class PiboGatewayServer {
 				const defaultProfile = this.pluginRegistry.resolveProfileName(input.defaultProfile);
 				return this.requireBindingStore().resolve({ ...input, defaultProfile });
 			},
+			listSessions: () => this.requireBindingStore().list?.() ?? [],
 			getGatewayActions: () => this.pluginRegistry.getGatewayActionInfos(),
+			getProfiles: () => this.pluginRegistry.getProfileInfos(),
 			auth: this.pluginRegistry.getAuthService(),
 			getWebApps: () => this.pluginRegistry.getWebApps(),
 		};

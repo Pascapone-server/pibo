@@ -17,24 +17,40 @@
     "tui:routed": "tsx src/bin/pibo.ts tui:routed",
     "tui:gateway": "tsx src/bin/pibo.ts tui gateway-producer",
     "gateway": "tsx src/bin/pibo.ts gateway",
-    "gateway:web": "tsx src/bin/pibo.ts gateway:web",
+    "gateway:web": "npm run chat-ui:build && tsx src/bin/pibo.ts gateway:web",
     "client": "tsx src/bin/pibo.ts client",
-    "build": "tsc -p tsconfig.json",
+    "chat-ui:build": "vite build --config src/apps/chat-ui/vite.config.ts",
+    "chat-ui:typecheck": "tsc -p src/apps/chat-ui/tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json && npm run chat-ui:build",
     "start": "node dist/bin/pibo.js",
     "test": "npm run build && node --test test/*.test.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && npm run chat-ui:typecheck",
     "clean": "node -e \"fs.rmSync('dist', { recursive: true, force: true })\""
   },
   "dependencies": {
     "@mariozechner/pi-ai": "^0.70.2",
     "@mariozechner/pi-coding-agent": "^0.70.2",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@tailwindcss/vite": "^4.2.4",
+    "@tanstack/react-router": "^1.168.25",
+    "@tanstack/react-start": "^1.167.50",
+    "@uiw/react-json-view": "^2.0.0-alpha.41",
     "better-auth": "^1.6.9",
-    "commander": "^14.0.3"
+    "commander": "^14.0.3",
+    "lucide-react": "^0.545.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "tailwindcss": "^4.2.4"
   },
   "devDependencies": {
+    "@tanstack/router-plugin": "^1.167.28",
     "@types/node": "^25.6.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
     "tsx": "^4.21.0",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vite": "^8.0.10",
+    "vite-tsconfig-paths": "^5.1.4"
   }
 }

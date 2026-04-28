@@ -15,6 +15,7 @@ import type {
 	PiboPlugin,
 	PiboPluginApi,
 	PiboPluginEventListener,
+	PiboProfileInfo,
 	PiboProfileBuildContext,
 	PiboProfileDefinition,
 } from "./types.js";
@@ -160,6 +161,14 @@ export class PiboPluginRegistry {
 
 	getProfileNames(): string[] {
 		return [...this.profiles.keys()];
+	}
+
+	getProfileInfos(): PiboProfileInfo[] {
+		return [...this.profiles.values()].map((profile) => ({
+			name: profile.name,
+			description: profile.description,
+			aliases: [...(profile.aliases ?? [])],
+		}));
 	}
 
 	resolveProfileName(name: string): string {
