@@ -15,7 +15,7 @@ Pibo is a minimal TypeScript wrapper around Pi Coding Agent. This file is a shor
 - The profile can be inspected through `npm run profile`.
 - Session routing exists in `src/core/session-router.ts`.
 - Gateway transport exists in `src/gateway/` and can be started with `npm run gateway`.
-- A console gateway client exists through `npm run client -- <sessionKey>`.
+- A console gateway client exists through `npm run client -- <piboSessionId>`.
 - A gateway producer profile exists through `npm run tui:gateway`.
 - A `run-yield-qa` profile exists for manual QA of yielded runs through the routed runtime.
 - Core event contracts live in `src/core/events.ts`.
@@ -31,7 +31,7 @@ Pibo is a minimal TypeScript wrapper around Pi Coding Agent. This file is a shor
 - Yielded runs are tracked in-memory by the session router with compact parent notifications, bounded waits, read/cancel/ack controls, and simple TTL cleanup.
 - Plugins can register channels through `api.registerChannel(...)`.
 - Plugins can register same-origin web apps through `api.registerWebApp(...)`.
-- Gateway channel sessions are backed by SQLite session bindings in `.pibo/session-bindings.sqlite`.
+- Gateway channel sessions are backed by the SQLite Pibo Session store in `.pibo/pibo-sessions.sqlite`.
 - The local routed TUI adapter lives in `src/local/` and uses an in-process router instead of a gateway daemon.
 - An authenticated web gateway path exists through `npm run gateway:web`, split into Better Auth, a same-origin web host, and the chat web app.
 - The Chat Web App can create additional personal sessions, reconstructs trace nodes from Pi JSONL plus raw Pibo events, groups persisted tool calls under the final assistant response, and filters empty reasoning artifacts from trace output.
@@ -42,7 +42,7 @@ Pibo is a minimal TypeScript wrapper around Pi Coding Agent. This file is a shor
 
 ## Session Routing
 
-The router is intentionally small. Producers emit events with a `sessionKey`. The router lazily creates one Pi runtime per session key, queues message events per session, and executes wrapper actions directly.
+The router is intentionally small. Producers emit events with a `piboSessionId`. The router resolves the matching Pibo Session record, lazily creates one Pi runtime per Pibo Session ID, queues message events per session, and executes wrapper actions directly.
 
 Message events are agent input. They enter the session FIFO and are sent to Pi with `session.prompt(...)`.
 
@@ -59,7 +59,7 @@ Pi session actions are also exposed through the same execution path:
 - `session.tree_navigate`
 - `session.switch`
 
-Fork and clone follow Pi Coding Agent semantics: the active Pi runtime for the current routed `sessionKey` is replaced with the forked or cloned session. The old Pi session remains persisted and can be reactivated with `session.switch`. Tree navigation stays in the current Pi session and moves the active leaf.
+Fork and clone call Pi Coding Agent's underlying operations but surface as new visible Pibo Sessions with `kind: "branch"` and `originId` pointing at the source session. The source session remains linked to its previous `piSessionId`. Tree navigation stays in the selected Pi session and moves the active leaf.
 
 Slash commands are independent from this event naming. A slash command such as `/compact` can still be sent as a normal message event when it should wait behind queued messages.
 
@@ -88,17 +88,21 @@ The current example plugin registers the skill at `examples/skills/pibo-example-
 
 Subagents are registered capabilities that profiles can opt into with `addSubagent(...)` or `addSubagents(...)`. Each subagent points at a target profile, so the called agent can have a different prompt context, skills, tools, and its own nested subagents.
 
-At runtime, pibo turns enabled subagents into generated Pi tools named `pibo_subagent_<name>`. Calling one of these tools routes a message into a normal pibo session whose key follows:
+At runtime, pibo turns enabled subagents into generated Pi tools named `pibo_subagent_<name>`. Calling one of these tools routes a message into a normal child Pibo Session:
 
 ```text
-<parentSessionKey>::sub::<subagentName>::<threadKey>
+channel: pibo.subagents
+kind: subagent
+parentId: <parent Pibo Session ID>
+profile: <target profile>
+metadata: { subagentName, subagentToolName, threadKey }
 ```
 
-Omitting `threadKey` creates a fresh child session. Reusing `threadKey` continues the same child session, which keeps subagent work inspectable and multi-turn. Subagent tools are synchronous normal tools; long-running subagent work is yielded by wrapping the subagent tool with `pibo_run_start`.
+Omitting `threadKey` creates a fresh child session. Reusing the same parent, target profile, subagent metadata, and `threadKey` continues the same child session, which keeps subagent work inspectable and multi-turn. Subagent tools are synchronous normal tools; long-running subagent work is yielded by wrapping the subagent tool with `pibo_run_start`.
 
 Profiles that expose yieldable tools also expose run-control tools. `pibo_run_start` wraps a yieldable tool call as a yielded run and returns a `runId`; `pibo_run_list`, `pibo_run_status`, `pibo_run_wait`, `pibo_run_read`, `pibo_run_cancel`, and `pibo_run_ack` manage the run afterward. Tracked runs are the default and remind the parent agent with compact `<pibo_run_notification>` service messages until they are read, cancelled, or acknowledged. Detached runs are explicit fire-and-forget work and do not create automatic reminders.
 
-## Channels And Session Bindings
+## Channels And Pibo Sessions
 
 Channels are plugin-owned adapters. They translate external transports such as a web app, Telegram, or another service into pibo input events and translate pibo output events back to the transport.
 
@@ -106,25 +110,27 @@ The channel context intentionally exposes only the product boundary:
 
 - `emit(event)` routes a `PiboInputEvent`.
 - `subscribe(listener)` observes normalized `PiboOutputEvent` values.
-- `resolveSession(input)` creates or reuses a persistent binding.
+- `getSession(id)`, `createSession(input)`, `updateSession(id, input)`, and `findSessions(input)` work with Pibo Session records.
 
-Session bindings keep the semantic conversation key separate from the technical Pi session id and agent profile:
+Pibo Sessions keep product routing data separate from the technical Pi session id:
 
 ```ts
-type PiboSessionBinding = {
-  sessionKey: string;
-  sessionId: string;
-  parentSessionKey?: string;
-  parentSessionId?: string;
+type PiboSession = {
+  id: string;
+  piSessionId: string;
   channel: string;
-  externalId: string;
-  originalProfile: string;
-  currentProfile?: string;
+  kind: string;
+  profile: string;
+  ownerScope?: string;
+  parentId?: string;
+  originId?: string;
   workspace?: string;
+  title?: string;
+  metadata?: Record<string, unknown>;
 };
 ```
 
-The gateway uses SQLite for bindings by default. Channels and tools route by stable `sessionKey`; Pi persistence and provider cache affinity use the short `sessionId`. Subagent bindings also store their parent key/id pair so the Pi session tree stays linked without overloading the routed key.
+The gateway uses SQLite for Pibo Sessions by default. Channels and tools route by stable `PiboSession.id`; Pi persistence and provider cache affinity use `PiboSession.piSessionId`. Subagent nesting uses `parentId`. Fork/clone derivation uses `originId`.
 
 ## Channel Examples
 
@@ -132,14 +138,14 @@ The gateway uses SQLite for bindings by default. Channels and tools route by sta
 Chat Web App
   -> same-origin API request
   -> auth/session policy
-  -> resolveSession(channel=chat-web, externalId=userId)
+  -> create/select Pibo Session(ownerScope=user:<userId>, channel=pibo.chat-web)
   -> PiboSessionRouter
   -> Core Pi Coding Agent
   -> PiboOutputEvent
   -> HTTP response / streamed UI update
 ```
 
-The chat web path is the primary concrete channel example. It shows how a channel resolves identity to a stable session binding, emits routed input events, observes normalized output events, and keeps auth outside the agent runtime.
+The chat web path is the primary concrete channel example. It shows how a channel resolves identity to an owner scope, creates or selects Pibo Sessions, emits routed input events, observes normalized output events, and keeps auth outside the agent runtime.
 
 ```mermaid
 flowchart LR
@@ -201,7 +207,7 @@ flowchart LR
     BUS --> ROUTER
     ROUTER --> TYPE
 
-    TYPE -->|message| MRoute[Route by sessionKey]
+    TYPE -->|message| MRoute[Route by piboSessionId]
     TYPE -->|execution| ERoute[Direct wrapper action]
 
     MRoute -->|Session A| QA
@@ -222,4 +228,4 @@ flowchart LR
 - Keep auth as a gateway/channel boundary service; web apps such as chat should consume auth rather than live inside the auth plugin.
 - Keep MCP presets optional and externally installed; do not turn registry entries into core package dependencies.
 - Design explicit model-provider configuration for MCP-backed agent tools before sharing credentials with external servers.
-- Add disk resume by `sessionKey` later only when we introduce a real session index.
+- Keep disk resume explicit through the Pibo Session store; do not infer product state from Pi session filenames.

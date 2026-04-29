@@ -27,7 +27,7 @@ type SpanNodeProps = {
 	forceContentExpanded?: boolean;
 	forceContentExpandedSignal?: number;
 	onFork?: (entryId: string) => void;
-	onOpenSession?: (sessionKey: string) => void;
+	onOpenSession?: (piboSessionId: string) => void;
 };
 
 type SpanTypeConfig = {
@@ -215,7 +215,7 @@ function SpanHeader({
 	relativeTime: string;
 	onToggle: () => void;
 	onFork?: (entryId: string) => void;
-	onOpenSession?: (sessionKey: string) => void;
+	onOpenSession?: (piboSessionId: string) => void;
 }) {
 	const headerClassName = `${contentExpanded ? `border-b ${config.borderColor}/20` : ""} ${statusStyles.headerClass}`;
 
@@ -237,7 +237,7 @@ function SpanHeader({
 				</button>
 				<SpanHeaderActions
 					forkEntryId={span.pibo?.traceNodeType === "user.message" ? span.pibo.entryId : undefined}
-					linkedSessionKey={span.pibo?.linkedSessionKey}
+					linkedPiboSessionId={span.pibo?.linkedPiboSessionId}
 					onFork={onFork}
 					onOpenSession={onOpenSession}
 				/>
@@ -429,18 +429,18 @@ function SpanContent({ span }: { span: Span }) {
 
 function SpanHeaderActions({
 	forkEntryId,
-	linkedSessionKey,
+	linkedPiboSessionId,
 	onFork,
 	onOpenSession,
 }: {
 	forkEntryId?: string;
-	linkedSessionKey?: string;
+	linkedPiboSessionId?: string;
 	onFork?: (entryId: string) => void;
-	onOpenSession?: (sessionKey: string) => void;
+	onOpenSession?: (piboSessionId: string) => void;
 }) {
 	const forkableEntryId = forkEntryId && onFork ? forkEntryId : undefined;
-	const childSessionKey = linkedSessionKey && onOpenSession ? linkedSessionKey : undefined;
-	if (!forkableEntryId && !childSessionKey) return null;
+	const childPiboSessionId = linkedPiboSessionId && onOpenSession ? linkedPiboSessionId : undefined;
+	if (!forkableEntryId && !childPiboSessionId) return null;
 	return (
 		<div className="flex shrink-0 items-center gap-1">
 			{forkableEntryId ? (
@@ -454,10 +454,10 @@ function SpanHeaderActions({
 					<GitBranch size={14} />
 				</button>
 			) : null}
-			{childSessionKey ? (
+			{childPiboSessionId ? (
 				<button
 					type="button"
-					onClick={() => onOpenSession?.(childSessionKey)}
+					onClick={() => onOpenSession?.(childPiboSessionId)}
 					className="inline-flex h-8 w-8 items-center justify-center rounded-sm border border-slate-700 bg-[#151f24]/80 text-slate-400 transition-colors hover:border-[#11a4d4] hover:text-[#11a4d4]"
 					title="Open child session"
 					aria-label="Open child session"

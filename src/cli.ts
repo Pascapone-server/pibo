@@ -166,14 +166,14 @@ export async function runPiboCli(argv = process.argv): Promise<void> {
 		);
 	program
 		.command("router")
-		.argument("[sessionKey]", "Session key", "demo")
+		.argument("[piboSessionId]", "Pibo session id", "demo")
 		.description("Emit a demo router status event")
-		.action(async (sessionKey: string) => {
+		.action(async (piboSessionId: string) => {
 			const { PiboSessionRouter } = await import("./core/session-router.js");
 			const router = new PiboSessionRouter({ persistSession: false });
 			const event = await router.emit({
 				type: "execution",
-				sessionKey,
+				piboSessionId,
 				action: "status",
 			});
 			printJson(event);
@@ -195,11 +195,11 @@ export async function runPiboCli(argv = process.argv): Promise<void> {
 		});
 	program
 		.command("client")
-		.argument("[sessionKey]", "Session key", "default")
+		.argument("[piboSessionId]", "Pibo session id", "default")
 		.description("Start a console gateway client")
-		.action(async (sessionKey: string) => {
+		.action(async (piboSessionId: string) => {
 			const { runGatewayClient } = await import("./gateway/client.js");
-			await runGatewayClient({ sessionKey });
+			await runGatewayClient({ piboSessionId });
 		});
 
 	if (argv.length <= 2) {

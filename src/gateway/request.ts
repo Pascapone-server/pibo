@@ -110,7 +110,7 @@ export async function sendGatewayMessageAndWaitForReply(
 		let reply: PiboAssistantMessageEvent | undefined;
 
 		const timeout = setTimeout(() => {
-			finish(new Error(`Timed out waiting for assistant reply from session "${event.sessionKey}"`));
+			finish(new Error(`Timed out waiting for assistant reply from session "${event.piboSessionId}"`));
 		}, timeoutMs);
 
 		const finish = (result: GatewayReplyResult | Error) => {
@@ -142,7 +142,7 @@ export async function sendGatewayMessageAndWaitForReply(
 			const output = frame.payload;
 			if (
 				output.type === "session_error" &&
-				output.sessionKey === eventWithId.sessionKey &&
+				output.piboSessionId === eventWithId.piboSessionId &&
 				output.eventId === eventWithId.id
 			) {
 				finish(new Error(output.error));
@@ -151,7 +151,7 @@ export async function sendGatewayMessageAndWaitForReply(
 
 			if (
 				output.type === "assistant_message" &&
-				output.sessionKey === eventWithId.sessionKey &&
+				output.piboSessionId === eventWithId.piboSessionId &&
 				output.eventId === eventWithId.id
 			) {
 				reply = output;

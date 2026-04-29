@@ -11,9 +11,9 @@ import { createDefaultPiboPluginRegistry } from "../plugins/builtin.js";
 import type { PiboPluginRegistry } from "../plugins/registry.js";
 import type { PiboGatewayActionInfo } from "../plugins/types.js";
 import {
-	InMemorySessionBindingStore,
-	type PiboSessionBinding,
-} from "../sessions/bindings.js";
+	InMemoryPiboSessionStore,
+	type PiboSession,
+} from "../sessions/store.js";
 
 export const LOCAL_TUI_CHANNEL_NAME = "local-tui";
 
@@ -34,7 +34,7 @@ export type LocalRoutedTuiCapabilities = {
 export type LocalRoutedTuiEventListener = (event: PiboOutputEvent) => void;
 
 export type LocalRoutedTuiClientLike = {
-	readonly binding: PiboSessionBinding;
+	readonly piboSession: PiboSession;
 	readonly capabilities: LocalRoutedTuiCapabilities;
 	onEvent(listener: LocalRoutedTuiEventListener): () => void;
 	sendMessage(text: string): Promise<unknown>;
@@ -51,12 +51,12 @@ export class LocalRoutedTuiClient implements LocalRoutedTuiClientLike {
 
 	constructor(
 		private readonly router: PiboSessionRouter,
-		readonly binding: PiboSessionBinding,
+		readonly piboSession: PiboSession,
 		capabilities: LocalRoutedTuiCapabilities,
 	) {
 		this.capabilities = capabilities;
 		this.unsubscribe = router.subscribe((event) => {
-			if (event.sessionKey !== this.binding.sessionKey) return;
+			if (event.piboSessionId !== this.piboSession.id) return;
 			for (const listener of this.eventListeners) {
 				listener(event);
 			}
@@ -71,7 +71,7 @@ export class LocalRoutedTuiClient implements LocalRoutedTuiClientLike {
 	sendMessage(text: string): Promise<unknown> {
 		return this.router.emit({
 			type: "message",
-			sessionKey: this.binding.sessionKey,
+			piboSessionId: this.piboSession.id,
 			id: randomUUID(),
 			text,
 			source: "ui",
@@ -81,8 +81,8 @@ export class LocalRoutedTuiClient implements LocalRoutedTuiClientLike {
 	sendExecution(action: PiboExecutionAction, params?: PiboJsonValue): Promise<unknown> {
 		const event: PiboExecutionEvent =
 			params === undefined
-				? { type: "execution", sessionKey: this.binding.sessionKey, id: randomUUID(), action }
-				: { type: "execution", sessionKey: this.binding.sessionKey, id: randomUUID(), action, params };
+				? { type: "execution", piboSessionId: this.piboSession.id, id: randomUUID(), action }
+				: { type: "execution", piboSessionId: this.piboSession.id, id: randomUUID(), action, params };
 		return this.router.emit(event);
 	}
 
@@ -95,21 +95,17 @@ export class LocalRoutedTuiClient implements LocalRoutedTuiClientLike {
 	}
 }
 
-function createLocalSessionKey(profile: string, sessionName: string): string {
-	return `${LOCAL_TUI_CHANNEL_NAME}:${profile}:${sessionName}`;
-}
-
 export function createLocalRoutedTuiClient(options: LocalRoutedTuiOptions = {}): LocalRoutedTuiClient {
 	const registry = options.pluginRegistry ?? createDefaultPiboPluginRegistry();
 	const profileName = registry.resolveProfileName(options.profile ?? "pibo-minimal");
 	const profile = registry.createProfile(profileName);
 	const sessionName = options.sessionName ?? "default";
-	const bindingStore = new InMemorySessionBindingStore();
-	const binding = bindingStore.resolve({
+	const sessionStore = new InMemoryPiboSessionStore();
+	const piboSession = sessionStore.create({
 		channel: LOCAL_TUI_CHANNEL_NAME,
-		externalId: `${profileName}:${sessionName}`,
-		sessionKey: createLocalSessionKey(profileName, sessionName),
-		defaultProfile: profileName,
+		kind: "local",
+		profile: profileName,
+		title: sessionName,
 		workspace: options.cwd,
 	});
 	const router = new PiboSessionRouter({
@@ -118,8 +114,8 @@ export function createLocalRoutedTuiClient(options: LocalRoutedTuiOptions = {}):
 		thinkingLevel: options.thinkingLevel,
 		pluginRegistry: registry,
 		profile,
-		bindingStore,
+		sessionStore,
 	});
 
-	return new LocalRoutedTuiClient(router, binding, { actions: registry.getGatewayActionInfos() });
+	return new LocalRoutedTuiClient(router, piboSession, { actions: registry.getGatewayActionInfos() });
 }

@@ -20,7 +20,7 @@ import { parsePiboThinkingLevel } from "../core/thinking.js";
 export type GatewayClientOptions = {
 	host?: string;
 	port?: number;
-	sessionKey?: string;
+	piboSessionId?: string;
 };
 
 type GatewayClientRenderState = {
@@ -49,9 +49,9 @@ function printResponse(frame: GatewayResponseFrame): void {
 
 function isSessionStatus(value: unknown): value is PiboSessionStatus {
 	if (!value || typeof value !== "object") return false;
-	const candidate = value as { sessionKey?: unknown; queuedMessages?: unknown; processing?: unknown };
+	const candidate = value as { piboSessionId?: unknown; queuedMessages?: unknown; processing?: unknown };
 	return (
-		typeof candidate.sessionKey === "string" &&
+		typeof candidate.piboSessionId === "string" &&
 		typeof candidate.queuedMessages === "number" &&
 		typeof candidate.processing === "boolean"
 	);
@@ -60,7 +60,7 @@ function isSessionStatus(value: unknown): value is PiboSessionStatus {
 function printExecutionResult(event: Extract<PiboOutputEvent, { type: "execution_result" }>): void {
 	if (event.action === "status" && isSessionStatus(event.result)) {
 		console.error(
-			`status: session=${event.result.sessionKey} queued=${event.result.queuedMessages} processing=${event.result.processing} streaming=${event.result.streaming}`,
+			`status: session=${event.result.piboSessionId} queued=${event.result.queuedMessages} processing=${event.result.processing} streaming=${event.result.streaming}`,
 		);
 		return;
 	}
@@ -86,11 +86,11 @@ function printIncomingMessage(
 	console.error(`\nincoming ${source}> ${event.text}`);
 }
 
-function printEvent(frame: GatewayFrame, sessionKey: string, state: GatewayClientRenderState): void {
+function printEvent(frame: GatewayFrame, piboSessionId: string, state: GatewayClientRenderState): void {
 	if (frame.type !== "event" || frame.event !== "router") return;
 
 	const event = frame.payload;
-	if (event.sessionKey !== sessionKey) return;
+	if (event.piboSessionId !== piboSessionId) return;
 
 	if (event.type === "message_queued") {
 		printIncomingMessage(event, state);
@@ -145,7 +145,7 @@ function printEvent(frame: GatewayFrame, sessionKey: string, state: GatewayClien
 export async function runGatewayClient(options: GatewayClientOptions = {}): Promise<void> {
 	const host = options.host ?? DEFAULT_GATEWAY_HOST;
 	const port = options.port ?? DEFAULT_GATEWAY_PORT;
-	const sessionKey = options.sessionKey ?? "default";
+	const piboSessionId = options.piboSessionId ?? "default";
 
 	const socket = connect({ host, port });
 	socket.setEncoding("utf-8");
@@ -156,7 +156,7 @@ export async function runGatewayClient(options: GatewayClientOptions = {}): Prom
 	});
 
 	console.error(`connected to pibo gateway at ${host}:${port}`);
-	console.error(`session: ${sessionKey}`);
+	console.error(`session: ${piboSessionId}`);
 	console.error("type a message, /status, /clear, /abort, /thinking [level], /thinking-show, or /quit");
 
 	let buffer = "";
@@ -176,7 +176,7 @@ export async function runGatewayClient(options: GatewayClientOptions = {}): Prom
 			if (frame?.type === "res") {
 				printResponse(frame);
 			} else if (frame?.type === "event") {
-				printEvent(frame, sessionKey, renderState);
+				printEvent(frame, piboSessionId, renderState);
 			}
 			newlineIndex = buffer.indexOf("\n");
 		}
@@ -209,8 +209,8 @@ export async function runGatewayClient(options: GatewayClientOptions = {}): Prom
 					id: randomUUID(),
 					event:
 						params === undefined
-							? { type: "execution", sessionKey, action: "thinking" }
-							: { type: "execution", sessionKey, action: "thinking", params },
+							? { type: "execution", piboSessionId, action: "thinking" }
+							: { type: "execution", piboSessionId, action: "thinking", params },
 				});
 				continue;
 			}
@@ -220,7 +220,7 @@ export async function runGatewayClient(options: GatewayClientOptions = {}): Prom
 				writeFrame(socket, {
 					type: "req",
 					id: randomUUID(),
-					event: { type: "execution", sessionKey, action },
+					event: { type: "execution", piboSessionId, action },
 				});
 				continue;
 			}
@@ -228,7 +228,7 @@ export async function runGatewayClient(options: GatewayClientOptions = {}): Prom
 			writeFrame(socket, {
 				type: "req",
 				id: randomUUID(),
-				event: { type: "message", sessionKey, text, source: "user" },
+				event: { type: "message", piboSessionId, text, source: "user" },
 			});
 		}
 	} finally {

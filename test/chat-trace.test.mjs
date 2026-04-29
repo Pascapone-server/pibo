@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildTraceView, traceNodesFromEntries } from "../dist/apps/chat/trace.js";
 
-function createTestBinding(overrides = {}) {
+function createTestSession(overrides = {}) {
 	return {
-		sessionKey: "chat:test",
-		sessionId: "missing-session-id",
-		channel: "chat-web",
-		externalId: "test",
-		originalProfile: "pibo-minimal",
+		id: "chat:test",
+		piSessionId: "missing-session-id",
+		channel: "pibo.chat-web",
+		kind: "chat",
+		profile: "pibo-minimal",
 		createdAt: "2026-04-29T08:00:00.000Z",
 		updatedAt: "2026-04-29T08:00:00.000Z",
 		...overrides,
@@ -70,33 +70,33 @@ test("chat trace skips empty assistant reasoning entries", () => {
 });
 
 test("chat trace skips empty live reasoning events", async () => {
-	const binding = createTestBinding();
+	const session = createTestSession();
 	const view = await buildTraceView({
-		binding,
-		bindings: [binding],
+		session,
+		sessions: [session],
 		events: [
 			{
 				id: "event-1",
-				sessionKey: "chat:test",
+				piboSessionId: "chat:test",
 				eventId: "turn-1",
 				type: "thinking_finished",
 				createdAt: "2026-04-29T08:00:01.000Z",
 				payload: {
 					type: "thinking_finished",
-					sessionKey: "chat:test",
+					piboSessionId: "chat:test",
 					eventId: "turn-1",
 					text: "",
 				},
 			},
 			{
 				id: "event-2",
-				sessionKey: "chat:test",
+				piboSessionId: "chat:test",
 				eventId: "turn-1",
 				type: "assistant_message",
 				createdAt: "2026-04-29T08:00:02.000Z",
 				payload: {
 					type: "assistant_message",
-					sessionKey: "chat:test",
+					piboSessionId: "chat:test",
 					eventId: "turn-1",
 					text: "visible answer",
 				},
@@ -113,20 +113,20 @@ test("chat trace skips empty live reasoning events", async () => {
 });
 
 test("chat trace hides internal fork and switch execution results", async () => {
-	const binding = createTestBinding();
+	const session = createTestSession();
 	const view = await buildTraceView({
-		binding,
-		bindings: [binding],
+		session,
+		sessions: [session],
 		events: [
 			{
 				id: "event-1",
-				sessionKey: "chat:test",
+				piboSessionId: "chat:test",
 				eventId: "fork-1",
 				type: "execution_result",
 				createdAt: "2026-04-29T08:00:01.000Z",
 				payload: {
 					type: "execution_result",
-					sessionKey: "chat:test",
+					piboSessionId: "chat:test",
 					eventId: "fork-1",
 					action: "session.fork",
 					result: { selectedText: "edit me" },
@@ -134,13 +134,13 @@ test("chat trace hides internal fork and switch execution results", async () => 
 			},
 			{
 				id: "event-2",
-				sessionKey: "chat:test",
+				piboSessionId: "chat:test",
 				eventId: "switch-1",
 				type: "execution_result",
 				createdAt: "2026-04-29T08:00:02.000Z",
 				payload: {
 					type: "execution_result",
-					sessionKey: "chat:test",
+					piboSessionId: "chat:test",
 					eventId: "switch-1",
 					action: "session.switch",
 					result: { ok: true },
@@ -148,13 +148,13 @@ test("chat trace hides internal fork and switch execution results", async () => 
 			},
 			{
 				id: "event-3",
-				sessionKey: "chat:test",
+				piboSessionId: "chat:test",
 				eventId: "status-1",
 				type: "execution_result",
 				createdAt: "2026-04-29T08:00:03.000Z",
 				payload: {
 					type: "execution_result",
-					sessionKey: "chat:test",
+					piboSessionId: "chat:test",
 					eventId: "status-1",
 					action: "status",
 					result: { ok: true },

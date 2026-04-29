@@ -2,7 +2,7 @@
 title: Pibo Event And Gateway Schema Specification
 version: 1.0
 date_created: 2026-04-28
-last_updated: 2026-04-28
+last_updated: 2026-04-29
 owner: Pibo maintainers
 tags: [schema, events, gateway, sessions]
 ---
@@ -29,10 +29,11 @@ This specification does not define HTTP chat API payloads; those are covered by 
 - **Execution action**: A command-like event that invokes a registered gateway action rather than sending text to the model.
 - **Gateway frame**: A newline-delimited JSON object exchanged over the local TCP gateway.
 - **JSON value**: `null`, boolean, finite number, string, array of JSON values, or object whose values are JSON values.
+- **Pibo Session ID**: The `PiboSession.id` value used for product routing and event correlation.
 
 ## 3. Requirements, Constraints & Guidelines
 
-- **REQ-001**: Every input event MUST include a non-empty `sessionKey`.
+- **REQ-001**: Every input event MUST include a non-empty `piboSessionId`.
 - **REQ-002**: Message input events MUST have `type: "message"` and string `text`.
 - **REQ-003**: Execution input events MUST have `type: "execution"` and string `action`.
 - **REQ-004**: Execution `params`, when present in a gateway request frame, MUST be JSON serializable.
@@ -62,7 +63,7 @@ This specification does not define HTTP chat API payloads; those are covered by 
 ```ts
 type PiboMessageEvent = {
   type: "message";
-  sessionKey: string;
+  piboSessionId: string;
   text: string;
   source?: "user" | "ui" | "service" | "actor";
   id?: string;
@@ -70,7 +71,7 @@ type PiboMessageEvent = {
 
 type PiboExecutionEvent = {
   type: "execution";
-  sessionKey: string;
+  piboSessionId: string;
   action: string;
   id?: string;
   params?: PiboJsonValue;
@@ -82,7 +83,7 @@ type PiboExecutionEvent = {
 | Action | Params | Result |
 | --- | --- | --- |
 | `status` | none | `PiboSessionStatus` |
-| `session_id` | none | `{ sessionKey }` |
+| `session_id` | none | `{ piboSessionId }` |
 | `clear_queue` | none | `{ cleared }` |
 | `abort` | none | `{ aborted: true }` |
 | `dispose` | none | `{ disposed: true }` |
@@ -100,21 +101,21 @@ type PiboExecutionEvent = {
 
 ```ts
 type PiboOutputEvent =
-  | { type: "message_queued"; sessionKey: string; eventId?: string; queuedMessages: number; text: string; source?: PiboEventSource }
-  | { type: "message_started"; sessionKey: string; eventId?: string; text: string; source?: PiboEventSource }
-  | { type: "assistant_delta"; sessionKey: string; eventId?: string; text: string }
-  | { type: "assistant_message"; sessionKey: string; eventId?: string; text: string }
-  | { type: "thinking_started"; sessionKey: string; eventId?: string }
-  | { type: "thinking_delta"; sessionKey: string; eventId?: string; text: string }
-  | { type: "thinking_finished"; sessionKey: string; eventId?: string; text?: string }
-  | { type: "tool_call"; sessionKey: string; eventId?: string; toolCallId: string; toolName: string; args: unknown; argsComplete: boolean }
-  | { type: "tool_execution_started"; sessionKey: string; eventId?: string; toolCallId: string; toolName: string; args: unknown }
-  | { type: "tool_execution_updated"; sessionKey: string; eventId?: string; toolCallId: string; toolName: string; args: unknown; partialResult: unknown }
-  | { type: "tool_execution_finished"; sessionKey: string; eventId?: string; toolCallId: string; toolName: string; result: unknown; isError: boolean }
-  | { type: "message_finished"; sessionKey: string; eventId?: string; source?: PiboEventSource }
-  | { type: "execution_result"; sessionKey: string; eventId?: string; action: string; result: unknown }
-  | { type: "session_error"; sessionKey: string; eventId?: string; error: string }
-  | { type: "pi_event"; sessionKey: string; event: unknown };
+  | { type: "message_queued"; piboSessionId: string; eventId?: string; queuedMessages: number; text: string; source?: PiboEventSource }
+  | { type: "message_started"; piboSessionId: string; eventId?: string; text: string; source?: PiboEventSource }
+  | { type: "assistant_delta"; piboSessionId: string; eventId?: string; text: string }
+  | { type: "assistant_message"; piboSessionId: string; eventId?: string; text: string }
+  | { type: "thinking_started"; piboSessionId: string; eventId?: string }
+  | { type: "thinking_delta"; piboSessionId: string; eventId?: string; text: string }
+  | { type: "thinking_finished"; piboSessionId: string; eventId?: string; text?: string }
+  | { type: "tool_call"; piboSessionId: string; eventId?: string; toolCallId: string; toolName: string; args: unknown; argsComplete: boolean }
+  | { type: "tool_execution_started"; piboSessionId: string; eventId?: string; toolCallId: string; toolName: string; args: unknown }
+  | { type: "tool_execution_updated"; piboSessionId: string; eventId?: string; toolCallId: string; toolName: string; args: unknown; partialResult: unknown }
+  | { type: "tool_execution_finished"; piboSessionId: string; eventId?: string; toolCallId: string; toolName: string; result: unknown; isError: boolean }
+  | { type: "message_finished"; piboSessionId: string; eventId?: string; source?: PiboEventSource }
+  | { type: "execution_result"; piboSessionId: string; eventId?: string; action: string; result: unknown }
+  | { type: "session_error"; piboSessionId: string; eventId?: string; error: string }
+  | { type: "pi_event"; piboSessionId: string; event: unknown };
 ```
 
 ### Gateway Frames
@@ -143,7 +144,7 @@ type GatewayEventFrame = {
 
 ## 5. Acceptance Criteria
 
-- **AC-001**: Given a gateway request frame with a missing `sessionKey`, When validated, Then it is rejected.
+- **AC-001**: Given a gateway request frame with a missing `piboSessionId`, When validated, Then it is rejected.
 - **AC-002**: Given a message request frame with string `text`, When validated, Then it is accepted.
 - **AC-003**: Given an execution request frame with non-JSON `params`, When validated, Then it is rejected.
 - **AC-004**: Given a valid request frame, When the router emits successfully, Then the gateway returns `{ type: "res", id, ok: true, payload }`.
@@ -177,22 +178,22 @@ Pibo normalizes Pi runtime events so transports can consume stable event types w
 ### Message Request
 
 ```json
-{"type":"req","id":"1","event":{"type":"message","sessionKey":"demo","text":"Hello","source":"user"}}
+{"type":"req","id":"1","event":{"type":"message","piboSessionId":"demo","text":"Hello","source":"user"}}
 ```
 
 ### Execution Request
 
 ```json
-{"type":"req","id":"2","event":{"type":"execution","sessionKey":"demo","action":"status"}}
+{"type":"req","id":"2","event":{"type":"execution","piboSessionId":"demo","action":"status"}}
 ```
 
 ### Invalid Request
 
 ```json
-{"type":"req","id":"3","event":{"type":"execution","sessionKey":"","action":"status"}}
+{"type":"req","id":"3","event":{"type":"execution","piboSessionId":"","action":"status"}}
 ```
 
-The invalid request fails gateway frame validation because `sessionKey` is empty.
+The invalid request fails gateway frame validation because `piboSessionId` is empty.
 
 ## 10. Validation Criteria
 

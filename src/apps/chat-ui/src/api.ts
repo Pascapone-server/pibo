@@ -1,12 +1,12 @@
 import type { BootstrapData, CreateSessionData, PiboSessionTraceView } from "./types";
 
-export async function getBootstrap(sessionKey?: string): Promise<BootstrapData> {
-	const suffix = sessionKey ? `?sessionKey=${encodeURIComponent(sessionKey)}` : "";
+export async function getBootstrap(piboSessionId?: string): Promise<BootstrapData> {
+	const suffix = piboSessionId ? `?piboSessionId=${encodeURIComponent(piboSessionId)}` : "";
 	return requestJson<BootstrapData>(`/api/chat/bootstrap${suffix}`);
 }
 
-export async function getTrace(sessionKey: string): Promise<PiboSessionTraceView> {
-	return requestJson<PiboSessionTraceView>(`/api/chat/trace?sessionKey=${encodeURIComponent(sessionKey)}`);
+export async function getTrace(piboSessionId: string): Promise<PiboSessionTraceView> {
+	return requestJson<PiboSessionTraceView>(`/api/chat/trace?piboSessionId=${encodeURIComponent(piboSessionId)}`);
 }
 
 export async function postSession(): Promise<CreateSessionData> {
@@ -17,19 +17,19 @@ export async function postSession(): Promise<CreateSessionData> {
 	});
 }
 
-export async function postMessage(sessionKey: string, text: string): Promise<unknown> {
+export async function postMessage(piboSessionId: string, text: string): Promise<unknown> {
 	return requestJson("/api/chat/message", {
 		method: "POST",
 		headers: { "content-type": "application/json" },
-		body: JSON.stringify({ sessionKey, text }),
+		body: JSON.stringify({ piboSessionId, text }),
 	});
 }
 
-export async function postAction(sessionKey: string, action: string, params?: unknown): Promise<unknown> {
+export async function postAction(piboSessionId: string, action: string, params?: unknown): Promise<unknown> {
 	return requestJson("/api/chat/action", {
 		method: "POST",
 		headers: { "content-type": "application/json" },
-		body: JSON.stringify({ sessionKey, action, params }),
+		body: JSON.stringify({ piboSessionId, action, params }),
 	});
 }
 

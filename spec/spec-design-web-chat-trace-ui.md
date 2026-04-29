@@ -49,7 +49,7 @@ Out of scope for V1:
 - **Subagent Session**: A routed Pibo session created by a generated `pibo_subagent_<name>` tool call.
 - **Delegation**: A trace node representing a subagent call from one session to another session.
 - **Trace Node**: A UI node representing a structured unit of agent work.
-- **Read Model**: Pibo-owned SQLite data optimized for web rendering and navigation. It is derived from Pibo events, session bindings, and Pi session files.
+- **Read Model**: Pibo-owned SQLite data optimized for web rendering and navigation. It is derived from Pibo events, Pibo Sessions, and Pi session files.
 - **Source of Truth**: The canonical owner of state. Pi session JSONL files remain the source of truth for persisted agent transcript content.
 - **Execution Command**: A Pibo wrapper action such as `status`, `abort`, `clear_queue`, `session.clone`, `session.fork`, or `thinking`.
 - **Slash Command**: A command entered through the chat composer command menu, modeled after the Local Routed TUI command behavior.
@@ -95,7 +95,7 @@ Out of scope for V1:
 - **REQ-035**: If the user confirms the fork switch modal, the Web App must select the forked session and reload that session's transcript and reconstructed traces.
 - **REQ-036**: If the user declines the fork switch modal, the selected session and visible transcript must remain unchanged.
 - **REQ-037**: Full session tree browsing and tree navigation UI are deferred from V1.
-- **REQ-038**: The Web App must use a separate SQLite database for web read-model state, distinct from `.pibo/session-bindings.sqlite`.
+- **REQ-038**: The Web App must use a separate SQLite database for web read-model state, distinct from `.pibo/pibo-sessions.sqlite`.
 - **REQ-039**: The dedicated web database must be `.pibo/web-chat.sqlite` and must not replace Pi JSONL session files.
 - **REQ-040**: Pi JSONL files remain canonical for persisted transcript messages, thinking content, tool calls, tool results, session tree entries, compaction, fork, and clone data.
 - **REQ-041**: The web read model must store product/session index data and raw Pibo events needed for reload and trace reconstruction.
@@ -114,7 +114,7 @@ Out of scope for V1:
 - **CON-001**: Pibo must not move channel, auth, profile, or UI policy into Pi Coding Agent.
 - **CON-002**: Pibo must preserve the existing product boundary: Pi owns agent execution and session JSONL; Pibo owns channels, routing, auth, policy, web UI, and read models.
 - **CON-003**: The Web App must consume Pibo view models derived from Pi JSONL and Pibo events, not raw Pi events directly.
-- **CON-004**: SQLite single-writer constraints must be considered. The Web App read model uses a separate database to reduce coupling with session bindings.
+- **CON-004**: SQLite single-writer constraints must be considered. The Web App read model uses a separate database to reduce coupling with the Pibo Session store.
 - **CON-005**: V1 must not persist materialized trace nodes as durable state. Trace nodes are a reconstructable projection.
 - **CON-006**: TanStack Start server-side features must not become the authority for Pibo auth, session routing, profile resolution, or agent execution. Those responsibilities remain in the Pibo web host, channel, router, and plugin/runtime layers.
 - **GUD-001**: The left sidebar may be dynamic by app area. In the `Sessions` area, it shows sessions. In future areas, it may show agents or settings navigation.
@@ -130,9 +130,10 @@ Out of scope for V1:
 type PiboWebSessionStatus = "idle" | "running" | "error";
 
 type PiboWebSessionNode = {
-  sessionKey: string;
-  sessionId: string;
-  parentSessionKey?: string;
+  piboSessionId: string;
+  piSessionId: string;
+  parentId?: string;
+  originId?: string;
   profile: string;
   title: string;
   subtitle?: string;
@@ -146,9 +147,9 @@ Session title selection order:
 
 1. Use `session_info.name` from the Pi session file when present.
 2. Otherwise use the first user message from the Pi session, truncated for sidebar display.
-3. Otherwise use the `sessionKey`.
+3. Otherwise use the Pibo Session ID.
 
-The sidebar must also expose the `sessionKey` as secondary text or tooltip so technical identity remains visible even when a friendly title exists.
+The sidebar must also expose the Pibo Session ID as secondary text or tooltip so technical identity remains visible even when a friendly title exists.
 
 ### 4.2 Pibo Trace Node
 
@@ -170,7 +171,7 @@ type PiboTraceNodeStatus = "running" | "done" | "error";
 type PiboTraceNode = {
   id: string;
   parentId?: string;
-  sessionKey: string;
+  piboSessionId: string;
   eventId?: string;
   toolCallId?: string;
   runId?: string;
@@ -184,7 +185,7 @@ type PiboTraceNode = {
   input?: unknown;
   output?: unknown;
   error?: string;
-  linkedSessionKey?: string;
+  linkedPiboSessionId?: string;
   children: PiboTraceNode[];
 };
 ```
@@ -221,7 +222,7 @@ V1 must not persist materialized trace nodes. Trace nodes such as `tool.call`, `
 
 Expected stored categories:
 
-- Session index rows derived from session bindings and Pi session metadata.
+- Session index rows derived from Pibo Sessions and Pi session metadata.
 - Parent-child session relationships for sidebar nesting.
 - Pibo event log rows for web-renderable product events.
 - Session selection metadata if required for navigation.
@@ -259,7 +260,7 @@ The full `/tree` command is not a V1 Web Chat command because full tree browsing
 - **AC-010**: Given the user types `/` in the composer, When commands are available, Then a keyboard-navigable slash command menu opens.
 - **AC-011**: Given the user selects `/clone`, When the command completes, Then the Web App switches to the cloned session returned by Pibo.
 - **AC-012**: Given a user message trace node, When the user clicks its fork control and fork succeeds, Then the Web App shows a small modal asking whether to switch to the forked session.
-- **AC-013**: Given the server restarts, When the app reloads, Then previously persisted session transcript content is reconstructed from Pi JSONL and session relationships from Pibo bindings/read model.
+- **AC-013**: Given the server restarts, When the app reloads, Then previously persisted session transcript content is reconstructed from Pi JSONL and session relationships from Pibo Sessions/read model.
 - **AC-014**: Given live events were indexed before reload, When the app reloads, Then execution command/error/tool lifecycle display is reconstructed from Pi JSONL plus the raw Pibo event log where the stored data is sufficient.
 - **AC-015**: Given the transcript contains thinking blocks and thinking display is off, When the user enables `/thinking-show`, Then historical thinking blocks become visible without changing model thinking effort.
 - **AC-016**: Given trace nodes are visible for the first time, When the view renders, Then nested trace nodes are collapsed by default.
@@ -269,7 +270,7 @@ The full `/tree` command is not a V1 Web Chat command because full tree browsing
 
 - **Unit Tests**:
   - Pi JSONL plus raw Pibo event-to-trace-node aggregation.
-  - Session tree construction from bindings and parent session keys.
+  - Session tree construction from Pibo Sessions and `parentId`.
   - Subagent tool-name detection and delegation linking.
   - Slash command normalization and dispatch mapping.
   - Read-model repository insert/query behavior.
@@ -307,7 +308,7 @@ However, Pibo Web Chat needs data that Pi JSONL does not fully own or does not e
 - Pibo execution command events and results.
 - Pibo session errors.
 - Web navigation indexes.
-- Subagent session relationships by `sessionKey`.
+- Subagent session relationships by Pibo Session `parentId`.
 - Yielded run lifecycle and policy metadata.
 
 The dedicated SQLite read model solves web rendering and reload requirements without changing Pi ownership of transcript persistence. V1 stores raw Pibo events rather than durable materialized trace nodes so future execution concepts such as workflows, agent teams, approvals, and scheduled runs can be represented by new events without migrating a UI-shaped storage model.
@@ -319,7 +320,7 @@ The pydantic-tracing UI is the chosen reference because it already solves nested
 ### External Systems
 
 - **EXT-001**: Pi Coding Agent session JSONL files - Canonical transcript and session tree data.
-- **EXT-002**: Pibo session binding store - Existing SQLite mapping for `sessionKey`, `sessionId`, channel, profile, and parent session information.
+- **EXT-002**: Pibo Session store - SQLite persistence for Pibo Session IDs, Pi Session IDs, channel, kind, profile, owner scope, parent/origin relationships, workspace, title, and metadata.
 
 ### Third-Party Services
 
@@ -357,7 +358,7 @@ Main Session A selected
 
 ```text
 User clicks "Open session" on a delegation node
-Selected session becomes Main Session A::sub::research::<threadKey>
+Selected session becomes the linked child Pibo Session
 Composer target becomes the subagent session
 New messages are sent to the subagent session
 ```

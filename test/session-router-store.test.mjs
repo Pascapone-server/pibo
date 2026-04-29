@@ -1,0 +1,212 @@
+import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
+import test from "node:test";
+import { InitialSessionContextBuilder } from "../dist/core/profiles.js";
+import { createPiboRuntime } from "../dist/core/runtime.js";
+import { PiboSessionRouter } from "../dist/core/session-router.js";
+import { piboCorePlugin } from "../dist/plugins/builtin.js";
+import { definePiboPlugin, PiboPluginRegistry } from "../dist/plugins/registry.js";
+import { InMemoryPiboSessionStore } from "../dist/sessions/store.js";
+
+function createTestRegistry(actionName, execute) {
+	return PiboPluginRegistry.create({
+		plugins: [
+			definePiboPlugin({
+				id: `test.${actionName}`,
+				register(api) {
+					api.registerProfile({
+						name: "test-profile",
+						create() {
+							return new InitialSessionContextBuilder("test-profile").withBuiltinTools("disabled").createSession();
+						},
+					});
+					api.registerGatewayAction({ name: actionName, execute });
+				},
+			}),
+		],
+	});
+}
+
+function createStoredSession(store, overrides = {}) {
+	return store.create({
+		id: "ps_source",
+		piSessionId: "11111111-1111-4111-8111-111111111111",
+		channel: "pibo.test",
+		kind: "chat",
+		profile: "test-profile",
+		ownerScope: "user:test",
+		workspace: process.cwd(),
+		...overrides,
+	});
+}
+
+test("session router uses the Pibo session profile when creating a runtime", async () => {
+	const store = new InMemoryPiboSessionStore();
+	store.create({
+		id: "ps_profile",
+		piSessionId: "11111111-1111-4111-8111-111111111111",
+		channel: "pibo.test",
+		kind: "chat",
+		profile: "pibo-example-plugin",
+		ownerScope: "user:test",
+	});
+	const router = new PiboSessionRouter({
+		persistSession: false,
+		sessionStore: store,
+	});
+
+	try {
+		const output = await router.emit({
+			type: "execution",
+			piboSessionId: "ps_profile",
+			action: "status",
+		});
+
+		assert.equal(output.type, "execution_result");
+		assert.equal(output.result.activeTools.includes("pibo_example_plugin_note"), true);
+
+		const current = await router.emit({
+			type: "execution",
+			piboSessionId: "ps_profile",
+			action: "session.current",
+		});
+		assert.equal(current.type, "execution_result");
+		assert.equal(current.result.piSessionId, "11111111-1111-4111-8111-111111111111");
+	} finally {
+		await router.disposeAll();
+	}
+});
+
+test("session router creates a visible branch Pibo session for clone operations", async () => {
+	const store = new InMemoryPiboSessionStore();
+	createStoredSession(store);
+	const registry = createTestRegistry("session.clone", (context) => ({
+		piboSessionId: context.piboSessionId,
+		previous: {
+			piSessionId: "11111111-1111-4111-8111-111111111111",
+			sessionFile: "/tmp/old-session.jsonl",
+			leafId: "old-leaf",
+			cwd: "/workspace",
+		},
+		current: {
+			piSessionId: "22222222-2222-4222-8222-222222222222",
+			sessionFile: "/tmp/new-session.jsonl",
+			leafId: "new-leaf",
+			cwd: "/workspace",
+		},
+		cancelled: false,
+	}));
+	const router = new PiboSessionRouter({
+		persistSession: false,
+		sessionStore: store,
+		pluginRegistry: registry,
+		profile: registry.createProfile("test-profile"),
+	});
+
+	try {
+		const output = await router.emit({
+			type: "execution",
+			piboSessionId: "ps_source",
+			action: "session.clone",
+		});
+
+		assert.equal(output.type, "execution_result");
+		const branchId = output.result.piboSessionId;
+		assert.notEqual(branchId, "ps_source");
+
+		const source = store.get("ps_source");
+		const branch = store.get(branchId);
+		assert.equal(source.piSessionId, "11111111-1111-4111-8111-111111111111");
+		assert.equal(branch.piSessionId, "22222222-2222-4222-8222-222222222222");
+		assert.equal(branch.kind, "branch");
+		assert.equal(branch.originId, "ps_source");
+		assert.equal(branch.parentId, undefined);
+		assert.equal(branch.ownerScope, "user:test");
+		assert.equal(branch.workspace, "/workspace");
+		assert.equal(branch.metadata.originAction, "session.clone");
+	} finally {
+		await router.disposeAll();
+	}
+});
+
+test("session router updates a Pibo session before emitting switch results", async () => {
+	const store = new InMemoryPiboSessionStore();
+	createStoredSession(store);
+	const registry = createTestRegistry("session.switch", (context) => ({
+		piboSessionId: context.piboSessionId,
+		previous: {
+			piSessionId: "11111111-1111-4111-8111-111111111111",
+			leafId: null,
+			cwd: "/workspace",
+		},
+		current: {
+			piSessionId: "22222222-2222-4222-8222-222222222222",
+			leafId: null,
+			cwd: "/workspace/new",
+		},
+		cancelled: false,
+	}));
+	const router = new PiboSessionRouter({
+		persistSession: false,
+		sessionStore: store,
+		pluginRegistry: registry,
+		profile: registry.createProfile("test-profile"),
+	});
+	let sessionAtResult;
+	router.subscribe((event) => {
+		if (event.type === "execution_result" && event.action === "session.switch") {
+			sessionAtResult = store.get("ps_source");
+		}
+	});
+
+	try {
+		const output = await router.emit({
+			type: "execution",
+			piboSessionId: "ps_source",
+			action: "session.switch",
+		});
+
+		assert.equal(output.type, "execution_result");
+		assert.equal(store.get("ps_source").piSessionId, "22222222-2222-4222-8222-222222222222");
+		assert.equal(store.get("ps_source").workspace, "/workspace/new");
+		assert.equal(sessionAtResult.piSessionId, "22222222-2222-4222-8222-222222222222");
+	} finally {
+		await router.disposeAll();
+	}
+});
+
+test("runtime reopens an existing persisted session by profile session id", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pibo-runtime-session-id-"));
+	const piSessionId = "11111111-1111-4111-8111-111111111111";
+	const profile = new InitialSessionContextBuilder("runtime-session-test")
+		.withSessionId(piSessionId)
+		.createSession();
+
+	const first = await createPiboRuntime({ cwd, persistSession: true, profile });
+	first.session.sessionManager.appendMessage({
+		role: "user",
+		content: "hello",
+		timestamp: Date.now(),
+	});
+	first.session.sessionManager.appendMessage({
+		role: "assistant",
+		content: [{ type: "text", text: "hi" }],
+		stopReason: "stop",
+		timestamp: Date.now(),
+	});
+	const firstFile = first.session.sessionFile;
+	await first.dispose();
+
+	const second = await createPiboRuntime({ cwd, persistSession: true, profile });
+	try {
+		assert.equal(second.session.sessionFile, firstFile);
+		assert.equal(second.session.sessionManager.getSessionId(), piSessionId);
+	} finally {
+		const currentFile = second.session.sessionFile;
+		await second.dispose();
+		await rm(cwd, { recursive: true, force: true });
+		if (currentFile) await rm(dirname(currentFile), { recursive: true, force: true });
+	}
+});

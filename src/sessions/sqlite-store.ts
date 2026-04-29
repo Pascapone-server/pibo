@@ -2,29 +2,33 @@ import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
-	createSessionBinding,
-	createPiboSessionId,
-	type PiboSessionBinding,
-	type PiboSessionBindingStore,
-	type ResolveSessionBindingInput,
-	type UpdateSessionBindingInput,
-} from "./bindings.js";
+	createPiboSession,
+	matchesFindInput,
+	type CreatePiboSessionInput,
+	type FindPiboSessionsInput,
+	type PiboSession,
+	type PiboSessionStore,
+	type UpdatePiboSessionInput,
+} from "./store.js";
+import type { PiboJsonObject } from "../core/events.js";
 
-type BindingRow = {
-	session_key: string;
-	session_id: string;
-	parent_session_key: string | null;
-	parent_session_id: string | null;
+type SessionRow = {
+	id: string;
+	pi_session_id: string;
 	channel: string;
-	external_id: string;
-	original_profile: string;
-	current_profile: string | null;
+	kind: string;
+	profile: string;
+	owner_scope: string | null;
+	parent_id: string | null;
+	origin_id: string | null;
 	workspace: string | null;
+	title: string | null;
+	metadata_json: string | null;
 	created_at: string;
 	updated_at: string;
 };
 
-export class SqliteSessionBindingStore implements PiboSessionBindingStore {
+export class SqlitePiboSessionStore implements PiboSessionStore {
 	private readonly db: DatabaseSync;
 
 	constructor(path: string) {
@@ -34,175 +38,171 @@ export class SqliteSessionBindingStore implements PiboSessionBindingStore {
 		}
 		this.db = new DatabaseSync(resolvedPath);
 		this.db.exec(`
-			CREATE TABLE IF NOT EXISTS session_bindings (
-				session_key TEXT PRIMARY KEY,
-				session_id TEXT NOT NULL,
-				parent_session_key TEXT,
-				parent_session_id TEXT,
+			CREATE TABLE IF NOT EXISTS pibo_sessions (
+				id TEXT PRIMARY KEY,
+				pi_session_id TEXT NOT NULL UNIQUE,
 				channel TEXT NOT NULL,
-				external_id TEXT NOT NULL,
-				original_profile TEXT NOT NULL,
-				current_profile TEXT,
+				kind TEXT NOT NULL,
+				profile TEXT NOT NULL,
+				owner_scope TEXT,
+				parent_id TEXT,
+				origin_id TEXT,
 				workspace TEXT,
+				title TEXT,
+				metadata_json TEXT,
 				created_at TEXT NOT NULL,
 				updated_at TEXT NOT NULL,
-				UNIQUE(channel, external_id)
-			)
+				FOREIGN KEY(parent_id) REFERENCES pibo_sessions(id),
+				FOREIGN KEY(origin_id) REFERENCES pibo_sessions(id)
+			);
+
+			CREATE INDEX IF NOT EXISTS idx_pibo_sessions_owner
+				ON pibo_sessions(owner_scope, updated_at);
+			CREATE INDEX IF NOT EXISTS idx_pibo_sessions_parent
+				ON pibo_sessions(parent_id, updated_at);
+			CREATE INDEX IF NOT EXISTS idx_pibo_sessions_origin
+				ON pibo_sessions(origin_id, updated_at);
+			CREATE INDEX IF NOT EXISTS idx_pibo_sessions_channel_kind
+				ON pibo_sessions(channel, kind, updated_at);
 		`);
-		this.migrate();
 	}
 
-	get(sessionKey: string): PiboSessionBinding | undefined {
-		const row = this.db
-			.prepare("SELECT * FROM session_bindings WHERE session_key = ?")
-			.get(sessionKey) as BindingRow | undefined;
-		return row ? bindingFromRow(row) : undefined;
+	get(id: string): PiboSession | undefined {
+		const row = this.db.prepare("SELECT * FROM pibo_sessions WHERE id = ?").get(id) as SessionRow | undefined;
+		return row ? sessionFromRow(row) : undefined;
 	}
 
-	list(): PiboSessionBinding[] {
-		return (this.db.prepare("SELECT * FROM session_bindings ORDER BY updated_at DESC").all() as BindingRow[]).map(
-			bindingFromRow,
+	list(): PiboSession[] {
+		return (this.db.prepare("SELECT * FROM pibo_sessions ORDER BY updated_at DESC").all() as SessionRow[]).map(
+			sessionFromRow,
 		);
 	}
 
-	update(sessionKey: string, input: UpdateSessionBindingInput): PiboSessionBinding | undefined {
-		const existing = this.get(sessionKey);
-		if (!existing) return undefined;
-		if (input.sessionId && input.sessionId !== existing.sessionId) {
-			const existingSession = this.findBySessionId(input.sessionId);
-			if (existingSession) return existingSession;
-		}
-
-		const updatedAt = new Date().toISOString();
+	create(input: CreatePiboSessionInput): PiboSession {
+		const session = createPiboSession(input);
 		this.db
 			.prepare(`
-				UPDATE session_bindings SET
-					session_id = ?,
-					parent_session_id = ?,
-					current_profile = ?,
-					workspace = ?,
-					updated_at = ?
-				WHERE session_key = ?
-			`)
-			.run(
-				input.sessionId ?? existing.sessionId,
-				input.parentSessionId ?? existing.parentSessionId ?? null,
-				input.currentProfile ?? existing.currentProfile ?? null,
-				input.workspace ?? existing.workspace ?? null,
-				updatedAt,
-				sessionKey,
-			);
-		return this.get(sessionKey);
-	}
-
-	resolve(input: ResolveSessionBindingInput): PiboSessionBinding {
-		const existing = this.findByChannelExternalId(input.channel, input.externalId);
-		if (existing) return existing;
-		if (input.sessionId) {
-			const existingSession = this.findBySessionId(input.sessionId);
-			if (existingSession) return existingSession;
-		}
-
-		const binding = createSessionBinding(input);
-		this.db
-			.prepare(`
-				INSERT INTO session_bindings (
-					session_key,
-					session_id,
-					parent_session_key,
-					parent_session_id,
+				INSERT INTO pibo_sessions (
+					id,
+					pi_session_id,
 					channel,
-					external_id,
-					original_profile,
-					current_profile,
+					kind,
+					profile,
+					owner_scope,
+					parent_id,
+					origin_id,
 					workspace,
+					title,
+					metadata_json,
 					created_at,
 					updated_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`)
 			.run(
-				binding.sessionKey,
-				binding.sessionId,
-				binding.parentSessionKey ?? null,
-				binding.parentSessionId ?? null,
-				binding.channel,
-				binding.externalId,
-				binding.originalProfile,
-				binding.workspace ?? null,
-				binding.createdAt,
-				binding.updatedAt,
+				session.id,
+				session.piSessionId,
+				session.channel,
+				session.kind,
+				session.profile,
+				session.ownerScope ?? null,
+				session.parentId ?? null,
+				session.originId ?? null,
+				session.workspace ?? null,
+				session.title ?? null,
+				JSON.stringify(session.metadata ?? {}),
+				session.createdAt,
+				session.updatedAt,
 			);
 
-		const created = this.get(binding.sessionKey);
-		if (!created) {
-			throw new Error(`Failed to create session binding "${binding.sessionKey}"`);
-		}
+		const created = this.get(session.id);
+		if (!created) throw new Error(`Failed to create Pibo session "${session.id}"`);
 		return created;
+	}
+
+	update(id: string, input: UpdatePiboSessionInput): PiboSession | undefined {
+		const existing = this.get(id);
+		if (!existing) return undefined;
+
+		const updated: PiboSession = {
+			...existing,
+			piSessionId: input.piSessionId ?? existing.piSessionId,
+			profile: input.profile ?? existing.profile,
+			ownerScope: input.ownerScope ?? existing.ownerScope,
+			parentId: input.parentId === null ? undefined : input.parentId ?? existing.parentId,
+			originId: input.originId === null ? undefined : input.originId ?? existing.originId,
+			workspace: input.workspace === null ? undefined : input.workspace ?? existing.workspace,
+			title: input.title === null ? undefined : input.title ?? existing.title,
+			metadata: input.metadata ?? existing.metadata,
+			updatedAt: new Date().toISOString(),
+		};
+
+		this.db
+			.prepare(`
+				UPDATE pibo_sessions SET
+					pi_session_id = ?,
+					profile = ?,
+					owner_scope = ?,
+					parent_id = ?,
+					origin_id = ?,
+					workspace = ?,
+					title = ?,
+					metadata_json = ?,
+					updated_at = ?
+				WHERE id = ?
+			`)
+			.run(
+				updated.piSessionId,
+				updated.profile,
+				updated.ownerScope ?? null,
+				updated.parentId ?? null,
+				updated.originId ?? null,
+				updated.workspace ?? null,
+				updated.title ?? null,
+				JSON.stringify(updated.metadata ?? {}),
+				updated.updatedAt,
+				id,
+			);
+		return this.get(id);
+	}
+
+	find(input: FindPiboSessionsInput): PiboSession[] {
+		return this.list().filter((session) => matchesFindInput(session, input));
 	}
 
 	close(): void {
 		this.db.close();
 	}
-
-	private findByChannelExternalId(channel: string, externalId: string): PiboSessionBinding | undefined {
-		const row = this.db
-			.prepare("SELECT * FROM session_bindings WHERE channel = ? AND external_id = ?")
-			.get(channel, externalId) as BindingRow | undefined;
-		return row ? bindingFromRow(row) : undefined;
-	}
-
-	private findBySessionId(sessionId: string): PiboSessionBinding | undefined {
-		const row = this.db
-			.prepare("SELECT * FROM session_bindings WHERE session_id = ?")
-			.get(sessionId) as BindingRow | undefined;
-		return row ? bindingFromRow(row) : undefined;
-	}
-
-	private migrate(): void {
-		const columns = new Set(
-			(this.db.prepare("PRAGMA table_info(session_bindings)").all() as Array<{ name: string }>).map(
-				(column) => column.name,
-			),
-		);
-
-		if (!columns.has("session_id")) {
-			this.db.exec("ALTER TABLE session_bindings ADD COLUMN session_id TEXT");
-		}
-		if (!columns.has("parent_session_key")) {
-			this.db.exec("ALTER TABLE session_bindings ADD COLUMN parent_session_key TEXT");
-		}
-		if (!columns.has("parent_session_id")) {
-			this.db.exec("ALTER TABLE session_bindings ADD COLUMN parent_session_id TEXT");
-		}
-
-		const missingSessionIds = this.db
-			.prepare("SELECT session_key FROM session_bindings WHERE session_id IS NULL OR session_id = ''")
-			.all() as Array<{ session_key: string }>;
-		const update = this.db.prepare("UPDATE session_bindings SET session_id = ? WHERE session_key = ?");
-		for (const row of missingSessionIds) {
-			update.run(createPiboSessionId(), row.session_key);
-		}
-
-		this.db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_session_bindings_session_id ON session_bindings(session_id)");
-	}
 }
 
-export function createDefaultSessionBindingStore(cwd = process.cwd()): SqliteSessionBindingStore {
-	return new SqliteSessionBindingStore(resolve(cwd, ".pibo/session-bindings.sqlite"));
+export function createDefaultPiboSessionStore(cwd = process.cwd()): SqlitePiboSessionStore {
+	return new SqlitePiboSessionStore(resolve(cwd, ".pibo/pibo-sessions.sqlite"));
 }
 
-function bindingFromRow(row: BindingRow): PiboSessionBinding {
+function sessionFromRow(row: SessionRow): PiboSession {
 	return {
-		sessionKey: row.session_key,
-		sessionId: row.session_id,
-		parentSessionKey: row.parent_session_key ?? undefined,
-		parentSessionId: row.parent_session_id ?? undefined,
+		id: row.id,
+		piSessionId: row.pi_session_id,
 		channel: row.channel,
-		externalId: row.external_id,
-		originalProfile: row.original_profile,
-		currentProfile: row.current_profile ?? undefined,
+		kind: row.kind,
+		profile: row.profile,
+		ownerScope: row.owner_scope ?? undefined,
+		parentId: row.parent_id ?? undefined,
+		originId: row.origin_id ?? undefined,
 		workspace: row.workspace ?? undefined,
+		title: row.title ?? undefined,
+		metadata: parseMetadata(row.metadata_json),
 		createdAt: row.created_at,
 		updatedAt: row.updated_at,
 	};
+}
+
+function parseMetadata(value: string | null): PiboJsonObject {
+	if (!value) return {};
+	try {
+		const parsed = JSON.parse(value) as unknown;
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+		return parsed as PiboJsonObject;
+	} catch {
+		return {};
+	}
 }

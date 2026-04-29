@@ -18,6 +18,22 @@ export type BetterAuthServiceOptions = {
 	allowedEmails?: string[];
 };
 
+export function createTrustedOrigins(baseURL: string, configuredOrigins?: string[]): string[] {
+	const origins = new Set<string>(configuredOrigins ?? []);
+	const parsed = new URL(baseURL);
+	origins.add(parsed.origin);
+
+	const loopbackHosts = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+	if (!loopbackHosts.has(parsed.hostname)) return [...origins];
+
+	for (const host of ["localhost", "127.0.0.1", "[::1]"]) {
+		const url = new URL(parsed.origin);
+		url.hostname = host;
+		origins.add(url.origin);
+	}
+	return [...origins];
+}
+
 function requiredOption(value: string | undefined, key: string): string {
 	if (!value) throw new Error(`${key} is required in pibo config for Better Auth`);
 	return value;
@@ -76,7 +92,7 @@ export function createBetterAuthService(options: BetterAuthServiceOptions = {}):
 		baseURL,
 		secret,
 		database,
-		trustedOrigins: options.trustedOrigins ?? [baseURL],
+		trustedOrigins: createTrustedOrigins(baseURL, options.trustedOrigins),
 		socialProviders: {
 			google: {
 				clientId: googleClientId,

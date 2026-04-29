@@ -10,41 +10,32 @@ type Area = "sessions" | "agents" | "settings";
 
 type ForkActionResponse = {
 	result: {
-		routeSessionKey?: string;
-		previous: {
-			sessionFile?: string;
-		};
+		piboSessionId?: string;
 		cancelled?: boolean;
 		selectedText?: string;
 	};
 };
 
-type PendingFork = {
-	response: ForkActionResponse;
-	previousComposerText: string;
-};
-
 export function App() {
 	const [bootstrap, setBootstrap] = useState<BootstrapData | null>(null);
 	const [traceView, setTraceView] = useState<PiboSessionTraceView | null>(null);
-	const [selectedSessionKey, setSelectedSessionKey] = useState<string | null>(null);
+	const [selectedPiboSessionId, setSelectedPiboSessionId] = useState<string | null>(null);
 	const [area, setArea] = useState<Area>("sessions");
 	const [error, setError] = useState<string | null>(null);
 	const [showThinking, setShowThinking] = useState(() => localStorage.getItem("pibo.chat.showThinking") === "true");
-	const [pendingFork, setPendingFork] = useState<PendingFork | null>(null);
 	const [composerText, setComposerText] = useState("");
 	const [composerFocusSignal, setComposerFocusSignal] = useState(0);
 	const [creatingSession, setCreatingSession] = useState(false);
 
-	const loadBootstrap = useCallback(async (sessionKey?: string) => {
-		const data = await getBootstrap(sessionKey);
+	const loadBootstrap = useCallback(async (piboSessionId?: string) => {
+		const data = await getBootstrap(piboSessionId);
 		setBootstrap(data);
-		setSelectedSessionKey(data.selectedSessionKey);
+		setSelectedPiboSessionId(data.selectedPiboSessionId);
 		return data;
 	}, []);
 
-	const loadTrace = useCallback(async (sessionKey: string) => {
-		const trace = await getTrace(sessionKey);
+	const loadTrace = useCallback(async (piboSessionId: string) => {
+		const trace = await getTrace(piboSessionId);
 		setTraceView(trace);
 	}, []);
 
@@ -53,18 +44,18 @@ export function App() {
 	}, [loadBootstrap]);
 
 	useEffect(() => {
-		if (!selectedSessionKey || area !== "sessions") return;
-		loadTrace(selectedSessionKey).catch((caught) => setError(caught instanceof Error ? caught.message : String(caught)));
-		const events = new EventSource(`/api/chat/events?sessionKey=${encodeURIComponent(selectedSessionKey)}`);
+		if (!selectedPiboSessionId || area !== "sessions") return;
+		loadTrace(selectedPiboSessionId).catch((caught) => setError(caught instanceof Error ? caught.message : String(caught)));
+		const events = new EventSource(`/api/chat/events?piboSessionId=${encodeURIComponent(selectedPiboSessionId)}`);
 		events.addEventListener("pibo", () => {
-			void loadTrace(selectedSessionKey);
+			void loadTrace(selectedPiboSessionId);
 		});
 		return () => events.close();
-	}, [area, loadTrace, selectedSessionKey]);
+	}, [area, loadTrace, selectedPiboSessionId]);
 
 	const selectedTrace = useMemo(() => {
 		if (!traceView) return null;
-		return adaptTrace(traceView.sessionKey, traceView.title, traceView.nodes);
+		return adaptTrace(traceView.piboSessionId, traceView.title, traceView.nodes);
 	}, [traceView]);
 
 	const slashCommands = useMemo(() => {
@@ -82,10 +73,10 @@ export function App() {
 		return commands;
 	}, [bootstrap]);
 
-	const selectSession = async (sessionKey: string) => {
-		setSelectedSessionKey(sessionKey);
-		const data = await loadBootstrap(sessionKey);
-		if (area === "sessions") await loadTrace(data.selectedSessionKey);
+	const selectSession = async (piboSessionId: string) => {
+		setSelectedPiboSessionId(piboSessionId);
+		const data = await loadBootstrap(piboSessionId);
+		if (area === "sessions") await loadTrace(data.selectedPiboSessionId);
 	};
 
 	const createSession = async () => {
@@ -94,8 +85,8 @@ export function App() {
 		try {
 			const created = await postSession();
 			setArea("sessions");
-			const data = await loadBootstrap(created.sessionKey);
-			await loadTrace(data.selectedSessionKey);
+			const data = await loadBootstrap(created.session.id);
+			await loadTrace(data.selectedPiboSessionId);
 			setError(null);
 		} catch (caught) {
 			setError(caught instanceof Error ? caught.message : String(caught));
@@ -105,7 +96,7 @@ export function App() {
 	};
 
 	const runCommand = async (text: string) => {
-		if (!selectedSessionKey) return false;
+		if (!selectedPiboSessionId) return false;
 		const commandText = text.trim().split(/\s+/)[0];
 		const command = slashCommands.find((candidate) => candidate.slash === commandText);
 		if (!command) return false;
@@ -116,42 +107,29 @@ export function App() {
 			return true;
 		}
 		const level = text.match(/^\/thinking\s+(\S+)/)?.[1];
-		await postAction(selectedSessionKey, command.action, level ? { level } : undefined);
-		await loadBootstrap(selectedSessionKey);
-		await loadTrace(selectedSessionKey);
+		const result = await postAction(selectedPiboSessionId, command.action, level ? { level } : undefined);
+		const derivedPiboSessionId = getResultPiboSessionId(result);
+		if ((command.action === "session.clone" || command.action === "session.fork") && derivedPiboSessionId) {
+			await selectSession(derivedPiboSessionId);
+		} else {
+			await loadBootstrap(selectedPiboSessionId);
+			await loadTrace(selectedPiboSessionId);
+		}
 		return true;
 	};
 
 	const forkFrom = async (entryId: string) => {
-		if (!selectedSessionKey) return;
-		const previousComposerText = composerText;
-		const result = parseForkActionResponse(await postAction(selectedSessionKey, "session.fork", { entryId }));
+		if (!selectedPiboSessionId) return;
+		const result = parseForkActionResponse(await postAction(selectedPiboSessionId, "session.fork", { entryId }));
 		if (result?.result.cancelled) return;
 		if (!result) throw new Error("Unexpected fork action response");
 		if (typeof result.result.selectedText === "string") {
 			setComposerText(result.result.selectedText);
 			setComposerFocusSignal((current) => current + 1);
 		}
-		setPendingFork({ response: result, previousComposerText });
-		await loadBootstrap(selectedSessionKey);
-		await loadTrace(selectedSessionKey);
-	};
-
-	const declineForkSwitch = async () => {
-		if (!pendingFork) return;
-		if (selectedSessionKey && pendingFork.response.result.previous.sessionFile) {
-			await postAction(selectedSessionKey, "session.switch", { sessionFile: pendingFork.response.result.previous.sessionFile });
-			await loadTrace(selectedSessionKey);
+		if (result.result.piboSessionId) {
+			await selectSession(result.result.piboSessionId);
 		}
-		setComposerText(pendingFork.previousComposerText);
-		setPendingFork(null);
-	};
-
-	const acceptForkSwitch = async () => {
-		if (!pendingFork) return;
-		const routeSessionKey = pendingFork.response.result.routeSessionKey ?? selectedSessionKey;
-		setPendingFork(null);
-		if (routeSessionKey) await selectSession(routeSessionKey);
 	};
 
 	if (error && !bootstrap) {
@@ -208,7 +186,7 @@ export function App() {
 							) : null}
 							<button
 								type="button"
-								onClick={() => void loadBootstrap(selectedSessionKey ?? undefined)}
+								onClick={() => void loadBootstrap(selectedPiboSessionId ?? undefined)}
 								title="Refresh"
 								aria-label="Refresh"
 								className="p-1 border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]"
@@ -221,10 +199,10 @@ export function App() {
 						<div className="p-2">
 							{bootstrap.sessions.map((session) => (
 								<SessionNode
-									key={session.sessionKey}
+									key={session.piboSessionId}
 									node={session}
-									selectedSessionKey={selectedSessionKey}
-									onSelect={(sessionKey) => void selectSession(sessionKey)}
+									selectedPiboSessionId={selectedPiboSessionId}
+									onSelect={(piboSessionId) => void selectSession(piboSessionId)}
 								/>
 							))}
 						</div>
@@ -240,9 +218,9 @@ export function App() {
 						<>
 							<div className="h-14 px-4 bg-[#151f24] border-b border-slate-800 flex items-center justify-between">
 								<div className="min-w-0">
-									<h1 className="text-base font-semibold truncate">{traceView?.title ?? selectedSessionKey}</h1>
+									<h1 className="text-base font-semibold truncate">{traceView?.title ?? selectedPiboSessionId}</h1>
 									<div className="font-mono text-[11px] text-slate-500 truncate">
-										{traceView?.sessionKey} {traceView ? `· ${traceView.sessionId}` : ""}
+										{traceView?.piboSessionId} {traceView ? `· ${traceView.piSessionId}` : ""}
 									</div>
 								</div>
 								<button
@@ -257,7 +235,12 @@ export function App() {
 									{showThinking ? "Thinking On" : "Thinking Off"}
 								</button>
 							</div>
-							<TraceTimeline trace={selectedTrace} showThinking={showThinking} onFork={forkFrom} onOpenSession={(key) => void selectSession(key)} />
+							<TraceTimeline
+								trace={selectedTrace}
+								showThinking={showThinking}
+								onFork={forkFrom}
+								onOpenSession={(piboSessionId) => void selectSession(piboSessionId)}
+							/>
 							<Composer
 								commands={slashCommands}
 								value={composerText}
@@ -265,9 +248,9 @@ export function App() {
 								onValueChange={setComposerText}
 								onCommand={runCommand}
 								onSend={async (text) => {
-									if (!selectedSessionKey) return;
-									await postMessage(selectedSessionKey, text);
-									await loadTrace(selectedSessionKey);
+									if (!selectedPiboSessionId) return;
+									await postMessage(selectedPiboSessionId, text);
+									await loadTrace(selectedPiboSessionId);
 								}}
 							/>
 						</>
@@ -291,18 +274,6 @@ export function App() {
 				</aside>
 			</div>
 
-			{pendingFork ? (
-				<div className="fixed inset-0 bg-black/60 grid place-items-center">
-					<div className="w-[min(420px,calc(100vw-32px))] bg-[#1a262b] border border-slate-700 rounded-sm p-4">
-						<h2 className="font-semibold mb-2">Zur geforkten Session wechseln?</h2>
-						<p className="text-sm text-slate-400 mb-4">Der Fork wurde erstellt. Wenn du ablehnst, wird die vorherige Session-Datei wieder geladen.</p>
-						<div className="flex justify-end gap-2">
-							<button type="button" onClick={() => void declineForkSwitch()} className="px-3 py-1.5 border border-slate-700 rounded-sm">Nein</button>
-							<button type="button" onClick={() => void acceptForkSwitch()} className="px-3 py-1.5 bg-[#11a4d4] rounded-sm">Ja</button>
-						</div>
-					</div>
-				</div>
-			) : null}
 		</div>
 	);
 }
@@ -322,35 +293,35 @@ function SignedOut({ message }: { message: string }) {
 
 function SessionNode({
 	node,
-	selectedSessionKey,
+	selectedPiboSessionId,
 	onSelect,
 	depth = 0,
 }: {
 	node: PiboWebSessionNode;
-	selectedSessionKey: string | null;
-	onSelect: (sessionKey: string) => void;
+	selectedPiboSessionId: string | null;
+	onSelect: (piboSessionId: string) => void;
 	depth?: number;
 }) {
 	return (
 		<div>
 			<button
 				type="button"
-				onClick={() => onSelect(node.sessionKey)}
+				onClick={() => onSelect(node.piboSessionId)}
 				className={`w-full grid grid-cols-[16px_1fr_auto] gap-2 items-center text-left px-2 py-2 mb-1 border rounded-sm ${
-					node.sessionKey === selectedSessionKey ? "border-[#11a4d4] bg-[#11a4d4]/10" : "border-transparent"
+					node.piboSessionId === selectedPiboSessionId ? "border-[#11a4d4] bg-[#11a4d4]/10" : "border-transparent"
 				}`}
 				style={{ paddingLeft: 8 + depth * 14 }}
-				title={node.sessionKey}
+				title={node.piboSessionId}
 			>
 				<span className="text-slate-500">{node.children.length ? "▾" : ""}</span>
 				<span className="min-w-0">
 					<span className="block text-sm truncate text-slate-200">{node.title}</span>
-					<span className="block text-[10px] font-mono truncate text-slate-500">{node.sessionKey}</span>
+					<span className="block text-[10px] font-mono truncate text-slate-500">{node.piboSessionId}</span>
 				</span>
 				<span className={`h-2 w-2 rounded-full ${node.status === "running" ? "bg-[#0bda57]" : node.status === "error" ? "bg-red-500" : "bg-slate-600"}`} />
 			</button>
 			{node.children.map((child) => (
-				<SessionNode key={child.sessionKey} node={child} selectedSessionKey={selectedSessionKey} onSelect={onSelect} depth={depth + 1} />
+				<SessionNode key={child.piboSessionId} node={child} selectedPiboSessionId={selectedPiboSessionId} onSelect={onSelect} depth={depth + 1} />
 			))}
 		</div>
 	);
@@ -483,8 +454,13 @@ function SettingsView({ showThinking, setShowThinking }: { showThinking: boolean
 }
 
 function parseForkActionResponse(value: unknown): ForkActionResponse | null {
-	if (!isRecord(value) || !isRecord(value.result) || !isRecord(value.result.previous)) return null;
+	if (!isRecord(value) || !isRecord(value.result)) return null;
 	return value as ForkActionResponse;
+}
+
+function getResultPiboSessionId(value: unknown): string | undefined {
+	if (!isRecord(value) || !isRecord(value.result)) return undefined;
+	return typeof value.result.piboSessionId === "string" ? value.result.piboSessionId : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

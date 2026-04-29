@@ -2,7 +2,7 @@
 title: Pibo Runtime Boundary Specification
 version: 1.0
 date_created: 2026-04-28
-last_updated: 2026-04-28
+last_updated: 2026-04-29
 owner: Pibo maintainers
 tags: [architecture, runtime, plugins, profiles, channels, subagents, runs]
 ---
@@ -17,7 +17,7 @@ This specification covers:
 
 - Runtime ownership between Pibo and Pi Coding Agent.
 - Profile, plugin, tool, skill, context file, subagent, channel, auth service, and web app registration.
-- Session routing and session binding behavior.
+- Session routing and Pibo Session behavior.
 - Subagent and yielded-run behavior.
 
 This specification does not define future marketplace behavior, remote deployment policy, or UI design beyond the current runtime contracts.
@@ -29,27 +29,28 @@ This specification does not define future marketplace behavior, remote deploymen
 - **Profile**: A named initial session context containing selected tools, subagents, skills, context files, and builtin tool mode.
 - **Plugin**: A static internal registration unit that contributes capabilities to `PiboPluginRegistry`.
 - **Channel**: A transport adapter that converts external input to `PiboInputEvent` values and consumes `PiboOutputEvent` values.
-- **Session key**: Stable route identity used by Pibo channels and tools.
-- **Session id**: Technical Pi session identity used for Pi persistence and provider cache affinity.
+- **Pibo Session ID**: Stable product route identity used by Pibo channels, tools, APIs, UI, and event correlation.
+- **Pi Session ID**: Technical Pi session identity used for Pi persistence and provider cache affinity.
+- **Pibo Session**: Product session record containing route identity, Pi session identity, channel, kind, profile, owner scope, hierarchy, derivation metadata, workspace, title, and plugin metadata.
 - **Yielded run**: A background execution wrapper for a yieldable tool that can be tracked, waited on, read, cancelled, or acknowledged.
 - **Subagent**: A profile-scoped generated tool that routes a message into another Pibo session using a target profile.
 
 ## 3. Requirements, Constraints & Guidelines
 
 - **REQ-001**: Pibo MUST remain a thin harness around Pi Coding Agent. Pi Coding Agent remains responsible for model turns, streaming, tools, sessions, and compaction.
-- **REQ-002**: Pibo MUST own product boundaries: profiles, plugins, channels, auth, policy, routing, session bindings, and transport adapters.
+- **REQ-002**: Pibo MUST own product boundaries: profiles, plugins, channels, auth, policy, routing, Pibo Sessions, and transport adapters.
 - **REQ-003**: Plugins MUST be static internal registrations through `PiboPluginRegistry`.
 - **REQ-004**: `PiboPluginRegistry` MUST reject duplicate plugin ids, tools, subagents, skills, context files, profiles, gateway actions, channels, web app names, profile aliases, and gateway slash commands.
 - **REQ-005**: A profile MUST be built through registered resources. Unknown profile resources MUST throw errors during profile creation.
 - **REQ-006**: Runtime creation MUST load enabled skills and enabled context files relative to the runtime cwd unless their paths are absolute.
 - **REQ-007**: Runtime creation MUST include enabled custom tool definitions, generated subagent tools, and generated run-control tools when a run controller is available and at least one tool is yieldable.
 - **REQ-008**: Builtin Pi tools MUST be disabled only when the profile `builtinTools` mode is `"disabled"`.
-- **REQ-009**: A `PiboSessionRouter` MUST create routed sessions lazily by `sessionKey`.
-- **REQ-010**: Concurrent creation for the same `sessionKey` MUST share one pending session creation promise.
-- **REQ-011**: The router MUST resolve a session binding before creating a routed runtime.
-- **REQ-012**: A session binding MUST preserve `sessionKey`, `sessionId`, channel, external id, original profile, optional current profile, optional parent identity, workspace, and timestamps.
-- **REQ-013**: When a binding store exists, the router MUST use it for persistent binding resolution.
-- **REQ-014**: Without a binding store, the router MUST use in-memory bindings for the process lifetime.
+- **REQ-009**: A `PiboSessionRouter` MUST create routed sessions lazily by `piboSessionId`.
+- **REQ-010**: Concurrent creation for the same `piboSessionId` MUST share one pending session creation promise.
+- **REQ-011**: The router MUST resolve a Pibo Session before creating a routed runtime.
+- **REQ-012**: A Pibo Session MUST preserve `id`, `piSessionId`, channel, kind, profile, optional owner scope, optional parent identity, optional origin identity, workspace, title, metadata, and timestamps.
+- **REQ-013**: When a persistent session store exists, the router MUST use it for Pibo Session resolution.
+- **REQ-014**: Without a persistent store, the router MUST use in-memory Pibo Sessions for the process lifetime.
 - **REQ-015**: A message input event MUST be queued per routed session and processed sequentially.
 - **REQ-016**: Execution actions MUST be dispatched through registered gateway actions.
 - **REQ-017**: Unknown execution actions MUST fail with an explicit error.
@@ -57,9 +58,9 @@ This specification does not define future marketplace behavior, remote deploymen
 - **REQ-019**: Router output events MUST be delivered to plugin listeners and router subscribers.
 - **REQ-020**: Plugin listener failures MUST be collected as registry event errors and MUST NOT prevent other listeners from receiving events.
 - **REQ-021**: A subagent definition MUST point to a registered target profile.
-- **REQ-022**: A subagent call MUST create or reuse a routed child session with key format `<parent>::sub::<subagent>::<thread>`.
+- **REQ-022**: A subagent call MUST create or reuse a routed child Pibo Session with `channel: "pibo.subagents"`, `kind: "subagent"`, `parentId`, target profile, and subagent metadata.
 - **REQ-023**: Omitted subagent `threadKey` values MUST create a new child session using a generated UUID.
-- **REQ-024**: Reused subagent session keys MUST remain bound to the same target profile.
+- **REQ-024**: Reused subagent sessions MUST remain bound to the same parent, target profile, subagent name/tool name, and thread key.
 - **REQ-025**: Subagent calls MUST enforce the configured `maxDepth` or default depth `3`.
 - **REQ-026**: Generated subagent tool names MUST have prefix `pibo_subagent_`.
 - **REQ-027**: Profiles with yieldable tools MUST expose generated run-control tools with prefix `pibo_run_`.
@@ -119,7 +120,23 @@ type PiboChannel = {
 };
 ```
 
-`PiboChannelContext` exposes only `emit`, `subscribe`, `resolveSession`, `getGatewayActions`, optional `auth`, and `getWebApps`.
+`PiboChannelContext` exposes only router/event methods, Pibo Session store methods, gateway action discovery, optional auth, profile inventory, and web app access.
+
+```ts
+type PiboChannelContext = {
+  emit(event: PiboInputEvent): Promise<PiboOutputEvent>;
+  subscribe(listener: PiboEventListener): () => void;
+  getSession(id: string): PiboSession | undefined;
+  createSession(input: CreatePiboSessionInput): PiboSession;
+  updateSession?(id: string, input: UpdatePiboSessionInput): PiboSession | undefined;
+  findSessions(input: FindPiboSessionsInput): PiboSession[];
+  listSessions?(): PiboSession[];
+  getGatewayActions(): PiboGatewayActionInfo[];
+  getProfiles?(): Array<{ name: string; description?: string; aliases: string[] }>;
+  auth?: PiboAuthService;
+  getWebApps(): PiboWebApp[];
+};
+```
 
 ### Built-In Profiles
 
@@ -134,10 +151,10 @@ type PiboChannel = {
 - **AC-001**: Given two plugins with the same id, When registry creation runs, Then creation fails.
 - **AC-002**: Given a profile alias, When `createProfile(alias)` is called, Then the aliased profile is created.
 - **AC-003**: Given an unknown profile, When `createProfile(name)` is called, Then the error includes available profiles.
-- **AC-004**: Given a new session key, When the router receives a message, Then a binding and routed runtime are created lazily.
+- **AC-004**: Given a new Pibo Session ID, When the router receives a message, Then a Pibo Session and routed runtime are created lazily.
 - **AC-005**: Given multiple queued messages for one session, When processing starts, Then messages are prompted in queue order.
 - **AC-006**: Given a disposed session, When new input targets it, Then the previous runtime is not reused.
-- **AC-007**: Given a subagent with a stable thread key, When called twice from the same parent, Then the same child session key is used.
+- **AC-007**: Given a subagent with a stable thread key, When called twice from the same parent, Then the same child Pibo Session is used.
 - **AC-008**: Given a tracked yielded run completes, When the parent turn finishes, Then the parent receives a compact service notification.
 - **AC-009**: Given a detached yielded run completes, When notifications are scheduled, Then no automatic detached reminder is delivered.
 
@@ -146,12 +163,12 @@ type PiboChannel = {
 - **Test Levels**: Unit and integration tests.
 - **Frameworks**: Node.js built-in test runner through `node --test`; TypeScript build through `tsc`.
 - **Primary Command**: `npm test`.
-- **Focused Commands**: `npm run typecheck`, `node --test test/plugin-registry.test.mjs`, `node --test test/session-router-binding.test.mjs`, `node --test test/subagents.test.mjs`, `node --test test/runs.test.mjs`.
-- **Coverage Focus**: Registry uniqueness, profile building, routed session behavior, subagent key generation, yielded-run lifecycle, session bindings.
+- **Focused Commands**: `npm run typecheck`, `node --test test/plugin-registry.test.mjs`, `node --test test/session-router-store.test.mjs`, `node --test test/subagents.test.mjs`, `node --test test/runs.test.mjs`.
+- **Coverage Focus**: Registry uniqueness, profile building, routed session behavior, subagent Pibo Session reuse, yielded-run lifecycle, Pibo Session persistence.
 
 ## 7. Rationale & Context
 
-The current code keeps Pi Coding Agent as the inner engine and gives Pibo a small, explicit product boundary. Static plugins avoid marketplace complexity while still allowing new capabilities. Session bindings separate semantic channel identity from technical Pi session identity, which allows persistent routing and profile-aware session creation.
+The current code keeps Pi Coding Agent as the inner engine and gives Pibo a small, explicit product boundary. Static plugins avoid marketplace complexity while still allowing new capabilities. Pibo Sessions separate product routing, ownership, profile selection, hierarchy, and plugin metadata from technical Pi session identity.
 
 ## 8. Dependencies & External Integrations
 
@@ -167,18 +184,28 @@ The current code keeps Pi Coding Agent as the inner engine and gives Pibo a smal
 
 ### Data Dependencies
 
-- **DAT-001**: Optional SQLite session binding store at `.pibo/session-bindings.sqlite`.
+- **DAT-001**: Optional SQLite Pibo Session store at `.pibo/pibo-sessions.sqlite`.
 - **DAT-002**: Optional Pi persisted sessions managed by Pi Coding Agent.
 
 ## 9. Examples & Edge Cases
 
-### Subagent Session Key
+### Subagent Pibo Session
 
-```text
-parent-session::sub::qa-reviewer::review-thread
+```json
+{
+  "channel": "pibo.subagents",
+  "kind": "subagent",
+  "parentId": "ps_parent",
+  "profile": "qa-reviewer",
+  "metadata": {
+    "subagentName": "qa-reviewer",
+    "subagentToolName": "pibo_subagent_qa_reviewer",
+    "threadKey": "review-thread"
+  }
+}
 ```
 
-If the subagent name or thread key contains unsupported characters, the unsafe part is replaced by a deterministic `key-<hash>` segment.
+If `threadKey` is omitted, the router generates a fresh UUID thread key. Reuse is based on structured session fields and metadata, not on parsing the Pibo Session ID.
 
 ### Run Notification Payload
 

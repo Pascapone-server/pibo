@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { Type } from "@mariozechner/pi-ai";
 import { defineTool, type ToolDefinition } from "@mariozechner/pi-coding-agent";
 import type { PiboAssistantMessageEvent } from "../core/events.js";
@@ -11,7 +11,7 @@ export type PiboSubagentRunInput = {
 };
 
 export type PiboSubagentRunResult = {
-	sessionKey: string;
+	piboSessionId: string;
 	eventId: string;
 	reply: PiboAssistantMessageEvent;
 };
@@ -24,28 +24,9 @@ function hashPart(value: string): string {
 	return createHash("sha256").update(value).digest("hex").slice(0, 12);
 }
 
-function sessionKeyPart(value: string): string {
-	const trimmed = value.trim();
-	if (/^[A-Za-z0-9._-]+$/.test(trimmed)) return trimmed;
-	return `key-${hashPart(value)}`;
-}
-
 function toolNamePart(value: string): string {
 	const normalized = value.trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
 	return normalized || `subagent_${hashPart(value)}`;
-}
-
-export function getSubagentSessionDepth(sessionKey: string): number {
-	return sessionKey.split("::sub::").length - 1;
-}
-
-export function createSubagentSessionKey(
-	parentSessionKey: string,
-	subagentName: string,
-	threadKey?: string,
-): string {
-	const resolvedThreadKey = threadKey?.trim() ? threadKey : randomUUID();
-	return `${parentSessionKey}::sub::${sessionKeyPart(subagentName)}::${sessionKeyPart(resolvedThreadKey)}`;
 }
 
 export function createSubagentToolName(subagentName: string): string {

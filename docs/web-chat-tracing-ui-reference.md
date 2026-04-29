@@ -238,7 +238,7 @@ type PiboTraceNodeStatus = "running" | "done" | "error";
 type PiboTraceNode = {
   id: string;
   parentId?: string;
-  sessionKey: string;
+  piboSessionId: string;
   eventId?: string;
   toolCallId?: string;
   type: PiboTraceNodeType;
@@ -251,7 +251,7 @@ type PiboTraceNode = {
   input?: unknown;
   output?: unknown;
   error?: string;
-  linkedSessionKey?: string;
+  linkedPiboSessionId?: string;
   children: PiboTraceNode[];
 };
 ```
@@ -260,9 +260,9 @@ For sessions:
 
 ```ts
 type PiboWebSessionNode = {
-  sessionKey: string;
-  sessionId: string;
-  parentSessionKey?: string;
+  piboSessionId: string;
+  piSessionId: string;
+  parentId?: string;
   profile: string;
   title: string;
   status: "idle" | "running" | "error";
@@ -322,7 +322,7 @@ PiboOutputEvent stream
   -> React components
 ```
 
-Pibo already has `.pibo/session-bindings.sqlite` for session bindings. For a full Web App, the spec should consider adding a separate persisted web event or trace index so reloads can restore:
+Pibo already has `.pibo/pibo-sessions.sqlite` for Pibo Sessions. For a full Web App, the spec should consider adding a separate persisted web event or trace index so reloads can restore:
 
 - session list
 - parent-child session relationships

@@ -2,7 +2,7 @@
 
 Pibo turns Pi Coding Agent into an agent-native runtime with discoverable CLI tools, plugins, channels, and local gateways.
 
-Pi remains the inner engine for model turns, tools, streaming, sessions, and compaction. Pibo owns the outer product boundary: profiles, plugin registration, channels, routing, session bindings, auth, policy, and transport-specific adapters.
+Pi remains the inner engine for model turns, tools, streaming, sessions, and compaction. Pibo owns the outer product boundary: profiles, plugin registration, channels, routing, Pibo Sessions, auth, policy, and transport-specific adapters.
 
 ## Docs
 
@@ -22,9 +22,7 @@ Pi remains the inner engine for model turns, tools, streaming, sessions, and com
 - `npm run tui:gateway` starts the Pi TUI with the gateway producer profile.
 - `npm run gateway` starts the local pibo gateway daemon.
 - `npm run gateway:web` starts the local gateway with Better Auth, the same-origin web host, and the chat app.
-- `npm run client -- <sessionKey>` starts a console client connected to the gateway.
-- `npm run remote -- <sessionName> [profile]` starts the Pi-TUI remote controller.
-- `npm run remote:line -- <sessionName> [profile]` starts the minimal line-based remote client for debugging.
+- `npm run client -- <piboSessionId>` starts a console client connected to the gateway.
 - `npm run dev -- mcp` lists configured MCP servers and tools.
 - `npm run dev -- tools` lists curated external CLI tools.
 - `npm run dev -- config keys` lists supported local config keys.
@@ -61,7 +59,7 @@ npm run profile -- example-plugin
 npm run tui -- example-plugin
 ```
 
-## Channels And Session Bindings
+## Channels And Pibo Sessions
 
 Plugins can register channels through `api.registerChannel(...)`. A channel maps an external transport into pibo events and maps pibo output events back to that transport.
 
@@ -69,28 +67,18 @@ The channel context exposes only the pibo boundary:
 
 - `emit(event)` sends a `PiboInputEvent` to the session router.
 - `subscribe(listener)` receives normalized `PiboOutputEvent` values.
-- `resolveSession(...)` creates or reuses a persistent session binding.
+- `getSession(id)`, `createSession(...)`, `updateSession(...)`, and `findSessions(...)` work with first-class Pibo Session records.
 - `getGatewayActions()` exposes discoverable execution actions for channel UIs.
 
-Gateway session bindings are stored in SQLite by default at `.pibo/session-bindings.sqlite`. The binding remembers the stable semantic `sessionKey`, short technical `sessionId`, channel, external id, original profile, optional current profile, optional parent identity, and optional workspace.
-
-The built-in remote agent plugin registers the local `remote-agent` channel on `127.0.0.1:4790`. It lets a local controller attach to a pibo session without speaking directly to Pi Coding Agent:
-
-```bash
-npm run gateway
-npm run remote -- local-a pibo-minimal
-```
-
-`npm run remote` runs the Pi-TUI proof-of-concept controller in `src/remote/examples/tui-controller.ts`. The reusable remote pieces live in `src/remote/protocol.ts`, `src/remote/channel.ts`, and `src/remote/session-client.ts`.
+Pibo Sessions are stored in SQLite by default at `.pibo/pibo-sessions.sqlite`. A Pibo Session keeps product identity (`id`), technical Pi identity (`piSessionId`), channel, kind, profile, owner scope, optional parent/origin relationships, optional workspace, title, and plugin metadata.
 
 The main source folders are:
 
 - `src/core/` for runtime, events, profiles, and session routing
 - `src/plugins/` for the static plugin registry and built-in plugins
 - `src/channels/` for channel contracts
-- `src/sessions/` for session binding storage
+- `src/sessions/` for Pibo Session storage
 - `src/gateway/` for the local TCP gateway transport
-- `src/remote/` for the local Pi-like remote-control channel
 - `src/runs/` for yielded run tracking and run-control tools
 - `src/auth/`, `src/web/`, and `src/apps/` for Better Auth, the same-origin web host, and web apps
 
@@ -116,15 +104,14 @@ Try the QA profile through the routed runtime:
 
 ```bash
 npm run profile -- run-yield-qa
-npm run gateway
-npm run remote -- yield-qa run-yield-qa
+npm run tui:routed -- run-yield-qa
 ```
 
 Subagent profiles require the routed runtime. Do not use direct `npm run tui -- run-yield-qa` for this profile.
 
 ## Gateway
 
-The gateway is the current local transport boundary. It owns the session router, accepts newline-delimited JSON frames over TCP, routes messages by `sessionKey`, and broadcasts normalized session events back to connected clients.
+The gateway is the current local transport boundary. It owns the session router, accepts newline-delimited JSON frames over TCP, routes messages by Pibo Session ID, and broadcasts normalized session events back to connected clients.
 
 The gateway producer profile adds `pibo_gateway_send`, a tool that sends a message into a target gateway session and returns the correlated assistant reply. See `examples/gateway/README.md` for the two supported manual flows.
 

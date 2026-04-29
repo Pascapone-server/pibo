@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
 	InitialSessionContext,
 	type InitialSessionContextOptions,
@@ -6,25 +7,25 @@ import {
 import { createDefaultPiboPluginRegistry } from "../plugins/builtin.js";
 import type { PiboPluginRegistry } from "../plugins/registry.js";
 import { createPiboRuntime, type PiboRuntimeOptions } from "./runtime.js";
-import type { PiboSessionBindingStore } from "../sessions/bindings.js";
 import { RoutedSession } from "./routed-session.js";
 import type {
 	PiboAssistantMessageEvent,
 	PiboEventListener,
+	PiboExecutionEvent,
+	PiboJsonObject,
 	PiboInputEvent,
 	PiboMessageEvent,
 	PiboOutputEvent,
 	PiboSessionOperationResult,
 } from "./events.js";
-import {
-	createSubagentSessionKey,
-	getSubagentSessionDepth,
-	type PiboSubagentRunner,
-} from "../subagents/tool.js";
-import { randomUUID } from "node:crypto";
+import { createSubagentToolName, type PiboSubagentRunner } from "../subagents/tool.js";
 import { PiboRunRegistry, type PiboRunNotification } from "../runs/registry.js";
 import type { PiboRunToolController } from "../runs/tools.js";
-import { createPiboSessionId, type PiboSessionBinding } from "../sessions/bindings.js";
+import {
+	InMemoryPiboSessionStore,
+	type PiboSession,
+	type PiboSessionStore,
+} from "../sessions/store.js";
 
 export type {
 	PiboEventListener,
@@ -43,19 +44,19 @@ export type PiboSessionRouterOptions = Omit<
 > & {
 	profile?: InitialSessionContext;
 	pluginRegistry?: PiboPluginRegistry;
-	bindingStore?: PiboSessionBindingStore;
+	sessionStore?: PiboSessionStore;
 	forwardPiEvents?: boolean;
 };
 
 function profileForSession(
 	baseProfile: InitialSessionContext,
-	sessionId: string,
-	parentSessionId?: string,
+	piSessionId: string,
+	parentPiSessionId?: string,
 ): InitialSessionContext {
 	const options: InitialSessionContextOptions = {
 		profileName: baseProfile.profileName,
-		sessionId,
-		parentSessionId,
+		sessionId: piSessionId,
+		parentSessionId: parentPiSessionId,
 		skills: baseProfile.skills,
 		tools: baseProfile.tools,
 		subagents: baseProfile.subagents,
@@ -105,15 +106,8 @@ function formatRunNotification(notification: PiboRunNotification): string {
 	].join("\n");
 }
 
-function archiveParentFor(
-	binding: PiboSessionBinding,
-	currentSessionId: string,
-): Pick<PiboSessionBinding, "parentSessionKey" | "parentSessionId"> {
-	if (binding.channel !== "subagent") return {};
-	return {
-		parentSessionKey: binding.parentSessionKey ?? binding.sessionKey,
-		parentSessionId: binding.parentSessionId ?? currentSessionId,
-	};
+function asJsonObject(value: PiboJsonObject | undefined): PiboJsonObject {
+	return value ?? {};
 }
 
 export class PiboSessionRouter {
@@ -124,13 +118,11 @@ export class PiboSessionRouter {
 	private readonly scheduledRunNotifications = new Map<string, boolean>();
 	private readonly baseProfile: InitialSessionContext;
 	private readonly pluginRegistry: PiboPluginRegistry;
-	private readonly bindingStore?: PiboSessionBindingStore;
-	private readonly sessionParentKeys = new Map<string, string>();
-	private readonly sessionBindings = new Map<string, PiboSessionBinding>();
+	private readonly sessionStore: PiboSessionStore;
 
 	constructor(private readonly options: PiboSessionRouterOptions = {}) {
 		this.pluginRegistry = options.pluginRegistry ?? createDefaultPiboPluginRegistry();
-		this.bindingStore = options.bindingStore;
+		this.sessionStore = options.sessionStore ?? new InMemoryPiboSessionStore();
 		this.baseProfile = options.profile ?? this.pluginRegistry.createProfile("pibo-minimal");
 	}
 
@@ -142,7 +134,7 @@ export class PiboSessionRouter {
 	}
 
 	async emit(event: PiboInputEvent): Promise<PiboOutputEvent> {
-		const session = await this.getOrCreateSession(event.sessionKey);
+		const session = await this.getOrCreateSession(event.piboSessionId);
 
 		if (event.type === "message") {
 			return session.enqueueMessage(event);
@@ -150,16 +142,14 @@ export class PiboSessionRouter {
 
 		const output = await session.executeAction(event);
 		if (event.action === "dispose") {
-			this.runRegistry.cancelOwnerRuns(event.sessionKey);
-			this.scheduledRunNotifications.delete(event.sessionKey);
-			this.sessions.delete(event.sessionKey);
-			this.sessionParentKeys.delete(event.sessionKey);
-			this.sessionBindings.delete(event.sessionKey);
+			this.runRegistry.cancelOwnerRuns(event.piboSessionId);
+			this.scheduledRunNotifications.delete(event.piboSessionId);
+			this.sessions.delete(event.piboSessionId);
 		}
 		return output;
 	}
 
-	getSessionKeys(): string[] {
+	getPiboSessionIds(): string[] {
 		return [...this.sessions.keys()];
 	}
 
@@ -173,7 +163,7 @@ export class PiboSessionRouter {
 			let settled = false;
 			const unsubscribe = this.subscribe((output) => {
 				if (
-					output.sessionKey !== eventWithId.sessionKey ||
+					output.piboSessionId !== eventWithId.piboSessionId ||
 					!("eventId" in output) ||
 					output.eventId !== eventWithId.id
 				) {
@@ -186,7 +176,7 @@ export class PiboSessionRouter {
 				}
 			});
 			const timeout = setTimeout(() => {
-				finish(new Error(`Timed out waiting for assistant reply from session "${eventWithId.sessionKey}"`));
+				finish(new Error(`Timed out waiting for assistant reply from Pibo session "${eventWithId.piboSessionId}"`));
 			}, timeoutMs);
 
 			const finish = (result: PiboAssistantMessageEvent | Error) => {
@@ -210,154 +200,138 @@ export class PiboSessionRouter {
 		this.sessions.clear();
 		this.runRegistry.cancelAll("Pibo session router was disposed.");
 		this.scheduledRunNotifications.clear();
-		this.sessionParentKeys.clear();
-		this.sessionBindings.clear();
 		await Promise.all(sessions.map((session) => session.dispose()));
 	}
 
-	private async getOrCreateSession(sessionKey: string): Promise<RoutedSession> {
-		const existing = this.sessions.get(sessionKey);
+	private async getOrCreateSession(piboSessionId: string): Promise<RoutedSession> {
+		const existing = this.sessions.get(piboSessionId);
 		if (existing) return existing;
 
-		const pending = this.pendingSessions.get(sessionKey);
+		const pending = this.pendingSessions.get(piboSessionId);
 		if (pending) return pending;
 
-		const created = this.createRoutedSession(sessionKey);
-		this.pendingSessions.set(sessionKey, created);
+		const created = this.createRoutedSession(piboSessionId);
+		this.pendingSessions.set(piboSessionId, created);
 		try {
 			return await created;
 		} finally {
-			this.pendingSessions.delete(sessionKey);
+			this.pendingSessions.delete(piboSessionId);
 		}
 	}
 
-	private async createRoutedSession(sessionKey: string): Promise<RoutedSession> {
-		const binding = this.resolveSessionBinding(sessionKey);
-		const profile = this.getProfileForSession(sessionKey);
+	private async createRoutedSession(piboSessionId: string): Promise<RoutedSession> {
+		const piboSession = this.resolvePiboSession(piboSessionId);
+		const profile = this.pluginRegistry.createProfile(piboSession.profile);
+		const parentPiSessionId = piboSession.parentId
+			? this.resolvePiboSession(piboSession.parentId).piSessionId
+			: undefined;
 		const runtime = await createPiboRuntime({
-			cwd: this.options.cwd,
+			cwd: piboSession.workspace ?? this.options.cwd,
 			persistSession: this.options.persistSession,
 			thinkingLevel: this.options.thinkingLevel,
-			profile: profileForSession(profile, binding.sessionId, binding.parentSessionId),
-			subagentRunner: this.createSubagentRunner(sessionKey),
-			runToolController: this.createRunToolController(sessionKey),
+			profile: profileForSession(profile, piboSession.piSessionId, parentPiSessionId),
+			subagentRunner: this.createSubagentRunner(piboSession.id),
+			runToolController: this.createRunToolController(piboSession.id),
 		});
 		const session = new RoutedSession(
-			sessionKey,
+			piboSession.id,
 			runtime,
 			this.emitOutput,
 			this.pluginRegistry,
 			this.options.forwardPiEvents ?? false,
-			(result) => this.updateSessionBinding(result),
+			(result, event) => this.handleSessionOperation(result, event),
 		);
-		this.sessions.set(sessionKey, session);
+		this.sessions.set(piboSession.id, session);
 		return session;
 	}
 
-	private updateSessionBinding(result: PiboSessionOperationResult): void {
+	private async handleSessionOperation(
+		result: PiboSessionOperationResult,
+		event: PiboExecutionEvent,
+	): Promise<void> {
 		if (result.cancelled) return;
 
-		const sessionKey = result.routeSessionKey;
-		const patch = {
-			sessionId: result.current.sessionId,
-			workspace: result.current.cwd,
-		};
-
-		if (this.bindingStore) {
-			this.bindingStore.update?.(sessionKey, patch);
-		} else {
-			const existing = this.sessionBindings.get(sessionKey);
-			if (!existing) return;
-			this.sessionBindings.set(sessionKey, {
-				...existing,
-				...patch,
-				updatedAt: new Date().toISOString(),
-			});
-		}
-
-		if (result.previous.sessionId !== result.current.sessionId) {
-			this.archivePreviousSessionBinding(result);
-		}
-	}
-
-	private archivePreviousSessionBinding(result: PiboSessionOperationResult): void {
-		const sessionKey = result.routeSessionKey;
-		const existing = this.bindingStore?.get(sessionKey) ?? this.sessionBindings.get(sessionKey);
-		if (!existing || !result.previous.sessionFile) return;
-		if (this.hasSessionBinding(result.previous.sessionId)) return;
-
-		const archiveParent = archiveParentFor(existing, result.current.sessionId);
-		const sessionId = result.previous.sessionId;
-		const archiveSessionKey = `${sessionKey}:branch:${sessionId}`;
-		const externalId = `${existing.externalId}:branch:${sessionId}`;
-		const defaultProfile = existing.currentProfile ?? existing.originalProfile;
-
-		if (this.bindingStore) {
-			this.bindingStore.resolve({
-				channel: existing.channel,
-				externalId,
-				sessionKey: archiveSessionKey,
-				sessionId,
-				...archiveParent,
-				defaultProfile,
-				workspace: result.previous.cwd,
-			});
+		if (event.action === "session.fork" || event.action === "session.clone") {
+			const action = event.action as "session.fork" | "session.clone";
+			const created = this.createDerivedSession(result, action);
+			result.piboSessionId = created.id;
+			await this.resetCachedSession(event.piboSessionId);
 			return;
 		}
 
-		if (this.sessionBindings.has(archiveSessionKey)) return;
-		const now = new Date().toISOString();
-		this.sessionBindings.set(archiveSessionKey, {
-			sessionKey: archiveSessionKey,
-			sessionId,
-			...archiveParent,
-			channel: existing.channel,
-			externalId,
-			originalProfile: defaultProfile,
-			workspace: result.previous.cwd,
-			createdAt: now,
-			updatedAt: now,
+		this.sessionStore.update(event.piboSessionId, {
+			piSessionId: result.current.piSessionId,
+			workspace: result.current.cwd,
 		});
 	}
 
-	private hasSessionBinding(sessionId: string): boolean {
-		const bindings = this.bindingStore?.list?.() ?? [...this.sessionBindings.values()];
-		return bindings.some((binding) => binding.sessionId === sessionId);
+	private createDerivedSession(
+		result: PiboSessionOperationResult,
+		action: "session.fork" | "session.clone",
+	): PiboSession {
+		const source = this.resolvePiboSession(result.piboSessionId);
+		return this.sessionStore.create({
+			channel: source.channel,
+			kind: "branch",
+			profile: source.profile,
+			ownerScope: source.ownerScope,
+			parentId: source.kind === "subagent" ? source.parentId : undefined,
+			originId: source.id,
+			piSessionId: result.current.piSessionId,
+			workspace: result.current.cwd,
+			title: source.title,
+			metadata: {
+				...asJsonObject(source.metadata),
+				originAction: action,
+				originPiSessionId: result.previous.piSessionId,
+			},
+		});
 	}
 
-	private getProfileForSession(sessionKey: string): InitialSessionContext {
-		const binding = this.resolveSessionBinding(sessionKey);
-		const profileName = binding.currentProfile ?? binding.originalProfile;
-		return this.pluginRegistry.createProfile(profileName);
+	private async resetCachedSession(piboSessionId: string): Promise<void> {
+		const cached = this.sessions.get(piboSessionId);
+		this.sessions.delete(piboSessionId);
+		await cached?.dispose();
 	}
 
-	private createSubagentRunner(parentSessionKey: string): PiboSubagentRunner {
+	private resolvePiboSession(piboSessionId: string): PiboSession {
+		const existing = this.sessionStore.get(piboSessionId);
+		if (existing) return existing;
+
+		return this.sessionStore.create({
+			id: piboSessionId,
+			channel: "pibo.runtime",
+			kind: "runtime",
+			profile: this.baseProfile.profileName,
+			workspace: this.options.cwd,
+		});
+	}
+
+	private createSubagentRunner(parentPiboSessionId: string): PiboSubagentRunner {
 		return {
 			runSubagent: async ({ subagent, message, threadKey }) => {
-				this.assertSubagentDepth(parentSessionKey, subagent);
-				const sessionKey = createSubagentSessionKey(parentSessionKey, subagent.name, threadKey);
-				this.sessionParentKeys.set(sessionKey, parentSessionKey);
-				this.resolveSubagentBinding(sessionKey, subagent);
+				this.assertSubagentDepth(parentPiboSessionId, subagent);
+				const child = this.resolveSubagentSession(parentPiboSessionId, subagent, threadKey);
 
 				const event: PiboMessageEvent = {
 					type: "message",
-					sessionKey,
+					piboSessionId: child.id,
 					text: message,
 					source: "actor",
 					id: randomUUID(),
 				};
 
 				const reply = await this.emitMessageAndWaitForReply(event, subagent.timeoutMs);
-				return { sessionKey, eventId: event.id!, reply };
+				return { piboSessionId: child.id, eventId: event.id!, reply };
 			},
 		};
 	}
 
-	private createRunToolController(parentSessionKey: string): PiboRunToolController {
+	private createRunToolController(parentPiboSessionId: string): PiboRunToolController {
 		return {
 			startToolRun: ({ toolName, completionPolicy, execute }) => {
 				const run = this.runRegistry.startToolRun({
-					ownerSessionKey: parentSessionKey,
+					ownerPiboSessionId: parentPiboSessionId,
 					toolName,
 					completionPolicy,
 				});
@@ -366,106 +340,83 @@ export class PiboSessionRouter {
 					try {
 						const result = await execute();
 						const completed = this.runRegistry.complete(run.runId, result);
-						if (completed) this.scheduleRunNotification(parentSessionKey, false);
+						if (completed) this.scheduleRunNotification(parentPiboSessionId, false);
 					} catch (error) {
 						const failed = this.runRegistry.fail(
 							run.runId,
 							error instanceof Error ? error.message : String(error),
 						);
-						if (failed) this.scheduleRunNotification(parentSessionKey, false);
+						if (failed) this.scheduleRunNotification(parentPiboSessionId, false);
 					}
 				})();
 
 				return run;
 			},
-			listRuns: (options) => this.runRegistry.list(parentSessionKey, options),
-			getRunStatus: (runId) => this.runRegistry.status(parentSessionKey, runId),
-			waitForRun: (runId, timeoutMs) => this.runRegistry.wait(parentSessionKey, runId, timeoutMs),
-			readRun: (runId) => this.runRegistry.read(parentSessionKey, runId),
+			listRuns: (options) => this.runRegistry.list(parentPiboSessionId, options),
+			getRunStatus: (runId) => this.runRegistry.status(parentPiboSessionId, runId),
+			waitForRun: (runId, timeoutMs) => this.runRegistry.wait(parentPiboSessionId, runId, timeoutMs),
+			readRun: (runId) => this.runRegistry.read(parentPiboSessionId, runId),
 			cancelRun: async (runId) => {
-				const cancelled = this.runRegistry.cancel(parentSessionKey, runId);
+				const cancelled = this.runRegistry.cancel(parentPiboSessionId, runId);
 				return cancelled;
 			},
-			ackRun: (runId) => this.runRegistry.ack(parentSessionKey, runId),
+			ackRun: (runId) => this.runRegistry.ack(parentPiboSessionId, runId),
 		};
 	}
 
-	private assertSubagentDepth(parentSessionKey: string, subagent: SubagentProfile): void {
+	private assertSubagentDepth(parentPiboSessionId: string, subagent: SubagentProfile): void {
 		const maxDepth = subagent.maxDepth ?? 3;
-		if (getSubagentSessionDepth(parentSessionKey) >= maxDepth) {
+		if (this.getSubagentDepth(parentPiboSessionId) >= maxDepth) {
 			throw new Error(
-				`Subagent "${subagent.name}" exceeded max depth ${maxDepth} from session "${parentSessionKey}"`,
+				`Subagent "${subagent.name}" exceeded max depth ${maxDepth} from Pibo session "${parentPiboSessionId}"`,
 			);
 		}
 	}
 
-	private resolveSubagentBinding(sessionKey: string, subagent: SubagentProfile): string {
-		const targetProfile = this.pluginRegistry.resolveProfileName(subagent.targetProfile);
-		const parentSessionKey = this.sessionParentKeys.get(sessionKey);
-		const parentSessionId = parentSessionKey ? this.resolveSessionBinding(parentSessionKey).sessionId : undefined;
-		const existing = this.bindingStore?.get(sessionKey);
-		if (existing) {
-			const existingProfile = existing.currentProfile ?? existing.originalProfile;
-			if (existingProfile !== targetProfile) {
-				throw new Error(
-					`Subagent session "${sessionKey}" is already bound to profile "${existingProfile}", not "${targetProfile}"`,
-				);
-			}
-			return targetProfile;
+	private getSubagentDepth(piboSessionId: string): number {
+		let depth = 0;
+		let current = this.sessionStore.get(piboSessionId);
+		const seen = new Set<string>();
+		while (current?.parentId) {
+			if (seen.has(current.parentId)) break;
+			seen.add(current.parentId);
+			depth += 1;
+			current = this.sessionStore.get(current.parentId);
 		}
-
-		this.bindingStore?.resolve({
-			channel: "subagent",
-			externalId: sessionKey,
-			sessionKey,
-			parentSessionKey,
-			parentSessionId,
-			defaultProfile: targetProfile,
-		});
-		if (!this.bindingStore) {
-			this.resolveSessionBinding(sessionKey, targetProfile, parentSessionKey);
-		}
-		return targetProfile;
+		return depth;
 	}
 
-	private resolveSessionBinding(
-		sessionKey: string,
-		defaultProfile?: string,
-		parentSessionKey = this.sessionParentKeys.get(sessionKey),
-	): PiboSessionBinding {
-		const existing = this.bindingStore?.get(sessionKey);
+	private resolveSubagentSession(
+		parentPiboSessionId: string,
+		subagent: SubagentProfile,
+		threadKey?: string,
+	): PiboSession {
+		const targetProfile = this.pluginRegistry.resolveProfileName(subagent.targetProfile);
+		const parent = this.resolvePiboSession(parentPiboSessionId);
+		const resolvedThreadKey = threadKey?.trim() ? threadKey.trim() : randomUUID();
+		const metadata: PiboJsonObject = {
+			subagentName: subagent.name,
+			subagentToolName: createSubagentToolName(subagent.name),
+			threadKey: resolvedThreadKey,
+		};
+		const existing = this.sessionStore.find({
+			channel: "pibo.subagents",
+			kind: "subagent",
+			parentId: parent.id,
+			profile: targetProfile,
+			metadata,
+		})[0];
 		if (existing) return existing;
 
-		const parentSessionId = parentSessionKey ? this.resolveSessionBinding(parentSessionKey).sessionId : undefined;
-		const profileName = defaultProfile ?? this.baseProfile.profileName;
-		if (this.bindingStore) {
-			return this.bindingStore.resolve({
-				channel: "runtime",
-				externalId: sessionKey,
-				sessionKey,
-				parentSessionKey,
-				parentSessionId,
-				defaultProfile: profileName,
-			});
-		}
-
-		const inMemory = this.sessionBindings.get(sessionKey);
-		if (inMemory) return inMemory;
-
-		const now = new Date().toISOString();
-		const binding: PiboSessionBinding = {
-			sessionKey,
-			sessionId: createPiboSessionId(),
-			parentSessionKey,
-			parentSessionId,
-			channel: "runtime",
-			externalId: sessionKey,
-			originalProfile: profileName,
-			createdAt: now,
-			updatedAt: now,
-		};
-		this.sessionBindings.set(sessionKey, binding);
-		return binding;
+		return this.sessionStore.create({
+			channel: "pibo.subagents",
+			kind: "subagent",
+			profile: targetProfile,
+			ownerScope: parent.ownerScope,
+			parentId: parent.id,
+			workspace: parent.workspace,
+			metadata,
+		});
 	}
 
 	private readonly emitOutput = (event: PiboOutputEvent): void => {
@@ -475,35 +426,35 @@ export class PiboSessionRouter {
 		}
 
 		if (event.type === "message_finished" && event.source !== "service") {
-			this.scheduleRunNotification(event.sessionKey, true);
+			this.scheduleRunNotification(event.piboSessionId, true);
 		}
 	};
 
-	private scheduleRunNotification(sessionKey: string, includeAlreadyNotified: boolean): void {
-		if (!this.runRegistry.hasPendingNotification(sessionKey, { includeAlreadyNotified })) return;
-		const previous = this.scheduledRunNotifications.get(sessionKey);
+	private scheduleRunNotification(piboSessionId: string, includeAlreadyNotified: boolean): void {
+		if (!this.runRegistry.hasPendingNotification(piboSessionId, { includeAlreadyNotified })) return;
+		const previous = this.scheduledRunNotifications.get(piboSessionId);
 		if (previous !== undefined) {
-			this.scheduledRunNotifications.set(sessionKey, previous || includeAlreadyNotified);
+			this.scheduledRunNotifications.set(piboSessionId, previous || includeAlreadyNotified);
 			return;
 		}
 
-		this.scheduledRunNotifications.set(sessionKey, includeAlreadyNotified);
+		this.scheduledRunNotifications.set(piboSessionId, includeAlreadyNotified);
 		queueMicrotask(() => {
-			void this.deliverRunNotification(sessionKey);
+			void this.deliverRunNotification(piboSessionId);
 		});
 	}
 
-	private async deliverRunNotification(sessionKey: string): Promise<void> {
-		const includeAlreadyNotified = this.scheduledRunNotifications.get(sessionKey) ?? false;
-		this.scheduledRunNotifications.delete(sessionKey);
-		const notification = this.runRegistry.createNotification(sessionKey, { includeAlreadyNotified });
+	private async deliverRunNotification(piboSessionId: string): Promise<void> {
+		const includeAlreadyNotified = this.scheduledRunNotifications.get(piboSessionId) ?? false;
+		this.scheduledRunNotifications.delete(piboSessionId);
+		const notification = this.runRegistry.createNotification(piboSessionId, { includeAlreadyNotified });
 		if (!notification) return;
 
 		try {
-			const session = await this.getOrCreateSession(sessionKey);
+			const session = await this.getOrCreateSession(piboSessionId);
 			session.enqueueMessage({
 				type: "message",
-				sessionKey,
+				piboSessionId,
 				text: formatRunNotification(notification),
 				source: "service",
 				id: randomUUID(),
@@ -511,7 +462,7 @@ export class PiboSessionRouter {
 		} catch (error) {
 			this.emitOutput({
 				type: "session_error",
-				sessionKey,
+				piboSessionId,
 				error: error instanceof Error ? error.message : String(error),
 			});
 		}

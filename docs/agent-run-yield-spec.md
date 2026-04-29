@@ -38,7 +38,7 @@ Yielded runs are an add-on. Normal tools still run synchronously when called dir
 
 ## Core Model
 
-`sessionKey` identifies a routed Pibo conversation. `sessionId` is the short technical Pi session identity behind that route and is used for Pi persistence and provider cache affinity.
+A Pibo Session ID identifies a routed Pibo conversation. `piSessionId` is the technical Pi session identity behind that route and is used for Pi persistence and provider cache affinity.
 
 `runId` identifies one concrete unit of long-running work.
 
@@ -138,7 +138,7 @@ The runtime needs an in-memory run registry.
 Responsibilities:
 
 - allocate stable `runId`
-- store owner parent `sessionKey`
+- store owner parent `piboSessionId`
 - store run kind, currently `tool`
 - store completion policy
 - store status
@@ -171,7 +171,7 @@ Implemented shape:
 type PiboRunRecord = {
   runId: string;
   kind: "tool";
-  ownerSessionKey: string;
+  ownerPiboSessionId: string;
   toolName: string;
   status: "queued" | "running" | "completed" | "failed" | "cancelled";
   completionPolicy: "tracked" | "detached";
@@ -303,7 +303,7 @@ Completion flow:
 1. Wrapped tool resolves or throws.
 2. Registry updates run status to completed or failed.
 3. Registry stores terminal result or error.
-4. If completionPolicy is tracked, enqueue compact mailbox notification for ownerSessionKey.
+4. If completionPolicy is tracked, enqueue compact mailbox notification for `ownerPiboSessionId`.
 5. Scheduler decides whether to start a follow-up turn now or defer.
 ```
 

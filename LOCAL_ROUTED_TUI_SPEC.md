@@ -31,13 +31,13 @@ Pi TUI shell
   -> Pi Coding Agent
 ```
 
-The TUI only handles terminal input and rendering. It does not own tools, subagents, yielded runs, profile resolution, session bindings, or plugin behavior.
+The TUI only handles terminal input and rendering. It does not own tools, subagents, yielded runs, profile resolution, Pibo Session storage, or plugin behavior.
 
 ## Why Routing Is Required
 
 Generated Pibo tools are not only static tool definitions. They depend on runtime state owned by `PiboSessionRouter`:
 
-- parent and child `sessionKey` ownership
+- parent and child Pibo Session ownership
 - subagent session creation and reuse
 - run registry state
 - tracked vs detached completion policy
@@ -115,24 +115,19 @@ On startup:
 2. Resolve the selected profile through the normal plugin registry.
 3. Start a small Pi TUI controller profile with builtin tools disabled.
 4. Register a TUI extension that intercepts user input.
-5. Forward normal input to `router.emit({ type: "message", sessionKey, text })`.
+5. Forward normal input to `router.emit({ type: "message", piboSessionId, text })`.
 6. Subscribe to router output events and render them in the TUI.
 
-The local routed TUI should use a stable namespaced session key that includes the selected profile:
+The local routed TUI should create an in-memory Pibo Session that records the selected profile:
 
 ```text
-local-tui:<profile>:default
+channel: local-tui
+kind: local
+profile: <profile>
+title: <sessionName>
 ```
 
-If profile/session selection is later added, the session key can include a user-provided name:
-
-```text
-local-tui:<profile>:<sessionName>
-```
-
-This avoids accidentally reusing a binding created for a different profile.
-
-V1 should prefer in-memory session bindings unless persistence is explicitly required. If persistent local TUI bindings are added later, they must use the `local-tui` channel namespace and must not share ambiguous `runtime` bindings with unrelated router uses.
+If profile/session selection is later added, it should create or select Pibo Sessions by structured fields such as channel, kind, profile, and title. V1 should prefer in-memory Pibo Sessions unless persistence is explicitly required.
 
 ## Event Flow
 
@@ -216,7 +211,7 @@ Cleaner follow-up:
 
 - Some Pi TUI slash commands act on the controller shell, not the routed Pibo session.
 - Rendering streamed output and execution results needs to stay compact.
-- Persistent bindings can accidentally pin a session key to an older profile if the local TUI uses an ambiguous key.
+- Persistent local sessions can accidentally pin a saved Pibo Session to an older profile if profile and title selection are ambiguous.
 - If future plugins require custom terminal UI panels, Pibo will need a small UI extension boundary.
 - If subagent or run logic is ever copied into the TUI, gateway and local TUI behavior will drift.
 

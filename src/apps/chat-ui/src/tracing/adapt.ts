@@ -1,6 +1,6 @@
 import type { PiboTraceNode, Span, SpanStatus, SpanType, Trace } from "../types";
 
-export function adaptTrace(sessionKey: string, title: string, nodes: PiboTraceNode[]): Trace {
+export function adaptTrace(piboSessionId: string, title: string, nodes: PiboTraceNode[]): Trace {
 	const spans = nodes.map((node) => adaptNode(node));
 	const all = flattenSpans(spans);
 	const startTime = all.length ? Math.min(...all.map((span) => span.startTime)) : Date.now() * 1000;
@@ -10,7 +10,7 @@ export function adaptTrace(sessionKey: string, title: string, nodes: PiboTraceNo
 	const hasError = all.some((span) => span.status === "ERROR");
 
 	return {
-		id: sessionKey,
+		id: piboSessionId,
 		name: title,
 		status: hasError ? "ERROR" : hasRunning ? "UNSET" : "OK",
 		spans,
@@ -43,7 +43,7 @@ function adaptNode(node: PiboTraceNode): Span {
 		children: node.children?.map(adaptNode),
 		pibo: {
 			entryId: node.entryId,
-			linkedSessionKey: node.linkedSessionKey,
+			linkedPiboSessionId: node.linkedPiboSessionId,
 			traceNodeType: node.type,
 		},
 	};
@@ -112,7 +112,7 @@ function spanAttributes(node: PiboTraceNode): Record<string, unknown> {
 		attributes["delegation.target_agent"] = node.title.replace(/^pibo_subagent_/, "");
 		attributes["delegation.query"] = node.summary ?? node.input;
 		attributes["result.status"] = node.status === "done" ? "completed" : node.status;
-		attributes.linked_session_key = node.linkedSessionKey;
+		attributes.linked_pibo_session_id = node.linkedPiboSessionId;
 	}
 	return attributes;
 }

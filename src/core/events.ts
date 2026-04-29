@@ -14,7 +14,7 @@ export type PiboJsonObject = { [key: string]: PiboJsonValue };
 
 export type PiboMessageEvent = {
 	type: "message";
-	sessionKey: string;
+	piboSessionId: string;
 	text: string;
 	source?: PiboEventSource;
 	id?: string;
@@ -69,7 +69,7 @@ export type PiboThinkingResult = {
 
 export type PiboExecutionEventBase<TAction extends PiboExecutionAction = PiboExecutionAction> = {
 	type: "execution";
-	sessionKey: string;
+	piboSessionId: string;
 	action: TAction;
 	id?: string;
 };
@@ -115,7 +115,7 @@ export type PiboExecutionEvent = PiboKnownExecutionEvent | PiboCustomExecutionEv
 export type PiboInputEvent = PiboMessageEvent | PiboExecutionEvent;
 
 export type PiboSessionStatus = {
-	sessionKey: string;
+	piboSessionId: string;
 	queuedMessages: number;
 	processing: boolean;
 	streaming: boolean;
@@ -125,7 +125,7 @@ export type PiboSessionStatus = {
 };
 
 export type PiboPiSessionSnapshot = {
-	sessionId: string;
+	piSessionId: string;
 	sessionFile?: string;
 	leafId: string | null;
 	cwd: string;
@@ -134,7 +134,7 @@ export type PiboPiSessionSnapshot = {
 };
 
 export type PiboSessionOperationResult = {
-	routeSessionKey: string;
+	piboSessionId: string;
 	previous: PiboPiSessionSnapshot;
 	current: PiboPiSessionSnapshot;
 	cancelled: boolean;
@@ -174,7 +174,7 @@ export type PiboSessionTreeResult = {
 
 export type PiboMessageQueuedEvent = {
 	type: "message_queued";
-	sessionKey: string;
+	piboSessionId: string;
 	eventId?: string;
 	queuedMessages: number;
 	text: string;
@@ -183,7 +183,7 @@ export type PiboMessageQueuedEvent = {
 
 export type PiboMessageStartedEvent = {
 	type: "message_started";
-	sessionKey: string;
+	piboSessionId: string;
 	eventId?: string;
 	text: string;
 	source?: PiboEventSource;
@@ -191,34 +191,34 @@ export type PiboMessageStartedEvent = {
 
 export type PiboAssistantMessageEvent = {
 	type: "assistant_message";
-	sessionKey: string;
+	piboSessionId: string;
 	eventId?: string;
 	text: string;
 };
 
 export type PiboThinkingStartedEvent = {
 	type: "thinking_started";
-	sessionKey: string;
+	piboSessionId: string;
 	eventId?: string;
 };
 
 export type PiboThinkingDeltaEvent = {
 	type: "thinking_delta";
-	sessionKey: string;
+	piboSessionId: string;
 	eventId?: string;
 	text: string;
 };
 
 export type PiboThinkingFinishedEvent = {
 	type: "thinking_finished";
-	sessionKey: string;
+	piboSessionId: string;
 	eventId?: string;
 	text?: string;
 };
 
 export type PiboToolCallEvent = {
 	type: "tool_call";
-	sessionKey: string;
+	piboSessionId: string;
 	eventId?: string;
 	toolCallId: string;
 	toolName: string;
@@ -228,7 +228,7 @@ export type PiboToolCallEvent = {
 
 export type PiboToolExecutionStartedEvent = {
 	type: "tool_execution_started";
-	sessionKey: string;
+	piboSessionId: string;
 	eventId?: string;
 	toolCallId: string;
 	toolName: string;
@@ -237,7 +237,7 @@ export type PiboToolExecutionStartedEvent = {
 
 export type PiboToolExecutionUpdatedEvent = {
 	type: "tool_execution_updated";
-	sessionKey: string;
+	piboSessionId: string;
 	eventId?: string;
 	toolCallId: string;
 	toolName: string;
@@ -247,7 +247,7 @@ export type PiboToolExecutionUpdatedEvent = {
 
 export type PiboToolExecutionFinishedEvent = {
 	type: "tool_execution_finished";
-	sessionKey: string;
+	piboSessionId: string;
 	eventId?: string;
 	toolCallId: string;
 	toolName: string;
@@ -258,8 +258,8 @@ export type PiboToolExecutionFinishedEvent = {
 export type PiboOutputEvent =
 	| PiboMessageQueuedEvent
 	| PiboMessageStartedEvent
-	| { type: "message_finished"; sessionKey: string; eventId?: string; source?: PiboEventSource }
-	| { type: "assistant_delta"; sessionKey: string; eventId?: string; text: string }
+	| { type: "message_finished"; piboSessionId: string; eventId?: string; source?: PiboEventSource }
+	| { type: "assistant_delta"; piboSessionId: string; eventId?: string; text: string }
 	| PiboThinkingStartedEvent
 	| PiboThinkingDeltaEvent
 	| PiboThinkingFinishedEvent
@@ -268,8 +268,8 @@ export type PiboOutputEvent =
 	| PiboToolExecutionUpdatedEvent
 	| PiboToolExecutionFinishedEvent
 	| PiboAssistantMessageEvent
-	| { type: "execution_result"; sessionKey: string; eventId?: string; action: PiboExecutionAction; result: unknown }
-	| { type: "session_error"; sessionKey: string; eventId?: string; error: string }
-	| { type: "pi_event"; sessionKey: string; event: unknown };
+	| { type: "execution_result"; piboSessionId: string; eventId?: string; action: PiboExecutionAction; result: unknown }
+	| { type: "session_error"; piboSessionId: string; eventId?: string; error: string }
+	| { type: "pi_event"; piboSessionId: string; event: unknown };
 
 export type PiboEventListener = (event: PiboOutputEvent) => void;

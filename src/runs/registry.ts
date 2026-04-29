@@ -12,7 +12,7 @@ export type PiboToolRunResult = {
 export type PiboRunSnapshot = {
 	runId: string;
 	kind: PiboRunKind;
-	ownerSessionKey: string;
+	ownerPiboSessionId: string;
 	status: PiboRunStatus;
 	completionPolicy: PiboRunCompletionPolicy;
 	consumed: boolean;
@@ -61,7 +61,7 @@ type PiboRunRecord = PiboRunSnapshot & {
 };
 
 type StartToolRunInput = {
-	ownerSessionKey: string;
+	ownerPiboSessionId: string;
 	toolName: string;
 	completionPolicy?: PiboRunCompletionPolicy;
 };
@@ -78,7 +78,7 @@ function snapshot(record: PiboRunRecord): PiboRunSnapshot {
 	const output: PiboRunSnapshot = {
 		runId: record.runId,
 		kind: record.kind,
-		ownerSessionKey: record.ownerSessionKey,
+		ownerPiboSessionId: record.ownerPiboSessionId,
 		status: record.status,
 		completionPolicy: record.completionPolicy,
 		consumed: record.consumed,
@@ -108,7 +108,7 @@ export class PiboRunRegistry {
 		const record: PiboRunRecord = {
 			runId,
 			kind: "tool",
-			ownerSessionKey: input.ownerSessionKey,
+			ownerPiboSessionId: input.ownerPiboSessionId,
 			status: "running",
 			completionPolicy: input.completionPolicy ?? "tracked",
 			consumed: false,
@@ -143,21 +143,21 @@ export class PiboRunRegistry {
 		return snapshot(record);
 	}
 
-	list(ownerSessionKey: string, options: { includeConsumed?: boolean; includeDetached?: boolean } = {}): PiboRunSnapshot[] {
+	list(ownerPiboSessionId: string, options: { includeConsumed?: boolean; includeDetached?: boolean } = {}): PiboRunSnapshot[] {
 		this.prune();
 		return [...this.runs.values()]
-			.filter((record) => record.ownerSessionKey === ownerSessionKey)
+			.filter((record) => record.ownerPiboSessionId === ownerPiboSessionId)
 			.filter((record) => options.includeConsumed || !record.consumed)
 			.filter((record) => options.includeDetached || record.completionPolicy !== "detached")
 			.map(snapshot);
 	}
 
-	status(ownerSessionKey: string, runId: string): PiboRunSnapshot {
-		return snapshot(this.requireOwned(ownerSessionKey, runId));
+	status(ownerPiboSessionId: string, runId: string): PiboRunSnapshot {
+		return snapshot(this.requireOwned(ownerPiboSessionId, runId));
 	}
 
-	async wait(ownerSessionKey: string, runId: string, timeoutMs: number): Promise<PiboRunWaitResult> {
-		const record = this.requireOwned(ownerSessionKey, runId);
+	async wait(ownerPiboSessionId: string, runId: string, timeoutMs: number): Promise<PiboRunWaitResult> {
+		const record = this.requireOwned(ownerPiboSessionId, runId);
 		if (terminal(record.status)) return { ...snapshot(record), timedOut: false };
 
 		const boundedTimeoutMs = Math.max(0, Math.min(timeoutMs, 300000));
@@ -188,8 +188,8 @@ export class PiboRunRegistry {
 		return { ...snapshot(completed), timedOut: false };
 	}
 
-	read(ownerSessionKey: string, runId: string): PiboRunReadResult {
-		const record = this.requireOwned(ownerSessionKey, runId);
+	read(ownerPiboSessionId: string, runId: string): PiboRunReadResult {
+		const record = this.requireOwned(ownerPiboSessionId, runId);
 		if (terminal(record.status)) {
 			record.consumed = true;
 			record.updatedAt = now();
@@ -200,8 +200,8 @@ export class PiboRunRegistry {
 		return output;
 	}
 
-	cancel(ownerSessionKey: string, runId: string): PiboRunSnapshot {
-		const record = this.requireOwned(ownerSessionKey, runId);
+	cancel(ownerPiboSessionId: string, runId: string): PiboRunSnapshot {
+		const record = this.requireOwned(ownerPiboSessionId, runId);
 		if (!terminal(record.status)) {
 			record.status = "cancelled";
 			record.summary = `${record.toolName} run cancelled.`;
@@ -212,8 +212,8 @@ export class PiboRunRegistry {
 		return snapshot(record);
 	}
 
-	ack(ownerSessionKey: string, runId: string): PiboRunSnapshot {
-		const record = this.requireOwned(ownerSessionKey, runId);
+	ack(ownerPiboSessionId: string, runId: string): PiboRunSnapshot {
+		const record = this.requireOwned(ownerPiboSessionId, runId);
 		record.acknowledgedStatus = record.status;
 		if (terminal(record.status)) record.consumed = true;
 		record.updatedAt = now();
@@ -221,11 +221,11 @@ export class PiboRunRegistry {
 	}
 
 	createNotification(
-		ownerSessionKey: string,
+		ownerPiboSessionId: string,
 		options: { includeAlreadyNotified?: boolean } = {},
 	): PiboRunNotification | undefined {
 		const records = [...this.runs.values()].filter((record) =>
-			this.needsNotification(record, ownerSessionKey, options),
+			this.needsNotification(record, ownerPiboSessionId, options),
 		);
 		if (records.length === 0) return undefined;
 
@@ -250,18 +250,18 @@ export class PiboRunRegistry {
 	}
 
 	hasPendingNotification(
-		ownerSessionKey: string,
+		ownerPiboSessionId: string,
 		options: { includeAlreadyNotified?: boolean } = {},
 	): boolean {
 		return [...this.runs.values()].some((record) =>
-			this.needsNotification(record, ownerSessionKey, options),
+			this.needsNotification(record, ownerPiboSessionId, options),
 		);
 	}
 
-	cancelOwnerRuns(ownerSessionKey: string, reason = "Owner session was disposed."): PiboRunSnapshot[] {
+	cancelOwnerRuns(ownerPiboSessionId: string, reason = "Owner Pibo session was disposed."): PiboRunSnapshot[] {
 		const cancelled: PiboRunSnapshot[] = [];
 		for (const record of this.runs.values()) {
-			if (record.ownerSessionKey !== ownerSessionKey || terminal(record.status)) continue;
+			if (record.ownerPiboSessionId !== ownerPiboSessionId || terminal(record.status)) continue;
 			record.status = "cancelled";
 			record.error = reason;
 			record.consumed = true;
@@ -314,21 +314,21 @@ export class PiboRunRegistry {
 		return pruned;
 	}
 
-	private requireOwned(ownerSessionKey: string, runId: string): PiboRunRecord {
+	private requireOwned(ownerPiboSessionId: string, runId: string): PiboRunRecord {
 		const record = this.runs.get(runId);
-		if (!record || record.ownerSessionKey !== ownerSessionKey) {
-			throw new Error(`Unknown run "${runId}" for session "${ownerSessionKey}"`);
+		if (!record || record.ownerPiboSessionId !== ownerPiboSessionId) {
+			throw new Error(`Unknown run "${runId}" for session "${ownerPiboSessionId}"`);
 		}
 		return record;
 	}
 
 	private needsNotification(
 		record: PiboRunRecord,
-		ownerSessionKey: string,
+		ownerPiboSessionId: string,
 		options: { includeAlreadyNotified?: boolean } = {},
 	): boolean {
 		return (
-			record.ownerSessionKey === ownerSessionKey &&
+			record.ownerPiboSessionId === ownerPiboSessionId &&
 			record.completionPolicy === "tracked" &&
 			!record.consumed &&
 			record.acknowledgedStatus !== record.status &&

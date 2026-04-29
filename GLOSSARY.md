@@ -11,7 +11,7 @@ The thin TypeScript product harness around Pi Coding Agent.
 The embedded inner agent engine responsible for model turns, tools, streaming, sessions, and compaction.
 
 **Product Boundary**:
-The outer layer owned by Pibo, including profiles, plugins, channels, routing, auth, policy, session bindings, and transport adapters.
+The outer layer owned by Pibo, including profiles, plugins, channels, routing, auth, policy, Pibo Sessions, and transport adapters.
 
 **Runtime**:
 The executable agent environment created from a selected profile and backed by Pi Coding Agent.
@@ -35,19 +35,31 @@ A plugin-owned adapter that maps an external transport into Pibo input events an
 The external communication mechanism used by a channel, such as local TCP, same-origin HTTP, or an in-process TUI adapter.
 
 **Session Router**:
-The Pibo component that owns routed sessions, queues input by session key, and emits normalized output events.
+The Pibo component that owns routed sessions, queues input by Pibo Session ID, and emits normalized output events.
 
 **Routed Session**:
 A single Pibo conversation managed by the session router.
 
-**Session Binding**:
-A persistent mapping between a channel identity and a routed Pibo session.
+**Pibo Session**:
+The stable product-level session record owned by Pibo. It carries route identity, channel, kind, profile, owner scope, hierarchy, derivation metadata, and the linked Pi Session ID.
 
-**sessionKey**:
-The stable semantic identifier used by channels, tools, and clients to route to a Pibo session.
+**Pibo Session ID**:
+The opaque `PiboSession.id` value used by channels, APIs, UI, routing, access control, and event correlation.
 
-**sessionId**:
-The short technical Pi session identifier used for Pi persistence and provider cache affinity.
+**Pibo Session Store**:
+The Pibo-owned store for Pibo Session records, backed by `.pibo/pibo-sessions.sqlite` in the gateway path or by memory in local adapters.
+
+**Pi Session ID**:
+The technical Pi Coding Agent session identifier stored as `PiboSession.piSessionId`, used for Pi persistence, transcript files, provider cache affinity, fork, clone, switch, tree navigation, and compaction.
+
+**Owner Scope**:
+The product-level ownership string used for access control and listing, such as `user:<auth-user-id>`.
+
+**Parent Session**:
+A true hierarchical child relationship represented by `PiboSession.parentId`, used for subagents and nested agent work.
+
+**Origin Session**:
+A derivation relationship represented by `PiboSession.originId`, used for forks and clones without implying UI nesting.
 
 **Input Event**:
 A normalized event sent into Pibo, either as user message input or as a wrapper-level execution request.
@@ -62,7 +74,7 @@ An input event that asks Pibo to perform a wrapper-level action such as status, 
 A normalized event emitted by the router, such as assistant text, thinking, tool status, errors, or execution results.
 
 **Gateway**:
-The local transport boundary that accepts newline-delimited JSON frames over TCP, routes messages by session key, and broadcasts session events.
+The local transport boundary that accepts newline-delimited JSON frames over TCP, routes messages by Pibo Session ID, and broadcasts session events.
 
 **Gateway Action**:
 A discoverable execution action exposed through the gateway for channel UIs or clients.
@@ -130,6 +142,9 @@ A plugin-registered same-origin application served by the Pibo web host.
 **Chat Web App**:
 The current web app registered under `/apps/chat` and `/api/chat/*`.
 
+**Chat Web Read Model**:
+The `.pibo/web-chat.sqlite` projection used by the Chat Web App for raw Pibo event storage and web-oriented session indexing.
+
 **Config CLI**:
 The `pibo config` operator CLI for managing local runtime config in `.pibo/config.json`.
 
@@ -143,8 +158,11 @@ Machine-local Pibo configuration stored in `.pibo/config.json`.
 - A **Plugin** registers capabilities in the **Plugin Registry**.
 - A **Channel** translates a **Transport** into **Input Events** and translates **Output Events** back to that transport.
 - The **Session Router** owns many **Routed Sessions**.
-- A **Session Binding** maps a channel identity to one stable **sessionKey** and one technical **sessionId**.
-- A **Subagent** call creates or reuses a routed child session.
+- A **Pibo Session** is the product session record used for routing, profile selection, ownership, hierarchy, and plugin metadata.
+- A **Pibo Session** links to one **Pi Session ID** for Pi Coding Agent persistence.
+- The **Pibo Session Store** is the source of truth for Pibo Session metadata.
+- The **Chat Web Read Model** is a projection and is not the source of truth for Pibo Sessions or Pi transcripts.
+- A **Subagent** call creates or reuses a routed child **Pibo Session** with `parentId`.
 - A **Yielded Run** is tracked in the **Run Registry** and identified by a **runId**.
 - A **Run-Control Tool** manages a **Yielded Run**; a **Yieldable Tool** is the wrapped work.
 - The **MCP CLI** manages **MCP Servers** outside the Pibo plugin runtime.
@@ -154,7 +172,8 @@ Machine-local Pibo configuration stored in `.pibo/config.json`.
 ## Ambiguities
 
 - Use **Pibo** for the product harness and **Pi Coding Agent** for the embedded engine; do not call both "the agent runtime" without context.
-- Use **sessionKey** for semantic routing identity and **sessionId** for Pi's technical persistence/cache identity.
+- Use **Pibo Session ID** for product routing identity and **Pi Session ID** for Pi's technical persistence/cache identity.
+- Use **parentId** only for true hierarchy and UI nesting. Use **originId** for fork or clone derivation.
 - Use **Channel** for Pibo transport adapters and **Transport** for the underlying communication mechanism.
 - Use **Plugin** for internal static extension modules and **MCP Server** for external Model Context Protocol processes.
 - Use **Curated CLI Tool** for `pibo tools` entries and **Tool** for capabilities exposed to agents in profiles.

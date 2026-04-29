@@ -34,17 +34,20 @@ npm run tui -- <profile>
 
 ## Files
 
-- `src/local/client.ts` creates the in-process router, profile-scoped binding, and local client methods.
+- `src/local/client.ts` creates the in-process router, local Pibo Session, and local client methods.
 - `src/local/extension.ts` contains the Pi TUI extension, command filtering, autocomplete filtering, and the adapter from normalized routed events to Pi TUI render components.
 - `src/local/tui.ts` wires the client and extension into `runPiboTui`.
 - `test/local-routed-tui.test.mjs` covers local routing behavior without starting an interactive TUI.
 
 ## Sessions
 
-V1 uses an in-memory binding store. The routed session key includes the resolved profile name:
+V1 uses an in-memory Pibo Session store. The local routed adapter creates one local Pibo Session for the selected profile and session name:
 
 ```text
-local-tui:<resolvedProfile>:<sessionName>
+channel: local-tui
+kind: local
+profile: <resolvedProfile>
+title: <sessionName>
 ```
 
 The default session name is `default`, so:
@@ -53,13 +56,7 @@ The default session name is `default`, so:
 npm run tui:routed -- run-yield-qa
 ```
 
-routes through:
-
-```text
-local-tui:pibo-run-yield-qa:default
-```
-
-This avoids reusing a local routed binding created for a different profile.
+routes through a local Pibo Session with `profile: "pibo-run-yield-qa"` and `title: "default"`.
 
 Pi session persistence still follows the normal routed runtime option. The controller shell runtime is non-persistent and exists only to host the terminal UI.
 

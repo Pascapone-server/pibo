@@ -50,7 +50,7 @@ npm run tui:gateway
 Prompt the TUI agent:
 
 ```text
-Nutze pibo_gateway_send und sende an sessionKey receiver: Diese Nachricht kam vom TUI-Agenten ueber das Gateway.
+Nutze pibo_gateway_send und sende an die Pibo Session receiver: Diese Nachricht kam vom TUI-Agenten ueber das Gateway.
 ```
 
 Expected behavior:

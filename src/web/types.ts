@@ -1,18 +1,15 @@
 import type { PiboChannelContext } from "../channels/types.js";
 import type { PiboAuthSession } from "../auth/types.js";
-import type { PiboSessionBinding } from "../sessions/bindings.js";
 
 export type PiboWebSession = {
 	authSession: PiboAuthSession;
-	binding: PiboSessionBinding;
+	ownerScope: string;
 };
 
 export type PiboWebAppContext = {
 	channelContext: PiboChannelContext;
 	requireSession(input: {
 		request: Request;
-		channel: string;
-		defaultProfile: string;
 	}): Promise<PiboWebSession>;
 };
 

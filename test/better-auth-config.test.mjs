@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createBetterAuthService } from "../dist/auth/better-auth.js";
+import { createBetterAuthService, createTrustedOrigins } from "../dist/auth/better-auth.js";
 
 const validOptions = {
 	baseURL: "http://localhost:4788",
@@ -30,4 +30,17 @@ test("better auth requires a strong secret", () => {
 			}),
 		/auth.secret must be at least 32 characters/,
 	);
+});
+
+test("better auth trusts loopback aliases for the configured base URL", () => {
+	assert.deepEqual(createTrustedOrigins("http://localhost:4788").sort(), [
+		"http://127.0.0.1:4788",
+		"http://[::1]:4788",
+		"http://localhost:4788",
+	]);
+	assert.deepEqual(createTrustedOrigins("http://127.0.0.1:4788").sort(), [
+		"http://127.0.0.1:4788",
+		"http://[::1]:4788",
+		"http://localhost:4788",
+	]);
 });

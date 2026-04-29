@@ -16,7 +16,7 @@ export type PiboTraceNode = {
 	id: string;
 	parentId?: string;
 	entryId?: string;
-	sessionKey: string;
+	piboSessionId: string;
 	eventId?: string;
 	toolCallId?: string;
 	runId?: string;
@@ -30,14 +30,14 @@ export type PiboTraceNode = {
 	input?: unknown;
 	output?: unknown;
 	error?: string;
-	linkedSessionKey?: string;
+	linkedPiboSessionId?: string;
 	children: PiboTraceNode[];
 };
 
 export type PiboWebSessionNode = {
-	sessionKey: string;
-	sessionId: string;
-	parentSessionKey?: string;
+	piboSessionId: string;
+	piSessionId: string;
+	parentId?: string;
 	profile: string;
 	title: string;
 	subtitle?: string;
@@ -46,9 +46,25 @@ export type PiboWebSessionNode = {
 	children: PiboWebSessionNode[];
 };
 
+export type PiboSession = {
+	id: string;
+	piSessionId: string;
+	channel: string;
+	kind: string;
+	profile: string;
+	ownerScope?: string;
+	parentId?: string;
+	originId?: string;
+	workspace?: string;
+	title?: string;
+	metadata?: Record<string, unknown>;
+	createdAt: string;
+	updatedAt: string;
+};
+
 export type PiboSessionTraceView = {
-	sessionKey: string;
-	sessionId: string;
+	piboSessionId: string;
+	piSessionId: string;
 	title: string;
 	nodes: PiboTraceNode[];
 	rawEvents: Array<{ id: string; type: string; createdAt: string; payload: unknown }>;
@@ -56,22 +72,15 @@ export type PiboSessionTraceView = {
 
 export type BootstrapData = {
 	identity: { userId: string; email?: string; name?: string };
-	binding: { sessionKey: string; sessionId: string };
-	selectedSessionKey: string;
+	session: PiboSession;
+	selectedPiboSessionId: string;
 	sessions: PiboWebSessionNode[];
 	agents: Array<{ name: string; description?: string; aliases: string[] }>;
 	capabilities: { actions: Array<{ name: string; description?: string; slashCommands: string[] }> };
 };
 
 export type CreateSessionData = {
-	sessionKey: string;
-	binding: {
-		sessionKey: string;
-		sessionId: string;
-		parentSessionKey?: string;
-		originalProfile: string;
-		currentProfile?: string;
-	};
+	session: PiboSession;
 };
 
 export type SpanType =
@@ -102,7 +111,7 @@ export type Span = {
 	children?: Span[];
 	pibo?: {
 		entryId?: string;
-		linkedSessionKey?: string;
+		linkedPiboSessionId?: string;
 		traceNodeType: PiboTraceNodeType;
 	};
 };

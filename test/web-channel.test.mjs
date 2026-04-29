@@ -3,42 +3,7 @@ import test from "node:test";
 import { createChatWebApp } from "../dist/apps/chat/web-app.js";
 import { PiboAuthError } from "../dist/auth/types.js";
 import { createWebHostChannel } from "../dist/web/channel.js";
-
-class MemoryBindingStore {
-	bindings = new Map();
-	bindingsByChannelExternalId = new Map();
-
-	resolve(input) {
-		const channelExternalId = `${input.channel}:${input.externalId}`;
-		const existing = this.bindingsByChannelExternalId.get(channelExternalId);
-		if (existing) return existing;
-
-		const now = new Date().toISOString();
-		const binding = {
-			sessionKey: input.sessionKey ?? `${input.channel}:${input.externalId}`,
-			sessionId: input.sessionId ?? `session-${this.bindings.size + 1}`,
-			parentSessionKey: input.parentSessionKey,
-			parentSessionId: input.parentSessionId,
-			channel: input.channel,
-			externalId: input.externalId,
-			originalProfile: input.defaultProfile,
-			workspace: input.workspace,
-			createdAt: now,
-			updatedAt: now,
-		};
-		this.bindings.set(binding.sessionKey, binding);
-		this.bindingsByChannelExternalId.set(channelExternalId, binding);
-		return binding;
-	}
-
-	get(sessionKey) {
-		return this.bindings.get(sessionKey);
-	}
-
-	list() {
-		return [...this.bindings.values()];
-	}
-}
+import { InMemoryPiboSessionStore } from "../dist/sessions/store.js";
 
 function createFakeAuthService() {
 	return {
@@ -64,7 +29,7 @@ function createFakeAuthService() {
 
 async function startWebHostChannel(options = {}) {
 	const emitted = [];
-	const bindings = new MemoryBindingStore();
+	const sessions = new InMemoryPiboSessionStore();
 	const channel = createWebHostChannel({ port: 0, announce: false });
 
 	await channel.start({
@@ -73,7 +38,7 @@ async function startWebHostChannel(options = {}) {
 			emitted.push(event);
 			return Promise.resolve({
 				type: event.type === "message" ? "message_queued" : "execution_result",
-				sessionKey: event.sessionKey,
+				piboSessionId: event.piboSessionId,
 				eventId: event.id,
 				queuedMessages: event.type === "message" ? 1 : undefined,
 				text: event.type === "message" ? event.text : undefined,
@@ -84,11 +49,20 @@ async function startWebHostChannel(options = {}) {
 		subscribe() {
 			return () => {};
 		},
-		resolveSession(input) {
-			return bindings.resolve(input);
+		getSession(id) {
+			return sessions.get(id);
+		},
+		createSession(input) {
+			return sessions.create(input);
+		},
+		updateSession(id, input) {
+			return sessions.update(id, input);
+		},
+		findSessions(input) {
+			return sessions.find(input);
 		},
 		listSessions() {
-			return bindings.list();
+			return sessions.list();
 		},
 		getGatewayActions() {
 			return [];
@@ -103,7 +77,7 @@ async function startWebHostChannel(options = {}) {
 	return {
 		channel,
 		emitted,
-		bindings,
+		sessions,
 		baseURL: `http://${address.host}:${address.port}`,
 	};
 }
@@ -120,7 +94,7 @@ test("chat web app requires auth for localhost requests", async () => {
 	}
 });
 
-test("chat web app maps authenticated users to chat bindings", async () => {
+test("chat web app maps authenticated users to chat sessions", async () => {
 	const { channel, baseURL, emitted } = await startWebHostChannel({
 		auth: createFakeAuthService(),
 	});
@@ -132,8 +106,11 @@ test("chat web app maps authenticated users to chat bindings", async () => {
 		assert.equal(accepted.status, 200);
 		const session = await accepted.json();
 		assert.equal(session.identity.userId, "user-1");
-		assert.equal(session.binding.sessionKey, "chat-web:user-1");
-		assert.equal(session.binding.originalProfile, "pibo-minimal");
+		assert.match(session.session.id, /^ps_[0-9a-f-]{36}$/);
+		assert.equal(session.session.channel, "pibo.chat-web");
+		assert.equal(session.session.kind, "chat");
+		assert.equal(session.session.profile, "pibo-minimal");
+		assert.equal(session.session.ownerScope, "user:user-1");
 
 		const message = await fetch(`${baseURL}/api/chat/message`, {
 			method: "POST",
@@ -146,7 +123,7 @@ test("chat web app maps authenticated users to chat bindings", async () => {
 		});
 		assert.equal(message.status, 200);
 		assert.equal(emitted.length, 1);
-		assert.equal(emitted[0].sessionKey, "chat-web:user-1");
+		assert.equal(emitted[0].piboSessionId, session.session.id);
 		assert.equal(emitted[0].text, "hello");
 	} finally {
 		await channel.stop?.();
@@ -170,19 +147,19 @@ test("chat web app creates user-owned sessions", async () => {
 		});
 		assert.equal(created.status, 201);
 		const payload = await created.json();
-		assert.match(payload.sessionKey, /^chat-web:user-1:session:/);
-		assert.equal(payload.binding.parentSessionKey, undefined);
-		assert.equal(payload.binding.parentSessionId, undefined);
+		assert.match(payload.session.id, /^ps_[0-9a-f-]{36}$/);
+		assert.equal(payload.session.ownerScope, "user:user-1");
+		assert.equal(payload.session.parentId, undefined);
 
-		const bootstrap = await fetch(`${baseURL}/api/chat/bootstrap?sessionKey=${encodeURIComponent(payload.sessionKey)}`, {
+		const bootstrap = await fetch(`${baseURL}/api/chat/bootstrap?piboSessionId=${encodeURIComponent(payload.session.id)}`, {
 			headers: { "x-test-user": "user-1" },
 		});
 		assert.equal(bootstrap.status, 200);
 		const data = await bootstrap.json();
-		assert.equal(data.selectedSessionKey, payload.sessionKey);
-		const createdNode = data.sessions.find((session) => session.sessionKey === payload.sessionKey);
+		assert.equal(data.selectedPiboSessionId, payload.session.id);
+		const createdNode = data.sessions.find((session) => session.piboSessionId === payload.session.id);
 		assert.ok(createdNode);
-		assert.equal(createdNode.parentSessionKey, undefined);
+		assert.equal(createdNode.parentId, undefined);
 
 		const message = await fetch(`${baseURL}/api/chat/message`, {
 			method: "POST",
@@ -191,19 +168,19 @@ test("chat web app creates user-owned sessions", async () => {
 				origin: baseURL,
 				"x-test-user": "user-1",
 			},
-			body: JSON.stringify({ sessionKey: payload.sessionKey, text: "hello new session" }),
+			body: JSON.stringify({ piboSessionId: payload.session.id, text: "hello new session" }),
 		});
 		assert.equal(message.status, 200);
 		assert.equal(emitted.length, 1);
-		assert.equal(emitted[0].sessionKey, payload.sessionKey);
+		assert.equal(emitted[0].piboSessionId, payload.session.id);
 		assert.equal(emitted[0].text, "hello new session");
 	} finally {
 		await channel.stop?.();
 	}
 });
 
-test("chat web app renders legacy user sessions as top-level sessions", async () => {
-	const { channel, baseURL, bindings } = await startWebHostChannel({
+test("chat web app renders origin sessions as top-level sessions", async () => {
+	const { channel, baseURL, sessions } = await startWebHostChannel({
 		auth: createFakeAuthService(),
 	});
 
@@ -212,13 +189,14 @@ test("chat web app renders legacy user sessions as top-level sessions", async ()
 			headers: { "x-test-user": "user-1" },
 		});
 		assert.equal(root.status, 200);
+		const rootPayload = await root.json();
 
-		const legacy = bindings.resolve({
-			channel: "chat-web",
-			externalId: "user-1:session:legacy",
-			sessionKey: "chat-web:user-1:session:legacy",
-			parentSessionKey: "chat-web:user-1",
-			defaultProfile: "pibo-minimal",
+		const origin = sessions.create({
+			channel: "pibo.chat-web",
+			kind: "branch",
+			profile: "pibo-minimal",
+			ownerScope: "user:user-1",
+			originId: rootPayload.session.id,
 		});
 
 		const bootstrap = await fetch(`${baseURL}/api/chat/bootstrap`, {
@@ -226,12 +204,12 @@ test("chat web app renders legacy user sessions as top-level sessions", async ()
 		});
 		assert.equal(bootstrap.status, 200);
 		const data = await bootstrap.json();
-		const legacyNode = data.sessions.find((session) => session.sessionKey === legacy.sessionKey);
-		const rootNode = data.sessions.find((session) => session.sessionKey === "chat-web:user-1");
-		assert.ok(legacyNode);
+		const originNode = data.sessions.find((session) => session.piboSessionId === origin.id);
+		const rootNode = data.sessions.find((session) => session.piboSessionId === rootPayload.session.id);
+		assert.ok(originNode);
 		assert.ok(rootNode);
-		assert.equal(legacyNode.parentSessionKey, undefined);
-		assert.equal(rootNode.children.some((session) => session.sessionKey === legacy.sessionKey), false);
+		assert.equal(originNode.parentId, undefined);
+		assert.equal(rootNode.children.some((session) => session.piboSessionId === origin.id), false);
 	} finally {
 		await channel.stop?.();
 	}

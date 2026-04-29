@@ -4,7 +4,7 @@ import type { PiboOutputEvent } from "../core/events.js";
 import { createDefaultPiboPluginRegistry } from "../plugins/builtin.js";
 import type { PiboPluginRegistry } from "../plugins/registry.js";
 import { PiboSessionRouter } from "../core/session-router.js";
-import type { PiboSessionBindingStore } from "../sessions/bindings.js";
+import type { PiboSessionStore } from "../sessions/store.js";
 import {
 	DEFAULT_GATEWAY_HOST,
 	DEFAULT_GATEWAY_PORT,
@@ -20,8 +20,8 @@ export type GatewayServerOptions = {
 	port?: number;
 	persistSession?: boolean;
 	pluginRegistry?: PiboPluginRegistry;
-	bindingStore?: PiboSessionBindingStore;
-	bindingDbPath?: string;
+	sessionStore?: PiboSessionStore;
+	sessionDbPath?: string;
 	startChannels?: boolean;
 };
 
@@ -48,19 +48,19 @@ function createConnection(socket: Socket): GatewayConnection {
 	};
 }
 
-async function createGatewayBindingStore(options: GatewayServerOptions): Promise<PiboSessionBindingStore> {
-	const { createDefaultSessionBindingStore, SqliteSessionBindingStore } = await import(
+async function createGatewaySessionStore(options: GatewayServerOptions): Promise<PiboSessionStore> {
+	const { createDefaultPiboSessionStore, SqlitePiboSessionStore } = await import(
 		"../sessions/sqlite-store.js"
 	);
-	return options.bindingDbPath
-		? new SqliteSessionBindingStore(options.bindingDbPath)
-		: createDefaultSessionBindingStore();
+	return options.sessionDbPath
+		? new SqlitePiboSessionStore(options.sessionDbPath)
+		: createDefaultPiboSessionStore();
 }
 
 export class PiboGatewayServer {
 	private readonly pluginRegistry: PiboPluginRegistry;
-	private bindingStore?: PiboSessionBindingStore;
-	private ownsBindingStore = false;
+	private sessionStore?: PiboSessionStore;
+	private ownsSessionStore = false;
 	private router?: PiboSessionRouter;
 	private readonly startedChannels: PiboChannel[] = [];
 	private readonly connections = new Set<GatewayConnection>();
@@ -75,12 +75,12 @@ export class PiboGatewayServer {
 		if (this.server) return;
 
 		this.validateChannels();
-		this.bindingStore = this.options.bindingStore ?? (await createGatewayBindingStore(this.options));
-		this.ownsBindingStore = !this.options.bindingStore;
+		this.sessionStore = this.options.sessionStore ?? (await createGatewaySessionStore(this.options));
+		this.ownsSessionStore = !this.options.sessionStore;
 		this.router = new PiboSessionRouter({
 			persistSession: this.options.persistSession,
 			pluginRegistry: this.pluginRegistry,
-			bindingStore: this.bindingStore,
+			sessionStore: this.sessionStore,
 		});
 		this.unsubscribe = this.router.subscribe((event) => this.broadcastRouterEvent(event));
 		this.server = createServer((socket) => this.handleSocket(socket));
@@ -121,11 +121,11 @@ export class PiboGatewayServer {
 		await this.router?.disposeAll();
 		this.router = undefined;
 
-		if (this.ownsBindingStore) {
-			this.bindingStore?.close?.();
+		if (this.ownsSessionStore) {
+			this.sessionStore?.close?.();
 		}
-		this.bindingStore = undefined;
-		this.ownsBindingStore = false;
+		this.sessionStore = undefined;
+		this.ownsSessionStore = false;
 	}
 
 	private handleSocket(socket: Socket): void {
@@ -218,12 +218,14 @@ export class PiboGatewayServer {
 		return {
 			emit: (event) => this.requireRouter().emit(event),
 			subscribe: (listener) => this.requireRouter().subscribe(listener),
-			resolveSession: (input) => {
-				const defaultProfile = this.pluginRegistry.resolveProfileName(input.defaultProfile);
-				return this.requireBindingStore().resolve({ ...input, defaultProfile });
+			getSession: (id) => this.requireSessionStore().get(id),
+			createSession: (input) => {
+				const profile = this.pluginRegistry.resolveProfileName(input.profile);
+				return this.requireSessionStore().create({ ...input, profile });
 			},
-			updateSession: (sessionKey, input) => this.requireBindingStore().update?.(sessionKey, input),
-			listSessions: () => this.requireBindingStore().list?.() ?? [],
+			updateSession: (id, input) => this.requireSessionStore().update(id, input),
+			findSessions: (input) => this.requireSessionStore().find(input),
+			listSessions: () => this.requireSessionStore().list?.() ?? [],
 			getGatewayActions: () => this.pluginRegistry.getGatewayActionInfos(),
 			getProfiles: () => this.pluginRegistry.getProfileInfos(),
 			auth: this.pluginRegistry.getAuthService(),
@@ -236,9 +238,9 @@ export class PiboGatewayServer {
 		return this.router;
 	}
 
-	private requireBindingStore(): PiboSessionBindingStore {
-		if (!this.bindingStore) throw new Error("Gateway binding store is not started");
-		return this.bindingStore;
+	private requireSessionStore(): PiboSessionStore {
+		if (!this.sessionStore) throw new Error("Gateway session store is not started");
+		return this.sessionStore;
 	}
 }
 

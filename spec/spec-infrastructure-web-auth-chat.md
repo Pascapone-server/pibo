@@ -2,7 +2,7 @@
 title: Pibo Web Gateway Auth And Chat Specification
 version: 1.0
 date_created: 2026-04-28
-last_updated: 2026-04-28
+last_updated: 2026-04-29
 owner: Pibo maintainers
 tags: [infrastructure, web, auth, gateway, chat]
 ---
@@ -31,6 +31,7 @@ This specification does not define non-web local gateway behavior except where w
 - **Better Auth service**: The auth implementation named `better-auth`.
 - **Allowed email allowlist**: Configured set of Google account emails allowed to use the web app.
 - **Same-origin mutation**: A non-GET request that requires `Content-Type: application/json` and an `Origin` equal to the request origin.
+- **Pibo Session**: The product session record used by the Chat Web App for routing, ownership, session listing, and trace reconstruction.
 
 ## 3. Requirements, Constraints & Guidelines
 
@@ -54,15 +55,16 @@ This specification does not define non-web local gateway behavior except where w
 - **REQ-018**: Users whose email is not in the allowlist MUST receive `403`.
 - **REQ-019**: Missing auth sessions MUST receive `401`.
 - **REQ-020**: The chat web app page MUST be served at `GET /apps/chat`.
-- **REQ-021**: `GET /api/chat/session` MUST require an auth session and return identity, session binding, and available gateway actions.
-- **REQ-022**: Chat session resolution MUST use channel `chat-web`, external id equal to the authenticated user id, and default profile `pibo-minimal` unless overridden.
-- **REQ-023**: `POST /api/chat/message` MUST require same-origin JSON, an authenticated session, and non-empty string `text`.
-- **REQ-024**: `POST /api/chat/message` MUST emit a `message` input event with source `"user"`.
+- **REQ-021**: `GET /api/chat/bootstrap` MUST require an auth session and return identity, selected Pibo Session, session tree, agent inventory, and available gateway actions.
+- **REQ-022**: Chat session ownership MUST use `ownerScope=user:<authenticated user id>` and default profile `pibo-minimal` unless overridden.
+- **REQ-023**: `POST /api/chat/sessions` MUST require same-origin JSON and create a new top-level personal Pibo Session.
+- **REQ-024**: `POST /api/chat/message` MUST require same-origin JSON, an authenticated session, non-empty string `text`, and MUST emit a `message` input event with source `"user"`.
 - **REQ-025**: `POST /api/chat/action` MUST require same-origin JSON, an authenticated session, a non-empty string `action`, and JSON-serializable optional `params`.
 - **REQ-026**: `GET /api/chat/events` MUST return a Server-Sent Events stream.
-- **REQ-027**: The SSE stream MUST send an initial `ready` event containing the session key.
-- **REQ-028**: The SSE stream MUST forward only router output events whose `sessionKey` matches the authenticated user's binding.
+- **REQ-027**: The SSE stream MUST send an initial `ready` event containing the selected `piboSessionId`.
+- **REQ-028**: The SSE stream MUST forward only router output events whose `piboSessionId` matches the authenticated user's selected Pibo Session.
 - **REQ-029**: Chat UI thinking output MUST be user-toggleable and hidden by default.
+- **REQ-030**: Chat APIs that accept a `piboSessionId` MUST reject sessions whose `ownerScope` does not match the authenticated user.
 - **SEC-001**: Chat mutation routes MUST reject non-JSON content types with `415`.
 - **SEC-002**: Chat mutation routes MUST reject missing `Origin` headers with `403`.
 - **SEC-003**: Chat mutation routes MUST reject cross-origin `Origin` headers with `403`.
@@ -103,13 +105,17 @@ type PiboWebApp = {
 | Route | Method | Auth | Behavior |
 | --- | --- | --- | --- |
 | `/apps/chat` | GET | UI handles auth state | Returns HTML chat app |
-| `/api/chat/session` | GET | required | Returns identity, binding, capabilities |
+| `/api/chat/bootstrap` | GET | required | Returns identity, selected session, session tree, capabilities |
+| `/api/chat/session` | GET | required | Compatibility endpoint returning identity, selected session, capabilities |
+| `/api/chat/sessions` | GET | required | Returns owned session tree |
+| `/api/chat/sessions` | POST | required | Creates a new top-level personal session |
+| `/api/chat/trace` | GET | required | Returns selected session trace view |
 | `/api/chat/message` | POST | required | Emits message event |
 | `/api/chat/action` | POST | required | Emits execution event |
 | `/api/chat/events` | GET | required | Opens SSE stream |
 | `/api/auth/*` | any | auth-service-owned | Delegates to Better Auth |
 
-### Session Response
+### Bootstrap Response
 
 ```json
 {
@@ -118,15 +124,19 @@ type PiboWebApp = {
     "email": "user@example.com",
     "provider": "google"
   },
-  "binding": {
-    "sessionKey": "chat-web:user-id",
-    "sessionId": "uuid",
-    "channel": "chat-web",
-    "externalId": "user-id",
-    "originalProfile": "pibo-minimal",
+  "session": {
+    "id": "ps_...",
+    "piSessionId": "uuid",
+    "channel": "pibo.chat-web",
+    "kind": "chat",
+    "profile": "pibo-minimal",
+    "ownerScope": "user:user-id",
     "createdAt": "2026-04-28T00:00:00.000Z",
     "updatedAt": "2026-04-28T00:00:00.000Z"
   },
+  "selectedPiboSessionId": "ps_...",
+  "sessions": [],
+  "agents": [],
   "capabilities": {
     "actions": []
   }
@@ -137,12 +147,13 @@ type PiboWebApp = {
 
 - **AC-001**: Given web gateway startup without an auth service, When the web host channel is registered, Then startup fails.
 - **AC-002**: Given missing Better Auth config, When creating the Better Auth service, Then creation fails with a config-specific error.
-- **AC-003**: Given an unauthenticated request to `/api/chat/session`, When handled, Then response status is `401`.
-- **AC-004**: Given an authenticated user outside the allowlist, When `/api/chat/session` is requested, Then response status is `403`.
-- **AC-005**: Given an authenticated allowed user, When `/api/chat/session` is requested, Then a persistent `chat-web` binding is returned.
+- **AC-003**: Given an unauthenticated request to `/api/chat/bootstrap`, When handled, Then response status is `401`.
+- **AC-004**: Given an authenticated user outside the allowlist, When `/api/chat/bootstrap` is requested, Then response status is `403`.
+- **AC-005**: Given an authenticated allowed user, When `/api/chat/bootstrap` is requested, Then a persistent personal Pibo Session is returned.
 - **AC-006**: Given a cross-origin POST to `/api/chat/message`, When handled, Then response status is `403`.
 - **AC-007**: Given a request body larger than `4 MiB`, When converted to a web request, Then status `413` is returned.
-- **AC-008**: Given an SSE subscription, When another session emits an event, Then that event is not written to this user's stream.
+- **AC-008**: Given an SSE subscription, When another session emits an event, Then that event is not written to this stream.
+- **AC-009**: Given an authenticated user requests another user's `piboSessionId`, When the request is handled, Then the response is rejected.
 
 ## 6. Test Automation Strategy
 
@@ -165,7 +176,7 @@ The web implementation keeps auth, web hosting, and chat as separate plugin capa
 
 - **INF-001**: `.pibo/config.json` for auth configuration.
 - **INF-002**: `.pibo/auth.sqlite` by default for Better Auth persistence.
-- **INF-003**: Session binding store, default `.pibo/session-bindings.sqlite` when the gateway owns the store.
+- **INF-003**: Pibo Session store, default `.pibo/pibo-sessions.sqlite` when the gateway owns the store.
 
 ### Technology Platform Dependencies
 
@@ -189,6 +200,12 @@ Content-Type: application/json
 Origin: http://localhost:4788
 
 {"text":"Hello"}
+```
+
+Current clients SHOULD include `piboSessionId`:
+
+```json
+{"piboSessionId":"ps_...","text":"Hello"}
 ```
 
 ### Invalid Action Params

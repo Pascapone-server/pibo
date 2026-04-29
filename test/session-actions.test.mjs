@@ -74,7 +74,7 @@ test("session fork replaces the active Pi session and can switch back", async ()
 
 		const candidates = await harness.routed.executeAction({
 			type: "execution",
-			sessionKey: "route:test",
+			piboSessionId: "route:test",
 			action: "session.fork_candidates",
 		});
 		assert.equal(candidates.type, "execution_result");
@@ -82,7 +82,7 @@ test("session fork replaces the active Pi session and can switch back", async ()
 
 		const forked = await harness.routed.executeAction({
 			type: "execution",
-			sessionKey: "route:test",
+			piboSessionId: "route:test",
 			action: "session.fork",
 			params: { entryId: ids.secondUserId },
 		});
@@ -94,7 +94,7 @@ test("session fork replaces the active Pi session and can switch back", async ()
 
 		const switched = await harness.routed.executeAction({
 			type: "execution",
-			sessionKey: "route:test",
+			piboSessionId: "route:test",
 			action: "session.switch",
 			params: { sessionFile: before.sessionFile },
 		});
@@ -113,7 +113,7 @@ test("session clone replaces the active Pi session at the current leaf", async (
 
 		const cloned = await harness.routed.executeAction({
 			type: "execution",
-			sessionKey: "route:test",
+			piboSessionId: "route:test",
 			action: "session.clone",
 		});
 		assert.equal(cloned.type, "execution_result");
@@ -154,7 +154,7 @@ test("routed session surfaces assistant provider errors with the active event id
 				return [];
 			},
 			sessionManager: {
-				getSessionId() {
+				getPiSessionId() {
 					return "session-id";
 				},
 				getSessionFile() {
@@ -176,7 +176,7 @@ test("routed session surfaces assistant provider errors with the active event id
 
 	routed.enqueueMessage({
 		type: "message",
-		sessionKey: "route:test",
+		piboSessionId: "route:test",
 		id: "event-1",
 		text: "hello",
 		source: "actor",
@@ -206,7 +206,7 @@ test("routed session normalizes assistant thinking events", async () => {
 				return [];
 			},
 			sessionManager: {
-				getSessionId() {
+				getPiSessionId() {
 					return "session-id";
 				},
 				getSessionFile() {
@@ -228,7 +228,7 @@ test("routed session normalizes assistant thinking events", async () => {
 
 	routed.activeMessage = {
 		type: "message",
-		sessionKey: "route:test",
+		piboSessionId: "route:test",
 		id: "event-1",
 		text: "hello",
 		source: "actor",
@@ -267,7 +267,7 @@ test("routed session normalizes tool call events", async () => {
 				return [];
 			},
 			sessionManager: {
-				getSessionId() {
+				getPiSessionId() {
 					return "session-id";
 				},
 				getSessionFile() {
@@ -289,7 +289,7 @@ test("routed session normalizes tool call events", async () => {
 
 	routed.activeMessage = {
 		type: "message",
-		sessionKey: "route:test",
+		piboSessionId: "route:test",
 		id: "event-1",
 		text: "hello",
 		source: "actor",
@@ -340,7 +340,7 @@ test("session tree navigation moves the active leaf inside the current Pi sessio
 
 		const tree = await harness.routed.executeAction({
 			type: "execution",
-			sessionKey: "route:test",
+			piboSessionId: "route:test",
 			action: "session.tree",
 		});
 		assert.equal(tree.type, "execution_result");
@@ -348,7 +348,7 @@ test("session tree navigation moves the active leaf inside the current Pi sessio
 
 		const navigated = await harness.routed.executeAction({
 			type: "execution",
-			sessionKey: "route:test",
+			piboSessionId: "route:test",
 			action: "session.tree_navigate",
 			params: { entryId: ids.firstUserId },
 		});

@@ -105,12 +105,13 @@ function createFakeClient() {
 		get closeCount() {
 			return closeCount;
 		},
-		binding: {
-			sessionKey: "local-tui:pibo-run-yield-qa:default",
-			sessionId: "local-session-1",
+		piboSession: {
+			id: "ps_local_tui",
+			piSessionId: "local-session-1",
 			channel: "local-tui",
-			externalId: "pibo-run-yield-qa:default",
-			originalProfile: "pibo-run-yield-qa",
+			kind: "local",
+			profile: "pibo-run-yield-qa",
+			title: "default",
 			createdAt: "2026-04-27T00:00:00.000Z",
 			updatedAt: "2026-04-27T00:00:00.000Z",
 		},
@@ -151,7 +152,7 @@ test("local routed TUI extension routes input through the local client", async (
 
 	await fake.handlers.get("session_start")({ type: "session_start", reason: "startup" }, ctx);
 
-	assert.match(fake.messages[0].content, /Connected to pibo local routed session local-tui:pibo-run-yield-qa:default/);
+	assert.match(fake.messages[0].content, /Connected to pibo local routed session ps_local_tui/);
 	assert.match(fake.messages[0].content, /Routed commands: \/status, \/thinking, \/session-current/);
 	assert.doesNotMatch(fake.messages[0].content, /Routed commands: .*\/session(?:,|\n|$)/);
 	assert.doesNotMatch(fake.messages[0].content, /\/tree\b/);
@@ -201,7 +202,7 @@ test("local routed TUI extension routes input through the local client", async (
 	for (const listener of client.eventListeners) {
 		listener({
 			type: "assistant_message",
-			sessionKey: "local-tui:pibo-run-yield-qa:default",
+			piboSessionId: "ps_local_tui",
 			eventId: "msg-1",
 			text: "Antwort aus der lokalen Session",
 		});
@@ -225,19 +226,19 @@ test("local routed TUI streams assistant deltas into a live widget", async () =>
 	for (const listener of client.eventListeners) {
 		listener({
 			type: "message_started",
-			sessionKey: "local-tui:pibo-run-yield-qa:default",
+			piboSessionId: "ps_local_tui",
 			eventId: "msg-1",
 			text: "",
 		});
 		listener({
 			type: "assistant_delta",
-			sessionKey: "local-tui:pibo-run-yield-qa:default",
+			piboSessionId: "ps_local_tui",
 			eventId: "msg-1",
 			text: "Hallo",
 		});
 		listener({
 			type: "assistant_delta",
-			sessionKey: "local-tui:pibo-run-yield-qa:default",
+			piboSessionId: "ps_local_tui",
 			eventId: "msg-1",
 			text: " streaming",
 		});
@@ -252,7 +253,7 @@ test("local routed TUI streams assistant deltas into a live widget", async () =>
 	for (const listener of client.eventListeners) {
 		listener({
 			type: "assistant_message",
-			sessionKey: "local-tui:pibo-run-yield-qa:default",
+			piboSessionId: "ps_local_tui",
 			eventId: "msg-1",
 			text: "Hallo streaming",
 		});
@@ -275,35 +276,35 @@ test("local routed TUI shows thinking deltas only when enabled", async () => {
 	for (const listener of client.eventListeners) {
 		listener({
 			type: "message_started",
-			sessionKey: "local-tui:pibo-run-yield-qa:default",
+			piboSessionId: "ps_local_tui",
 			eventId: "msg-1",
 			text: "",
 		});
 		listener({
 			type: "thinking_delta",
-			sessionKey: "local-tui:pibo-run-yield-qa:default",
+			piboSessionId: "ps_local_tui",
 			eventId: "msg-1",
 			text: "Ich denke",
 		});
 		listener({
 			type: "thinking_finished",
-			sessionKey: "local-tui:pibo-run-yield-qa:default",
+			piboSessionId: "ps_local_tui",
 			eventId: "msg-1",
 		});
 		listener({
 			type: "thinking_started",
-			sessionKey: "local-tui:pibo-run-yield-qa:default",
+			piboSessionId: "ps_local_tui",
 			eventId: "msg-1",
 		});
 		listener({
 			type: "thinking_delta",
-			sessionKey: "local-tui:pibo-run-yield-qa:default",
+			piboSessionId: "ps_local_tui",
 			eventId: "msg-1",
 			text: "weiter",
 		});
 		listener({
 			type: "assistant_delta",
-			sessionKey: "local-tui:pibo-run-yield-qa:default",
+			piboSessionId: "ps_local_tui",
 			eventId: "msg-1",
 			text: "Antwort",
 		});
@@ -342,35 +343,35 @@ test("local routed TUI preserves thinking blocks when the assistant message fini
 	for (const listener of client.eventListeners) {
 		listener({
 			type: "message_started",
-			sessionKey: "local-tui:pibo-run-yield-qa:default",
+			piboSessionId: "ps_local_tui",
 			eventId: "msg-1",
 			text: "",
 		});
 		listener({
 			type: "thinking_delta",
-			sessionKey: "local-tui:pibo-run-yield-qa:default",
+			piboSessionId: "ps_local_tui",
 			eventId: "msg-1",
 			text: "erster Block",
 		});
 		listener({
 			type: "thinking_finished",
-			sessionKey: "local-tui:pibo-run-yield-qa:default",
+			piboSessionId: "ps_local_tui",
 			eventId: "msg-1",
 		});
 		listener({
 			type: "thinking_started",
-			sessionKey: "local-tui:pibo-run-yield-qa:default",
+			piboSessionId: "ps_local_tui",
 			eventId: "msg-1",
 		});
 		listener({
 			type: "thinking_finished",
-			sessionKey: "local-tui:pibo-run-yield-qa:default",
+			piboSessionId: "ps_local_tui",
 			eventId: "msg-1",
 			text: "zweiter Block",
 		});
 		listener({
 			type: "assistant_message",
-			sessionKey: "local-tui:pibo-run-yield-qa:default",
+			piboSessionId: "ps_local_tui",
 			eventId: "msg-1",
 			text: "finale Antwort",
 		});
@@ -395,13 +396,13 @@ test("local routed TUI renders tool execution events with Pi tool styling", asyn
 	for (const listener of client.eventListeners) {
 		listener({
 			type: "message_started",
-			sessionKey: "local-tui:pibo-run-yield-qa:default",
+			piboSessionId: "ps_local_tui",
 			eventId: "msg-1",
 			text: "",
 		});
 		listener({
 			type: "tool_call",
-			sessionKey: "local-tui:pibo-run-yield-qa:default",
+			piboSessionId: "ps_local_tui",
 			eventId: "msg-1",
 			toolCallId: "tool-1",
 			toolName: "pibo_echo",
@@ -410,7 +411,7 @@ test("local routed TUI renders tool execution events with Pi tool styling", asyn
 		});
 		listener({
 			type: "tool_execution_started",
-			sessionKey: "local-tui:pibo-run-yield-qa:default",
+			piboSessionId: "ps_local_tui",
 			eventId: "msg-1",
 			toolCallId: "tool-1",
 			toolName: "pibo_echo",
@@ -425,7 +426,7 @@ test("local routed TUI renders tool execution events with Pi tool styling", asyn
 	for (const listener of client.eventListeners) {
 		listener({
 			type: "tool_execution_finished",
-			sessionKey: "local-tui:pibo-run-yield-qa:default",
+			piboSessionId: "ps_local_tui",
 			eventId: "msg-1",
 			toolCallId: "tool-1",
 			toolName: "pibo_echo",
@@ -514,14 +515,15 @@ test("local routed TUI renderer delegates messages to Pi components", async () =
 	assert.equal(executionLines.some((line) => line.includes("status: ok")), true);
 });
 
-test("local routed TUI client uses a profile-scoped local session key", async () => {
+test("local routed TUI client creates a profile-scoped local Pibo session", async () => {
 	const client = createLocalRoutedTuiClient({ profile: "run-yield-qa", persistSession: false, thinkingLevel: "high" });
 
 	try {
-		assert.equal(client.binding.sessionKey, "local-tui:pibo-run-yield-qa:default");
-		assert.equal(client.binding.channel, "local-tui");
-		assert.equal(client.binding.externalId, "pibo-run-yield-qa:default");
-		assert.equal(client.binding.originalProfile, "pibo-run-yield-qa");
+		assert.match(client.piboSession.id, /^ps_[0-9a-f-]{36}$/);
+		assert.equal(client.piboSession.channel, "local-tui");
+		assert.equal(client.piboSession.kind, "local");
+		assert.equal(client.piboSession.profile, "pibo-run-yield-qa");
+		assert.equal(client.piboSession.title, "default");
 		assert.equal(client.router.options.thinkingLevel, "high");
 		assert.ok(client.capabilities.actions.some((action) => action.name === "status"));
 	} finally {

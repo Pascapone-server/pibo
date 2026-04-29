@@ -23,7 +23,10 @@ import type { PiboThinkingLevel } from "./thinking.js";
 
 type PiSessionTreeNode = ReturnType<SessionManager["getTree"]>[number];
 
-type PiboSessionOperationListener = (result: PiboSessionOperationResult) => void | Promise<void>;
+type PiboSessionOperationListener = (
+	result: PiboSessionOperationResult,
+	event: PiboExecutionEvent,
+) => void | Promise<void>;
 
 type PiEventCandidate = {
 	type?: unknown;
@@ -93,7 +96,7 @@ function toolCallFromAssistantEvent(candidate: PiEventCandidate): PiToolCall | u
 	return toolCallFromMessage(candidate.message, candidate.assistantMessageEvent?.contentIndex);
 }
 
-function normalizeToolCallEvent(sessionKey: string, candidate: PiEventCandidate): PiboOutputEvent | undefined {
+function normalizeToolCallEvent(piboSessionId: string, candidate: PiEventCandidate): PiboOutputEvent | undefined {
 	if (
 		candidate.type === "message_update" &&
 		(candidate.assistantMessageEvent?.type === "toolcall_start" ||
@@ -105,7 +108,7 @@ function normalizeToolCallEvent(sessionKey: string, candidate: PiEventCandidate)
 
 		return {
 			type: "tool_call",
-			sessionKey,
+			piboSessionId,
 			toolCallId: toolCall.id,
 			toolName: toolCall.name,
 			args: toolCall.args,
@@ -116,7 +119,7 @@ function normalizeToolCallEvent(sessionKey: string, candidate: PiEventCandidate)
 	return undefined;
 }
 
-function normalizeToolExecutionEvent(sessionKey: string, candidate: PiEventCandidate): PiboOutputEvent | undefined {
+function normalizeToolExecutionEvent(piboSessionId: string, candidate: PiEventCandidate): PiboOutputEvent | undefined {
 	if (typeof candidate.toolCallId !== "string" || typeof candidate.toolName !== "string") {
 		return undefined;
 	}
@@ -124,7 +127,7 @@ function normalizeToolExecutionEvent(sessionKey: string, candidate: PiEventCandi
 	if (candidate.type === "tool_execution_start") {
 		return {
 			type: "tool_execution_started",
-			sessionKey,
+			piboSessionId,
 			toolCallId: candidate.toolCallId,
 			toolName: candidate.toolName,
 			args: candidate.args,
@@ -134,7 +137,7 @@ function normalizeToolExecutionEvent(sessionKey: string, candidate: PiEventCandi
 	if (candidate.type === "tool_execution_update") {
 		return {
 			type: "tool_execution_updated",
-			sessionKey,
+			piboSessionId,
 			toolCallId: candidate.toolCallId,
 			toolName: candidate.toolName,
 			args: candidate.args,
@@ -145,7 +148,7 @@ function normalizeToolExecutionEvent(sessionKey: string, candidate: PiEventCandi
 	if (candidate.type === "tool_execution_end") {
 		return {
 			type: "tool_execution_finished",
-			sessionKey,
+			piboSessionId,
 			toolCallId: candidate.toolCallId,
 			toolName: candidate.toolName,
 			result: candidate.result,
@@ -156,7 +159,7 @@ function normalizeToolExecutionEvent(sessionKey: string, candidate: PiEventCandi
 	return undefined;
 }
 
-function normalizePiEvent(sessionKey: string, event: unknown): PiboOutputEvent | undefined {
+function normalizePiEvent(piboSessionId: string, event: unknown): PiboOutputEvent | undefined {
 	if (!event || typeof event !== "object") return undefined;
 
 	const candidate = event as PiEventCandidate;
@@ -166,14 +169,14 @@ function normalizePiEvent(sessionKey: string, event: unknown): PiboOutputEvent |
 		candidate.assistantMessageEvent?.type === "text_delta" &&
 		typeof candidate.assistantMessageEvent.delta === "string"
 	) {
-		return { type: "assistant_delta", sessionKey, text: candidate.assistantMessageEvent.delta };
+		return { type: "assistant_delta", piboSessionId, text: candidate.assistantMessageEvent.delta };
 	}
 
 	if (
 		candidate.type === "message_update" &&
 		candidate.assistantMessageEvent?.type === "thinking_start"
 	) {
-		return { type: "thinking_started", sessionKey };
+		return { type: "thinking_started", piboSessionId };
 	}
 
 	if (
@@ -181,19 +184,21 @@ function normalizePiEvent(sessionKey: string, event: unknown): PiboOutputEvent |
 		candidate.assistantMessageEvent?.type === "thinking_delta" &&
 		typeof candidate.assistantMessageEvent.delta === "string"
 	) {
-		return { type: "thinking_delta", sessionKey, text: candidate.assistantMessageEvent.delta };
+		return { type: "thinking_delta", piboSessionId, text: candidate.assistantMessageEvent.delta };
 	}
 
 	if (candidate.type === "message_update" && candidate.assistantMessageEvent?.type === "thinking_end") {
 		const text =
 			typeof candidate.assistantMessageEvent.content === "string" ? candidate.assistantMessageEvent.content : undefined;
-		return text === undefined ? { type: "thinking_finished", sessionKey } : { type: "thinking_finished", sessionKey, text };
+		return text === undefined
+			? { type: "thinking_finished", piboSessionId }
+			: { type: "thinking_finished", piboSessionId, text };
 	}
 
-	const toolCallEvent = normalizeToolCallEvent(sessionKey, candidate);
+	const toolCallEvent = normalizeToolCallEvent(piboSessionId, candidate);
 	if (toolCallEvent) return toolCallEvent;
 
-	const toolExecutionEvent = normalizeToolExecutionEvent(sessionKey, candidate);
+	const toolExecutionEvent = normalizeToolExecutionEvent(piboSessionId, candidate);
 	if (toolExecutionEvent) return toolExecutionEvent;
 
 	if (candidate.type === "message_end") {
@@ -205,7 +210,7 @@ function normalizePiEvent(sessionKey: string, event: unknown): PiboOutputEvent |
 			if (message?.stopReason === "error" || typeof message?.errorMessage === "string") {
 				return {
 					type: "session_error",
-					sessionKey,
+					piboSessionId,
 					error:
 						typeof message.errorMessage === "string" && message.errorMessage.length > 0
 							? message.errorMessage
@@ -214,7 +219,7 @@ function normalizePiEvent(sessionKey: string, event: unknown): PiboOutputEvent |
 			}
 			const text = textFromMessage(candidate.message);
 			if (text) {
-				return { type: "assistant_message", sessionKey, text };
+				return { type: "assistant_message", piboSessionId, text };
 			}
 		}
 	}
@@ -230,7 +235,7 @@ export class RoutedSession {
 	private unsubscribe?: () => void;
 
 	constructor(
-		private readonly sessionKey: string,
+		private readonly piboSessionId: string,
 		private readonly runtime: AgentSessionRuntime,
 		private readonly emit: PiboEventListener,
 		private readonly pluginRegistry: PiboPluginRegistry,
@@ -246,12 +251,12 @@ export class RoutedSession {
 	private bindRuntimeSession(): void {
 		this.unsubscribe?.();
 		this.unsubscribe = this.runtime.session.subscribe((event) => {
-			const normalized = normalizePiEvent(this.sessionKey, event);
+			const normalized = normalizePiEvent(this.piboSessionId, event);
 			if (normalized) {
 				this.emit(this.withActiveMessage(normalized));
 			}
 			if (this.forwardPiEvents) {
-				this.emit({ type: "pi_event", sessionKey: this.sessionKey, event });
+				this.emit({ type: "pi_event", piboSessionId: this.piboSessionId, event });
 			}
 		});
 	}
@@ -262,7 +267,7 @@ export class RoutedSession {
 
 		const output: PiboOutputEvent = {
 			type: "message_queued",
-			sessionKey: this.sessionKey,
+			piboSessionId: this.piboSessionId,
 			eventId: event.id,
 			queuedMessages: this.queue.length,
 			text: event.text,
@@ -277,10 +282,10 @@ export class RoutedSession {
 		this.assertActive();
 
 		const result = await this.runAction(event);
-		if (isSessionOperationResult(result)) await this.onSessionOperation?.(result);
+		if (isSessionOperationResult(result)) await this.onSessionOperation?.(result, event);
 		const output: PiboOutputEvent = {
 			type: "execution_result",
-			sessionKey: this.sessionKey,
+			piboSessionId: this.piboSessionId,
 			eventId: event.id,
 			action: event.action,
 			result,
@@ -291,7 +296,7 @@ export class RoutedSession {
 
 	getStatus(): PiboSessionStatus {
 		return {
-			sessionKey: this.sessionKey,
+			piboSessionId: this.piboSessionId,
 			queuedMessages: this.queue.length,
 			processing: this.processing,
 			streaming: this.runtime.session.isStreaming,
@@ -330,7 +335,7 @@ export class RoutedSession {
 		const previous = this.createSessionSnapshot();
 		const result = await this.runtime.fork(entryId);
 		return {
-			routeSessionKey: this.sessionKey,
+			piboSessionId: this.piboSessionId,
 			previous,
 			current: this.createSessionSnapshot(),
 			cancelled: result.cancelled,
@@ -347,7 +352,7 @@ export class RoutedSession {
 		const previous = this.createSessionSnapshot();
 		const result = await this.runtime.fork(leafId, { position: "at" });
 		return {
-			routeSessionKey: this.sessionKey,
+			piboSessionId: this.piboSessionId,
 			previous,
 			current: this.createSessionSnapshot(),
 			cancelled: result.cancelled,
@@ -372,7 +377,7 @@ export class RoutedSession {
 			label: params.label,
 		});
 		return {
-			routeSessionKey: this.sessionKey,
+			piboSessionId: this.piboSessionId,
 			previous,
 			current: this.createSessionSnapshot(),
 			cancelled: result.cancelled,
@@ -386,7 +391,7 @@ export class RoutedSession {
 		const previous = this.createSessionSnapshot();
 		const result = await this.runtime.switchSession(params.sessionFile, { cwdOverride: params.cwdOverride });
 		return {
-			routeSessionKey: this.sessionKey,
+			piboSessionId: this.piboSessionId,
 			previous,
 			current: this.createSessionSnapshot(),
 			cancelled: result.cancelled,
@@ -439,9 +444,9 @@ export class RoutedSession {
 		try {
 			while (this.queue.length > 0 && !this.disposed) {
 				const event = this.queue.shift()!;
-				this.emit({
-					type: "message_started",
-					sessionKey: this.sessionKey,
+					this.emit({
+						type: "message_started",
+						piboSessionId: this.piboSessionId,
 					eventId: event.id,
 					text: event.text,
 					source: event.source,
@@ -452,14 +457,14 @@ export class RoutedSession {
 					await this.runtime.session.prompt(event.text, { source: promptSource(event.source) });
 					this.emit({
 						type: "message_finished",
-						sessionKey: this.sessionKey,
+						piboSessionId: this.piboSessionId,
 						eventId: event.id,
 						source: event.source,
 					});
 				} catch (error) {
 					this.emit({
 						type: "session_error",
-						sessionKey: this.sessionKey,
+						piboSessionId: this.piboSessionId,
 						eventId: event.id,
 						error: errorMessage(error),
 					});
@@ -481,7 +486,7 @@ export class RoutedSession {
 
 		return await gatewayAction.execute(
 			{
-				sessionKey: this.sessionKey,
+				piboSessionId: this.piboSessionId,
 				getStatus: () => this.getStatus(),
 				clearQueue: () => this.clearQueue(),
 				abort: async () => {
@@ -505,7 +510,7 @@ export class RoutedSession {
 
 	private assertActive(): void {
 		if (this.disposed) {
-			throw new Error(`Session "${this.sessionKey}" has been disposed`);
+			throw new Error(`Session "${this.piboSessionId}" has been disposed`);
 		}
 	}
 
@@ -527,7 +532,7 @@ export class RoutedSession {
 		const session = this.runtime.session;
 		const manager = session.sessionManager;
 		return {
-			sessionId: session.sessionId,
+			piSessionId: session.sessionId,
 			sessionFile: session.sessionFile,
 			leafId: manager.getLeafId(),
 			cwd: this.runtime.cwd,
@@ -568,10 +573,10 @@ function normalizeSessionTree(nodes: PiSessionTreeNode[]): PiboSessionTreeNode[]
 
 function isSessionOperationResult(value: unknown): value is PiboSessionOperationResult {
 	if (!value || typeof value !== "object") return false;
-	const candidate = value as { routeSessionKey?: unknown; current?: { sessionId?: unknown } };
+	const candidate = value as { piboSessionId?: unknown; current?: { piSessionId?: unknown } };
 	return (
-		typeof candidate.routeSessionKey === "string" &&
+		typeof candidate.piboSessionId === "string" &&
 		Boolean(candidate.current) &&
-		typeof candidate.current?.sessionId === "string"
+		typeof candidate.current?.piSessionId === "string"
 	);
 }

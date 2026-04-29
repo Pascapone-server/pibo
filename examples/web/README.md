@@ -48,5 +48,5 @@ Expected behavior:
 - authenticated users outside `auth.allowedEmails` return `403`
 - Google sign-in creates a Better Auth session
 - sign-out clears the Better Auth session and the next sign-in shows Google's account chooser
-- the chat app resolves a persistent binding with `channel: chat-web`
-- messages from the web app route into the pibo session for that user
+- the chat app creates or selects a persistent Pibo Session with `channel: pibo.chat-web`
+- messages from the web app route into the selected Pibo Session for that user

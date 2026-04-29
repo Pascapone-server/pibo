@@ -42,7 +42,7 @@ test("sendGatewayEvent sends a request event and resolves the gateway response",
 				ok: true,
 				payload: {
 					type: "message_queued",
-					sessionKey: frame.event.sessionKey,
+					piboSessionId: frame.event.piboSessionId,
 					eventId: frame.event.id,
 					queuedMessages: 1,
 					text: frame.event.text,
@@ -54,7 +54,7 @@ test("sendGatewayEvent sends a request event and resolves the gateway response",
 
 	try {
 		const response = await sendGatewayEvent(
-			{ type: "message", sessionKey: "receiver", text: "hello", source: "actor" },
+			{ type: "message", piboSessionId: "receiver", text: "hello", source: "actor" },
 			{ port: gateway.port },
 		);
 
@@ -78,7 +78,7 @@ test("sendGatewayMessageAndWaitForReply resolves only the correlated assistant r
 				ok: true,
 				payload: {
 					type: "message_queued",
-					sessionKey: frame.event.sessionKey,
+					piboSessionId: frame.event.piboSessionId,
 					eventId: frame.event.id,
 					queuedMessages: 1,
 					text: frame.event.text,
@@ -92,7 +92,7 @@ test("sendGatewayMessageAndWaitForReply resolves only the correlated assistant r
 				event: "router",
 				payload: {
 					type: "assistant_message",
-					sessionKey: frame.event.sessionKey,
+					piboSessionId: frame.event.piboSessionId,
 					eventId: "unrelated",
 					text: "wrong reply",
 				},
@@ -104,7 +104,7 @@ test("sendGatewayMessageAndWaitForReply resolves only the correlated assistant r
 				event: "router",
 				payload: {
 					type: "assistant_message",
-					sessionKey: frame.event.sessionKey,
+					piboSessionId: frame.event.piboSessionId,
 					eventId: frame.event.id,
 					text: "right reply",
 				},
@@ -114,7 +114,7 @@ test("sendGatewayMessageAndWaitForReply resolves only the correlated assistant r
 
 	try {
 		const result = await sendGatewayMessageAndWaitForReply(
-			{ type: "message", sessionKey: "receiver", text: "hello", source: "actor" },
+			{ type: "message", piboSessionId: "receiver", text: "hello", source: "actor" },
 			{ port: gateway.port },
 		);
 
@@ -134,7 +134,7 @@ test("sendGatewayMessageAndWaitForReply tolerates reply before response", async 
 				event: "router",
 				payload: {
 					type: "assistant_message",
-					sessionKey: frame.event.sessionKey,
+					piboSessionId: frame.event.piboSessionId,
 					eventId: frame.event.id,
 					text: "early reply",
 				},
@@ -147,7 +147,7 @@ test("sendGatewayMessageAndWaitForReply tolerates reply before response", async 
 				ok: true,
 				payload: {
 					type: "message_queued",
-					sessionKey: frame.event.sessionKey,
+					piboSessionId: frame.event.piboSessionId,
 					eventId: frame.event.id,
 					queuedMessages: 1,
 					text: frame.event.text,
@@ -159,7 +159,7 @@ test("sendGatewayMessageAndWaitForReply tolerates reply before response", async 
 
 	try {
 		const result = await sendGatewayMessageAndWaitForReply(
-			{ type: "message", sessionKey: "receiver", text: "hello", source: "actor" },
+			{ type: "message", piboSessionId: "receiver", text: "hello", source: "actor" },
 			{ port: gateway.port },
 		);
 

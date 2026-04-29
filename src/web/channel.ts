@@ -38,7 +38,7 @@ function createAppContext(channelContext: PiboChannelContext): PiboWebAppContext
 	return {
 		channelContext,
 		requireSession(input) {
-			return requireWebSession(channelContext, input.request, input);
+			return requireWebSession(channelContext, input.request);
 		},
 	};
 }

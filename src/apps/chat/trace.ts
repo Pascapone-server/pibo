@@ -1,15 +1,15 @@
 import { existsSync, readFileSync } from "node:fs";
 import { parseSessionEntries, SessionManager, type SessionEntry } from "@mariozechner/pi-coding-agent";
 import type { PiboOutputEvent, PiboSessionListItem } from "../../core/events.js";
-import type { PiboSessionBinding } from "../../sessions/bindings.js";
+import type { PiboSession } from "../../sessions/store.js";
 import type { ChatWebSessionIndexItem, ChatWebStoredEvent } from "./read-model.js";
 
 export type PiboWebSessionStatus = "idle" | "running" | "error";
 
 export type PiboWebSessionNode = {
-	sessionKey: string;
-	sessionId: string;
-	parentSessionKey?: string;
+	piboSessionId: string;
+	piSessionId: string;
+	parentId?: string;
 	profile: string;
 	title: string;
 	subtitle?: string;
@@ -36,7 +36,7 @@ export type PiboTraceNode = {
 	id: string;
 	parentId?: string;
 	entryId?: string;
-	sessionKey: string;
+	piboSessionId: string;
 	eventId?: string;
 	toolCallId?: string;
 	runId?: string;
@@ -50,13 +50,13 @@ export type PiboTraceNode = {
 	input?: unknown;
 	output?: unknown;
 	error?: string;
-	linkedSessionKey?: string;
+	linkedPiboSessionId?: string;
 	children: PiboTraceNode[];
 };
 
 export type PiboSessionTraceView = {
-	sessionKey: string;
-	sessionId: string;
+	piboSessionId: string;
+	piSessionId: string;
 	title: string;
 	nodes: PiboTraceNode[];
 	rawEvents: ChatWebStoredEvent[];
@@ -70,8 +70,8 @@ type SessionMetadata = {
 };
 
 type TraceBuildInput = {
-	binding: PiboSessionBinding;
-	bindings: PiboSessionBinding[];
+	session: PiboSession;
+	sessions: PiboSession[];
 	events: ChatWebStoredEvent[];
 	cwd?: string;
 };
@@ -92,37 +92,37 @@ type MessagePart = {
 };
 
 export async function loadPiSessionMetadata(
-	binding: PiboSessionBinding,
+	session: PiboSession,
 	cwd = process.cwd(),
 ): Promise<SessionMetadata> {
-	const session = await findPiSession(binding, cwd);
-	if (!session) return {};
+	const piSession = await findPiSession(session, cwd);
+	if (!piSession) return {};
 	return {
-		sessionPath: session.path,
-		name: session.name,
-		firstMessage: session.firstMessage,
-		modified: session.modified,
+		sessionPath: piSession.path,
+		name: piSession.name,
+		firstMessage: piSession.firstMessage,
+		modified: piSession.modified,
 	};
 }
 
 export async function buildSessionNodes(
-	bindings: PiboSessionBinding[],
+	sessions: PiboSession[],
 	indexItems: ChatWebSessionIndexItem[],
 	cwd = process.cwd(),
 ): Promise<PiboWebSessionNode[]> {
-	const indexByKey = new Map(indexItems.map((item) => [item.sessionKey, item]));
+	const indexByKey = new Map(indexItems.map((item) => [item.piboSessionId, item]));
 	const nodes = new Map<string, PiboWebSessionNode>();
 
-	for (const binding of bindings) {
-		const metadata = await loadPiSessionMetadata(binding, binding.workspace ?? cwd);
-		const indexed = indexByKey.get(binding.sessionKey);
-		nodes.set(binding.sessionKey, {
-			sessionKey: binding.sessionKey,
-			sessionId: binding.sessionId ?? binding.sessionKey,
-			parentSessionKey: binding.parentSessionKey,
-			profile: binding.currentProfile ?? binding.originalProfile,
-			title: createSessionTitle(binding, metadata),
-			subtitle: binding.sessionKey,
+	for (const session of sessions) {
+		const metadata = await loadPiSessionMetadata(session, session.workspace ?? cwd);
+		const indexed = indexByKey.get(session.id);
+		nodes.set(session.id, {
+			piboSessionId: session.id,
+			piSessionId: session.piSessionId,
+			parentId: session.parentId,
+			profile: session.profile,
+			title: createSessionTitle(session, metadata),
+			subtitle: session.id,
 			status: indexed?.status ?? "idle",
 			lastActivityAt: indexed?.lastActivityAt ?? metadata.modified,
 			children: [],
@@ -131,7 +131,7 @@ export async function buildSessionNodes(
 
 	const roots: PiboWebSessionNode[] = [];
 	for (const node of nodes.values()) {
-		const parent = node.parentSessionKey ? nodes.get(node.parentSessionKey) : undefined;
+		const parent = node.parentId ? nodes.get(node.parentId) : undefined;
 		if (parent) {
 			parent.children.push(node);
 		} else {
@@ -148,11 +148,11 @@ export async function buildSessionNodes(
 }
 
 export async function buildTraceView(input: TraceBuildInput): Promise<PiboSessionTraceView> {
-	const metadata = await loadPiSessionMetadata(input.binding, input.binding.workspace ?? input.cwd);
+	const metadata = await loadPiSessionMetadata(input.session, input.session.workspace ?? input.cwd);
 	const entries = metadata.sessionPath ? readEntries(metadata.sessionPath) : [];
-	const nodes = traceNodesFromEntries(input.binding.sessionKey, entries);
+	const nodes = traceNodesFromEntries(input.session.id, entries);
 	const byId = mapTraceNodesById(nodes);
-	const childByParent = mapChildren(input.bindings);
+	const childByParent = mapChildren(input.sessions);
 	const hasPersistedTranscript = entries.some((entry) => entry.type === "message");
 	const openTranscriptEventIds = findOpenTranscriptEventIds(input.events);
 
@@ -164,7 +164,7 @@ export async function buildTraceView(input: TraceBuildInput): Promise<PiboSessio
 		) {
 			continue;
 		}
-		const node = traceNodeFromEvent(input.binding.sessionKey, storedEvent.payload, childByParent, storedEvent.createdAt);
+		const node = traceNodeFromEvent(input.session.id, storedEvent.payload, childByParent, storedEvent.createdAt);
 		if (!node) continue;
 		if (node.type === "agent.turn" && node.eventId) {
 			const existingTurn = [...byId.values()].find(
@@ -193,9 +193,9 @@ export async function buildTraceView(input: TraceBuildInput): Promise<PiboSessio
 	}
 
 	return {
-		sessionKey: input.binding.sessionKey,
-		sessionId: input.binding.sessionId ?? input.binding.sessionKey,
-		title: createSessionTitle(input.binding, metadata),
+		piboSessionId: input.session.id,
+		piSessionId: input.session.piSessionId,
+		title: createSessionTitle(input.session, metadata),
 		nodes: nestTraceNodes(nodes),
 		rawEvents: input.events,
 	};
@@ -216,8 +216,8 @@ export async function listPiSessions(cwd = process.cwd()): Promise<PiboSessionLi
 	}));
 }
 
-function createSessionTitle(binding: PiboSessionBinding, metadata: SessionMetadata): string {
-	const candidate = metadata.name || metadata.firstMessage || binding.sessionKey;
+function createSessionTitle(session: PiboSession, metadata: SessionMetadata): string {
+	const candidate = metadata.name || metadata.firstMessage || session.title || session.id;
 	return truncateTitle(candidate);
 }
 
@@ -227,9 +227,9 @@ function truncateTitle(title: string, maxLength = 56): string {
 	return `${normalized.slice(0, maxLength - 1)}…`;
 }
 
-async function findPiSession(binding: PiboSessionBinding, cwd: string): Promise<PiboSessionListItem | undefined> {
+async function findPiSession(piboSession: PiboSession, cwd: string): Promise<PiboSessionListItem | undefined> {
 	const sessions = await listPiSessions(cwd);
-	return sessions.find((session) => session.id === binding.sessionId);
+	return sessions.find((session) => session.id === piboSession.piSessionId);
 }
 
 function readEntries(path: string): SessionEntry[] {
@@ -252,24 +252,24 @@ function messageParts(entry: MessageSessionEntry): unknown[] {
 	return Array.isArray(content) ? content : [];
 }
 
-export function traceNodesFromEntries(sessionKey: string, entries: SessionEntry[]): PiboTraceNode[] {
+export function traceNodesFromEntries(piboSessionId: string, entries: SessionEntry[]): PiboTraceNode[] {
 	const nodes: PiboTraceNode[] = [];
 	for (let index = 0; index < entries.length; index += 1) {
 		const entry = entries[index];
 		if (entry.type === "message") {
 			const role = messageRole(entry);
 			if (role === "user") {
-				nodes.push(createUserMessageNode(sessionKey, entry, messageContent(entry)));
+				nodes.push(createUserMessageNode(piboSessionId, entry, messageContent(entry)));
 			} else if (role === "assistant" || role === "toolResult") {
 				const turn = collectAssistantTurn(entries, index);
-				nodes.push(...createAssistantTurnNodes(sessionKey, turn.entries));
+				nodes.push(...createAssistantTurnNodes(piboSessionId, turn.entries));
 				index = turn.nextIndex - 1;
 			}
 		} else if (entry.type === "session_info" && entry.name) {
 			nodes.push({
 				id: `entry:${entry.id}`,
 				entryId: entry.id,
-				sessionKey,
+				piboSessionId,
 				type: "execution.command",
 				title: "Session Info",
 				status: "done",
@@ -299,12 +299,12 @@ function collectAssistantTurn(
 	return { entries: turnEntries, nextIndex: index };
 }
 
-function createUserMessageNode(sessionKey: string, entry: MessageSessionEntry, content: unknown): PiboTraceNode {
+function createUserMessageNode(piboSessionId: string, entry: MessageSessionEntry, content: unknown): PiboTraceNode {
 	const text = extractText(content);
 	return {
 		id: `entry:${entry.id}`,
 		entryId: entry.id,
-		sessionKey,
+		piboSessionId,
 		type: "user.message",
 		title: "User Message",
 		status: "done",
@@ -315,7 +315,7 @@ function createUserMessageNode(sessionKey: string, entry: MessageSessionEntry, c
 	};
 }
 
-function createAssistantTurnNodes(sessionKey: string, entries: MessageSessionEntry[]): PiboTraceNode[] {
+function createAssistantTurnNodes(piboSessionId: string, entries: MessageSessionEntry[]): PiboTraceNode[] {
 	const firstAssistant = entries.find((entry) => messageRole(entry) === "assistant");
 	if (!firstAssistant) return [];
 
@@ -329,7 +329,7 @@ function createAssistantTurnNodes(sessionKey: string, entries: MessageSessionEnt
 
 	for (const entry of entries) {
 		if (messageRole(entry) === "toolResult") {
-			mergePersistedToolResult(toolsByCallId, childNodes, entry, sessionKey);
+			mergePersistedToolResult(toolsByCallId, childNodes, entry, piboSessionId);
 			continue;
 		}
 
@@ -340,12 +340,12 @@ function createAssistantTurnNodes(sessionKey: string, entries: MessageSessionEnt
 		for (const [index, part] of messageParts(entry).entries()) {
 			const typed = part as MessagePart;
 			if (typed.type === "thinking" && typeof typed.thinking === "string" && hasVisibleText(typed.thinking)) {
-				reasoningNodes.push(createReasoningNode(sessionKey, entry, index, typed.thinking));
+				reasoningNodes.push(createReasoningNode(piboSessionId, entry, index, typed.thinking));
 			} else if (typed.type === "text" && typeof typed.text === "string" && typed.text !== "") {
 				answerTextParts.push(typed.text);
 				responseEntry = entry;
 			} else if (typed.type === "toolCall" && typeof typed.id === "string" && typeof typed.name === "string") {
-				const toolNode = createToolCallNode(sessionKey, entry, typed);
+				const toolNode = createToolCallNode(piboSessionId, entry, typed);
 				childNodes.push(toolNode);
 				toolsByCallId.set(typed.id, toolNode);
 			}
@@ -354,7 +354,7 @@ function createAssistantTurnNodes(sessionKey: string, entries: MessageSessionEnt
 
 	const response = createAssistantMessageNode({
 		id: `entry:${firstAssistant.id}:response`,
-		sessionKey,
+		piboSessionId,
 		entry: responseEntry,
 		status: responseStatus,
 		text: answerTextParts.join(""),
@@ -367,7 +367,7 @@ function createAssistantTurnNodes(sessionKey: string, entries: MessageSessionEnt
 }
 
 function createReasoningNode(
-	sessionKey: string,
+	piboSessionId: string,
 	entry: MessageSessionEntry,
 	index: number,
 	thinking: string,
@@ -375,7 +375,7 @@ function createReasoningNode(
 	return {
 		id: `entry:${entry.id}:thinking:${index}`,
 		entryId: entry.id,
-		sessionKey,
+		piboSessionId,
 		type: "model.reasoning",
 		title: "Thinking",
 		status: "done",
@@ -386,12 +386,12 @@ function createReasoningNode(
 	};
 }
 
-function createToolCallNode(sessionKey: string, entry: MessageSessionEntry, part: MessagePart): PiboTraceNode {
+function createToolCallNode(piboSessionId: string, entry: MessageSessionEntry, part: MessagePart): PiboTraceNode {
 	const name = typeof part.name === "string" ? part.name : "Tool Call";
 	return {
 		id: `entry:${entry.id}:tool:${String(part.id)}`,
 		entryId: entry.id,
-		sessionKey,
+		piboSessionId,
 		toolCallId: typeof part.id === "string" ? part.id : undefined,
 		type: isSubagentToolName(name) ? "agent.delegation" : "tool.call",
 		title: name,
@@ -406,7 +406,7 @@ function mergePersistedToolResult(
 	toolsByCallId: Map<string, PiboTraceNode>,
 	childNodes: PiboTraceNode[],
 	entry: MessageSessionEntry,
-	sessionKey: string,
+	piboSessionId: string,
 ): void {
 	const message = entry.message as {
 		toolCallId?: unknown;
@@ -420,7 +420,7 @@ function mergePersistedToolResult(
 
 	let toolNode = toolsByCallId.get(toolCallId);
 	if (!toolNode) {
-		toolNode = createMissingToolResultNode(sessionKey, entry, toolCallId);
+		toolNode = createMissingToolResultNode(piboSessionId, entry, toolCallId);
 		childNodes.push(toolNode);
 		toolsByCallId.set(toolCallId, toolNode);
 	}
@@ -431,7 +431,7 @@ function mergePersistedToolResult(
 }
 
 function createMissingToolResultNode(
-	sessionKey: string,
+	piboSessionId: string,
 	entry: MessageSessionEntry,
 	toolCallId: string,
 ): PiboTraceNode {
@@ -439,7 +439,7 @@ function createMissingToolResultNode(
 	return {
 		id: `entry:${entry.id}:tool-result:${toolCallId}`,
 		entryId: entry.id,
-		sessionKey,
+		piboSessionId,
 		toolCallId,
 		type: "tool.result",
 		title: typeof message.toolName === "string" ? message.toolName : "Tool Result",
@@ -456,7 +456,7 @@ function toolResultOutput(message: { content?: unknown; details?: unknown }): un
 
 function createAssistantMessageNode(input: {
 	id: string;
-	sessionKey: string;
+	piboSessionId: string;
 	entry: MessageSessionEntry;
 	status: PiboTraceNodeStatus;
 	text: string;
@@ -468,7 +468,7 @@ function createAssistantMessageNode(input: {
 	return {
 		id: input.id,
 		entryId: input.entry.id,
-		sessionKey: input.sessionKey,
+		piboSessionId: input.piboSessionId,
 		type: "assistant.message",
 		title: "Agent Message",
 		status: input.status,
@@ -482,15 +482,15 @@ function createAssistantMessageNode(input: {
 }
 
 function traceNodeFromEvent(
-	sessionKey: string,
+	piboSessionId: string,
 	event: PiboOutputEvent,
-	childByParent: Map<string, PiboSessionBinding[]>,
+	childByParent: Map<string, PiboSession[]>,
 	createdAt?: string,
 ): PiboTraceNode | undefined {
 	const eventId = "eventId" in event && typeof event.eventId === "string" ? event.eventId : undefined;
 	const id = `event:${event.type}:${eventId ?? cryptoSafeId(event)}`;
 	const turnParentId = eventId ? messageTurnNodeId(eventId) : undefined;
-	const base = { id, sessionKey, eventId, startedAt: createdAt, children: [] as PiboTraceNode[] };
+	const base = { id, piboSessionId, eventId, startedAt: createdAt, children: [] as PiboTraceNode[] };
 
 	switch (event.type) {
 		case "message_queued":
@@ -539,13 +539,13 @@ function traceNodeFromEvent(
 		case "tool_execution_started":
 		case "tool_execution_updated":
 		case "tool_execution_finished": {
-			const linkedSessionKey = findLikelyChildSession(sessionKey, event.toolName, childByParent);
+			const linkedPiboSessionId = findLikelyChildSession(piboSessionId, event.toolName, childByParent);
 			return {
 				...base,
 				id: `tool:${event.toolCallId}`,
 				parentId: turnParentId,
 				toolCallId: event.toolCallId,
-				type: linkedSessionKey || isSubagentToolName(event.toolName) ? "agent.delegation" : "tool.call",
+				type: linkedPiboSessionId || isSubagentToolName(event.toolName) ? "agent.delegation" : "tool.call",
 				title: event.toolName,
 				status:
 					event.type === "tool_execution_finished"
@@ -565,7 +565,7 @@ function traceNodeFromEvent(
 							: undefined,
 				error:
 					event.type === "tool_execution_finished" && event.isError ? stringifyPreview(event.result) : undefined,
-				linkedSessionKey,
+				linkedPiboSessionId,
 				children: [],
 			};
 		}
@@ -594,7 +594,7 @@ function traceNodeFromEvent(
 }
 
 function isInternalSessionOperation(action: string): boolean {
-	return action === "session.fork" || action === "session.switch";
+	return action === "session.fork" || action === "session.clone" || action === "session.switch";
 }
 
 function isTranscriptEchoEvent(event: PiboOutputEvent): boolean {
@@ -668,30 +668,29 @@ function mergeToolEvent(target: PiboTraceNode, update: PiboTraceNode): void {
 	target.output = update.output ?? target.output;
 	target.error = update.error ?? target.error;
 	target.completedAt = update.completedAt ?? target.completedAt;
-	target.linkedSessionKey = update.linkedSessionKey ?? target.linkedSessionKey;
+	target.linkedPiboSessionId = update.linkedPiboSessionId ?? target.linkedPiboSessionId;
 }
 
-function mapChildren(bindings: PiboSessionBinding[]): Map<string, PiboSessionBinding[]> {
-	const result = new Map<string, PiboSessionBinding[]>();
-	for (const binding of bindings) {
-		if (!binding.parentSessionKey) continue;
-		const children = result.get(binding.parentSessionKey) ?? [];
-		children.push(binding);
-		result.set(binding.parentSessionKey, children);
+function mapChildren(sessions: PiboSession[]): Map<string, PiboSession[]> {
+	const result = new Map<string, PiboSession[]>();
+	for (const session of sessions) {
+		if (!session.parentId) continue;
+		const children = result.get(session.parentId) ?? [];
+		children.push(session);
+		result.set(session.parentId, children);
 	}
 	return result;
 }
 
 function findLikelyChildSession(
-	sessionKey: string,
+	piboSessionId: string,
 	toolName: string,
-	childByParent: Map<string, PiboSessionBinding[]>,
+	childByParent: Map<string, PiboSession[]>,
 ): string | undefined {
 	if (!isSubagentToolName(toolName)) return undefined;
-	const subagentName = toolName.replace(/^pibo_subagent_/, "");
 	return childByParent
-		.get(sessionKey)
-		?.find((binding) => binding.sessionKey.includes(`::sub::${subagentName}::`))?.sessionKey;
+		.get(piboSessionId)
+		?.find((session) => session.metadata?.subagentToolName === toolName)?.id;
 }
 
 function isSubagentToolName(name: string): boolean {

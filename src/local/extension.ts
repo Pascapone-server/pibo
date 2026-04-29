@@ -237,9 +237,9 @@ function createLocalAutocompleteProvider(
 
 function isSessionStatus(value: unknown): value is PiboSessionStatus {
 	if (!value || typeof value !== "object") return false;
-	const candidate = value as { sessionKey?: unknown; queuedMessages?: unknown; processing?: unknown };
+	const candidate = value as { piboSessionId?: unknown; queuedMessages?: unknown; processing?: unknown };
 	return (
-		typeof candidate.sessionKey === "string" &&
+		typeof candidate.piboSessionId === "string" &&
 		typeof candidate.queuedMessages === "number" &&
 		typeof candidate.processing === "boolean"
 	);
@@ -259,7 +259,7 @@ function createExecutionParams(slashCommand: string, args = ""): PiboJsonValue |
 
 function formatExecutionResult(event: Extract<PiboOutputEvent, { type: "execution_result" }>): string {
 	if (event.action === "status" && isSessionStatus(event.result)) {
-		return `status: session=${event.result.sessionKey} queued=${event.result.queuedMessages} processing=${event.result.processing} streaming=${event.result.streaming}`;
+		return `status: session=${event.result.piboSessionId} queued=${event.result.queuedMessages} processing=${event.result.processing} streaming=${event.result.streaming}`;
 	}
 
 	if (event.action === "thinking" && isThinkingResult(event.result)) {
@@ -287,8 +287,8 @@ function sendTuiMessage(pi: Parameters<ExtensionFactory>[0], content: string, de
 function formatConnectedMessage(client: LocalRoutedTuiClientLike, slashCommands: Map<string, string>): string {
 	const commands = [...slashCommands.keys()].join(", ") || "none";
 	return [
-		`Connected to pibo local routed session ${client.binding.sessionKey}.`,
-		`Profile: ${client.binding.originalProfile}`,
+		`Connected to pibo local routed session ${client.piboSession.id}.`,
+		`Profile: ${client.piboSession.profile}`,
 		`Routed commands: ${commands}`,
 		"Only /quit and /thinking-show stay local in routed mode.",
 	].join("\n");

@@ -138,10 +138,10 @@ export const piboCorePlugin = definePiboPlugin({
 		});
 		api.registerGatewayAction({
 			name: "session_id",
-			description: "Return the routed session key.",
+			description: "Return the routed Pibo session id.",
 			slashCommands: ["session"],
 			execute(context) {
-				return { sessionKey: context.sessionKey };
+				return { piboSessionId: context.piboSessionId };
 			},
 		});
 		api.registerGatewayAction({
@@ -205,7 +205,7 @@ export const piboCorePlugin = definePiboPlugin({
 		});
 		api.registerGatewayAction({
 			name: "session.fork",
-			description: "Fork before a selected user message and make the fork the active Pi session.",
+			description: "Fork before a selected user message and create a visible Pibo session for the fork.",
 			async execute(context, event) {
 				const params = requireForkParams(event);
 				return await context.forkSession(params.entryId);
@@ -213,7 +213,7 @@ export const piboCorePlugin = definePiboPlugin({
 		});
 		api.registerGatewayAction({
 			name: "session.clone",
-			description: "Clone the current leaf and make the clone the active Pi session.",
+			description: "Clone the current leaf and create a visible Pibo session for the clone.",
 			slashCommands: ["clone"],
 			execute(context) {
 				return context.cloneSession();

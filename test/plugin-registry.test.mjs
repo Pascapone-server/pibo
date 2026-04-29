@@ -48,7 +48,7 @@ test("default plugin registry builds profiles from registered resources", () => 
 		},
 		{
 			name: "session_id",
-			description: "Return the routed session key.",
+			description: "Return the routed Pibo session id.",
 			slashCommands: ["session"],
 		},
 		{
@@ -83,12 +83,12 @@ test("default plugin registry builds profiles from registered resources", () => 
 		},
 		{
 			name: "session.fork",
-			description: "Fork before a selected user message and make the fork the active Pi session.",
+			description: "Fork before a selected user message and create a visible Pibo session for the fork.",
 			slashCommands: [],
 		},
 		{
 			name: "session.clone",
-			description: "Clone the current leaf and make the clone the active Pi session.",
+			description: "Clone the current leaf and create a visible Pibo session for the clone.",
 			slashCommands: ["clone"],
 		},
 		{
@@ -129,7 +129,7 @@ test("plugins can register profiles, gateway actions, and event listeners", asyn
 					api.registerGatewayAction({
 						name: "test_action",
 						execute(context) {
-							return { sessionKey: context.sessionKey };
+							return { piboSessionId: context.piboSessionId };
 						},
 					});
 					api.onEvent((event) => {
@@ -169,7 +169,7 @@ test("plugins can register profiles, gateway actions, and event listeners", asyn
 	assert.ok(action);
 	assert.deepEqual(
 		await action.execute({
-			sessionKey: "abc",
+			piboSessionId: "abc",
 			getStatus() {
 				throw new Error("not used");
 			},
@@ -179,10 +179,10 @@ test("plugins can register profiles, gateway actions, and event listeners", asyn
 			async abort() {},
 			async dispose() {},
 		}),
-		{ sessionKey: "abc" },
+		{ piboSessionId: "abc" },
 	);
 
-	registry.notifyEvent({ type: "message_finished", sessionKey: "abc" });
+	registry.notifyEvent({ type: "message_finished", piboSessionId: "abc" });
 	assert.deepEqual(observed, ["message_finished"]);
 	assert.equal(registry.getChannels()[0].name, "test_channel");
 	assert.equal(registry.getAuthService().name, "test_auth");

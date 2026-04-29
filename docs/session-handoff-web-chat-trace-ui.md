@@ -35,7 +35,7 @@ Bring the Pibo Chat Web App closer to the existing `pydantic-tracing` trace UI:
   - Materialized trace projections are not stored.
   - Trace nodes are reconstructed from Pi session JSONL plus raw Pibo events.
 - Added web APIs for bootstrap, trace view, SSE updates, messages, and execution actions.
-- Added nested session listing based on session bindings and parent session keys.
+- Added nested session listing based on Pibo Sessions and `parentId`.
 - Added explicit new-session creation from the Web Chat UI through `POST /api/chat/sessions`.
 - Added basic Agents and Settings areas as V1 placeholders.
 - Added slash command menu behavior and Enter/Shift+Enter handling.

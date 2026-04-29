@@ -288,7 +288,7 @@ Inputs are compact technical fields:
 - light slate background in light mode
 - slate border
 - Terminal Cyan focus border and focus ring
-- monospaced text for IDs, session keys, trace IDs, and command fields
+- monospaced text for IDs, Pibo Session IDs, trace IDs, and command fields
 
 Search fields should include a leading search icon and be sized for short identifiers.
 

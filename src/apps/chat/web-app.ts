@@ -1,15 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { extname, resolve } from "node:path";
-import type { PiboJsonValue, PiboOutputEvent, PiboSessionOperationResult } from "../../core/events.js";
+import type { PiboJsonValue, PiboOutputEvent } from "../../core/events.js";
 import { PiboWebHttpError, readJsonBody, responseHtml, responseJson } from "../../web/http.js";
 import type { PiboWebApp, PiboWebAppContext, PiboWebSession } from "../../web/types.js";
-import type { PiboSessionBinding } from "../../sessions/bindings.js";
+import type { PiboSession } from "../../sessions/store.js";
 import { ChatWebReadModel, createDefaultChatWebReadModel } from "./read-model.js";
 import { buildSessionNodes, buildTraceView } from "./trace.js";
 
 export const CHAT_WEB_APP_NAME = "pibo.chat-web";
-export const CHAT_WEB_CHANNEL = "chat-web";
+export const CHAT_WEB_CHANNEL = "pibo.chat-web";
 export const CHAT_WEB_MOUNT_PATH = "/apps/chat";
 export const CHAT_WEB_API_PREFIX = "/api/chat";
 
@@ -78,148 +78,71 @@ function ensureEventIndexing(state: ChatWebAppState, context: PiboWebAppContext)
 	state.unsubscribe?.();
 	state.subscribedContext = context;
 	state.unsubscribe = context.channelContext.subscribe((event) => {
-		const binding = context.channelContext.listSessions?.().find((candidate) => candidate.sessionKey === event.sessionKey);
-		state.readModel.recordEvent(event, binding);
+		const session = context.channelContext.getSession(event.piboSessionId);
+		state.readModel.recordEvent(event, session);
 	});
 }
 
-function listKnownBindings(context: PiboWebAppContext, root: PiboSessionBinding): PiboSessionBinding[] {
-	const listed = context.channelContext.listSessions?.() ?? [root];
-	const byKey = new Map<string, PiboSessionBinding>();
-	for (const binding of listed) byKey.set(binding.sessionKey, binding);
-	byKey.set(root.sessionKey, root);
-	return [...byKey.values()]
-		.filter((binding) => isSessionInPersonalScope(binding.sessionKey, root.sessionKey, byKey))
-		.map((binding) => normalizePersonalBinding(binding, root.sessionKey));
+function listOwnedSessions(context: PiboWebAppContext, webSession: PiboWebSession): PiboSession[] {
+	return (context.channelContext.listSessions?.() ?? [])
+		.filter((session) => session.ownerScope === webSession.ownerScope)
+		.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }
 
-function isSessionInPersonalScope(
-	sessionKey: string,
-	rootSessionKey: string,
-	byKey: ReadonlyMap<string, PiboSessionBinding>,
-): boolean {
-	if (sessionKey === rootSessionKey) return true;
-	if (sessionKey.startsWith(`${rootSessionKey}:session:`)) return true;
-	if (sessionKey.startsWith(`${rootSessionKey}:branch:`)) return true;
-	if (sessionKey.startsWith(`${rootSessionKey}::sub::`)) return true;
-
-	let current = byKey.get(sessionKey);
-	const seen = new Set<string>();
-	while (current?.parentSessionKey) {
-		if (current.parentSessionKey === rootSessionKey) return true;
-		if (seen.has(current.parentSessionKey)) return false;
-		seen.add(current.parentSessionKey);
-		current = byKey.get(current.parentSessionKey);
-	}
-
-	return false;
-}
-
-function normalizePersonalBinding(binding: PiboSessionBinding, rootSessionKey: string): PiboSessionBinding {
-	if (binding.channel !== CHAT_WEB_CHANNEL) return binding;
-	if (!isPersonalTopLevelKey(binding.sessionKey, rootSessionKey)) return binding;
-	if (!binding.parentSessionKey && !binding.parentSessionId) return binding;
-	return {
-		...binding,
-		parentSessionKey: undefined,
-		parentSessionId: undefined,
-	};
-}
-
-function isPersonalTopLevelKey(sessionKey: string, rootSessionKey: string): boolean {
-	return sessionKey.startsWith(`${rootSessionKey}:session:`) || sessionKey.startsWith(`${rootSessionKey}:branch:`);
+function ensureDefaultChatSession(
+	context: PiboWebAppContext,
+	webSession: PiboWebSession,
+	defaultProfile: string,
+): PiboSession {
+	const existing = listOwnedSessions(context, webSession).find((session) => !session.parentId);
+	if (existing) return existing;
+	return context.channelContext.createSession({
+		channel: CHAT_WEB_CHANNEL,
+		kind: "chat",
+		profile: defaultProfile,
+		ownerScope: webSession.ownerScope,
+	});
 }
 
 function resolveRequestedSession(
 	context: PiboWebAppContext,
-	root: PiboWebSession,
-	sessionKey?: string,
-): PiboSessionBinding {
-	const rootBinding = root.binding;
-	if (!sessionKey || sessionKey === rootBinding.sessionKey) return rootBinding;
-	const bindings = listKnownBindings(context, rootBinding);
-	const byKey = new Map(bindings.map((binding) => [binding.sessionKey, binding]));
-	const binding = byKey.get(sessionKey);
-	if (!binding || !isSessionInPersonalScope(sessionKey, rootBinding.sessionKey, byKey)) {
+	webSession: PiboWebSession,
+	defaultProfile: string,
+	piboSessionId?: string,
+): PiboSession {
+	const fallback = ensureDefaultChatSession(context, webSession, defaultProfile);
+	if (!piboSessionId || piboSessionId === fallback.id) return fallback;
+	const selected = context.channelContext.getSession(piboSessionId);
+	if (!selected || selected.ownerScope !== webSession.ownerScope) {
 		throw new PiboWebHttpError("Session is not available for this user", 404);
 	}
-	return binding;
+	return selected;
 }
 
-function createPersonalChatSession(context: PiboWebAppContext, root: PiboWebSession): PiboSessionBinding {
-	const id = randomUUID();
-	const rootBinding = root.binding;
-	return context.channelContext.resolveSession({
+function createPersonalChatSession(
+	context: PiboWebAppContext,
+	webSession: PiboWebSession,
+	defaultProfile: string,
+): PiboSession {
+	return context.channelContext.createSession({
 		channel: CHAT_WEB_CHANNEL,
-		externalId: `${root.authSession.identity.userId}:session:${id}`,
-		sessionKey: `${rootBinding.sessionKey}:session:${id}`,
-		defaultProfile: rootBinding.currentProfile ?? rootBinding.originalProfile,
-		workspace: rootBinding.workspace,
+		kind: "chat",
+		profile: defaultProfile,
+		ownerScope: webSession.ownerScope,
 	});
 }
 
-function ensureArchivedSessionBindings(context: PiboWebAppContext, root: PiboWebSession, readModel: ChatWebReadModel): void {
-	const bindings = listKnownBindings(context, root.binding);
-	for (const binding of bindings) {
-		for (const event of readModel.listEvents(binding.sessionKey)) {
-			const result = sessionOperationResultFromEvent(event.payload);
-			if (!result || result.cancelled || !result.previous.sessionFile) continue;
-			if (result.previous.sessionId === result.current.sessionId) continue;
-
-			const source = context.channelContext.listSessions?.().find((candidate) => candidate.sessionKey === result.routeSessionKey) ?? binding;
-			const archiveParent = archiveParentFor(source, result.current.sessionId);
-			const sessionId = result.previous.sessionId;
-			if (source.sessionId !== result.current.sessionId) {
-				context.channelContext.updateSession?.(source.sessionKey, {
-					sessionId: result.current.sessionId,
-					workspace: result.current.cwd,
-				});
-			}
-			if (context.channelContext.listSessions?.().some((candidate) => candidate.sessionId === sessionId)) continue;
-			context.channelContext.resolveSession({
-				channel: source.channel,
-				externalId: `${source.externalId}:branch:${sessionId}`,
-				sessionKey: `${source.sessionKey}:branch:${sessionId}`,
-				sessionId,
-				...archiveParent,
-				defaultProfile: source.currentProfile ?? source.originalProfile,
-				workspace: result.previous.cwd,
-			});
-		}
-	}
+function indexOwnedSessions(readModel: ChatWebReadModel, sessions: PiboSession[]): void {
+	for (const session of sessions) readModel.upsertSession(session);
 }
 
-function sessionOperationResultFromEvent(event: PiboOutputEvent): PiboSessionOperationResult | undefined {
-	if (event.type !== "execution_result") return undefined;
-	if (event.action !== "session.fork" && event.action !== "session.switch" && event.action !== "session.clone") {
-		return undefined;
-	}
-	const result = event.result;
-	if (!result || typeof result !== "object") return undefined;
-	const candidate = result as Partial<PiboSessionOperationResult>;
-	if (!candidate.previous || !candidate.current || typeof candidate.routeSessionKey !== "string") return undefined;
-	if (typeof candidate.previous.sessionId !== "string" || typeof candidate.current.sessionId !== "string") return undefined;
-	return candidate as PiboSessionOperationResult;
-}
-
-function archiveParentFor(
-	source: PiboSessionBinding,
-	currentSessionId: string,
-): Pick<PiboSessionBinding, "parentSessionKey" | "parentSessionId"> {
-	if (source.channel !== "subagent") return {};
-	return {
-		parentSessionKey: source.parentSessionKey ?? source.sessionKey,
-		parentSessionId: source.parentSessionId ?? currentSessionId,
-	};
-}
-
-function createEventStream(sessionKey: string, context: PiboWebAppContext): Response {
+function createEventStream(piboSessionId: string, context: PiboWebAppContext): Response {
 	let unsubscribe: (() => void) | undefined;
 	const stream = new ReadableStream<Uint8Array>({
 		start(controller) {
-			writeSse(controller, "ready", { sessionKey });
+			writeSse(controller, "ready", { piboSessionId });
 			unsubscribe = context.channelContext.subscribe((event: PiboOutputEvent) => {
-				if (event.sessionKey === sessionKey) {
+				if (event.piboSessionId === piboSessionId) {
 					writeSse(controller, "pibo", event);
 				}
 			});
@@ -303,7 +226,7 @@ function createChatHtml(): string {
 		.session-row { width: 100%; display: grid; grid-template-columns: 18px 1fr auto; gap: 7px; align-items: center; text-align: left; margin-bottom: 4px; border-color: transparent; background: transparent; padding: 7px 8px; }
 		.session-row.active { border-color: #11a4d4; background: rgba(17,164,212,.10); }
 		.session-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: #e2e8f0; }
-		.session-key { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; color: #64748b; }
+		.session-id { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; color: #64748b; }
 		.status-dot { width: 7px; height: 7px; border-radius: 999px; background: #64748b; }
 		.status-dot.running { background: #0bda57; box-shadow: 0 0 10px rgba(11,218,87,.35); }
 		.status-dot.error { background: #ef4444; }
@@ -487,7 +410,7 @@ function createChatHtml(): string {
 		const newSessionButton = document.querySelector("#new-session");
 		let eventSource;
 		let bootstrap;
-		let selectedSessionKey;
+		let selectedPiboSessionId;
 		let area = "sessions";
 		let pendingForkResult;
 		let pendingForkComposerText;
@@ -587,7 +510,7 @@ function createChatHtml(): string {
 		function renderSpanContent(node) {
 			const actionHtml = [];
 			if (node.type === "user.message" && node.entryId) actionHtml.push('<button class="ghost fork-button" data-entry-id="' + escapeText(node.entryId) + '">Fork From Here</button>');
-			if (node.linkedSessionKey) actionHtml.push('<button class="ghost session-link" data-session-key="' + escapeText(node.linkedSessionKey) + '">Open Child Session</button>');
+			if (node.linkedPiboSessionId) actionHtml.push('<button class="ghost session-link" data-pibo-session-id="' + escapeText(node.linkedPiboSessionId) + '">Open Child Session</button>');
 			const actions = actionHtml.length ? '<div class="span-actions">' + actionHtml.join("") + '</div>' : "";
 
 			if (node.type === "user.message") {
@@ -677,8 +600,8 @@ function createChatHtml(): string {
 
 		function connectEvents() {
 			if (eventSource) eventSource.close();
-			if (!selectedSessionKey) return;
-			eventSource = new EventSource("/api/chat/events?sessionKey=" + encodeURIComponent(selectedSessionKey));
+			if (!selectedPiboSessionId) return;
+			eventSource = new EventSource("/api/chat/events?piboSessionId=" + encodeURIComponent(selectedPiboSessionId));
 			eventSource.addEventListener("pibo", (event) => {
 				const payload = JSON.parse(event.data);
 				appendRawEvent({ type: payload.type, payload });
@@ -704,7 +627,7 @@ function createChatHtml(): string {
 					return;
 				}
 				bootstrap = data;
-				selectedSessionKey = selectedSessionKey || data.selectedSessionKey;
+				selectedPiboSessionId = selectedPiboSessionId || data.selectedPiboSessionId;
 				renderSignedIn(data);
 				renderArea();
 				connectEvents();
@@ -734,45 +657,45 @@ function createChatHtml(): string {
 		function renderSessionNode(node, depth) {
 			const wrap = document.createElement("div");
 			const row = document.createElement("button");
-			row.className = "session-row" + (node.sessionKey === selectedSessionKey ? " active" : "");
+			row.className = "session-row" + (node.piboSessionId === selectedPiboSessionId ? " active" : "");
 			row.style.paddingLeft = 8 + depth * 14 + "px";
 			row.innerHTML =
 				'<span>' + (node.children && node.children.length ? "▾" : "") + '</span>' +
-				'<span><span class="session-title">' + escapeText(node.title) + '</span><span class="session-key">' + escapeText(node.sessionKey) + '</span></span>' +
+				'<span><span class="session-title">' + escapeText(node.title) + '</span><span class="session-id">' + escapeText(node.piboSessionId) + '</span></span>' +
 				'<span class="status-dot ' + escapeText(node.status) + '"></span>';
-			row.title = node.sessionKey;
-			row.addEventListener("click", function() { selectSession(node.sessionKey); });
+			row.title = node.piboSessionId;
+			row.addEventListener("click", function() { selectSession(node.piboSessionId); });
 			wrap.append(row);
 			(node.children || []).forEach(function(child) { wrap.append(renderSessionNode(child, depth + 1)); });
 			return wrap;
 		}
-		async function selectSession(sessionKey) {
-			selectedSessionKey = sessionKey;
+		async function selectSession(piboSessionId) {
+			selectedPiboSessionId = piboSessionId;
 			connectEvents();
 			await refreshBootstrap(false);
 			renderArea();
 		}
 		async function createSession() {
 			const created = await postJson("/api/chat/sessions", {});
-			selectedSessionKey = created.sessionKey;
+			selectedPiboSessionId = created.session && created.session.id;
 			connectEvents();
 			await refreshBootstrap(false);
 			renderArea();
 		}
 		async function refreshBootstrap(keepTrace) {
-			const response = await fetch("/api/chat/bootstrap?sessionKey=" + encodeURIComponent(selectedSessionKey || ""));
+			const response = await fetch("/api/chat/bootstrap?piboSessionId=" + encodeURIComponent(selectedPiboSessionId || ""));
 			if (!response.ok) return;
 			bootstrap = await response.json();
-			selectedSessionKey = bootstrap.selectedSessionKey;
+			selectedPiboSessionId = bootstrap.selectedPiboSessionId;
 			if (!keepTrace) renderSessions();
 		}
 		async function refreshTrace() {
-			if (!selectedSessionKey) return;
-			const response = await fetch("/api/chat/trace?sessionKey=" + encodeURIComponent(selectedSessionKey));
+			if (!selectedPiboSessionId) return;
+			const response = await fetch("/api/chat/trace?piboSessionId=" + encodeURIComponent(selectedPiboSessionId));
 			if (!response.ok) return;
 			const trace = await response.json();
-			sessionTitleEl.textContent = trace.title || selectedSessionKey;
-			sessionMetaEl.textContent = trace.sessionKey + " · " + trace.sessionId;
+			sessionTitleEl.textContent = trace.title || selectedPiboSessionId;
+			sessionMetaEl.textContent = trace.piboSessionId + " · " + trace.piSessionId;
 			renderTrace(trace.nodes || []);
 			renderRawEvents(trace.rawEvents || []);
 		}
@@ -821,7 +744,7 @@ function createChatHtml(): string {
 			body.querySelectorAll(".session-link").forEach(function(button) {
 				button.addEventListener("click", function(event) {
 					event.stopPropagation();
-					void selectSession(button.dataset.sessionKey);
+					void selectSession(button.dataset.piboSessionId);
 				});
 			});
 			if (node.children && node.children.length) {
@@ -900,26 +823,26 @@ function createChatHtml(): string {
 			}
 			const levelMatch = text.match(/^\\/thinking\\s+(\\S+)/);
 			const params = levelMatch ? { level: levelMatch[1] } : undefined;
-			const result = await postJson("/api/chat/action", { sessionKey: selectedSessionKey, action: command.action, params: params });
+			const result = await postJson("/api/chat/action", { piboSessionId: selectedPiboSessionId, action: command.action, params: params });
 			appendRawEvent({ type: "command_result", payload: result });
-			if (command.action === "session.clone" && result && result.result && result.result.current) {
-				await refreshBootstrap(true);
-				await refreshTrace();
+			if (command.action === "session.clone" && result && result.result && result.result.piboSessionId) {
+				await selectSession(result.result.piboSessionId);
 			}
 		}
 		async function forkFrom(entryId) {
-			const previousComposerText = messageInput.value;
-			const result = await postJson("/api/chat/action", { sessionKey: selectedSessionKey, action: "session.fork", params: { entryId: entryId } });
+			const result = await postJson("/api/chat/action", { piboSessionId: selectedPiboSessionId, action: "session.fork", params: { entryId: entryId } });
 			appendRawEvent({ type: "fork_result", payload: result });
 			pendingForkResult = result && result.result ? result.result : undefined;
-			pendingForkComposerText = previousComposerText;
 			if (pendingForkResult && typeof pendingForkResult.selectedText === "string") {
 				messageInput.value = pendingForkResult.selectedText;
 				messageInput.focus();
 			}
-			await refreshBootstrap(false);
-			await refreshTrace();
-			forkModal.classList.remove("hidden");
+			if (pendingForkResult && pendingForkResult.piboSessionId) {
+				await selectSession(pendingForkResult.piboSessionId);
+			} else {
+				await refreshBootstrap(false);
+				await refreshTrace();
+			}
 		}
 		async function postJson(url, payload) {
 			const response = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
@@ -939,7 +862,7 @@ function createChatHtml(): string {
 				return;
 			}
 			messageInput.value = "";
-			await postJson("/api/chat/message", { sessionKey: selectedSessionKey, text: text });
+			await postJson("/api/chat/message", { piboSessionId: selectedPiboSessionId, text: text });
 			await refreshTrace();
 		});
 		messageInput.addEventListener("input", renderCommandMenu);
@@ -996,22 +919,22 @@ function createChatHtml(): string {
 		document.querySelector("#fork-stay").addEventListener("click", function() {
 			forkModal.classList.add("hidden");
 			const previousFile = pendingForkResult && pendingForkResult.previous && pendingForkResult.previous.sessionFile;
-			const routeSessionKey = pendingForkResult && pendingForkResult.routeSessionKey ? pendingForkResult.routeSessionKey : selectedSessionKey;
+			const targetPiboSessionId = pendingForkResult && pendingForkResult.piboSessionId ? pendingForkResult.piboSessionId : selectedPiboSessionId;
 			pendingForkResult = undefined;
 			messageInput.value = pendingForkComposerText || "";
 			pendingForkComposerText = undefined;
 			if (previousFile) {
-				void postJson("/api/chat/action", { sessionKey: routeSessionKey, action: "session.switch", params: { sessionFile: previousFile } })
+				void postJson("/api/chat/action", { piboSessionId: targetPiboSessionId, action: "session.switch", params: { sessionFile: previousFile } })
 					.then(function(result) { appendRawEvent({ type: "fork_restore", payload: result }); return refreshTrace(); })
 					.catch(function(error) { appendRawEvent({ type: "fork_restore_error", payload: String(error) }); });
 			}
 		});
 		document.querySelector("#fork-switch").addEventListener("click", async function() {
 			forkModal.classList.add("hidden");
-			const routeSessionKey = pendingForkResult && pendingForkResult.routeSessionKey ? pendingForkResult.routeSessionKey : selectedSessionKey;
+			const targetPiboSessionId = pendingForkResult && pendingForkResult.piboSessionId ? pendingForkResult.piboSessionId : selectedPiboSessionId;
 			pendingForkResult = undefined;
 			pendingForkComposerText = undefined;
-			if (routeSessionKey) await selectSession(routeSessionKey);
+			if (targetPiboSessionId) await selectSession(targetPiboSessionId);
 		});
 
 		updateThinkingButton();
@@ -1030,8 +953,6 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 	const requireSession = (request: Request, context: PiboWebAppContext): Promise<PiboWebSession> =>
 		context.requireSession({
 			request,
-			channel: CHAT_WEB_CHANNEL,
-			defaultProfile,
 		});
 
 	return {
@@ -1050,23 +971,20 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 			}
 
 			if (url.pathname === `${CHAT_WEB_API_PREFIX}/bootstrap` && request.method === "GET") {
-				const session = await requireSession(request, context);
-				state.readModel.upsertSession(session.binding);
-				for (const binding of context.channelContext.listSessions?.() ?? []) {
-					state.readModel.upsertSession(binding);
-				}
-				ensureArchivedSessionBindings(context, session, state.readModel);
+				const webSession = await requireSession(request, context);
 				const selectedSession = resolveRequestedSession(
 					context,
-					session,
-					url.searchParams.get("sessionKey") || undefined,
+					webSession,
+					defaultProfile,
+					url.searchParams.get("piboSessionId") || undefined,
 				);
-				const bindings = listKnownBindings(context, session.binding);
-				const sessions = await buildSessionNodes(bindings, state.readModel.listSessions());
+				const ownedSessions = listOwnedSessions(context, webSession);
+				indexOwnedSessions(state.readModel, ownedSessions);
+				const sessions = await buildSessionNodes(ownedSessions, state.readModel.listSessions());
 				return responseJson({
-					identity: session.authSession.identity,
-					binding: session.binding,
-					selectedSessionKey: selectedSession.sessionKey,
+					identity: webSession.authSession.identity,
+					session: selectedSession,
+					selectedPiboSessionId: selectedSession.id,
 					sessions,
 					agents: context.channelContext.getProfiles?.() ?? [],
 					capabilities: {
@@ -1076,11 +994,12 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 			}
 
 			if (url.pathname === `${CHAT_WEB_API_PREFIX}/session` && request.method === "GET") {
-				const session = await requireSession(request, context);
-				state.readModel.upsertSession(session.binding);
+				const webSession = await requireSession(request, context);
+				const selectedSession = ensureDefaultChatSession(context, webSession, defaultProfile);
+				state.readModel.upsertSession(selectedSession);
 				return responseJson({
-					identity: session.authSession.identity,
-					binding: session.binding,
+					identity: webSession.authSession.identity,
+					session: selectedSession,
 					capabilities: {
 						actions: context.channelContext.getGatewayActions(),
 					},
@@ -1088,60 +1007,58 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 			}
 
 			if (url.pathname === `${CHAT_WEB_API_PREFIX}/sessions` && request.method === "GET") {
-				const session = await requireSession(request, context);
-				state.readModel.upsertSession(session.binding);
-				for (const binding of context.channelContext.listSessions?.() ?? []) {
-					state.readModel.upsertSession(binding);
-				}
-				ensureArchivedSessionBindings(context, session, state.readModel);
-				const bindings = listKnownBindings(context, session.binding);
-				return responseJson(await buildSessionNodes(bindings, state.readModel.listSessions()));
+				const webSession = await requireSession(request, context);
+				ensureDefaultChatSession(context, webSession, defaultProfile);
+				const ownedSessions = listOwnedSessions(context, webSession);
+				indexOwnedSessions(state.readModel, ownedSessions);
+				return responseJson(await buildSessionNodes(ownedSessions, state.readModel.listSessions()));
 			}
 
 			if (url.pathname === `${CHAT_WEB_API_PREFIX}/sessions` && request.method === "POST") {
 				requireSameOriginJsonRequest(request);
-				const session = await requireSession(request, context);
+				const webSession = await requireSession(request, context);
 				await readJsonBody<Record<string, never>>(request);
-				const created = createPersonalChatSession(context, session);
-				state.readModel.upsertSession(session.binding);
+				const created = createPersonalChatSession(context, webSession, defaultProfile);
 				state.readModel.upsertSession(created);
-				return responseJson({ sessionKey: created.sessionKey, binding: created }, { status: 201 });
+				return responseJson({ session: created }, { status: 201 });
 			}
 
 			if (url.pathname === `${CHAT_WEB_API_PREFIX}/trace` && request.method === "GET") {
-				const session = await requireSession(request, context);
+				const webSession = await requireSession(request, context);
 				const selectedSession = resolveRequestedSession(
 					context,
-					session,
-					url.searchParams.get("sessionKey") || undefined,
+					webSession,
+					defaultProfile,
+					url.searchParams.get("piboSessionId") || undefined,
 				);
 				state.readModel.upsertSession(selectedSession);
-				const bindings = listKnownBindings(context, session.binding);
+				const ownedSessions = listOwnedSessions(context, webSession);
 				return responseJson(
 					await buildTraceView({
-						binding: selectedSession,
-						bindings,
-						events: state.readModel.listEvents(selectedSession.sessionKey),
+						session: selectedSession,
+						sessions: ownedSessions,
+						events: state.readModel.listEvents(selectedSession.id),
 					}),
 				);
 			}
 
-				if (url.pathname === `${CHAT_WEB_API_PREFIX}/message` && request.method === "POST") {
-					requireSameOriginJsonRequest(request);
-					const session = await requireSession(request, context);
-					const body = await readJsonBody<{ sessionKey?: unknown; text?: unknown }>(request);
+			if (url.pathname === `${CHAT_WEB_API_PREFIX}/message` && request.method === "POST") {
+				requireSameOriginJsonRequest(request);
+				const webSession = await requireSession(request, context);
+				const body = await readJsonBody<{ piboSessionId?: unknown; text?: unknown }>(request);
 				if (typeof body.text !== "string" || body.text.trim().length === 0) {
 					return responseJson({ error: "Message text is required" }, { status: 400 });
 				}
 				const selectedSession = resolveRequestedSession(
 					context,
-					session,
-					typeof body.sessionKey === "string" ? body.sessionKey : undefined,
+					webSession,
+					defaultProfile,
+					typeof body.piboSessionId === "string" ? body.piboSessionId : undefined,
 				);
 				state.readModel.upsertSession(selectedSession);
 				const output = await context.channelContext.emit({
 					type: "message",
-					sessionKey: selectedSession.sessionKey,
+					piboSessionId: selectedSession.id,
 					id: randomUUID(),
 					text: body.text,
 					source: "user",
@@ -1149,10 +1066,10 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				return responseJson(output);
 			}
 
-				if (url.pathname === `${CHAT_WEB_API_PREFIX}/action` && request.method === "POST") {
-					requireSameOriginJsonRequest(request);
-					const session = await requireSession(request, context);
-					const body = await readJsonBody<{ sessionKey?: unknown; action?: unknown; params?: unknown }>(request);
+			if (url.pathname === `${CHAT_WEB_API_PREFIX}/action` && request.method === "POST") {
+				requireSameOriginJsonRequest(request);
+				const webSession = await requireSession(request, context);
+				const body = await readJsonBody<{ piboSessionId?: unknown; action?: unknown; params?: unknown }>(request);
 				if (typeof body.action !== "string" || body.action.length === 0) {
 					return responseJson({ error: "Action is required" }, { status: 400 });
 				}
@@ -1161,13 +1078,14 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				}
 				const selectedSession = resolveRequestedSession(
 					context,
-					session,
-					typeof body.sessionKey === "string" ? body.sessionKey : undefined,
+					webSession,
+					defaultProfile,
+					typeof body.piboSessionId === "string" ? body.piboSessionId : undefined,
 				);
 				state.readModel.upsertSession(selectedSession);
 				const output = await context.channelContext.emit({
 					type: "execution",
-					sessionKey: selectedSession.sessionKey,
+					piboSessionId: selectedSession.id,
 					id: randomUUID(),
 					action: body.action,
 					...(body.params === undefined ? {} : { params: body.params }),
@@ -1176,13 +1094,14 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 			}
 
 			if (url.pathname === `${CHAT_WEB_API_PREFIX}/events` && request.method === "GET") {
-				const session = await requireSession(request, context);
+				const webSession = await requireSession(request, context);
 				const selectedSession = resolveRequestedSession(
 					context,
-					session,
-					url.searchParams.get("sessionKey") || undefined,
+					webSession,
+					defaultProfile,
+					url.searchParams.get("piboSessionId") || undefined,
 				);
-				return createEventStream(selectedSession.sessionKey, context);
+				return createEventStream(selectedSession.id, context);
 			}
 
 			return undefined;

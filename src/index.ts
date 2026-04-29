@@ -76,10 +76,8 @@ export type { WebHostChannel, WebHostChannelOptions } from "./web/channel.js";
 export type { PiboWebApp, PiboWebAppContext, PiboWebSession } from "./web/types.js";
 export { sendGatewayEvent, sendGatewayMessageAndWaitForReply } from "./gateway/request.js";
 export {
-	createSubagentSessionKey,
 	createSubagentToolDefinitions,
 	createSubagentToolName,
-	getSubagentSessionDepth,
 } from "./subagents/tool.js";
 export type {
 	PiboSubagentRunInput,
@@ -109,16 +107,18 @@ export type {
 	PiboSessionTreeResult,
 } from "./core/events.js";
 export type {
-	PiboSessionBinding,
-	PiboSessionBindingStore,
-	ResolveSessionBindingInput,
-} from "./sessions/bindings.js";
+	CreatePiboSessionInput,
+	FindPiboSessionsInput,
+	PiboSession,
+	PiboSessionStore,
+	UpdatePiboSessionInput,
+} from "./sessions/store.js";
 export {
-	InMemorySessionBindingStore,
-	createDefaultSessionKey,
+	InMemoryPiboSessionStore,
+	createPiSessionId,
 	createPiboSessionId,
-	createSessionBinding,
-} from "./sessions/bindings.js";
+	createPiboSession,
+} from "./sessions/store.js";
 export type { PiboSessionRouterOptions } from "./core/session-router.js";
 export { runPiboCli } from "./cli.js";
 export {

@@ -6,7 +6,7 @@ import { PiboSessionRouter } from "../dist/core/session-router.js";
 
 function startRun(registry, options = {}) {
 	return registry.startToolRun({
-		ownerSessionKey: options.ownerSessionKey ?? "parent",
+		ownerPiboSessionId: options.ownerPiboSessionId ?? "parent",
 		toolName: options.toolName ?? "helper",
 		completionPolicy: options.completionPolicy,
 	});
@@ -16,7 +16,7 @@ function runSnapshot(run, options = {}) {
 	return {
 		runId: options.runId ?? "run_1",
 		kind: "tool",
-		ownerSessionKey: "parent",
+		ownerPiboSessionId: "parent",
 		status: options.status ?? "running",
 		completionPolicy: options.completionPolicy ?? "tracked",
 		consumed: false,
@@ -215,7 +215,7 @@ test("router coalesces generic run completion into a compact parent notification
 			messages.push(event);
 			return {
 				type: "message_queued",
-				sessionKey: event.sessionKey,
+				piboSessionId: event.piboSessionId,
 				eventId: event.id,
 				queuedMessages: 1,
 				text: event.text,
@@ -234,7 +234,7 @@ test("router coalesces generic run completion into a compact parent notification
 	await new Promise((resolve) => setImmediate(resolve));
 
 	assert.equal(messages.length, 1);
-	assert.equal(messages[0].sessionKey, "parent");
+	assert.equal(messages[0].piboSessionId, "parent");
 	assert.equal(messages[0].source, "service");
 	assert.match(messages[0].text, /<pibo_run_notification>/);
 	assert.match(messages[0].text, /"completed"/);
@@ -250,7 +250,7 @@ test("router converts yielded tool errors into failed run notifications", async 
 			messages.push(event);
 			return {
 				type: "message_queued",
-				sessionKey: event.sessionKey,
+				piboSessionId: event.piboSessionId,
 				eventId: event.id,
 				queuedMessages: 1,
 				text: event.text,
@@ -270,7 +270,7 @@ test("router converts yielded tool errors into failed run notifications", async 
 
 	assert.equal(router.runRegistry.status("parent", run.runId).status, "failed");
 	assert.equal(messages.length, 1);
-	assert.equal(messages[0].sessionKey, "parent");
+	assert.equal(messages[0].piboSessionId, "parent");
 	assert.match(messages[0].text, /"failed"/);
 	assert.match(messages[0].text, /"runId":"run_/);
 });

@@ -55,12 +55,12 @@ export function isGatewayRequestFrame(value: unknown): value is GatewayRequestFr
 
 	const event = frame.event as {
 		type?: unknown;
-		sessionKey?: unknown;
+		piboSessionId?: unknown;
 		text?: unknown;
 		action?: unknown;
 		params?: unknown;
 	};
-	if (typeof event.sessionKey !== "string" || event.sessionKey.length === 0) return false;
+	if (typeof event.piboSessionId !== "string" || event.piboSessionId.length === 0) return false;
 	if (event.type === "message") return typeof event.text === "string";
 	if (event.type === "execution") {
 		return typeof event.action === "string" && (event.params === undefined || isJsonValue(event.params));

@@ -55,15 +55,15 @@ Der Plan setzt `spec/spec-design-web-chat-trace-ui.md` und `DESIGN.md` um.
    - Verify: Unit Tests für Migration, Insert, Query, Close.
 
 2. Event-Indexing an Pibo Output Events anbinden.
-   - Events pro `sessionKey`, Event-Typ, Timestamp und Payload speichern.
+   - Events pro `piboSessionId`, Event-Typ, Timestamp und Payload speichern.
    - Raw Events behalten, solange die zugehörige Pi Session existiert.
    - Verify: Integration Test emittiert Events und liest sie aus `.pibo/web-chat.sqlite`.
 
 3. Session-Index aktualisieren.
-   - Aus Session Bindings, Parent-Keys und Pi Session Metadaten.
-   - Titel-Fallback: `session_info.name`, sonst erste User Message gekürzt, sonst `sessionKey`.
-   - `sessionKey` bleibt als Secondary Text oder Tooltip sichtbar.
-   - Verify: Test mit Main Session und nested Subagent Binding.
+   - Aus Pibo Sessions, `parentId` und Pi Session Metadaten.
+   - Titel-Fallback: `session_info.name`, sonst erste User Message gekürzt, sonst Pibo Session ID.
+   - Pibo Session ID bleibt als Secondary Text oder Tooltip sichtbar.
+   - Verify: Test mit Main Session und nested Subagent Session.
 
 ## Phase 3: API Surface Für Die Web App
 
@@ -87,7 +87,7 @@ Der Plan setzt `spec/spec-design-web-chat-trace-ui.md` und `DESIGN.md` um.
 ## Phase 4: Trace-Rekonstruktion
 
 1. Aggregator für Pi JSONL + raw Pibo Events bauen.
-   - Input: Pi Session Entries, Session Binding Tree, raw Pibo Events.
+   - Input: Pi Session Entries, Pibo Session Tree, raw Pibo Events.
    - Output: `PiboTraceNode[]`.
    - Keine Persistenz der Trace Nodes.
    - Verify: Unit Tests für User/Assistant/Thinking/Tool/Execution/Error.
@@ -100,7 +100,7 @@ Der Plan setzt `spec/spec-design-web-chat-trace-ui.md` und `DESIGN.md` um.
 
 3. Subagent Delegation rekonstruieren.
    - `pibo_subagent_*` Toolcalls als `agent.delegation`.
-   - Child Session über Session Binding/Session Key verlinken.
+   - Child Session über `parentId` und Pibo Session ID verlinken.
    - Inline Child Trace bei Expansion nachladen oder lazy rekonstruieren.
    - Verify: Test für nested Subagent Sessions mit mehreren Tiefen.
 
@@ -150,7 +150,7 @@ Der Plan setzt `spec/spec-design-web-chat-trace-ui.md` und `DESIGN.md` um.
    - Main Sessions top-level.
    - Subagent Sessions nested.
    - Beliebige Tiefe unterstützen.
-   - Status, Profil, Last Activity, Titel, `sessionKey`.
+   - Status, Profil, Last Activity, Titel, Pibo Session ID.
    - Verify: Test mit tief verschachteltem Session Tree.
 
 ## Phase 7: Composer Und Slash Commands

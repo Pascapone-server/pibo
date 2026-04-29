@@ -8,7 +8,7 @@ type TraceTimelineProps = {
 	trace: Trace | null;
 	showThinking: boolean;
 	onFork: (entryId: string) => void;
-	onOpenSession: (sessionKey: string) => void;
+	onOpenSession: (piboSessionId: string) => void;
 };
 
 const timelineContentStyle = {

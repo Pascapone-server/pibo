@@ -6,7 +6,7 @@ import { sendGatewayMessageAndWaitForReply, type GatewayReplyResult } from "./re
 
 type PiboGatewaySendDetails = {
 	ok: boolean;
-	sessionKey?: string;
+	piboSessionId?: string;
 	error?: string;
 	gatewayPayload?: unknown;
 	reply?: string;
@@ -20,7 +20,7 @@ const piboGatewaySendTool = defineTool({
 	promptSnippet:
 		"Send a message through the local pibo gateway to a target session and return the final assistant reply from that session.",
 	parameters: Type.Object({
-		sessionKey: Type.String({ description: "Target pibo gateway session key" }),
+		piboSessionId: Type.String({ description: "Target Pibo gateway session id" }),
 		message: Type.String({ description: "Message to enqueue for the target session" }),
 	}),
 	async execute(_toolCallId, params) {
@@ -30,7 +30,7 @@ const piboGatewaySendTool = defineTool({
 		try {
 			result = await sendGatewayMessageAndWaitForReply({
 				type: "message",
-				sessionKey: params.sessionKey,
+				piboSessionId: params.piboSessionId,
 				text: params.message,
 				source: "actor",
 			});
@@ -46,7 +46,7 @@ const piboGatewaySendTool = defineTool({
 
 		if (!response.ok) {
 			const message = response.error?.message ?? "Gateway rejected the message";
-			const details: PiboGatewaySendDetails = { ok: false, sessionKey: params.sessionKey, error: message };
+			const details: PiboGatewaySendDetails = { ok: false, piboSessionId: params.piboSessionId, error: message };
 			return {
 				content: [{ type: "text", text: `Gateway error: ${message}` }],
 				details,
@@ -55,7 +55,7 @@ const piboGatewaySendTool = defineTool({
 
 		const details: PiboGatewaySendDetails = {
 			ok: true,
-			sessionKey: params.sessionKey,
+			piboSessionId: params.piboSessionId,
 			gatewayPayload: response.payload,
 			reply: result?.reply.text,
 		};
@@ -66,7 +66,7 @@ const piboGatewaySendTool = defineTool({
 					type: "text",
 					text: result?.reply
 						? result.reply.text
-						: `Queued message for pibo gateway session "${params.sessionKey}", but no assistant reply was returned.`,
+						: `Queued message for pibo gateway session "${params.piboSessionId}", but no assistant reply was returned.`,
 				},
 			],
 			details,

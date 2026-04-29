@@ -45,7 +45,7 @@ export type PiboProfileInfo = {
 };
 
 export type PiboGatewayActionContext = {
-	sessionKey: string;
+	piboSessionId: string;
 	getStatus(): PiboSessionStatus;
 	clearQueue(): number;
 	abort(): Promise<void>;

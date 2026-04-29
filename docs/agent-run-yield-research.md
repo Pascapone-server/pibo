@@ -185,7 +185,7 @@ Expected responsibilities:
 
 - allocate stable `runId`
 - store status
-- store metadata such as kind, owner session, child session key, event id, command, timestamps
+- store metadata such as kind, owner Pibo Session ID, child Pibo Session ID, event id, command, timestamps
 - hold buffered result or output summary
 - support wait with timeout
 - support status snapshot
@@ -277,14 +277,14 @@ Current Pibo subagents already have:
 - `sync` and `async` modes
 - routed sessions
 - `threadKey`
-- session-key based inspectability
+- Pibo Session ID based inspectability
 
-The current async mode returns `sessionKey` and `eventId`, but it does not provide a structured wait handle or mailbox guarantee.
+The current async mode returns `piboSessionId` and `eventId`, but it does not provide a structured wait handle or mailbox guarantee.
 
 The improved model should:
 
 - register a run before starting the child message
-- associate the run with child `sessionKey` and `eventId`
+- associate the run with child `piboSessionId` and `eventId`
 - complete/fail the run when the child produces a correlated assistant result or error
 - put a completion notification into the parent agent mailbox
 - allow `pibo_run_wait` to retrieve the child result
@@ -347,7 +347,7 @@ Use:
 
 - `runId` for the generic handle
 - `processId` only for process-specific execution
-- `sessionKey` only for Pibo routed sessions
+- `piboSessionId` only for Pibo routed sessions
 - `threadKey` only for subagent conversation continuity
 
 ## Open Questions

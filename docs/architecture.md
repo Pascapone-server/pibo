@@ -1,6 +1,6 @@
 # Pibo Architecture
 
-Pibo is a thin TypeScript harness around Pi Coding Agent. Pi remains the inner engine for model turns, tools, streaming, sessions, and compaction. Pibo owns the outer product boundary: profiles, plugin registration, channels, routing, session bindings, and transport-specific adapters.
+Pibo is a thin TypeScript harness around Pi Coding Agent. Pi remains the inner engine for model turns, tools, streaming, sessions, and compaction. Pibo owns the outer product boundary: profiles, plugin registration, channels, routing, Pibo Sessions, and transport-specific adapters.
 
 ## Design Principles
 
@@ -34,22 +34,28 @@ Execution events are wrapper-level actions such as status, queue clear, abort, d
 
 Output events are normalized router events. Assistant text and thinking are separate streams: `assistant_delta` carries visible assistant text, while `thinking_started`, `thinking_delta`, and `thinking_finished` carry model thinking traces when the provider emits them. Channels decide independently whether to display thinking; the router always preserves the event boundary so web, gateway, and local TUI clients can opt in without changing Pi runtime behavior.
 
+## Pibo And Pi Sessions
+
+Pibo separates product session identity from Pi Coding Agent's technical session identity. `PiboSession.id` is the stable product route used by channels, APIs, UI, access control, and event correlation. `PiboSession.piSessionId` is the Pi Coding Agent session id used for Pi persistence, transcript files, provider cache affinity, fork, clone, switch, tree navigation, and compaction.
+
+Pibo Sessions are stored in `.pibo/pibo-sessions.sqlite`. They carry channel, kind, profile, owner scope, optional `parentId` for true hierarchy, optional `originId` for fork/clone derivation, workspace, title, and plugin metadata. Core code must not parse meaning out of the Pibo Session ID.
+
 ## Pi Session Controls
 
-Pibo follows Pi Coding Agent's session behavior instead of reimplementing it. The stable `sessionKey` belongs to the channel route, while `sessionId` is the short technical Pi session identity used for Pi persistence and provider cache affinity. The active Pi session underneath a route may still change through fork, clone, or switch actions.
+Pibo exposes Pi session controls through typed execution actions while keeping the selected Pibo Session as the route.
 
 The built-in session actions are:
 
-- `session.current` returns the active Pi session id, session file, leaf id, cwd, and parent session file.
+- `session.current` returns the active `piSessionId`, session file, leaf id, cwd, and parent session file.
 - `session.list` lists persisted Pi sessions for the current workspace/session directory.
 - `session.fork_candidates` returns user message entry ids that can be used as fork targets.
-- `session.fork` calls Pi's fork behavior for a selected user message and makes the fork the active Pi session for the same route.
-- `session.clone` clones the current leaf and makes the clone active for the same route.
+- `session.fork` calls Pi's fork behavior for a selected user message and returns a new visible Pibo Session with `kind: "branch"` and `originId` pointing at the source session.
+- `session.clone` clones the current leaf and returns a new visible Pibo Session with `kind: "branch"` and `originId` pointing at the source session.
 - `session.tree` returns Pi's current session tree plus the active leaf.
 - `session.tree_navigate` moves the active leaf inside the current Pi session tree.
 - `session.switch` switches the active Pi runtime to a persisted session file.
 
-Fork and clone intentionally replace the active Pi runtime inside the existing routed session, matching Pi Coding Agent. The previous session file is preserved by Pi and returned in the action result. Channels can keep their own UI history and call `session.switch` when they want to move back to an older fork or clone.
+Fork and clone intentionally become new product sessions instead of silently replacing the original route. The previous session file is preserved by Pi and returned in the action result. Channels can select the returned Pibo Session ID when they want to continue on the branch.
 
 Tree navigation stays inside the current Pi session file. It changes the active leaf and returns any editor text Pi would prefill for a user-message target. Channels decide how to render tree selection; Pibo only exposes the typed infrastructure.
 
@@ -85,14 +91,14 @@ A subagent definition points at another registered profile. That target profile 
 At runtime, each subagent call creates or reuses a normal routed session:
 
 ```text
-parent-session
+parent Pibo Session
   -> pibo_subagent_<name> tool
-  -> parent-session::sub::<name>::<threadKey>
+  -> child Pibo Session with channel=pibo.subagents, kind=subagent, parentId=<parent id>
   -> Session router
   -> Pi runtime for targetProfile
 ```
 
-If `threadKey` is omitted, pibo creates a new subagent session. If the caller passes the same `threadKey` again, the same subagent session is continued, which allows multi-turn delegation. The generated session key can be used through the gateway like any other session key while the router is running.
+If `threadKey` is omitted, pibo creates a new subagent session. If the caller passes the same `threadKey` again, the same subagent session is continued, which allows multi-turn delegation. Reuse is based on structured Pibo Session fields: parent id, target profile, and metadata containing the subagent name/tool name/thread key.
 
 Subagent tools are synchronous normal tools: they wait for the correlated child reply and return it to the calling agent. A depth guard prevents accidental recursive subagent loops. Long-running subagent work should be started through yielded runs by wrapping the subagent tool with `pibo_run_start`.
 
@@ -124,10 +130,10 @@ The channel context intentionally exposes only:
 
 - `emit(event)` to route a `PiboInputEvent`.
 - `subscribe(listener)` to observe `PiboOutputEvent` values.
-- `resolveSession(input)` to create or reuse a persistent binding.
+- `getSession(id)`, `createSession(input)`, `updateSession(id, input)`, and `findSessions(input)` to work with first-class Pibo Session records.
 - `getGatewayActions()` to discover execution actions for channel UIs.
 
-Session bindings are stored in SQLite by default at `.pibo/session-bindings.sqlite`. A binding keeps a stable, semantic `sessionKey` separate from the technical `sessionId`, original agent profile, channel identity, and optional parent session identity. Channels and tools route by `sessionKey`; Pi and provider cache keys use `sessionId`.
+Pibo Sessions are stored in SQLite by default at `.pibo/pibo-sessions.sqlite`. Channels and tools route by `PiboSession.id`; Pi and provider cache keys use `PiboSession.piSessionId`. Sidebar/tree nesting follows `parentId` only. Fork/clone derivation uses `originId` and does not imply nesting.
 
 ## Auth
 
@@ -142,18 +148,18 @@ Same-Origin Web Host
   -> Better Auth /api/auth/*
   -> Chat Web App /apps/chat and /api/chat/*
   -> auth/session policy
-  -> resolveSession(channel=chat-web, externalId=userId)
+  -> create or select Pibo Session(ownerScope=user:<userId>, channel=pibo.chat-web)
   -> Session router
 ```
 
-The V1 chat web app uses Better Auth Google sign-in for every request path, including localhost. The authenticated Better Auth user id maps to the root session binding external id, producing `chat-web:<userId>`. Additional user-created chat sessions use top-level bindings such as `chat-web:<userId>:session:<uuid>`. Fork archives are also top-level branch bindings so they remain visible without looking like subagents. `parentSessionKey` is reserved for true child sessions such as subagents, not for ordinary sessions owned by the same user.
+The V1 chat web app uses Better Auth Google sign-in for every request path, including localhost. The authenticated Better Auth user id becomes `ownerScope=user:<userId>`. New personal sessions are top-level Pibo Sessions with `channel: "pibo.chat-web"` and `kind: "chat"`. Fork and clone results are visible branch sessions with `originId`. `parentId` is reserved for true child sessions such as subagents, not for ordinary sessions owned by the same user.
 
 The auth boundary is enforced before channel input reaches the session router:
 
 - no Better Auth session returns `401`
 - a missing or empty `auth.allowedEmails` allowlist prevents Better Auth startup
 - a Google account outside `auth.allowedEmails` returns `403`
-- allowed users resolve a persistent `chat-web` session binding
+- allowed users can list and select their own Pibo Sessions by `ownerScope`
 - chat mutation routes require same-origin JSON requests
 
 Google OAuth redirect URIs remain per deployment. Local QA can use `http://localhost:4788/api/auth/callback/google`; internet-facing deployments must configure their own `https://<host>/api/auth/callback/google` in Google Cloud Console and set `auth.baseURL` to the same origin. Pibo does not attempt wildcard redirect support because Google requires exact redirect URI matching for web-server OAuth. Private LAN IP Google OAuth redirects are intentionally not a supported V1 mode.
@@ -174,7 +180,7 @@ This avoids iframe and cross-origin complexity for V1. Apps can use normal same-
 
 The local adapter is intentionally not a gateway replacement and not a second runtime:
 
-- `src/local/client.ts` owns the in-process router client, local `local-tui:<profile>:<sessionName>` binding, and router cleanup.
+- `src/local/client.ts` owns the in-process router client, a local Pibo Session, and router cleanup.
 - `src/local/extension.ts` owns Pi TUI input interception, conservative slash-command filtering, autocomplete filtering, and mapping normalized routed events onto Pi TUI render components.
 - `src/local/tui.ts` wires the controller profile, client, extension, and `runPiboTui` together.
 
@@ -221,7 +227,7 @@ npm run dev -- tools guide browser-use remote-browser
 ```bash
 npm run gateway
 npm run gateway:web
-npm run client -- <sessionKey>
+npm run client -- <piboSessionId>
 npm run tui -- [profile]
 npm run tui:routed -- [profile]
 npm run profile -- [profile]
