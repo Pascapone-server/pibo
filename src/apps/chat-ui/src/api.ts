@@ -1,7 +1,10 @@
-import type { BootstrapData, CreateSessionData, PiboSessionTraceView } from "./types";
+import type { BootstrapData, CreateSessionData, PiboSession, PiboSessionTraceView } from "./types";
 
-export async function getBootstrap(piboSessionId?: string): Promise<BootstrapData> {
-	const suffix = piboSessionId ? `?piboSessionId=${encodeURIComponent(piboSessionId)}` : "";
+export async function getBootstrap(piboSessionId?: string, includeArchived = false): Promise<BootstrapData> {
+	const params = new URLSearchParams();
+	if (piboSessionId) params.set("piboSessionId", piboSessionId);
+	if (includeArchived) params.set("includeArchived", "true");
+	const suffix = params.size ? `?${params.toString()}` : "";
 	return requestJson<BootstrapData>(`/api/chat/bootstrap${suffix}`);
 }
 
@@ -14,6 +17,17 @@ export async function postSession(): Promise<CreateSessionData> {
 		method: "POST",
 		headers: { "content-type": "application/json" },
 		body: "{}",
+	});
+}
+
+export async function patchSession(
+	piboSessionId: string,
+	input: { title?: string | null; archived?: boolean },
+): Promise<{ session: PiboSession }> {
+	return requestJson<{ session: PiboSession }>(`/api/chat/sessions/${encodeURIComponent(piboSessionId)}`, {
+		method: "PATCH",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify(input),
 	});
 }
 

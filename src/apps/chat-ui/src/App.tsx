@@ -1,6 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LogOut, MessageSquarePlus, RefreshCw, Settings, UserRound } from "lucide-react";
-import { getBootstrap, getTrace, postAction, postMessage, postSession, signInWithGoogle, signOut } from "./api";
+import {
+	Archive,
+	ArchiveRestore,
+	Bug,
+	Check,
+	Edit3,
+	LogOut,
+	MessageSquarePlus,
+	RefreshCw,
+	Settings,
+	UserRound,
+	X,
+} from "lucide-react";
+import { getBootstrap, getTrace, patchSession, postAction, postMessage, postSession, signInWithGoogle, signOut } from "./api";
 import type { BootstrapData, PiboSessionTraceView, PiboWebSessionNode } from "./types";
 import { adaptTrace } from "./tracing/adapt";
 import { TraceTimeline } from "./tracing/TraceTimeline";
@@ -23,12 +35,19 @@ export function App() {
 	const [area, setArea] = useState<Area>("sessions");
 	const [error, setError] = useState<string | null>(null);
 	const [showThinking, setShowThinking] = useState(() => localStorage.getItem("pibo.chat.showThinking") === "true");
+	const [showRawEvents, setShowRawEvents] = useState(() => localStorage.getItem("pibo.chat.showRawEvents") === "true");
+	const [showArchived, setShowArchived] = useState(() => localStorage.getItem("pibo.chat.showArchived") === "true");
 	const [composerText, setComposerText] = useState("");
 	const [composerFocusSignal, setComposerFocusSignal] = useState(0);
 	const [creatingSession, setCreatingSession] = useState(false);
+	const showArchivedRef = useRef(showArchived);
 
-	const loadBootstrap = useCallback(async (piboSessionId?: string) => {
-		const data = await getBootstrap(piboSessionId);
+	useEffect(() => {
+		showArchivedRef.current = showArchived;
+	}, [showArchived]);
+
+	const loadBootstrap = useCallback(async (piboSessionId?: string, includeArchived = showArchivedRef.current) => {
+		const data = await getBootstrap(piboSessionId, includeArchived);
 		setBootstrap(data);
 		setSelectedPiboSessionId(data.selectedPiboSessionId);
 		return data;
@@ -47,16 +66,49 @@ export function App() {
 		if (!selectedPiboSessionId || area !== "sessions") return;
 		loadTrace(selectedPiboSessionId).catch((caught) => setError(caught instanceof Error ? caught.message : String(caught)));
 		const events = new EventSource(`/api/chat/events?piboSessionId=${encodeURIComponent(selectedPiboSessionId)}`);
-		events.addEventListener("pibo", () => {
-			void loadTrace(selectedPiboSessionId);
+		let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+		let refreshInFlight = false;
+		let refreshPending = false;
+		const runRefresh = () => {
+			if (refreshInFlight) {
+				refreshPending = true;
+				return;
+			}
+			refreshInFlight = true;
+			loadTrace(selectedPiboSessionId)
+				.catch((caught) => setError(caught instanceof Error ? caught.message : String(caught)))
+				.finally(() => {
+					refreshInFlight = false;
+					if (refreshPending) {
+						refreshPending = false;
+						scheduleRefresh(0);
+					}
+				});
+		};
+		const scheduleRefresh = (delayMs: number) => {
+			if (refreshTimer) return;
+			refreshTimer = setTimeout(() => {
+				refreshTimer = undefined;
+				runRefresh();
+			}, delayMs);
+		};
+		events.addEventListener("pibo", (message) => {
+			const type = eventType(message);
+			const immediate = type === "assistant_message" || type === "message_finished" || type === "session_error";
+			scheduleRefresh(immediate ? 0 : 80);
 		});
-		return () => events.close();
+		return () => {
+			if (refreshTimer) clearTimeout(refreshTimer);
+			events.close();
+		};
 	}, [area, loadTrace, selectedPiboSessionId]);
 
 	const selectedTrace = useMemo(() => {
 		if (!traceView) return null;
 		return adaptTrace(traceView.piboSessionId, traceView.title, traceView.nodes);
 	}, [traceView]);
+
+	const rawEvents = useMemo(() => compactRawEvents(traceView?.rawEvents ?? []), [traceView?.rawEvents]);
 
 	const slashCommands = useMemo(() => {
 		const actions = bootstrap?.capabilities.actions ?? [];
@@ -92,6 +144,42 @@ export function App() {
 			setError(caught instanceof Error ? caught.message : String(caught));
 		} finally {
 			setCreatingSession(false);
+		}
+	};
+
+	const toggleArchivedSessions = async () => {
+		const next = !showArchived;
+		setShowArchived(next);
+		localStorage.setItem("pibo.chat.showArchived", String(next));
+		try {
+			const data = await loadBootstrap(selectedPiboSessionId ?? undefined, next);
+			if (area === "sessions") await loadTrace(data.selectedPiboSessionId);
+			setError(null);
+		} catch (caught) {
+			setError(caught instanceof Error ? caught.message : String(caught));
+		}
+	};
+
+	const renameSession = async (piboSessionId: string, title: string | null) => {
+		try {
+			await patchSession(piboSessionId, { title });
+			const data = await loadBootstrap(selectedPiboSessionId ?? undefined);
+			if (area === "sessions") await loadTrace(data.selectedPiboSessionId);
+			setError(null);
+		} catch (caught) {
+			setError(caught instanceof Error ? caught.message : String(caught));
+		}
+	};
+
+	const setSessionArchived = async (piboSessionId: string, archived: boolean) => {
+		try {
+			await patchSession(piboSessionId, { archived });
+			const keepSelected = !(archived && !showArchived && selectedPiboSessionId === piboSessionId);
+			const data = await loadBootstrap(keepSelected ? (selectedPiboSessionId ?? undefined) : undefined);
+			if (area === "sessions") await loadTrace(data.selectedPiboSessionId);
+			setError(null);
+		} catch (caught) {
+			setError(caught instanceof Error ? caught.message : String(caught));
 		}
 	};
 
@@ -167,7 +255,13 @@ export function App() {
 				</div>
 			</header>
 
-			<div className="min-h-0 grid grid-cols-[300px_minmax(0,1fr)_320px] max-[980px]:grid-cols-[240px_minmax(0,1fr)]">
+			<div
+				className={`min-h-0 grid ${
+					showRawEvents
+						? "grid-cols-[300px_minmax(0,1fr)_320px] max-[980px]:grid-cols-[240px_minmax(0,1fr)]"
+						: "grid-cols-[300px_minmax(0,1fr)] max-[980px]:grid-cols-[240px_minmax(0,1fr)]"
+				}`}
+			>
 				<aside className="min-h-0 overflow-auto bg-[#1a262b] border-r border-slate-800">
 					<div className="h-11 px-3 border-b border-slate-800 flex items-center justify-between text-xs font-bold uppercase tracking-wider">
 						<span>{area}</span>
@@ -182,6 +276,19 @@ export function App() {
 									className="p-1 border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4] disabled:opacity-50"
 								>
 									<MessageSquarePlus size={13} />
+								</button>
+							) : null}
+							{area === "sessions" ? (
+								<button
+									type="button"
+									onClick={() => void toggleArchivedSessions()}
+									title={showArchived ? "Hide Archived Sessions" : "Show Archived Sessions"}
+									aria-label={showArchived ? "Hide Archived Sessions" : "Show Archived Sessions"}
+									className={`p-1 border rounded-sm hover:border-[#11a4d4] hover:text-[#11a4d4] ${
+										showArchived ? "border-[#11a4d4] text-[#11a4d4]" : "border-slate-700 text-slate-400"
+									}`}
+								>
+									{showArchived ? <ArchiveRestore size={13} /> : <Archive size={13} />}
 								</button>
 							) : null}
 							<button
@@ -203,6 +310,8 @@ export function App() {
 									node={session}
 									selectedPiboSessionId={selectedPiboSessionId}
 									onSelect={(piboSessionId) => void selectSession(piboSessionId)}
+									onRename={(piboSessionId, title) => void renameSession(piboSessionId, title)}
+									onArchive={(piboSessionId, archived) => void setSessionArchived(piboSessionId, archived)}
 								/>
 							))}
 						</div>
@@ -223,17 +332,34 @@ export function App() {
 										{traceView?.piboSessionId} {traceView ? `· ${traceView.piSessionId}` : ""}
 									</div>
 								</div>
-								<button
-									type="button"
-									onClick={() => {
-										const next = !showThinking;
-										setShowThinking(next);
-										localStorage.setItem("pibo.chat.showThinking", String(next));
-									}}
-									className="px-3 py-1.5 text-xs border border-slate-700 rounded-sm"
-								>
-									{showThinking ? "Thinking On" : "Thinking Off"}
-								</button>
+								<div className="flex items-center gap-2">
+									<button
+										type="button"
+										onClick={() => {
+											const next = !showRawEvents;
+											setShowRawEvents(next);
+											localStorage.setItem("pibo.chat.showRawEvents", String(next));
+										}}
+										title={showRawEvents ? "Hide Raw Events" : "Show Raw Events"}
+										aria-label={showRawEvents ? "Hide Raw Events" : "Show Raw Events"}
+										className={`h-8 w-8 inline-flex items-center justify-center border rounded-sm ${
+											showRawEvents ? "border-[#11a4d4] text-[#11a4d4]" : "border-slate-700 text-slate-400"
+										}`}
+									>
+										<Bug size={14} />
+									</button>
+									<button
+										type="button"
+										onClick={() => {
+											const next = !showThinking;
+											setShowThinking(next);
+											localStorage.setItem("pibo.chat.showThinking", String(next));
+										}}
+										className="px-3 py-1.5 text-xs border border-slate-700 rounded-sm"
+									>
+										{showThinking ? "Thinking On" : "Thinking Off"}
+									</button>
+								</div>
 							</div>
 							<TraceTimeline
 								trace={selectedTrace}
@@ -261,17 +387,22 @@ export function App() {
 					)}
 				</main>
 
-				<aside className="min-h-0 overflow-auto bg-[#0e1116] border-l border-slate-800 max-[980px]:hidden">
-					<div className="h-11 px-3 border-b border-slate-800 flex items-center text-xs font-bold uppercase tracking-wider">Raw Events</div>
-					<div className="p-3 flex flex-col gap-2">
-						{traceView?.rawEvents.slice(-80).reverse().map((event) => (
-							<div key={event.id} className="border-l-2 border-[#11a4d4] bg-[#151f24] p-2">
-								<div className="text-[#11a4d4] font-mono text-[11px] mb-1">{event.type}</div>
-								<JsonRenderer value={event.payload} showControls={false} />
-							</div>
-						))}
-					</div>
-				</aside>
+				{showRawEvents ? (
+					<aside className="min-h-0 overflow-auto bg-[#0e1116] border-l border-slate-800 max-[980px]:hidden">
+						<div className="h-11 px-3 border-b border-slate-800 flex items-center text-xs font-bold uppercase tracking-wider">Raw Events</div>
+						<div className="p-3 flex flex-col gap-2">
+							{rawEvents.slice(-80).reverse().map((event) => (
+								<div key={event.id} className="border-l-2 border-[#11a4d4] bg-[#151f24] p-2">
+									<div className="flex items-center justify-between gap-2 text-[#11a4d4] font-mono text-[11px] mb-1">
+										<span>{event.type}</span>
+										{event.count > 1 ? <span className="text-slate-500">x{event.count}</span> : null}
+									</div>
+									<JsonRenderer value={event.payload} showControls={false} />
+								</div>
+							))}
+						</div>
+					</aside>
+				) : null}
 			</div>
 
 		</div>
@@ -295,33 +426,128 @@ function SessionNode({
 	node,
 	selectedPiboSessionId,
 	onSelect,
+	onRename,
+	onArchive,
 	depth = 0,
 }: {
 	node: PiboWebSessionNode;
 	selectedPiboSessionId: string | null;
 	onSelect: (piboSessionId: string) => void;
+	onRename: (piboSessionId: string, title: string | null) => void;
+	onArchive: (piboSessionId: string, archived: boolean) => void;
 	depth?: number;
 }) {
+	const [editing, setEditing] = useState(false);
+	const [draftTitle, setDraftTitle] = useState(node.title);
+
+	useEffect(() => {
+		if (!editing) setDraftTitle(node.title);
+	}, [editing, node.title]);
+
+	const submitRename = () => {
+		const title = draftTitle.trim();
+		onRename(node.piboSessionId, title ? title : null);
+		setEditing(false);
+	};
+
 	return (
 		<div>
-			<button
-				type="button"
-				onClick={() => onSelect(node.piboSessionId)}
-				className={`w-full grid grid-cols-[16px_1fr_auto] gap-2 items-center text-left px-2 py-2 mb-1 border rounded-sm ${
+			<div
+				className={`group w-full grid grid-cols-[1fr_auto] gap-1 items-center mb-1 border rounded-sm ${
 					node.piboSessionId === selectedPiboSessionId ? "border-[#11a4d4] bg-[#11a4d4]/10" : "border-transparent"
 				}`}
 				style={{ paddingLeft: 8 + depth * 14 }}
 				title={node.piboSessionId}
 			>
-				<span className="text-slate-500">{node.children.length ? "▾" : ""}</span>
-				<span className="min-w-0">
-					<span className="block text-sm truncate text-slate-200">{node.title}</span>
-					<span className="block text-[10px] font-mono truncate text-slate-500">{node.piboSessionId}</span>
-				</span>
-				<span className={`h-2 w-2 rounded-full ${node.status === "running" ? "bg-[#0bda57]" : node.status === "error" ? "bg-red-500" : "bg-slate-600"}`} />
-			</button>
+				{editing ? (
+					<form
+						className="min-w-0 grid grid-cols-[1fr_auto_auto] gap-1 py-1 pr-1"
+						onSubmit={(event) => {
+							event.preventDefault();
+							submitRename();
+						}}
+					>
+						<input
+							value={draftTitle}
+							onChange={(event) => setDraftTitle(event.target.value)}
+							onKeyDown={(event) => {
+								if (event.key === "Escape") {
+									event.preventDefault();
+									setEditing(false);
+									setDraftTitle(node.title);
+								}
+							}}
+							autoFocus
+							className="min-w-0 bg-[#0e1116] border border-slate-700 rounded-sm px-2 py-1 text-sm outline-none focus:border-[#11a4d4]"
+						/>
+						<button
+							type="submit"
+							title="Save Session Title"
+							aria-label="Save Session Title"
+							className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]"
+						>
+							<Check size={13} />
+						</button>
+						<button
+							type="button"
+							onClick={() => {
+								setEditing(false);
+								setDraftTitle(node.title);
+							}}
+							title="Cancel Rename"
+							aria-label="Cancel Rename"
+							className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]"
+						>
+							<X size={13} />
+						</button>
+					</form>
+				) : (
+					<button
+						type="button"
+						onClick={() => onSelect(node.piboSessionId)}
+						className="min-w-0 grid grid-cols-[16px_1fr_auto] gap-2 items-center text-left px-2 py-2"
+					>
+						<span className="text-slate-500">{node.children.length ? "▾" : ""}</span>
+						<span className="min-w-0">
+							<span className={`block text-sm truncate ${node.archived ? "text-slate-500" : "text-slate-200"}`}>{node.title}</span>
+							<span className="block text-[10px] font-mono truncate text-slate-500">{node.piboSessionId}</span>
+						</span>
+						<span className={`h-2 w-2 rounded-full ${node.status === "running" ? "bg-[#0bda57]" : node.status === "error" ? "bg-red-500" : "bg-slate-600"}`} />
+					</button>
+				)}
+				{editing ? null : (
+					<div className="flex items-center gap-1 pr-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+						<button
+							type="button"
+							onClick={() => setEditing(true)}
+							title="Rename Session"
+							aria-label="Rename Session"
+							className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]"
+						>
+							<Edit3 size={13} />
+						</button>
+						<button
+							type="button"
+							onClick={() => onArchive(node.piboSessionId, !node.archived)}
+							title={node.archived ? "Restore Session" : "Archive Session"}
+							aria-label={node.archived ? "Restore Session" : "Archive Session"}
+							className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]"
+						>
+							{node.archived ? <ArchiveRestore size={13} /> : <Archive size={13} />}
+						</button>
+					</div>
+				)}
+			</div>
 			{node.children.map((child) => (
-				<SessionNode key={child.piboSessionId} node={child} selectedPiboSessionId={selectedPiboSessionId} onSelect={onSelect} depth={depth + 1} />
+				<SessionNode
+					key={child.piboSessionId}
+					node={child}
+					selectedPiboSessionId={selectedPiboSessionId}
+					onSelect={onSelect}
+					onRename={onRename}
+					onArchive={onArchive}
+					depth={depth + 1}
+				/>
 			))}
 		</div>
 	);
@@ -451,6 +677,49 @@ function SettingsView({ showThinking, setShowThinking }: { showThinking: boolean
 			</label>
 		</div>
 	);
+}
+
+type RawEvent = PiboSessionTraceView["rawEvents"][number];
+type CompactRawEvent = RawEvent & { count: number };
+
+function eventType(message: MessageEvent): string | undefined {
+	try {
+		const parsed = JSON.parse(message.data) as { type?: unknown };
+		return typeof parsed.type === "string" ? parsed.type : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function compactRawEvents(events: RawEvent[]): CompactRawEvent[] {
+	const compacted: CompactRawEvent[] = [];
+	for (const event of events) {
+		const previous = compacted[compacted.length - 1];
+		if (previous && canMergeRawDelta(previous, event)) {
+			previous.count += 1;
+			previous.createdAt = event.createdAt;
+			previous.payload = {
+				...(isRecord(previous.payload) ? previous.payload : {}),
+				text: `${textFromPayload(previous.payload)}${textFromPayload(event.payload)}`,
+			};
+			continue;
+		}
+		compacted.push({ ...event, count: 1 });
+	}
+	return compacted;
+}
+
+function canMergeRawDelta(left: RawEvent, right: RawEvent): boolean {
+	if (left.type !== right.type) return false;
+	if (left.type !== "assistant_delta" && left.type !== "thinking_delta") return false;
+	const leftPayload = isRecord(left.payload) ? left.payload : {};
+	const rightPayload = isRecord(right.payload) ? right.payload : {};
+	return leftPayload.piboSessionId === rightPayload.piboSessionId && leftPayload.eventId === rightPayload.eventId;
+}
+
+function textFromPayload(payload: unknown): string {
+	if (!isRecord(payload)) return "";
+	return typeof payload.text === "string" ? payload.text : "";
 }
 
 function parseForkActionResponse(value: unknown): ForkActionResponse | null {

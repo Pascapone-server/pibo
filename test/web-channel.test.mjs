@@ -179,6 +179,80 @@ test("chat web app creates user-owned sessions", async () => {
 	}
 });
 
+test("chat web app renames and archives owned sessions", async () => {
+	const { channel, baseURL } = await startWebHostChannel({
+		auth: createFakeAuthService(),
+	});
+
+	try {
+		const created = await fetch(`${baseURL}/api/chat/sessions`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: "{}",
+		});
+		assert.equal(created.status, 201);
+		const payload = await created.json();
+
+		const renamed = await fetch(`${baseURL}/api/chat/sessions/${encodeURIComponent(payload.session.id)}`, {
+			method: "PATCH",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({ title: "Renamed Session" }),
+		});
+		assert.equal(renamed.status, 200);
+		const renamedPayload = await renamed.json();
+		assert.equal(renamedPayload.session.title, "Renamed Session");
+
+		const bootstrap = await fetch(`${baseURL}/api/chat/bootstrap?piboSessionId=${encodeURIComponent(payload.session.id)}`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(bootstrap.status, 200);
+		const bootstrapPayload = await bootstrap.json();
+		assert.equal(
+			bootstrapPayload.sessions.find((session) => session.piboSessionId === payload.session.id)?.title,
+			"Renamed Session",
+		);
+
+		const archived = await fetch(`${baseURL}/api/chat/sessions/${encodeURIComponent(payload.session.id)}`, {
+			method: "PATCH",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({ archived: true }),
+		});
+		assert.equal(archived.status, 200);
+		const archivedPayload = await archived.json();
+		assert.equal(typeof archivedPayload.session.metadata.chatWebArchivedAt, "string");
+
+		const defaultBootstrap = await fetch(`${baseURL}/api/chat/bootstrap`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(defaultBootstrap.status, 200);
+		const defaultPayload = await defaultBootstrap.json();
+		assert.equal(defaultPayload.sessions.some((session) => session.piboSessionId === payload.session.id), false);
+
+		const archivedBootstrap = await fetch(`${baseURL}/api/chat/bootstrap?includeArchived=true`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(archivedBootstrap.status, 200);
+		const archivedBootstrapPayload = await archivedBootstrap.json();
+		const archivedNode = archivedBootstrapPayload.sessions.find((session) => session.piboSessionId === payload.session.id);
+		assert.ok(archivedNode);
+		assert.equal(archivedNode.archived, true);
+	} finally {
+		await channel.stop?.();
+	}
+});
+
 test("chat web app renders origin sessions as top-level sessions", async () => {
 	const { channel, baseURL, sessions } = await startWebHostChannel({
 		auth: createFakeAuthService(),

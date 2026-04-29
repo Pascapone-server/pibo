@@ -3,6 +3,7 @@ import { parseSessionEntries, SessionManager, type SessionEntry } from "@marioze
 import type { PiboOutputEvent, PiboSessionListItem } from "../../core/events.js";
 import type { PiboSession } from "../../sessions/store.js";
 import type { ChatWebSessionIndexItem, ChatWebStoredEvent } from "./read-model.js";
+import { isChatWebSessionArchived } from "./session-metadata.js";
 
 export type PiboWebSessionStatus = "idle" | "running" | "error";
 
@@ -13,6 +14,7 @@ export type PiboWebSessionNode = {
 	profile: string;
 	title: string;
 	subtitle?: string;
+	archived?: boolean;
 	status: PiboWebSessionStatus;
 	lastActivityAt?: string;
 	children: PiboWebSessionNode[];
@@ -123,6 +125,7 @@ export async function buildSessionNodes(
 			profile: session.profile,
 			title: createSessionTitle(session, metadata),
 			subtitle: session.id,
+			archived: isChatWebSessionArchived(session),
 			status: indexed?.status ?? "idle",
 			lastActivityAt: indexed?.lastActivityAt ?? metadata.modified,
 			children: [],
@@ -164,6 +167,10 @@ export async function buildTraceView(input: TraceBuildInput): Promise<PiboSessio
 		) {
 			continue;
 		}
+		if (storedEvent.payload.type === "assistant_delta") {
+			mergeAssistantDeltaEvent(nodes, byId, storedEvent.payload, storedEvent.createdAt);
+			continue;
+		}
 		const node = traceNodeFromEvent(input.session.id, storedEvent.payload, childByParent, storedEvent.createdAt);
 		if (!node) continue;
 		if (node.type === "agent.turn" && node.eventId) {
@@ -173,6 +180,13 @@ export async function buildTraceView(input: TraceBuildInput): Promise<PiboSessio
 			if (existingTurn) {
 				existingTurn.status = node.status;
 				existingTurn.completedAt = node.completedAt ?? existingTurn.completedAt;
+				continue;
+			}
+		}
+		if (node.type === "assistant.message") {
+			const existing = byId.get(node.id);
+			if (existing) {
+				mergeAssistantMessageEvent(existing, node);
 				continue;
 			}
 		}
@@ -217,7 +231,7 @@ export async function listPiSessions(cwd = process.cwd()): Promise<PiboSessionLi
 }
 
 function createSessionTitle(session: PiboSession, metadata: SessionMetadata): string {
-	const candidate = metadata.name || metadata.firstMessage || session.title || session.id;
+	const candidate = session.title || metadata.name || metadata.firstMessage || session.id;
 	return truncateTitle(candidate);
 }
 
@@ -528,6 +542,7 @@ function traceNodeFromEvent(
 		case "assistant_message":
 			return {
 				...base,
+				id: eventId ? assistantMessageNodeId(eventId) : id,
 				parentId: turnParentId,
 				type: "assistant.message",
 				title: "Agent Message",
@@ -593,6 +608,49 @@ function traceNodeFromEvent(
 	}
 }
 
+function mergeAssistantDeltaEvent(
+	nodes: PiboTraceNode[],
+	byId: Map<string, PiboTraceNode>,
+	event: Extract<PiboOutputEvent, { type: "assistant_delta" }>,
+	createdAt?: string,
+): void {
+	if (event.text.length === 0) return;
+
+	const id = event.eventId ? assistantMessageNodeId(event.eventId) : `event:assistant_delta:${cryptoSafeId(event)}`;
+	const existing = byId.get(id);
+	if (existing) {
+		const text = `${typeof existing.output === "string" ? existing.output : ""}${event.text}`;
+		existing.status = "running";
+		existing.summary = text;
+		existing.output = text;
+		return;
+	}
+
+	const node: PiboTraceNode = {
+		id,
+		parentId: event.eventId ? messageTurnNodeId(event.eventId) : undefined,
+		piboSessionId: event.piboSessionId,
+		eventId: event.eventId,
+		type: "assistant.message",
+		title: "Agent Message",
+		status: "running",
+		startedAt: createdAt,
+		summary: event.text,
+		output: event.text,
+		children: [],
+	};
+	nodes.push(node);
+	byId.set(node.id, node);
+}
+
+function mergeAssistantMessageEvent(target: PiboTraceNode, update: PiboTraceNode): void {
+	target.status = update.status;
+	target.summary = update.summary ?? target.summary;
+	target.output = update.output ?? target.output;
+	target.error = update.error ?? target.error;
+	target.completedAt = update.completedAt ?? target.completedAt;
+}
+
 function isInternalSessionOperation(action: string): boolean {
 	return action === "session.fork" || action === "session.clone" || action === "session.switch";
 }
@@ -632,6 +690,10 @@ function findOpenTranscriptEventIds(events: ChatWebStoredEvent[]): Set<string> {
 
 function messageTurnNodeId(eventId: string): string {
 	return `event:message:${eventId}`;
+}
+
+function assistantMessageNodeId(eventId: string): string {
+	return `event:assistant:${eventId}`;
 }
 
 function mapTraceNodesById(nodes: PiboTraceNode[]): Map<string, PiboTraceNode> {

@@ -41,6 +41,7 @@ export type PiboWebSessionNode = {
 	profile: string;
 	title: string;
 	subtitle?: string;
+	archived?: boolean;
 	status: "idle" | "running" | "error";
 	lastActivityAt?: string;
 	children: PiboWebSessionNode[];

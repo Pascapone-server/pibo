@@ -111,11 +111,11 @@ export function SpanNode({
 }: SpanNodeProps) {
 	const [childrenExpanded, setChildrenExpanded] = useState(() => {
 		if (typeof forceExpanded === "boolean") return forceExpanded;
-		return false;
+		return span.status === "UNSET";
 	});
 	const [contentExpanded, setContentExpanded] = useState(() => {
 		if (typeof forceContentExpanded === "boolean") return forceContentExpanded;
-		return false;
+		return span.status === "UNSET";
 	});
 
 	useEffect(() => {

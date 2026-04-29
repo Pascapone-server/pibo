@@ -112,6 +112,122 @@ test("chat trace skips empty live reasoning events", async () => {
 	assert.equal(view.nodes[0].output, "visible answer");
 });
 
+test("chat trace aggregates live assistant deltas into a streaming response node", async () => {
+	const session = createTestSession();
+	const view = await buildTraceView({
+		session,
+		sessions: [session],
+		events: [
+			{
+				id: "event-1",
+				piboSessionId: "chat:test",
+				eventId: "turn-1",
+				type: "message_started",
+				createdAt: "2026-04-29T08:00:00.000Z",
+				payload: {
+					type: "message_started",
+					piboSessionId: "chat:test",
+					eventId: "turn-1",
+					text: "hello",
+					source: "user",
+				},
+			},
+			{
+				id: "event-2",
+				piboSessionId: "chat:test",
+				eventId: "turn-1",
+				type: "assistant_delta",
+				createdAt: "2026-04-29T08:00:01.000Z",
+				payload: {
+					type: "assistant_delta",
+					piboSessionId: "chat:test",
+					eventId: "turn-1",
+					text: "Hello",
+				},
+			},
+			{
+				id: "event-3",
+				piboSessionId: "chat:test",
+				eventId: "turn-1",
+				type: "assistant_delta",
+				createdAt: "2026-04-29T08:00:02.000Z",
+				payload: {
+					type: "assistant_delta",
+					piboSessionId: "chat:test",
+					eventId: "turn-1",
+					text: " world",
+				},
+			},
+		],
+		cwd: process.cwd(),
+	});
+
+	const turn = view.nodes.find((node) => node.type === "agent.turn");
+	assert.ok(turn);
+	assert.equal(turn.status, "running");
+	assert.equal(turn.children.length, 1);
+	assert.equal(turn.children[0].type, "assistant.message");
+	assert.equal(turn.children[0].status, "running");
+	assert.equal(turn.children[0].output, "Hello world");
+});
+
+test("chat trace replaces live assistant deltas with the final assistant message", async () => {
+	const session = createTestSession();
+	const view = await buildTraceView({
+		session,
+		sessions: [session],
+		events: [
+			{
+				id: "event-1",
+				piboSessionId: "chat:test",
+				eventId: "turn-1",
+				type: "message_started",
+				createdAt: "2026-04-29T08:00:00.000Z",
+				payload: {
+					type: "message_started",
+					piboSessionId: "chat:test",
+					eventId: "turn-1",
+					text: "hello",
+					source: "user",
+				},
+			},
+			{
+				id: "event-2",
+				piboSessionId: "chat:test",
+				eventId: "turn-1",
+				type: "assistant_delta",
+				createdAt: "2026-04-29T08:00:01.000Z",
+				payload: {
+					type: "assistant_delta",
+					piboSessionId: "chat:test",
+					eventId: "turn-1",
+					text: "partial",
+				},
+			},
+			{
+				id: "event-3",
+				piboSessionId: "chat:test",
+				eventId: "turn-1",
+				type: "assistant_message",
+				createdAt: "2026-04-29T08:00:02.000Z",
+				payload: {
+					type: "assistant_message",
+					piboSessionId: "chat:test",
+					eventId: "turn-1",
+					text: "final answer",
+				},
+			},
+		],
+		cwd: process.cwd(),
+	});
+
+	const turn = view.nodes.find((node) => node.type === "agent.turn");
+	assert.ok(turn);
+	assert.equal(turn.children.length, 1);
+	assert.equal(turn.children[0].status, "done");
+	assert.equal(turn.children[0].output, "final answer");
+});
+
 test("chat trace hides internal fork and switch execution results", async () => {
 	const session = createTestSession();
 	const view = await buildTraceView({

@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { extname, resolve } from "node:path";
-import type { PiboJsonValue, PiboOutputEvent } from "../../core/events.js";
+import type { PiboJsonObject, PiboJsonValue, PiboOutputEvent } from "../../core/events.js";
 import { PiboWebHttpError, readJsonBody, responseHtml, responseJson } from "../../web/http.js";
 import type { PiboWebApp, PiboWebAppContext, PiboWebSession } from "../../web/types.js";
-import type { PiboSession } from "../../sessions/store.js";
+import type { PiboSession, UpdatePiboSessionInput } from "../../sessions/store.js";
 import { ChatWebReadModel, createDefaultChatWebReadModel } from "./read-model.js";
 import { buildSessionNodes, buildTraceView } from "./trace.js";
+import { isChatWebSessionArchived, withChatWebArchived } from "./session-metadata.js";
 
 export const CHAT_WEB_APP_NAME = "pibo.chat-web";
 export const CHAT_WEB_CHANNEL = "pibo.chat-web";
@@ -89,12 +90,33 @@ function listOwnedSessions(context: PiboWebAppContext, webSession: PiboWebSessio
 		.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }
 
+function visibleOwnedSessions(
+	sessions: PiboSession[],
+	selectedSession: PiboSession,
+	includeArchived: boolean,
+): PiboSession[] {
+	if (includeArchived) return sessions;
+	const byId = new Map(sessions.map((session) => [session.id, session]));
+	return sessions.filter((session) => session.id === selectedSession.id || !hasArchivedSessionInPath(session, byId));
+}
+
+function hasArchivedSessionInPath(session: PiboSession, byId: ReadonlyMap<string, PiboSession>): boolean {
+	let current: PiboSession | undefined = session;
+	while (current) {
+		if (isChatWebSessionArchived(current)) return true;
+		current = current.parentId ? byId.get(current.parentId) : undefined;
+	}
+	return false;
+}
+
 function ensureDefaultChatSession(
 	context: PiboWebAppContext,
 	webSession: PiboWebSession,
 	defaultProfile: string,
 ): PiboSession {
-	const existing = listOwnedSessions(context, webSession).find((session) => !session.parentId);
+	const existing = listOwnedSessions(context, webSession).find(
+		(session) => !session.parentId && !isChatWebSessionArchived(session),
+	);
 	if (existing) return existing;
 	return context.channelContext.createSession({
 		channel: CHAT_WEB_CHANNEL,
@@ -102,6 +124,56 @@ function ensureDefaultChatSession(
 		profile: defaultProfile,
 		ownerScope: webSession.ownerScope,
 	});
+}
+
+function parseBooleanSearchParam(url: URL, name: string): boolean {
+	return url.searchParams.get(name) === "true";
+}
+
+function sessionResourceId(pathname: string): string | undefined {
+	const prefix = `${CHAT_WEB_API_PREFIX}/sessions/`;
+	if (!pathname.startsWith(prefix)) return undefined;
+	const encodedId = pathname.slice(prefix.length);
+	if (!encodedId || encodedId.includes("/")) return undefined;
+	try {
+		return decodeURIComponent(encodedId);
+	} catch {
+		throw new PiboWebHttpError("Invalid session id", 400);
+	}
+}
+
+function normalizeSessionTitle(value: unknown): string | null | undefined {
+	if (value === undefined) return undefined;
+	if (value === null) return null;
+	if (typeof value !== "string") {
+		throw new PiboWebHttpError("Session title must be a string or null", 400);
+	}
+	const title = value.replace(/\s+/g, " ").trim();
+	if (!title) return null;
+	if (title.length > 120) {
+		throw new PiboWebHttpError("Session title is too long", 400);
+	}
+	return title;
+}
+
+function metadataWithArchiveState(session: PiboSession, archived: unknown): PiboJsonObject | undefined {
+	if (archived === undefined) return undefined;
+	if (typeof archived !== "boolean") {
+		throw new PiboWebHttpError("Session archived flag must be boolean", 400);
+	}
+	return withChatWebArchived(session.metadata, archived);
+}
+
+function createSessionUpdate(session: PiboSession, body: { title?: unknown; archived?: unknown }): UpdatePiboSessionInput {
+	const update: UpdatePiboSessionInput = {};
+	const title = normalizeSessionTitle(body.title);
+	if (title !== undefined) update.title = title;
+	const metadata = metadataWithArchiveState(session, body.archived);
+	if (metadata) update.metadata = metadata;
+	if (!("title" in update) && !("metadata" in update)) {
+		throw new PiboWebHttpError("No session update fields provided", 400);
+	}
+	return update;
 }
 
 function resolveRequestedSession(
@@ -972,6 +1044,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 
 			if (url.pathname === `${CHAT_WEB_API_PREFIX}/bootstrap` && request.method === "GET") {
 				const webSession = await requireSession(request, context);
+				const includeArchived = parseBooleanSearchParam(url, "includeArchived");
 				const selectedSession = resolveRequestedSession(
 					context,
 					webSession,
@@ -980,7 +1053,10 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				);
 				const ownedSessions = listOwnedSessions(context, webSession);
 				indexOwnedSessions(state.readModel, ownedSessions);
-				const sessions = await buildSessionNodes(ownedSessions, state.readModel.listSessions());
+				const sessions = await buildSessionNodes(
+					visibleOwnedSessions(ownedSessions, selectedSession, includeArchived),
+					state.readModel.listSessions(),
+				);
 				return responseJson({
 					identity: webSession.authSession.identity,
 					session: selectedSession,
@@ -1008,10 +1084,16 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 
 			if (url.pathname === `${CHAT_WEB_API_PREFIX}/sessions` && request.method === "GET") {
 				const webSession = await requireSession(request, context);
-				ensureDefaultChatSession(context, webSession, defaultProfile);
+				const includeArchived = parseBooleanSearchParam(url, "includeArchived");
+				const selectedSession = ensureDefaultChatSession(context, webSession, defaultProfile);
 				const ownedSessions = listOwnedSessions(context, webSession);
 				indexOwnedSessions(state.readModel, ownedSessions);
-				return responseJson(await buildSessionNodes(ownedSessions, state.readModel.listSessions()));
+				return responseJson(
+					await buildSessionNodes(
+						visibleOwnedSessions(ownedSessions, selectedSession, includeArchived),
+						state.readModel.listSessions(),
+					),
+				);
 			}
 
 			if (url.pathname === `${CHAT_WEB_API_PREFIX}/sessions` && request.method === "POST") {
@@ -1021,6 +1103,22 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				const created = createPersonalChatSession(context, webSession, defaultProfile);
 				state.readModel.upsertSession(created);
 				return responseJson({ session: created }, { status: 201 });
+			}
+
+			const patchSessionId = sessionResourceId(url.pathname);
+			if (patchSessionId && request.method === "PATCH") {
+				requireSameOriginJsonRequest(request);
+				const webSession = await requireSession(request, context);
+				const selectedSession = resolveRequestedSession(context, webSession, defaultProfile, patchSessionId);
+				const body = await readJsonBody<{ title?: unknown; archived?: unknown }>(request);
+				const updateSession = context.channelContext.updateSession;
+				if (!updateSession) {
+					throw new PiboWebHttpError("Session updates are not available", 501);
+				}
+				const updated = updateSession(selectedSession.id, createSessionUpdate(selectedSession, body));
+				if (!updated) throw new PiboWebHttpError("Session not found", 404);
+				state.readModel.upsertSession(updated);
+				return responseJson({ session: updated });
 			}
 
 			if (url.pathname === `${CHAT_WEB_API_PREFIX}/trace` && request.method === "GET") {
