@@ -2,7 +2,7 @@
 title: Pibo Web Chat Trace UI
 version: 0.1
 date_created: 2026-04-28
-last_updated: 2026-04-28
+last_updated: 2026-04-29
 owner: Pibo
 tags: [design, web, chat, tracing, sessions, subagents]
 ---
@@ -205,6 +205,8 @@ type PiboTraceNode = {
 | `session_error` | `error` |
 | `pibo_subagent_*` tool | `agent.delegation` linked to child session |
 | run notification/tool result for `pibo_run_*` | `yielded.run` where detectable |
+
+Trace reconstruction must treat empty or whitespace-only reasoning text as transport/provider noise. Persisted Pi `thinking` parts and live `thinking_finished` events only produce `model.reasoning` nodes when they contain visible text after trimming.
 
 ### 4.4 Web Read Model Storage
 

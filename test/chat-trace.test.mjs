@@ -1,6 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { traceNodesFromEntries } from "../dist/apps/chat/trace.js";
+import { buildTraceView, traceNodesFromEntries } from "../dist/apps/chat/trace.js";
+
+function createTestBinding(overrides = {}) {
+	return {
+		sessionKey: "chat:test",
+		sessionId: "missing-session-id",
+		channel: "chat-web",
+		externalId: "test",
+		originalProfile: "pibo-minimal",
+		createdAt: "2026-04-29T08:00:00.000Z",
+		updatedAt: "2026-04-29T08:00:00.000Z",
+		...overrides,
+	};
+}
 
 test("chat trace preserves assistant content part order", () => {
 	const nodes = traceNodesFromEntries("chat:test", [
@@ -28,6 +41,75 @@ test("chat trace preserves assistant content part order", () => {
 	assert.equal(nodes[1].output, "then answer");
 	assert.equal(nodes[0].parentId, undefined);
 	assert.equal(nodes[1].parentId, undefined);
+});
+
+test("chat trace skips empty assistant reasoning entries", () => {
+	const nodes = traceNodesFromEntries("chat:test", [
+		{
+			type: "message",
+			id: "assistant-empty-reasoning",
+			parentId: "user-1",
+			timestamp: "2026-04-29T08:00:00.000Z",
+			message: {
+				role: "assistant",
+				content: [
+					{ type: "thinking", thinking: "" },
+					{ type: "thinking", thinking: " \n\t" },
+					{ type: "text", text: "visible answer" },
+				],
+				stopReason: "stop",
+			},
+		},
+	]);
+
+	assert.deepEqual(
+		nodes.map((node) => node.type),
+		["assistant.message"],
+	);
+	assert.equal(nodes[0].output, "visible answer");
+});
+
+test("chat trace skips empty live reasoning events", async () => {
+	const binding = createTestBinding();
+	const view = await buildTraceView({
+		binding,
+		bindings: [binding],
+		events: [
+			{
+				id: "event-1",
+				sessionKey: "chat:test",
+				eventId: "turn-1",
+				type: "thinking_finished",
+				createdAt: "2026-04-29T08:00:01.000Z",
+				payload: {
+					type: "thinking_finished",
+					sessionKey: "chat:test",
+					eventId: "turn-1",
+					text: "",
+				},
+			},
+			{
+				id: "event-2",
+				sessionKey: "chat:test",
+				eventId: "turn-1",
+				type: "assistant_message",
+				createdAt: "2026-04-29T08:00:02.000Z",
+				payload: {
+					type: "assistant_message",
+					sessionKey: "chat:test",
+					eventId: "turn-1",
+					text: "visible answer",
+				},
+			},
+		],
+		cwd: process.cwd(),
+	});
+
+	assert.deepEqual(
+		view.nodes.map((node) => node.type),
+		["assistant.message"],
+	);
+	assert.equal(view.nodes[0].output, "visible answer");
 });
 
 test("chat trace groups tool calls with the final assistant response", () => {

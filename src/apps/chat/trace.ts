@@ -339,7 +339,7 @@ function createAssistantTurnNodes(sessionKey: string, entries: MessageSessionEnt
 
 		for (const [index, part] of messageParts(entry).entries()) {
 			const typed = part as MessagePart;
-			if (typed.type === "thinking" && typeof typed.thinking === "string") {
+			if (typed.type === "thinking" && typeof typed.thinking === "string" && hasVisibleText(typed.thinking)) {
 				reasoningNodes.push(createReasoningNode(sessionKey, entry, index, typed.thinking));
 			} else if (typed.type === "text" && typeof typed.text === "string" && typed.text !== "") {
 				answerTextParts.push(typed.text);
@@ -515,6 +515,7 @@ function traceNodeFromEvent(
 				input: event.type === "message_started" ? { text: event.text, source: event.source } : undefined,
 			};
 		case "thinking_finished":
+			if (!hasVisibleText(event.text)) return undefined;
 			return {
 				...base,
 				parentId: turnParentId,
@@ -705,6 +706,10 @@ function messageError(message: unknown): string | undefined {
 	if (!message || typeof message !== "object") return undefined;
 	const errorMessage = (message as { errorMessage?: unknown }).errorMessage;
 	return typeof errorMessage === "string" ? errorMessage : undefined;
+}
+
+function hasVisibleText(value: unknown): value is string {
+	return typeof value === "string" && value.trim().length > 0;
 }
 
 function extractText(content: unknown): string {
