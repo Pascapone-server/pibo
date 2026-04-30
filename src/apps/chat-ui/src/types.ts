@@ -47,6 +47,20 @@ export type PiboWebSessionNode = {
 	children: PiboWebSessionNode[];
 };
 
+export type PiboRoom = {
+	id: string;
+	ownerScope: string;
+	name: string;
+	topic?: string;
+	type: "space" | "chat" | "agent";
+	parentRoomId?: string;
+	createdAt: string;
+	updatedAt: string;
+	retentionPolicyId?: string;
+	metadata: Record<string, unknown>;
+	children?: PiboRoom[];
+};
+
 export type PiboSession = {
 	id: string;
 	piSessionId: string;
@@ -74,7 +88,10 @@ export type PiboSessionTraceView = {
 export type BootstrapData = {
 	identity: { userId: string; email?: string; name?: string };
 	session: PiboSession;
+	room?: PiboRoom;
+	selectedRoomId: string;
 	selectedPiboSessionId: string;
+	rooms: PiboRoom[];
 	sessions: PiboWebSessionNode[];
 	agents: Array<{ name: string; description?: string; aliases: string[] }>;
 	capabilities: { actions: Array<{ name: string; description?: string; slashCommands: string[] }> };

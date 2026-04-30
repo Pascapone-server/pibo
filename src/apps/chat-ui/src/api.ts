@@ -1,9 +1,10 @@
-import type { BootstrapData, CreateSessionData, PiboSession, PiboSessionTraceView } from "./types";
+import type { BootstrapData, CreateSessionData, PiboRoom, PiboSession, PiboSessionTraceView } from "./types";
 
-export async function getBootstrap(piboSessionId?: string, includeArchived = false): Promise<BootstrapData> {
+export async function getBootstrap(piboSessionId?: string, includeArchived = false, roomId?: string): Promise<BootstrapData> {
 	const params = new URLSearchParams();
 	if (piboSessionId) params.set("piboSessionId", piboSessionId);
 	if (includeArchived) params.set("includeArchived", "true");
+	if (roomId) params.set("roomId", roomId);
 	const suffix = params.size ? `?${params.toString()}` : "";
 	return requestJson<BootstrapData>(`/api/chat/bootstrap${suffix}`);
 }
@@ -12,11 +13,27 @@ export async function getTrace(piboSessionId: string): Promise<PiboSessionTraceV
 	return requestJson<PiboSessionTraceView>(`/api/chat/trace?piboSessionId=${encodeURIComponent(piboSessionId)}`);
 }
 
-export async function postSession(profile?: string): Promise<CreateSessionData> {
+export async function postSession(profile?: string, roomId?: string): Promise<CreateSessionData> {
 	return requestJson<CreateSessionData>("/api/chat/sessions", {
 		method: "POST",
 		headers: { "content-type": "application/json" },
-		body: JSON.stringify(profile ? { profile } : {}),
+		body: JSON.stringify({ ...(profile ? { profile } : {}), ...(roomId ? { roomId } : {}) }),
+	});
+}
+
+export async function postRoom(input: { name: string; topic?: string }): Promise<{ room: PiboRoom }> {
+	return requestJson<{ room: PiboRoom }>("/api/chat/rooms", {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify(input),
+	});
+}
+
+export async function patchRoom(roomId: string, input: { name?: string; topic?: string | null }): Promise<{ room: PiboRoom }> {
+	return requestJson<{ room: PiboRoom }>(`/api/chat/rooms/${encodeURIComponent(roomId)}`, {
+		method: "PATCH",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify(input),
 	});
 }
 
@@ -31,11 +48,11 @@ export async function patchSession(
 	});
 }
 
-export async function postMessage(piboSessionId: string, text: string): Promise<unknown> {
+export async function postMessage(piboSessionId: string, text: string, clientTxnId: string, roomId?: string): Promise<unknown> {
 	return requestJson("/api/chat/message", {
 		method: "POST",
 		headers: { "content-type": "application/json" },
-		body: JSON.stringify({ piboSessionId, text }),
+		body: JSON.stringify({ piboSessionId, text, clientTxnId, ...(roomId ? { roomId } : {}) }),
 	});
 }
 

@@ -9,6 +9,7 @@ import {
 	ChevronsUp,
 	Edit3,
 	EyeOff,
+	FolderPlus,
 	Layers,
 	LogOut,
 	MessageSquarePlus,
@@ -18,8 +19,8 @@ import {
 	UserRound,
 	X,
 } from "lucide-react";
-import { getBootstrap, getTrace, patchSession, postAction, postMessage, postSession, signInWithGoogle, signOut } from "./api";
-import type { BootstrapData, PiboSessionTraceView, PiboTraceNode, PiboWebSessionNode } from "./types";
+import { getBootstrap, getTrace, patchRoom, patchSession, postAction, postMessage, postRoom, postSession, signInWithGoogle, signOut } from "./api";
+import type { BootstrapData, PiboRoom, PiboSessionTraceView, PiboTraceNode, PiboWebSessionNode } from "./types";
 import { adaptTrace } from "./tracing/adapt";
 import { TraceTimeline } from "./tracing/TraceTimeline";
 import { JsonRenderer } from "./tracing/JsonRenderer";
@@ -41,6 +42,7 @@ export function App() {
 	const [traceView, setTraceView] = useState<PiboSessionTraceView | null>(null);
 	const [traceLoadingSessionId, setTraceLoadingSessionId] = useState<string | null>(null);
 	const [selectedPiboSessionId, setSelectedPiboSessionId] = useState<string | null>(null);
+	const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
 	const [area, setArea] = useState<Area>("sessions");
 	const [error, setError] = useState<string | null>(null);
 	const [showThinking, setShowThinking] = useState(() => localStorage.getItem("pibo.chat.showThinking") !== "false");
@@ -51,6 +53,7 @@ export function App() {
 	const [composerText, setComposerText] = useState("");
 	const [composerFocusSignal, setComposerFocusSignal] = useState(0);
 	const [creatingSession, setCreatingSession] = useState(false);
+	const [creatingRoom, setCreatingRoom] = useState(false);
 	const showArchivedRef = useRef(showArchived);
 	const bootstrapRequestId = useRef(0);
 	const traceRequestId = useRef(0);
@@ -112,13 +115,14 @@ export function App() {
 		};
 	}, []);
 
-	const loadBootstrap = useCallback(async (piboSessionId?: string, includeArchived = showArchivedRef.current) => {
+	const loadBootstrap = useCallback(async (piboSessionId?: string, includeArchived = showArchivedRef.current, roomId?: string) => {
 		const requestId = bootstrapRequestId.current + 1;
 		bootstrapRequestId.current = requestId;
-		const data = await getBootstrap(piboSessionId, includeArchived);
+		const data = await getBootstrap(piboSessionId, includeArchived, roomId);
 		if (requestId !== bootstrapRequestId.current) return data;
 		setBootstrap(data);
 		setSelectedPiboSessionId(data.selectedPiboSessionId);
+		setSelectedRoomId(data.selectedRoomId);
 		return data;
 	}, []);
 
@@ -149,7 +153,9 @@ export function App() {
 		loadTrace(selectedPiboSessionId, { showLoading: traceViewSessionId.current !== selectedPiboSessionId }).catch((caught) =>
 			setError(caught instanceof Error ? caught.message : String(caught)),
 		);
-		const events = new EventSource(`/api/chat/events?piboSessionId=${encodeURIComponent(selectedPiboSessionId)}`);
+		const params = new URLSearchParams({ piboSessionId: selectedPiboSessionId });
+		if (selectedRoomId) params.set("roomId", selectedRoomId);
+		const events = new EventSource(`/api/chat/events?${params.toString()}`);
 		let traceTimer: ReturnType<typeof setTimeout> | undefined;
 		let bootstrapTimer: ReturnType<typeof setTimeout> | undefined;
 		const scheduleTraceRefresh = (delayMs: number) => {
@@ -163,7 +169,9 @@ export function App() {
 			if (bootstrapTimer) return;
 			bootstrapTimer = setTimeout(() => {
 				bootstrapTimer = undefined;
-				loadBootstrap(selectedPiboSessionId).catch((caught) => setError(caught instanceof Error ? caught.message : String(caught)));
+				loadBootstrap(selectedPiboSessionId, showArchivedRef.current, selectedRoomId ?? undefined).catch((caught) =>
+					setError(caught instanceof Error ? caught.message : String(caught)),
+				);
 			}, delayMs);
 		};
 		events.addEventListener("pibo", (message) => {
@@ -183,7 +191,7 @@ export function App() {
 			if (bootstrapTimer) clearTimeout(bootstrapTimer);
 			events.close();
 		};
-	}, [area, enqueueStreamEvent, loadBootstrap, loadTrace, selectedPiboSessionId]);
+	}, [area, enqueueStreamEvent, loadBootstrap, loadTrace, selectedPiboSessionId, selectedRoomId]);
 
 	const currentTraceView = traceView?.piboSessionId === selectedPiboSessionId ? traceView : null;
 
@@ -236,16 +244,24 @@ export function App() {
 		await loadBootstrap(piboSessionId);
 	}, [loadBootstrap]);
 
+	const selectRoom = useCallback(async (roomId: string) => {
+		setSelectedRoomId(roomId);
+		setTraceView(null);
+		const data = await loadBootstrap(undefined, showArchivedRef.current, roomId);
+		setTraceLoadingSessionId(data.selectedPiboSessionId);
+		setArea("sessions");
+	}, [loadBootstrap]);
+
 	const createSession = async (profile = newSessionProfile) => {
 		if (creatingSession) return;
 		setCreatingSession(true);
 		try {
-			const created = await postSession(profile || undefined);
+			const created = await postSession(profile || undefined, selectedRoomId ?? undefined);
 			setTraceLoadingSessionId(created.session.id);
 			setArea("sessions");
 			setSelectedPiboSessionId(created.session.id);
 			setTraceView(null);
-			await loadBootstrap(created.session.id);
+			await loadBootstrap(created.session.id, showArchivedRef.current, selectedRoomId ?? undefined);
 			setError(null);
 		} catch (caught) {
 			setError(caught instanceof Error ? caught.message : String(caught));
@@ -259,7 +275,7 @@ export function App() {
 		setShowArchived(next);
 		localStorage.setItem("pibo.chat.showArchived", String(next));
 		try {
-			const data = await loadBootstrap(selectedPiboSessionId ?? undefined, next);
+			const data = await loadBootstrap(selectedPiboSessionId ?? undefined, next, selectedRoomId ?? undefined);
 			if (area === "sessions" && data.selectedPiboSessionId !== selectedPiboSessionId) {
 				setTraceLoadingSessionId(data.selectedPiboSessionId);
 				setTraceView(null);
@@ -273,7 +289,7 @@ export function App() {
 	const renameSession = async (piboSessionId: string, title: string | null) => {
 		try {
 			await patchSession(piboSessionId, { title });
-			const data = await loadBootstrap(selectedPiboSessionId ?? undefined);
+			const data = await loadBootstrap(selectedPiboSessionId ?? undefined, showArchivedRef.current, selectedRoomId ?? undefined);
 			if (area === "sessions") await loadTrace(data.selectedPiboSessionId);
 			setError(null);
 		} catch (caught) {
@@ -285,11 +301,39 @@ export function App() {
 		try {
 			await patchSession(piboSessionId, { archived });
 			const keepSelected = !(archived && !showArchived && selectedPiboSessionId === piboSessionId);
-			const data = await loadBootstrap(keepSelected ? (selectedPiboSessionId ?? undefined) : undefined);
+			const data = await loadBootstrap(
+				keepSelected ? (selectedPiboSessionId ?? undefined) : undefined,
+				showArchivedRef.current,
+				selectedRoomId ?? undefined,
+			);
 			if (area === "sessions" && data.selectedPiboSessionId !== selectedPiboSessionId) {
 				setTraceLoadingSessionId(data.selectedPiboSessionId);
 				setTraceView(null);
 			}
+			setError(null);
+		} catch (caught) {
+			setError(caught instanceof Error ? caught.message : String(caught));
+		}
+	};
+
+	const createRoom = async () => {
+		if (creatingRoom) return;
+		setCreatingRoom(true);
+		try {
+			const created = await postRoom({ name: "New Chat" });
+			await selectRoom(created.room.id);
+			setError(null);
+		} catch (caught) {
+			setError(caught instanceof Error ? caught.message : String(caught));
+		} finally {
+			setCreatingRoom(false);
+		}
+	};
+
+	const updateRoom = async (roomId: string, input: { name?: string; topic?: string | null }) => {
+		try {
+			await patchRoom(roomId, input);
+			await loadBootstrap(selectedPiboSessionId ?? undefined, showArchivedRef.current, roomId);
 			setError(null);
 		} catch (caught) {
 			setError(caught instanceof Error ? caught.message : String(caught));
@@ -313,7 +357,7 @@ export function App() {
 		if ((command.action === "session.clone" || command.action === "session.fork") && derivedPiboSessionId) {
 			await selectSession(derivedPiboSessionId);
 		} else {
-			await loadBootstrap(selectedPiboSessionId);
+			await loadBootstrap(selectedPiboSessionId, showArchivedRef.current, selectedRoomId ?? undefined);
 			await loadTrace(selectedPiboSessionId);
 		}
 		return true;
@@ -384,6 +428,18 @@ export function App() {
 							{area === "sessions" ? (
 								<button
 									type="button"
+									onClick={() => void createRoom()}
+									disabled={creatingRoom}
+									title="New Room"
+									aria-label="New Room"
+									className="p-1 border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4] disabled:opacity-50"
+								>
+									<FolderPlus size={13} />
+								</button>
+							) : null}
+							{area === "sessions" ? (
+								<button
+									type="button"
 									onClick={() => void createSession()}
 									disabled={creatingSession}
 									title="New Session"
@@ -408,7 +464,7 @@ export function App() {
 							) : null}
 							<button
 								type="button"
-								onClick={() => void loadBootstrap(selectedPiboSessionId ?? undefined)}
+								onClick={() => void loadBootstrap(selectedPiboSessionId ?? undefined, showArchivedRef.current, selectedRoomId ?? undefined)}
 								title="Refresh"
 								aria-label="Refresh"
 								className="p-1 border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]"
@@ -418,17 +474,32 @@ export function App() {
 						</div>
 					</div>
 					{area === "sessions" ? (
-						<div className="p-2">
-							{bootstrap.sessions.map((session) => (
-								<SessionNode
-									key={session.piboSessionId}
-									node={session}
-									selectedPiboSessionId={selectedPiboSessionId}
-									onSelect={(piboSessionId) => void selectSession(piboSessionId)}
-									onRename={(piboSessionId, title) => void renameSession(piboSessionId, title)}
-									onArchive={(piboSessionId, archived) => void setSessionArchived(piboSessionId, archived)}
-								/>
-							))}
+						<div className="p-2 space-y-3">
+							<div>
+								<div className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Rooms</div>
+								{bootstrap.rooms.map((room) => (
+									<RoomNode
+										key={room.id}
+										room={room}
+										selectedRoomId={selectedRoomId}
+										onSelect={(roomId) => void selectRoom(roomId)}
+										onUpdate={(roomId, input) => void updateRoom(roomId, input)}
+									/>
+								))}
+							</div>
+							<div>
+								<div className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Sessions</div>
+								{bootstrap.sessions.map((session) => (
+									<SessionNode
+										key={session.piboSessionId}
+										node={session}
+										selectedPiboSessionId={selectedPiboSessionId}
+										onSelect={(piboSessionId) => void selectSession(piboSessionId)}
+										onRename={(piboSessionId, title) => void renameSession(piboSessionId, title)}
+										onArchive={(piboSessionId, archived) => void setSessionArchived(piboSessionId, archived)}
+									/>
+								))}
+							</div>
 						</div>
 					) : area === "agents" ? (
 						<div className="p-2">
@@ -463,7 +534,8 @@ export function App() {
 								<div className="min-w-0">
 									<h1 className="text-base font-semibold truncate">{currentTraceView?.title ?? selectedPiboSessionId}</h1>
 									<div className="font-mono text-[11px] text-slate-500 truncate">
-										{currentTraceView?.piboSessionId} {currentTraceView ? `· ${currentTraceView.piSessionId}` : ""}
+										{bootstrap.room?.name ?? selectedRoomId ?? "Room"} · {currentTraceView?.piboSessionId}{" "}
+										{currentTraceView ? `· ${currentTraceView.piSessionId}` : ""}
 									</div>
 								</div>
 								<div className="flex items-center gap-2">
@@ -525,8 +597,8 @@ export function App() {
 								onCommand={runCommand}
 								onSend={async (text) => {
 									if (!selectedPiboSessionId) return;
-									await postMessage(selectedPiboSessionId, text);
-									await loadBootstrap(selectedPiboSessionId);
+									await postMessage(selectedPiboSessionId, text, createClientTxnId(), selectedRoomId ?? undefined);
+									await loadBootstrap(selectedPiboSessionId, showArchivedRef.current, selectedRoomId ?? undefined);
 									await loadTrace(selectedPiboSessionId);
 								}}
 							/>
@@ -614,6 +686,111 @@ function HeaderIconButton({
 		>
 			{children}
 		</button>
+	);
+}
+
+function RoomNode({
+	room,
+	selectedRoomId,
+	onSelect,
+	onUpdate,
+	depth = 0,
+}: {
+	room: PiboRoom;
+	selectedRoomId: string | null;
+	onSelect: (roomId: string) => void;
+	onUpdate: (roomId: string, input: { name?: string; topic?: string | null }) => void;
+	depth?: number;
+}) {
+	const [editing, setEditing] = useState(false);
+	const [draftName, setDraftName] = useState(room.name);
+	const [draftTopic, setDraftTopic] = useState(room.topic ?? "");
+
+	useEffect(() => {
+		if (!editing) {
+			setDraftName(room.name);
+			setDraftTopic(room.topic ?? "");
+		}
+	}, [editing, room.name, room.topic]);
+
+	const submit = () => {
+		const name = draftName.trim();
+		if (!name) return;
+		onUpdate(room.id, { name, topic: draftTopic.trim() || null });
+		setEditing(false);
+	};
+
+	return (
+		<div>
+			<div
+				className={`group mb-1 border rounded-sm ${
+					room.id === selectedRoomId ? "border-[#11a4d4] bg-[#11a4d4]/10" : "border-transparent"
+				}`}
+				style={{ marginLeft: depth * 12 }}
+				title={room.id}
+			>
+				{editing ? (
+					<form
+						className="grid gap-1 p-1"
+						onSubmit={(event) => {
+							event.preventDefault();
+							submit();
+						}}
+					>
+						<input
+							value={draftName}
+							onChange={(event) => setDraftName(event.target.value)}
+							className="min-w-0 bg-[#0e1116] border border-slate-700 rounded-sm px-2 py-1 text-sm outline-none focus:border-[#11a4d4]"
+							autoFocus
+						/>
+						<input
+							value={draftTopic}
+							onChange={(event) => setDraftTopic(event.target.value)}
+							placeholder="Topic"
+							className="min-w-0 bg-[#0e1116] border border-slate-700 rounded-sm px-2 py-1 text-xs outline-none focus:border-[#11a4d4]"
+						/>
+						<div className="flex justify-end gap-1">
+							<button type="submit" className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]">
+								<Check size={13} />
+							</button>
+							<button
+								type="button"
+								onClick={() => setEditing(false)}
+								className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]"
+							>
+								<X size={13} />
+							</button>
+						</div>
+					</form>
+				) : (
+					<div className="grid grid-cols-[1fr_auto] items-center gap-1 py-1 pr-1">
+						<button type="button" onClick={() => onSelect(room.id)} className="min-w-0 text-left px-2 py-1">
+							<span className="block text-sm truncate text-slate-200">{room.name}</span>
+							<span className="block text-[10px] font-mono truncate text-slate-500">{room.topic || room.type}</span>
+						</button>
+						<button
+							type="button"
+							onClick={() => setEditing(true)}
+							title="Edit Room"
+							aria-label="Edit Room"
+							className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:border-[#11a4d4] hover:text-[#11a4d4]"
+						>
+							<Edit3 size={13} />
+						</button>
+					</div>
+				)}
+			</div>
+			{(room.children ?? []).map((child) => (
+				<RoomNode
+					key={child.id}
+					room={child}
+					selectedRoomId={selectedRoomId}
+					onSelect={onSelect}
+					onUpdate={onUpdate}
+					depth={depth + 1}
+				/>
+			))}
+		</div>
 	);
 }
 
@@ -707,7 +884,13 @@ function SessionNode({
 					<div className="min-w-0 grid grid-cols-[1fr_auto] gap-2 items-center py-1 pr-1">
 						<button
 							type="button"
-							onClick={() => onSelect(node.piboSessionId)}
+							onClick={() => {
+								if (hasChildren && node.piboSessionId === selectedPiboSessionId) {
+									setExpanded((current) => !current);
+									return;
+								}
+								onSelect(node.piboSessionId);
+							}}
 							className="min-w-0 text-left px-1 py-1"
 						>
 							<span className={`block text-sm truncate ${node.archived ? "text-slate-500" : "text-slate-200"}`}>{node.title}</span>
@@ -909,6 +1092,10 @@ function resizeComposerInput(input: HTMLTextAreaElement | null) {
 function cssPx(value: string, fallback = 0): number {
 	const parsed = Number.parseFloat(value);
 	return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function createClientTxnId(): string {
+	return `web-${Date.now().toString(36)}-${crypto.randomUUID()}`;
 }
 
 function AgentsView({

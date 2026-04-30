@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { createChatWebApp } from "../dist/apps/chat/web-app.js";
 import { PiboAuthError } from "../dist/auth/types.js";
@@ -29,7 +32,9 @@ function createFakeAuthService() {
 
 async function startWebHostChannel(options = {}) {
 	const emitted = [];
+	const listeners = new Set();
 	const sessions = new InMemoryPiboSessionStore();
+	const storagePath = join(mkdtempSync(join(tmpdir(), "pibo-web-channel-")), "chat.sqlite");
 	const channel = createWebHostChannel({ port: 0, announce: false });
 
 	await channel.start({
@@ -46,8 +51,11 @@ async function startWebHostChannel(options = {}) {
 				result: event.type === "execution" ? { ok: true } : undefined,
 			});
 		},
-		subscribe() {
-			return () => {};
+		subscribe(listener) {
+			listeners.add(listener);
+			return () => {
+				listeners.delete(listener);
+			};
 		},
 		getSession(id) {
 			return sessions.get(id);
@@ -71,7 +79,7 @@ async function startWebHostChannel(options = {}) {
 			return options.profiles ?? [];
 		},
 		getWebApps() {
-			return [createChatWebApp()];
+			return [createChatWebApp({ readModelPath: storagePath })];
 		},
 	});
 
@@ -80,6 +88,9 @@ async function startWebHostChannel(options = {}) {
 	return {
 		channel,
 		emitted,
+		emitOutput(event) {
+			for (const listener of listeners) listener(event);
+		},
 		sessions,
 		baseURL: `http://${address.host}:${address.port}`,
 	};
@@ -177,6 +188,99 @@ test("chat web app creates user-owned sessions", async () => {
 		assert.equal(emitted.length, 1);
 		assert.equal(emitted[0].piboSessionId, payload.session.id);
 		assert.equal(emitted[0].text, "hello new session");
+	} finally {
+		await channel.stop?.();
+	}
+});
+
+test("chat web app makes message sends idempotent by client transaction id", async () => {
+	const { channel, baseURL, emitted } = await startWebHostChannel({
+		auth: createFakeAuthService(),
+	});
+
+	try {
+		const sessionResponse = await fetch(`${baseURL}/api/chat/session`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(sessionResponse.status, 200);
+		const sessionPayload = await sessionResponse.json();
+		const body = JSON.stringify({
+			piboSessionId: sessionPayload.session.id,
+			text: "retry me",
+			clientTxnId: "txn-retry-1",
+		});
+
+		const first = await fetch(`${baseURL}/api/chat/message`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body,
+		});
+		assert.equal(first.status, 200);
+		const second = await fetch(`${baseURL}/api/chat/message`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body,
+		});
+		assert.equal(second.status, 200);
+		const duplicate = await second.json();
+
+		assert.equal(emitted.length, 1);
+		assert.equal(duplicate.duplicate, true);
+		assert.equal(duplicate.event.clientTxnId, "txn-retry-1");
+	} finally {
+		await channel.stop?.();
+	}
+});
+
+test("chat web app replays durable SSE frames with stream cursors", async () => {
+	const { channel, baseURL, emitOutput } = await startWebHostChannel({
+		auth: createFakeAuthService(),
+	});
+
+	try {
+		const sessionResponse = await fetch(`${baseURL}/api/chat/session`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(sessionResponse.status, 200);
+		const sessionPayload = await sessionResponse.json();
+		emitOutput({
+			type: "assistant_message",
+			piboSessionId: sessionPayload.session.id,
+			eventId: "run-1",
+			text: "hello from history",
+		});
+
+		const controller = new AbortController();
+		const response = await fetch(
+			`${baseURL}/api/chat/events?piboSessionId=${encodeURIComponent(sessionPayload.session.id)}&since=0`,
+			{
+				headers: { "x-test-user": "user-1" },
+				signal: controller.signal,
+			},
+		);
+		assert.equal(response.status, 200);
+		const reader = response.body.getReader();
+		const decoder = new TextDecoder();
+		let text = "";
+		for (let index = 0; index < 5 && !text.includes("TEXT_MESSAGE_END"); index += 1) {
+			const chunk = await reader.read();
+			assert.equal(chunk.done, false);
+			text += decoder.decode(chunk.value, { stream: true });
+		}
+		controller.abort();
+
+		assert.match(text, /id: \d+:0/);
+		assert.match(text, /id: \d+:1/);
+		assert.match(text, /TEXT_MESSAGE_END/);
+		assert.match(text, /hello from history/);
 	} finally {
 		await channel.stop?.();
 	}
