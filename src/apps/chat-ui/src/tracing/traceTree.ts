@@ -17,14 +17,15 @@ export function processSpanTree(spans: Span[]): Span[] {
 }
 
 function displaySpansFor(span: Span): Span[] {
-	const children = span.children ? processSpanTree(span.children) : [];
-	if (span.spanType === "agent.run") return children;
+	const children = span.children ? processSpanTree(span.children) : undefined;
+	if (span.spanType === "agent.run") return children ?? [];
 	if (span.spanType === "model.response") {
-		return sortByStartTime([...children, { ...span, children: undefined }]);
+		const response = span.children ? { ...span, children: undefined } : span;
+		return sortByStartTime([...(children ?? []), response]);
 	}
 
-	if (!shouldDisplaySpan(span)) return children;
-	return [{ ...span, children }];
+	if (!shouldDisplaySpan(span)) return children ?? [];
+	return children === span.children ? [span] : [{ ...span, children }];
 }
 
 function sortByStartTime(spans: Span[]): Span[] {

@@ -6,7 +6,7 @@ import test from "node:test";
 import { SessionManager } from "@mariozechner/pi-coding-agent";
 import { ChatWebReadModel } from "../dist/apps/chat/read-model.js";
 import { chatStreamFramesFromOutputEvent, createChatStreamState } from "../dist/apps/chat/stream.js";
-import { buildTraceView, traceNodesFromEntries } from "../dist/apps/chat/trace.js";
+import { buildSessionNodes, buildTraceView, traceNodesFromEntries } from "../dist/apps/chat/trace.js";
 
 function createTestSession(overrides = {}) {
 	return {
@@ -161,6 +161,28 @@ test("chat read model keeps parent sessions running after subagent link events",
 
 	assert.equal(readModel.listSessions().find((item) => item.piboSessionId === session.id)?.status, "running");
 	readModel.close();
+});
+
+test("chat session nodes sort new sessions without activity first", async () => {
+	const older = createTestSession({
+		id: "chat:older",
+		piSessionId: "missing-older-session-id",
+		createdAt: "2026-04-29T08:00:00.000Z",
+		updatedAt: "2026-04-29T08:00:00.000Z",
+	});
+	const newer = createTestSession({
+		id: "chat:newer",
+		piSessionId: "missing-newer-session-id",
+		createdAt: "2026-04-29T09:00:00.000Z",
+		updatedAt: "2026-04-29T09:00:00.000Z",
+	});
+
+	const nodes = await buildSessionNodes([older, newer], []);
+
+	assert.deepEqual(
+		nodes.map((node) => node.piboSessionId),
+		["chat:newer", "chat:older"],
+	);
 });
 
 test("chat trace preserves assistant content part order", () => {

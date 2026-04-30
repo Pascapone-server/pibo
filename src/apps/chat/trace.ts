@@ -144,7 +144,7 @@ export async function buildSessionNodes(
 			subtitle: session.id,
 			archived: isChatWebSessionArchived(session),
 			status: indexed?.status ?? "idle",
-			lastActivityAt: indexed?.lastActivityAt ?? metadata.modified,
+			lastActivityAt: indexed?.lastActivityAt ?? metadata.modified ?? session.updatedAt,
 			children: [],
 		});
 	}

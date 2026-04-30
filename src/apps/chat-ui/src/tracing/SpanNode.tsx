@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import {
 	ArrowDownToLine,
 	Bell,
@@ -17,6 +17,7 @@ import {
 	User,
 } from "lucide-react";
 import type { Span, SpanStatus, SpanType } from "../types";
+import { countRender } from "../renderMetrics";
 import { JsonRenderer } from "./JsonRenderer";
 
 type SpanNodeProps = {
@@ -110,7 +111,7 @@ function isExpandedAtDepth(depth: number, expansionDepth: SpanExpansionDepth): b
 	return expansionDepth === "all" || depth < expansionDepth;
 }
 
-export function SpanNode({
+export const SpanNode = memo(function SpanNode({
 	span,
 	startTime,
 	depth = 0,
@@ -120,6 +121,7 @@ export function SpanNode({
 	onFork,
 	onOpenSession,
 }: SpanNodeProps) {
+	countRender("SpanNode");
 	const [childrenExpanded, setChildrenExpanded] = useState(() => {
 		return isExpandedAtDepth(depth, expansionDepth);
 	});
@@ -146,10 +148,10 @@ export function SpanNode({
 			: null;
 	const subtreeIndentPx = useMemo(() => getMaxDescendantDepth(span) * NESTING_INDENT_PX, [span]);
 
-	const handleToggle = () => {
+	const handleToggle = useCallback(() => {
 		setContentExpanded((current) => !current);
 		if (hasChildren) setChildrenExpanded((current) => !current);
-	};
+	}, [hasChildren]);
 
 	return (
 		<div
@@ -199,7 +201,7 @@ export function SpanNode({
 			</div>
 		</div>
 	);
-}
+});
 
 function SpanHeader({
 	span,
@@ -284,7 +286,8 @@ function SpanHeaderTiming({ duration, relativeTime }: { duration: string | null;
 	);
 }
 
-function SpanContent({ span }: { span: Span }) {
+const SpanContent = memo(function SpanContent({ span }: { span: Span }) {
+	countRender("SpanContent");
 	const [showDetails, setShowDetails] = useState(false);
 	const { spanType, attributes, name } = span;
 	const content = attributes.content || attributes.input || attributes.output || attributes.message;
@@ -462,7 +465,7 @@ function SpanContent({ span }: { span: Span }) {
 			</div>
 		</div>
 	);
-}
+});
 
 function SpanHeaderActions({
 	forkEntryId,

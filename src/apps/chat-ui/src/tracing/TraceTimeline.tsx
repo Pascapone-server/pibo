@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { ChevronsDown, ChevronsUp, GitBranch, ListTree, RefreshCw, RotateCcw } from "lucide-react";
 import type { Span, Trace } from "../types";
+import { countRender } from "../renderMetrics";
 import { SpanNode, type SpanExpansionDepth } from "./SpanNode";
 import { processSpanTree } from "./traceTree";
 
 type TraceTimelineProps = {
 	trace: Trace | null;
+	isLoading?: boolean;
 	showThinking: boolean;
 	expandThinking: boolean;
 	sessionAgentProfile?: string;
@@ -22,6 +24,7 @@ const DEFAULT_EXPANSION_DEPTH = 1;
 
 export function TraceTimeline({
 	trace,
+	isLoading = false,
 	showThinking,
 	expandThinking,
 	sessionAgentProfile,
@@ -29,7 +32,9 @@ export function TraceTimeline({
 	onFork,
 	onOpenSession,
 }: TraceTimelineProps) {
+	countRender("TraceTimeline");
 	const scrollRef = useRef<HTMLDivElement>(null);
+	const bottomLockedRef = useRef(true);
 	const [expansionDepth, setExpansionDepth] = useState<SpanExpansionDepth>(DEFAULT_EXPANSION_DEPTH);
 	const [expansionSignal, setExpansionSignal] = useState(0);
 	const [levelInput, setLevelInput] = useState(String(DEFAULT_EXPANSION_DEPTH));
@@ -57,9 +62,20 @@ export function TraceTimeline({
 		sessionAgentProfile && activeAgentProfile && activeAgentProfile !== sessionAgentProfile,
 	);
 
-	useEffect(() => {
-		if (isStreaming && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-	}, [isStreaming, trace?.spans.length]);
+	const updateBottomLock = useCallback(() => {
+		const element = scrollRef.current;
+		if (!element) return;
+		bottomLockedRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 48;
+	}, []);
+
+	useLayoutEffect(() => {
+		if (!isStreaming || !bottomLockedRef.current) return;
+		const frame = requestAnimationFrame(() => {
+			const element = scrollRef.current;
+			if (element && bottomLockedRef.current) element.scrollTop = element.scrollHeight;
+		});
+		return () => cancelAnimationFrame(frame);
+	}, [isStreaming, trace?.spans]);
 
 	if (!trace) {
 		return (
@@ -70,7 +86,9 @@ export function TraceTimeline({
 						Execution Flow
 					</h2>
 				</div>
-				<div className="flex-1 flex items-center justify-center text-slate-500">No Trace Selected</div>
+				<div className="flex-1 flex items-center justify-center text-slate-500">
+					{isLoading ? <TraceLoadingIndicator /> : "No Trace Selected"}
+				</div>
 			</section>
 		);
 	}
@@ -92,6 +110,7 @@ export function TraceTimeline({
 				<div className="flex items-center gap-4">
 					<GitBranch size={18} className="text-[#11a4d4]" aria-label="Execution flow" />
 					<div className="flex min-w-0 items-center gap-2">
+						{isLoading ? <Badge color="cyan">Loading</Badge> : null}
 						{stats.active > 0 ? <Badge color="cyan">{stats.active} Active</Badge> : null}
 						{stats.completed > 0 ? <Badge color="green">{stats.completed} Done</Badge> : null}
 						{sessionAgentProfile ? <Badge color="transparent">{sessionAgentProfile}</Badge> : null}
@@ -149,7 +168,7 @@ export function TraceTimeline({
 				</div>
 			</div>
 
-			<div ref={scrollRef} className="flex-1 overflow-auto p-6">
+			<div ref={scrollRef} onScroll={updateBottomLock} className="flex-1 overflow-auto p-6">
 				<div className="relative w-max min-w-full pr-6" style={timelineContentStyle}>
 					{spanTree.map((span) => (
 						<SpanNode
@@ -220,6 +239,15 @@ function Badge({
 		<span className={`max-w-52 truncate rounded-sm px-2 py-0.5 text-xs font-bold ${casing} ${className}`}>
 			{children}
 		</span>
+	);
+}
+
+function TraceLoadingIndicator() {
+	return (
+		<div className="flex items-center gap-3 text-sm text-[#11a4d4]" role="status" aria-live="polite">
+			<RefreshCw size={16} className="animate-spin" />
+			<span>Loading Trace...</span>
+		</div>
 	);
 }
 

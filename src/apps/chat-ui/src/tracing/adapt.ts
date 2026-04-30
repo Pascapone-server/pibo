@@ -1,5 +1,7 @@
 import type { PiboTraceNode, Span, SpanStatus, SpanType, Trace } from "../types";
 
+const spanCache = new WeakMap<PiboTraceNode, Span>();
+
 export function adaptTrace(piboSessionId: string, title: string, nodes: PiboTraceNode[]): Trace {
 	const spans = nodes.map((node) => adaptNode(node));
 	const all = flattenSpans(spans);
@@ -21,12 +23,15 @@ export function adaptTrace(piboSessionId: string, title: string, nodes: PiboTrac
 }
 
 function adaptNode(node: PiboTraceNode): Span {
+	const cached = spanCache.get(node);
+	if (cached) return cached;
+
 	const startTime = toMicros(node.startedAt) ?? Date.now() * 1000;
 	const endTime = toMicros(node.completedAt);
 	const status = adaptStatus(node.status);
 	const spanType = adaptSpanType(node.type);
 
-	return {
+	const span: Span = {
 		id: node.id,
 		parentId: node.parentId,
 		name: spanName(node),
@@ -47,6 +52,8 @@ function adaptNode(node: PiboTraceNode): Span {
 			traceNodeType: node.type,
 		},
 	};
+	spanCache.set(node, span);
+	return span;
 }
 
 function adaptSpanType(type: PiboTraceNode["type"]): SpanType {

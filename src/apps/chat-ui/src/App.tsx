@@ -4,13 +4,12 @@ import {
 	ArchiveRestore,
 	Brain,
 	Bug,
-	ChevronDown,
-	ChevronRight,
 	Check,
 	ChevronsDown,
 	ChevronsUp,
 	Edit3,
 	EyeOff,
+	Layers,
 	LogOut,
 	MessageSquarePlus,
 	RefreshCw,
@@ -24,6 +23,7 @@ import type { BootstrapData, PiboSessionTraceView, PiboTraceNode, PiboWebSession
 import { adaptTrace } from "./tracing/adapt";
 import { TraceTimeline } from "./tracing/TraceTimeline";
 import { JsonRenderer } from "./tracing/JsonRenderer";
+import { countRender } from "./renderMetrics";
 
 type Area = "sessions" | "agents" | "settings";
 
@@ -36,8 +36,10 @@ type ForkActionResponse = {
 };
 
 export function App() {
+	countRender("App");
 	const [bootstrap, setBootstrap] = useState<BootstrapData | null>(null);
 	const [traceView, setTraceView] = useState<PiboSessionTraceView | null>(null);
+	const [traceLoadingSessionId, setTraceLoadingSessionId] = useState<string | null>(null);
 	const [selectedPiboSessionId, setSelectedPiboSessionId] = useState<string | null>(null);
 	const [area, setArea] = useState<Area>("sessions");
 	const [error, setError] = useState<string | null>(null);
@@ -52,11 +54,63 @@ export function App() {
 	const showArchivedRef = useRef(showArchived);
 	const bootstrapRequestId = useRef(0);
 	const traceRequestId = useRef(0);
-	const pendingStreamEvents = useRef<ChatStreamEvent[]>([]);
+	const selectedPiboSessionIdRef = useRef<string | null>(null);
+	const traceViewSessionId = useRef<string | null>(null);
+	const pendingStreamEventsBySession = useRef(new Map<string, ChatStreamEvent[]>());
+	const pendingStreamFrame = useRef<number | undefined>(undefined);
 
 	useEffect(() => {
 		showArchivedRef.current = showArchived;
 	}, [showArchived]);
+
+	useEffect(() => {
+		selectedPiboSessionIdRef.current = selectedPiboSessionId;
+	}, [selectedPiboSessionId]);
+
+	useEffect(() => {
+		traceViewSessionId.current = traceView?.piboSessionId ?? null;
+	}, [traceView?.piboSessionId]);
+
+	const flushPendingStreamEvents = useCallback((piboSessionId: string) => {
+		const pending = pendingStreamEventsBySession.current.get(piboSessionId);
+		if (!pending?.length) return;
+		pendingStreamEventsBySession.current.delete(piboSessionId);
+		setTraceView((current) => {
+			if (current?.piboSessionId !== piboSessionId) return current;
+			return applyChatStreamEvents(current, pending);
+		});
+	}, []);
+
+	const schedulePendingStreamFlush = useCallback(() => {
+		if (pendingStreamFrame.current !== undefined) return;
+		pendingStreamFrame.current = requestAnimationFrame(() => {
+			pendingStreamFrame.current = undefined;
+			const piboSessionId = selectedPiboSessionIdRef.current;
+			if (piboSessionId) flushPendingStreamEvents(piboSessionId);
+		});
+	}, [flushPendingStreamEvents]);
+
+	const enqueueStreamEvent = useCallback(
+		(piboSessionId: string, event: ChatStreamEvent, flushImmediately = false) => {
+			const pending = pendingStreamEventsBySession.current.get(piboSessionId) ?? [];
+			pending.push(event);
+			pendingStreamEventsBySession.current.set(piboSessionId, pending);
+			if (flushImmediately) {
+				flushPendingStreamEvents(piboSessionId);
+			} else {
+				schedulePendingStreamFlush();
+			}
+		},
+		[flushPendingStreamEvents, schedulePendingStreamFlush],
+	);
+
+	useEffect(() => {
+		return () => {
+			if (pendingStreamFrame.current !== undefined) {
+				cancelAnimationFrame(pendingStreamFrame.current);
+			}
+		};
+	}, []);
 
 	const loadBootstrap = useCallback(async (piboSessionId?: string, includeArchived = showArchivedRef.current) => {
 		const requestId = bootstrapRequestId.current + 1;
@@ -68,14 +122,21 @@ export function App() {
 		return data;
 	}, []);
 
-	const loadTrace = useCallback(async (piboSessionId: string) => {
+	const loadTrace = useCallback(async (piboSessionId: string, options: { showLoading?: boolean } = {}) => {
 		const requestId = traceRequestId.current + 1;
 		traceRequestId.current = requestId;
-		const trace = await getTrace(piboSessionId);
-		if (requestId !== traceRequestId.current) return;
-		const pending = pendingStreamEvents.current;
-		pendingStreamEvents.current = [];
-		setTraceView(pending.reduce(applyChatStreamEvent, trace));
+		if (options.showLoading) setTraceLoadingSessionId(piboSessionId);
+		try {
+			const trace = await getTrace(piboSessionId);
+			if (requestId !== traceRequestId.current) return;
+			const pending = pendingStreamEventsBySession.current.get(piboSessionId) ?? [];
+			pendingStreamEventsBySession.current.delete(piboSessionId);
+			setTraceView(applyChatStreamEvents(trace, pending));
+		} finally {
+			if (requestId === traceRequestId.current) {
+				setTraceLoadingSessionId((current) => (current === piboSessionId ? null : current));
+			}
+		}
 	}, []);
 
 	useEffect(() => {
@@ -84,8 +145,10 @@ export function App() {
 
 	useEffect(() => {
 		if (!selectedPiboSessionId || area !== "sessions") return;
-		pendingStreamEvents.current = [];
-		loadTrace(selectedPiboSessionId).catch((caught) => setError(caught instanceof Error ? caught.message : String(caught)));
+		setTraceView((current) => (current?.piboSessionId === selectedPiboSessionId ? current : null));
+		loadTrace(selectedPiboSessionId, { showLoading: traceViewSessionId.current !== selectedPiboSessionId }).catch((caught) =>
+			setError(caught instanceof Error ? caught.message : String(caught)),
+		);
 		const events = new EventSource(`/api/chat/events?piboSessionId=${encodeURIComponent(selectedPiboSessionId)}`);
 		let traceTimer: ReturnType<typeof setTimeout> | undefined;
 		let bootstrapTimer: ReturnType<typeof setTimeout> | undefined;
@@ -106,11 +169,8 @@ export function App() {
 		events.addEventListener("pibo", (message) => {
 			const event = chatStreamEvent(message);
 			if (!event) return;
-			setTraceView((current) => {
-				if (current?.piboSessionId === selectedPiboSessionId) return applyChatStreamEvent(current, event);
-				pendingStreamEvents.current.push(event);
-				return current;
-			});
+			const flushImmediately = event.type !== "TEXT_MESSAGE_CONTENT" && event.type !== "REASONING_MESSAGE_CONTENT";
+			enqueueStreamEvent(selectedPiboSessionId, event, flushImmediately);
 			if (event.type === "RUN_FINISHED" || event.type === "RUN_ERROR") {
 				scheduleTraceRefresh(0);
 				scheduleBootstrapRefresh(0);
@@ -123,14 +183,19 @@ export function App() {
 			if (bootstrapTimer) clearTimeout(bootstrapTimer);
 			events.close();
 		};
-	}, [area, loadBootstrap, loadTrace, selectedPiboSessionId]);
+	}, [area, enqueueStreamEvent, loadBootstrap, loadTrace, selectedPiboSessionId]);
+
+	const currentTraceView = traceView?.piboSessionId === selectedPiboSessionId ? traceView : null;
 
 	const selectedTrace = useMemo(() => {
-		if (!traceView) return null;
-		return adaptTrace(traceView.piboSessionId, traceView.title, traceView.nodes);
-	}, [traceView]);
+		if (!currentTraceView) return null;
+		return adaptTrace(currentTraceView.piboSessionId, currentTraceView.title, currentTraceView.nodes);
+	}, [currentTraceView]);
 
-	const rawEvents = useMemo(() => compactRawEvents(traceView?.rawEvents ?? []), [traceView?.rawEvents]);
+	const rawEvents = useMemo(
+		() => (showRawEvents ? compactRawEvents(currentTraceView?.rawEvents ?? []) : []),
+		[showRawEvents, currentTraceView?.rawEvents],
+	);
 
 	useEffect(() => {
 		if (!bootstrap?.agents.length) return;
@@ -164,20 +229,23 @@ export function App() {
 		return commands;
 	}, [bootstrap]);
 
-	const selectSession = async (piboSessionId: string) => {
+	const selectSession = useCallback(async (piboSessionId: string) => {
+		setTraceLoadingSessionId(piboSessionId);
 		setSelectedPiboSessionId(piboSessionId);
-		const data = await loadBootstrap(piboSessionId);
-		if (area === "sessions") await loadTrace(data.selectedPiboSessionId);
-	};
+		setTraceView((current) => (current?.piboSessionId === piboSessionId ? current : null));
+		await loadBootstrap(piboSessionId);
+	}, [loadBootstrap]);
 
 	const createSession = async (profile = newSessionProfile) => {
 		if (creatingSession) return;
 		setCreatingSession(true);
 		try {
 			const created = await postSession(profile || undefined);
+			setTraceLoadingSessionId(created.session.id);
 			setArea("sessions");
-			const data = await loadBootstrap(created.session.id);
-			await loadTrace(data.selectedPiboSessionId);
+			setSelectedPiboSessionId(created.session.id);
+			setTraceView(null);
+			await loadBootstrap(created.session.id);
 			setError(null);
 		} catch (caught) {
 			setError(caught instanceof Error ? caught.message : String(caught));
@@ -192,7 +260,10 @@ export function App() {
 		localStorage.setItem("pibo.chat.showArchived", String(next));
 		try {
 			const data = await loadBootstrap(selectedPiboSessionId ?? undefined, next);
-			if (area === "sessions") await loadTrace(data.selectedPiboSessionId);
+			if (area === "sessions" && data.selectedPiboSessionId !== selectedPiboSessionId) {
+				setTraceLoadingSessionId(data.selectedPiboSessionId);
+				setTraceView(null);
+			}
 			setError(null);
 		} catch (caught) {
 			setError(caught instanceof Error ? caught.message : String(caught));
@@ -215,7 +286,10 @@ export function App() {
 			await patchSession(piboSessionId, { archived });
 			const keepSelected = !(archived && !showArchived && selectedPiboSessionId === piboSessionId);
 			const data = await loadBootstrap(keepSelected ? (selectedPiboSessionId ?? undefined) : undefined);
-			if (area === "sessions") await loadTrace(data.selectedPiboSessionId);
+			if (area === "sessions" && data.selectedPiboSessionId !== selectedPiboSessionId) {
+				setTraceLoadingSessionId(data.selectedPiboSessionId);
+				setTraceView(null);
+			}
 			setError(null);
 		} catch (caught) {
 			setError(caught instanceof Error ? caught.message : String(caught));
@@ -245,7 +319,7 @@ export function App() {
 		return true;
 	};
 
-	const forkFrom = async (entryId: string) => {
+	const forkFrom = useCallback(async (entryId: string) => {
 		if (!selectedPiboSessionId) return;
 		const result = parseForkActionResponse(await postAction(selectedPiboSessionId, "session.fork", { entryId }));
 		if (result?.result.cancelled) return;
@@ -257,7 +331,9 @@ export function App() {
 		if (result.result.piboSessionId) {
 			await selectSession(result.result.piboSessionId);
 		}
-	};
+	}, [selectSession, selectedPiboSessionId]);
+
+	const openSession = useCallback((piboSessionId: string) => void selectSession(piboSessionId), [selectSession]);
 
 	if (error && !bootstrap) {
 		return <SignedOut message={error} />;
@@ -385,9 +461,9 @@ export function App() {
 						<>
 							<div className="h-14 px-4 bg-[#151f24] border-b border-slate-800 flex items-center justify-between">
 								<div className="min-w-0">
-									<h1 className="text-base font-semibold truncate">{traceView?.title ?? selectedPiboSessionId}</h1>
+									<h1 className="text-base font-semibold truncate">{currentTraceView?.title ?? selectedPiboSessionId}</h1>
 									<div className="font-mono text-[11px] text-slate-500 truncate">
-										{traceView?.piboSessionId} {traceView ? `· ${traceView.piSessionId}` : ""}
+										{currentTraceView?.piboSessionId} {currentTraceView ? `· ${currentTraceView.piSessionId}` : ""}
 									</div>
 								</div>
 								<div className="flex items-center gap-2">
@@ -433,12 +509,13 @@ export function App() {
 							</div>
 							<TraceTimeline
 								trace={selectedTrace}
+								isLoading={traceLoadingSessionId === selectedPiboSessionId}
 								showThinking={showThinking}
 								expandThinking={expandThinking}
 								sessionAgentProfile={bootstrap.session.profile}
 								activeAgentProfile={newSessionProfile}
 								onFork={forkFrom}
-								onOpenSession={(piboSessionId) => void selectSession(piboSessionId)}
+								onOpenSession={openSession}
 							/>
 							<Composer
 								commands={slashCommands}
@@ -627,32 +704,34 @@ function SessionNode({
 						</button>
 					</form>
 				) : (
-					<div className="min-w-0 grid grid-cols-[28px_1fr] items-center py-1 pr-1">
-						{hasChildren ? (
-							<button
-								type="button"
-								onClick={() => setExpanded((current) => !current)}
-								aria-expanded={expanded}
-								title={expanded ? "Collapse Subsessions" : "Expand Subsessions"}
-								aria-label={expanded ? "Collapse Subsessions" : "Expand Subsessions"}
-								className="h-7 w-7 inline-flex items-center justify-center text-slate-500 hover:text-[#11a4d4]"
-							>
-								{expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-							</button>
-						) : (
-							<span />
-						)}
+					<div className="min-w-0 grid grid-cols-[1fr_auto] gap-2 items-center py-1 pr-1">
 						<button
 							type="button"
 							onClick={() => onSelect(node.piboSessionId)}
-							className="min-w-0 grid grid-cols-[1fr_auto] gap-2 items-center text-left px-2 py-1"
+							className="min-w-0 text-left px-1 py-1"
 						>
-							<span className="min-w-0">
-								<span className={`block text-sm truncate ${node.archived ? "text-slate-500" : "text-slate-200"}`}>{node.title}</span>
-								<span className="block text-[10px] font-mono truncate text-slate-500">{node.piboSessionId}</span>
-							</span>
-							<span className={`h-2 w-2 rounded-full ${node.status === "running" ? "bg-[#0bda57]" : node.status === "error" ? "bg-red-500" : "bg-slate-600"}`} />
+							<span className={`block text-sm truncate ${node.archived ? "text-slate-500" : "text-slate-200"}`}>{node.title}</span>
+							<span className="block text-[10px] font-mono truncate text-slate-500">{node.piboSessionId}</span>
 						</button>
+						<span className="grid grid-rows-[16px_16px] place-items-center gap-0.5">
+							<span className={`h-2 w-2 rounded-full ${node.status === "running" ? "bg-[#0bda57]" : node.status === "error" ? "bg-red-500" : "bg-slate-600"}`} />
+							{hasChildren ? (
+								<button
+									type="button"
+									onClick={() => setExpanded((current) => !current)}
+									aria-expanded={expanded}
+									title={expanded ? "Collapse Subsessions" : "Expand Subsessions"}
+									aria-label={expanded ? "Collapse Subsessions" : "Expand Subsessions"}
+									className={`h-4 w-4 inline-flex items-center justify-center rounded-sm transition-colors ${
+										expanded ? "text-[#0bda57]" : "text-slate-600 hover:text-[#11a4d4]"
+									}`}
+								>
+									<Layers size={13} />
+								</button>
+							) : (
+								<span className="h-4 w-4" />
+							)}
+						</span>
 					</div>
 				)}
 				{editing ? null : (
@@ -972,14 +1051,19 @@ function chatStreamEvent(message: MessageEvent): ChatStreamEvent | undefined {
 	}
 }
 
+function applyChatStreamEvents(view: PiboSessionTraceView, events: ChatStreamEvent[]): PiboSessionTraceView {
+	if (!events.length) return view;
+	return events.reduce(applyChatStreamEvent, view);
+}
+
 function applyChatStreamEvent(view: PiboSessionTraceView, event: ChatStreamEvent): PiboSessionTraceView {
 	if (event.type === "ready") return view;
 	const createdAt = new Date().toISOString();
-	const nodes = cloneTraceNodes(view.nodes);
+	let nodes = view.nodes;
 
 	switch (event.type) {
 		case "RUN_STARTED":
-			upsertTraceNode(nodes, {
+			nodes = upsertTraceNode(nodes, {
 				id: messageTurnNodeId(event.runId),
 				piboSessionId: view.piboSessionId,
 				eventId: event.runId,
@@ -993,20 +1077,22 @@ function applyChatStreamEvent(view: PiboSessionTraceView, event: ChatStreamEvent
 			});
 			break;
 		case "RUN_FINISHED":
-			updateTraceNode(nodes, messageTurnNodeId(event.runId), (node) => {
-				node.status = "done";
-				node.completedAt = createdAt;
-			});
+			nodes = updateTraceNode(nodes, messageTurnNodeId(event.runId), (node) => ({
+				...node,
+				status: "done",
+				completedAt: createdAt,
+			}));
 			break;
 		case "RUN_ERROR": {
 			if (event.runId) {
-				updateTraceNode(nodes, messageTurnNodeId(event.runId), (node) => {
-					node.status = "error";
-					node.completedAt = createdAt;
-					node.error = event.message;
-				});
+				nodes = updateTraceNode(nodes, messageTurnNodeId(event.runId), (node) => ({
+					...node,
+					status: "error",
+					completedAt: createdAt,
+					error: event.message,
+				}));
 			}
-			upsertTraceNode(nodes, {
+			nodes = upsertTraceNode(nodes, {
 				id: `event:error:${event.runId ?? createdAt}`,
 				parentId: event.runId ? messageTurnNodeId(event.runId) : undefined,
 				piboSessionId: view.piboSessionId,
@@ -1022,31 +1108,32 @@ function applyChatStreamEvent(view: PiboSessionTraceView, event: ChatStreamEvent
 			break;
 		}
 		case "TEXT_MESSAGE_START":
-			upsertTraceNode(nodes, assistantNode(event.messageId, view.piboSessionId, createdAt));
+			nodes = upsertTraceNode(nodes, assistantNode(event.messageId, view.piboSessionId, createdAt));
 			break;
 		case "TEXT_MESSAGE_CONTENT":
-			appendTextToNode(nodes, assistantNode(event.messageId, view.piboSessionId, createdAt), event.delta);
+			nodes = appendTextToNode(nodes, assistantNode(event.messageId, view.piboSessionId, createdAt), event.delta);
 			break;
 		case "TEXT_MESSAGE_END":
-			upsertTraceNode(nodes, {
+			nodes = upsertTraceNode(nodes, {
 				...assistantNode(event.messageId, view.piboSessionId, createdAt),
 				status: "done",
 				completedAt: createdAt,
 				...(event.finalText === undefined ? {} : { summary: event.finalText, output: event.finalText }),
 			});
-			updateTraceNode(nodes, messageTurnNodeId(event.messageId), (node) => {
-				node.status = "done";
-				node.completedAt = createdAt;
-			});
+			nodes = updateTraceNode(nodes, messageTurnNodeId(event.messageId), (node) => ({
+				...node,
+				status: "done",
+				completedAt: createdAt,
+			}));
 			break;
 		case "REASONING_MESSAGE_START":
-			upsertTraceNode(nodes, reasoningNode(event.messageId, view.piboSessionId, createdAt));
+			nodes = upsertTraceNode(nodes, reasoningNode(event.messageId, view.piboSessionId, createdAt));
 			break;
 		case "REASONING_MESSAGE_CONTENT":
-			appendTextToNode(nodes, reasoningNode(event.messageId, view.piboSessionId, createdAt), event.delta);
+			nodes = appendTextToNode(nodes, reasoningNode(event.messageId, view.piboSessionId, createdAt), event.delta);
 			break;
 		case "REASONING_MESSAGE_END":
-			upsertTraceNode(nodes, {
+			nodes = upsertTraceNode(nodes, {
 				...reasoningNode(event.messageId, view.piboSessionId, createdAt),
 				status: "done",
 				completedAt: createdAt,
@@ -1054,7 +1141,7 @@ function applyChatStreamEvent(view: PiboSessionTraceView, event: ChatStreamEvent
 			});
 			break;
 		case "TOOL_CALL_START":
-			upsertTraceNode(nodes, {
+			nodes = upsertTraceNode(nodes, {
 				id: toolNodeId(event.toolCallId),
 				parentId: event.runId ? messageTurnNodeId(event.runId) : undefined,
 				piboSessionId: view.piboSessionId,
@@ -1069,20 +1156,19 @@ function applyChatStreamEvent(view: PiboSessionTraceView, event: ChatStreamEvent
 			});
 			break;
 		case "TOOL_CALL_ARGS":
-			updateTraceNode(nodes, toolNodeId(event.toolCallId), (node) => {
-				node.input = event.args;
-			});
+			nodes = updateTraceNode(nodes, toolNodeId(event.toolCallId), (node) => ({ ...node, input: event.args }));
 			break;
 		case "TOOL_CALL_RESULT":
-			updateTraceNode(nodes, toolNodeId(event.toolCallId), (node) => {
-				node.status = event.isError ? "error" : "done";
-				node.completedAt = createdAt;
-				node.output = event.result;
-				if (event.isError) node.error = stringifyUnknown(event.result);
-			});
+			nodes = updateTraceNode(nodes, toolNodeId(event.toolCallId), (node) => ({
+				...node,
+				status: event.isError ? "error" : "done",
+				completedAt: createdAt,
+				output: event.result,
+				error: event.isError ? stringifyUnknown(event.result) : node.error,
+			}));
 			break;
 		case "AGENT_DELEGATION":
-			upsertTraceNode(nodes, {
+			nodes = upsertTraceNode(nodes, {
 				id: event.toolCallId ? toolNodeId(event.toolCallId) : `event:subagent:${event.childPiboSessionId}`,
 				piboSessionId: view.piboSessionId,
 				toolCallId: event.toolCallId,
@@ -1098,7 +1184,7 @@ function applyChatStreamEvent(view: PiboSessionTraceView, event: ChatStreamEvent
 			break;
 		case "EXECUTION_RESULT":
 			if (isInternalSessionOperation(event.action)) break;
-			upsertTraceNode(nodes, {
+			nodes = upsertTraceNode(nodes, {
 				id: `event:execution_result:${event.runId ?? event.action}`,
 				piboSessionId: view.piboSessionId,
 				eventId: event.runId,
@@ -1122,39 +1208,70 @@ function applyChatStreamEvent(view: PiboSessionTraceView, event: ChatStreamEvent
 	};
 }
 
-function cloneTraceNodes(nodes: PiboTraceNode[]): PiboTraceNode[] {
-	return nodes.map((node) => ({ ...node, children: cloneTraceNodes(node.children ?? []) }));
-}
-
-function upsertTraceNode(nodes: PiboTraceNode[], update: PiboTraceNode): void {
+function upsertTraceNode(nodes: PiboTraceNode[], update: PiboTraceNode): PiboTraceNode[] {
 	const existing = findTraceNode(nodes, update.id);
 	if (existing) {
-		Object.assign(existing, { ...update, children: update.children.length ? update.children : existing.children });
-		return;
+		return updateTraceNode(nodes, update.id, (node) => ({
+			...node,
+			...update,
+			children: update.children.length ? update.children : node.children,
+		}));
 	}
 	const parent = update.parentId ? findTraceNode(nodes, update.parentId) : undefined;
 	if (parent) {
-		parent.children = [...(parent.children ?? []), update];
-	} else {
-		nodes.push(update);
+		return updateTraceNode(nodes, parent.id, (node) => ({
+			...node,
+			children: [...(node.children ?? []), update],
+		}));
 	}
+	return [...nodes, update];
 }
 
-function updateTraceNode(nodes: PiboTraceNode[], id: string, update: (node: PiboTraceNode) => void): void {
-	const node = findTraceNode(nodes, id);
-	if (node) update(node);
+function updateTraceNode(
+	nodes: PiboTraceNode[],
+	id: string,
+	update: (node: PiboTraceNode) => PiboTraceNode,
+): PiboTraceNode[] {
+	const result = updateTraceNodeInTree(nodes, id, update);
+	return result ?? nodes;
 }
 
-function appendTextToNode(nodes: PiboTraceNode[], node: PiboTraceNode, delta: string): void {
+function updateTraceNodeInTree(
+	nodes: PiboTraceNode[],
+	id: string,
+	update: (node: PiboTraceNode) => PiboTraceNode,
+): PiboTraceNode[] | undefined {
+	for (let index = 0; index < nodes.length; index += 1) {
+		const node = nodes[index];
+		if (node.id === id) {
+			const updated = update(node);
+			if (updated === node) return undefined;
+			const next = nodes.slice();
+			next[index] = updated;
+			return next;
+		}
+		const updatedChildren = updateTraceNodeInTree(node.children ?? [], id, update);
+		if (updatedChildren) {
+			const next = nodes.slice();
+			next[index] = { ...node, children: updatedChildren };
+			return next;
+		}
+	}
+	return undefined;
+}
+
+function appendTextToNode(nodes: PiboTraceNode[], node: PiboTraceNode, delta: string): PiboTraceNode[] {
 	const existing = findTraceNode(nodes, node.id);
 	if (!existing) {
-		upsertTraceNode(nodes, { ...node, summary: delta, output: delta });
-		return;
+		return upsertTraceNode(nodes, { ...node, summary: delta, output: delta });
 	}
 	const text = `${typeof existing.output === "string" ? existing.output : ""}${delta}`;
-	existing.status = "running";
-	existing.summary = text;
-	existing.output = text;
+	return updateTraceNode(nodes, existing.id, (current) => ({
+		...current,
+		status: "running",
+		summary: text,
+		output: text,
+	}));
 }
 
 function findTraceNode(nodes: PiboTraceNode[], id: string): PiboTraceNode | undefined {
