@@ -6,6 +6,7 @@ import { PiboWebHttpError, readJsonBody, responseHtml, responseJson } from "../.
 import type { PiboWebApp, PiboWebAppContext, PiboWebSession } from "../../web/types.js";
 import type { PiboSession, UpdatePiboSessionInput } from "../../sessions/store.js";
 import { ChatWebReadModel, createDefaultChatWebReadModel } from "./read-model.js";
+import { chatStreamFramesFromOutputEvent, createChatStreamState, type ChatStreamEvent } from "./stream.js";
 import { buildSessionNodes, buildTraceView } from "./trace.js";
 import { isChatWebSessionArchived, withChatWebArchived } from "./session-metadata.js";
 
@@ -31,7 +32,7 @@ type ChatSessionCreateBody = {
 
 const CHAT_UI_DIST_DIR = resolve(process.cwd(), "dist/apps/chat-ui");
 
-function writeSse(controller: ReadableStreamDefaultController<Uint8Array>, event: string, payload: unknown): void {
+function writeSse(controller: ReadableStreamDefaultController<Uint8Array>, event: string, payload: ChatStreamEvent): void {
 	const encoder = new TextEncoder();
 	controller.enqueue(encoder.encode(`event: ${event}\n`));
 	controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
@@ -242,10 +243,13 @@ function createEventStream(piboSessionId: string, context: PiboWebAppContext): R
 	let unsubscribe: (() => void) | undefined;
 	const stream = new ReadableStream<Uint8Array>({
 		start(controller) {
-			writeSse(controller, "ready", { piboSessionId });
+			const streamState = createChatStreamState();
+			writeSse(controller, "pibo", { type: "ready", piboSessionId });
 			unsubscribe = context.channelContext.subscribe((event: PiboOutputEvent) => {
 				if (event.piboSessionId === piboSessionId) {
-					writeSse(controller, "pibo", event);
+					for (const frame of chatStreamFramesFromOutputEvent(event, streamState)) {
+						writeSse(controller, "pibo", frame);
+					}
 				}
 			});
 		},
@@ -714,7 +718,9 @@ function createChatHtml(): string {
 			eventSource.addEventListener("pibo", (event) => {
 				const payload = JSON.parse(event.data);
 				appendRawEvent({ type: payload.type, payload });
-				void refreshTrace();
+				if (payload.type !== "TEXT_MESSAGE_CONTENT" && payload.type !== "REASONING_MESSAGE_CONTENT") {
+					void refreshTrace();
+				}
 			});
 			eventSource.onerror = () => appendRawEvent({ type: "stream_error", payload: "Event stream disconnected." });
 		}

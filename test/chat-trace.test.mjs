@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { SessionManager } from "@mariozechner/pi-coding-agent";
 import { ChatWebReadModel } from "../dist/apps/chat/read-model.js";
+import { chatStreamFramesFromOutputEvent, createChatStreamState } from "../dist/apps/chat/stream.js";
 import { buildTraceView, traceNodesFromEntries } from "../dist/apps/chat/trace.js";
 
 function createTestSession(overrides = {}) {
@@ -60,6 +61,35 @@ test("chat read model resets interrupted running sessions on open", () => {
 	readModel = new ChatWebReadModel(dbPath);
 	assert.equal(readModel.listSessions().find((item) => item.piboSessionId === session.id)?.status, "idle");
 	readModel.close();
+});
+
+test("chat stream adapter emits AGUI-style start delta and end frames", () => {
+	const state = createChatStreamState();
+
+	assert.deepEqual(
+		chatStreamFramesFromOutputEvent(
+			{ type: "assistant_delta", piboSessionId: "chat:test", eventId: "turn-1", text: "hel" },
+			state,
+		),
+		[
+			{ type: "TEXT_MESSAGE_START", messageId: "turn-1", role: "assistant" },
+			{ type: "TEXT_MESSAGE_CONTENT", messageId: "turn-1", delta: "hel" },
+		],
+	);
+	assert.deepEqual(
+		chatStreamFramesFromOutputEvent(
+			{ type: "assistant_delta", piboSessionId: "chat:test", eventId: "turn-1", text: "lo" },
+			state,
+		),
+		[{ type: "TEXT_MESSAGE_CONTENT", messageId: "turn-1", delta: "lo" }],
+	);
+	assert.deepEqual(
+		chatStreamFramesFromOutputEvent(
+			{ type: "assistant_message", piboSessionId: "chat:test", eventId: "turn-1", text: "hello" },
+			state,
+		),
+		[{ type: "TEXT_MESSAGE_END", messageId: "turn-1", finalText: "hello" }],
+	);
 });
 
 test("chat read model keeps newest events when limiting session event history", () => {

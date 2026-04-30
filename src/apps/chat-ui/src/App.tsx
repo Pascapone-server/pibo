@@ -20,7 +20,7 @@ import {
 	X,
 } from "lucide-react";
 import { getBootstrap, getTrace, patchSession, postAction, postMessage, postSession, signInWithGoogle, signOut } from "./api";
-import type { BootstrapData, PiboSessionTraceView, PiboWebSessionNode } from "./types";
+import type { BootstrapData, PiboSessionTraceView, PiboTraceNode, PiboWebSessionNode } from "./types";
 import { adaptTrace } from "./tracing/adapt";
 import { TraceTimeline } from "./tracing/TraceTimeline";
 import { JsonRenderer } from "./tracing/JsonRenderer";
@@ -52,6 +52,7 @@ export function App() {
 	const showArchivedRef = useRef(showArchived);
 	const bootstrapRequestId = useRef(0);
 	const traceRequestId = useRef(0);
+	const pendingStreamEvents = useRef<ChatStreamEvent[]>([]);
 
 	useEffect(() => {
 		showArchivedRef.current = showArchived;
@@ -72,7 +73,9 @@ export function App() {
 		traceRequestId.current = requestId;
 		const trace = await getTrace(piboSessionId);
 		if (requestId !== traceRequestId.current) return;
-		setTraceView(trace);
+		const pending = pendingStreamEvents.current;
+		pendingStreamEvents.current = [];
+		setTraceView(pending.reduce(applyChatStreamEvent, trace));
 	}, []);
 
 	useEffect(() => {
@@ -81,33 +84,16 @@ export function App() {
 
 	useEffect(() => {
 		if (!selectedPiboSessionId || area !== "sessions") return;
+		pendingStreamEvents.current = [];
 		loadTrace(selectedPiboSessionId).catch((caught) => setError(caught instanceof Error ? caught.message : String(caught)));
 		const events = new EventSource(`/api/chat/events?piboSessionId=${encodeURIComponent(selectedPiboSessionId)}`);
-		let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+		let traceTimer: ReturnType<typeof setTimeout> | undefined;
 		let bootstrapTimer: ReturnType<typeof setTimeout> | undefined;
-		let refreshInFlight = false;
-		let refreshPending = false;
-		const runRefresh = () => {
-			if (refreshInFlight) {
-				refreshPending = true;
-				return;
-			}
-			refreshInFlight = true;
-			loadTrace(selectedPiboSessionId)
-				.catch((caught) => setError(caught instanceof Error ? caught.message : String(caught)))
-				.finally(() => {
-					refreshInFlight = false;
-					if (refreshPending) {
-						refreshPending = false;
-						scheduleRefresh(0);
-					}
-				});
-		};
-		const scheduleRefresh = (delayMs: number) => {
-			if (refreshTimer) return;
-			refreshTimer = setTimeout(() => {
-				refreshTimer = undefined;
-				runRefresh();
+		const scheduleTraceRefresh = (delayMs: number) => {
+			if (traceTimer) return;
+			traceTimer = setTimeout(() => {
+				traceTimer = undefined;
+				loadTrace(selectedPiboSessionId).catch((caught) => setError(caught instanceof Error ? caught.message : String(caught)));
 			}, delayMs);
 		};
 		const scheduleBootstrapRefresh = (delayMs: number) => {
@@ -118,15 +104,22 @@ export function App() {
 			}, delayMs);
 		};
 		events.addEventListener("pibo", (message) => {
-			const type = eventType(message);
-			const immediate = type === "assistant_message" || type === "message_finished" || type === "session_error";
-			scheduleRefresh(immediate ? 0 : 80);
-			if (type && type !== "assistant_delta" && type !== "thinking_delta") {
-				scheduleBootstrapRefresh(immediate ? 0 : 150);
+			const event = chatStreamEvent(message);
+			if (!event) return;
+			setTraceView((current) => {
+				if (current?.piboSessionId === selectedPiboSessionId) return applyChatStreamEvent(current, event);
+				pendingStreamEvents.current.push(event);
+				return current;
+			});
+			if (event.type === "RUN_FINISHED" || event.type === "RUN_ERROR") {
+				scheduleTraceRefresh(0);
+				scheduleBootstrapRefresh(0);
+			} else if (event.type !== "TEXT_MESSAGE_CONTENT" && event.type !== "REASONING_MESSAGE_CONTENT") {
+				scheduleBootstrapRefresh(150);
 			}
 		});
 		return () => {
-			if (refreshTimer) clearTimeout(refreshTimer);
+			if (traceTimer) clearTimeout(traceTimer);
 			if (bootstrapTimer) clearTimeout(bootstrapTimer);
 			events.close();
 		};
@@ -136,15 +129,6 @@ export function App() {
 		if (!traceView) return null;
 		return adaptTrace(traceView.piboSessionId, traceView.title, traceView.nodes);
 	}, [traceView]);
-
-	useEffect(() => {
-		if (!selectedPiboSessionId || area !== "sessions" || selectedTrace?.status !== "UNSET") return;
-		const timer = setInterval(() => {
-			loadTrace(selectedPiboSessionId).catch((caught) => setError(caught instanceof Error ? caught.message : String(caught)));
-			loadBootstrap(selectedPiboSessionId).catch((caught) => setError(caught instanceof Error ? caught.message : String(caught)));
-		}, 1000);
-		return () => clearInterval(timer);
-	}, [area, loadBootstrap, loadTrace, selectedPiboSessionId, selectedTrace?.status]);
 
 	const rawEvents = useMemo(() => compactRawEvents(traceView?.rawEvents ?? []), [traceView?.rawEvents]);
 
@@ -961,12 +945,297 @@ function SettingsView({
 type RawEvent = PiboSessionTraceView["rawEvents"][number];
 type CompactRawEvent = RawEvent & { count: number };
 
-function eventType(message: MessageEvent): string | undefined {
+type ChatStreamEvent =
+	| { type: "ready"; piboSessionId: string }
+	| { type: "RUN_STARTED"; runId: string; input?: { text?: string; source?: string } }
+	| { type: "RUN_FINISHED"; runId: string }
+	| { type: "RUN_ERROR"; runId?: string; message: string }
+	| { type: "TEXT_MESSAGE_START"; messageId: string; role: "assistant" }
+	| { type: "TEXT_MESSAGE_CONTENT"; messageId: string; delta: string }
+	| { type: "TEXT_MESSAGE_END"; messageId: string; finalText?: string }
+	| { type: "REASONING_MESSAGE_START"; messageId: string }
+	| { type: "REASONING_MESSAGE_CONTENT"; messageId: string; delta: string }
+	| { type: "REASONING_MESSAGE_END"; messageId: string; finalText?: string }
+	| { type: "TOOL_CALL_START"; toolCallId: string; toolName: string; args?: unknown; runId?: string }
+	| { type: "TOOL_CALL_ARGS"; toolCallId: string; args: unknown; argsComplete: boolean }
+	| { type: "TOOL_CALL_RESULT"; toolCallId: string; result: unknown; isError: boolean }
+	| { type: "AGENT_DELEGATION"; toolCallId?: string; toolName: string; subagentName: string; childPiboSessionId: string; threadKey?: string }
+	| { type: "EXECUTION_RESULT"; runId?: string; action: string; result: unknown }
+	| { type: "RAW_EVENT"; event: unknown };
+
+function chatStreamEvent(message: MessageEvent): ChatStreamEvent | undefined {
 	try {
 		const parsed = JSON.parse(message.data) as { type?: unknown };
-		return typeof parsed.type === "string" ? parsed.type : undefined;
+		return typeof parsed.type === "string" ? (parsed as ChatStreamEvent) : undefined;
 	} catch {
 		return undefined;
+	}
+}
+
+function applyChatStreamEvent(view: PiboSessionTraceView, event: ChatStreamEvent): PiboSessionTraceView {
+	if (event.type === "ready") return view;
+	const createdAt = new Date().toISOString();
+	const nodes = cloneTraceNodes(view.nodes);
+
+	switch (event.type) {
+		case "RUN_STARTED":
+			upsertTraceNode(nodes, {
+				id: messageTurnNodeId(event.runId),
+				piboSessionId: view.piboSessionId,
+				eventId: event.runId,
+				type: "agent.turn",
+				title: "Agent Turn",
+				status: "running",
+				startedAt: createdAt,
+				summary: event.input?.text,
+				input: event.input,
+				children: [],
+			});
+			break;
+		case "RUN_FINISHED":
+			updateTraceNode(nodes, messageTurnNodeId(event.runId), (node) => {
+				node.status = "done";
+				node.completedAt = createdAt;
+			});
+			break;
+		case "RUN_ERROR": {
+			if (event.runId) {
+				updateTraceNode(nodes, messageTurnNodeId(event.runId), (node) => {
+					node.status = "error";
+					node.completedAt = createdAt;
+					node.error = event.message;
+				});
+			}
+			upsertTraceNode(nodes, {
+				id: `event:error:${event.runId ?? createdAt}`,
+				parentId: event.runId ? messageTurnNodeId(event.runId) : undefined,
+				piboSessionId: view.piboSessionId,
+				eventId: event.runId,
+				type: "error",
+				title: "Error",
+				status: "error",
+				startedAt: createdAt,
+				error: event.message,
+				output: event.message,
+				children: [],
+			});
+			break;
+		}
+		case "TEXT_MESSAGE_START":
+			upsertTraceNode(nodes, assistantNode(event.messageId, view.piboSessionId, createdAt));
+			break;
+		case "TEXT_MESSAGE_CONTENT":
+			appendTextToNode(nodes, assistantNode(event.messageId, view.piboSessionId, createdAt), event.delta);
+			break;
+		case "TEXT_MESSAGE_END":
+			upsertTraceNode(nodes, {
+				...assistantNode(event.messageId, view.piboSessionId, createdAt),
+				status: "done",
+				completedAt: createdAt,
+				...(event.finalText === undefined ? {} : { summary: event.finalText, output: event.finalText }),
+			});
+			updateTraceNode(nodes, messageTurnNodeId(event.messageId), (node) => {
+				node.status = "done";
+				node.completedAt = createdAt;
+			});
+			break;
+		case "REASONING_MESSAGE_START":
+			upsertTraceNode(nodes, reasoningNode(event.messageId, view.piboSessionId, createdAt));
+			break;
+		case "REASONING_MESSAGE_CONTENT":
+			appendTextToNode(nodes, reasoningNode(event.messageId, view.piboSessionId, createdAt), event.delta);
+			break;
+		case "REASONING_MESSAGE_END":
+			upsertTraceNode(nodes, {
+				...reasoningNode(event.messageId, view.piboSessionId, createdAt),
+				status: "done",
+				completedAt: createdAt,
+				...(event.finalText === undefined ? {} : { summary: event.finalText, output: event.finalText }),
+			});
+			break;
+		case "TOOL_CALL_START":
+			upsertTraceNode(nodes, {
+				id: toolNodeId(event.toolCallId),
+				parentId: event.runId ? messageTurnNodeId(event.runId) : undefined,
+				piboSessionId: view.piboSessionId,
+				eventId: event.runId,
+				toolCallId: event.toolCallId,
+				type: "tool.call",
+				title: event.toolName,
+				status: "running",
+				startedAt: createdAt,
+				input: event.args,
+				children: [],
+			});
+			break;
+		case "TOOL_CALL_ARGS":
+			updateTraceNode(nodes, toolNodeId(event.toolCallId), (node) => {
+				node.input = event.args;
+			});
+			break;
+		case "TOOL_CALL_RESULT":
+			updateTraceNode(nodes, toolNodeId(event.toolCallId), (node) => {
+				node.status = event.isError ? "error" : "done";
+				node.completedAt = createdAt;
+				node.output = event.result;
+				if (event.isError) node.error = stringifyUnknown(event.result);
+			});
+			break;
+		case "AGENT_DELEGATION":
+			upsertTraceNode(nodes, {
+				id: event.toolCallId ? toolNodeId(event.toolCallId) : `event:subagent:${event.childPiboSessionId}`,
+				piboSessionId: view.piboSessionId,
+				toolCallId: event.toolCallId,
+				type: "agent.delegation",
+				title: event.toolName,
+				status: "running",
+				startedAt: createdAt,
+				summary: event.subagentName,
+				input: { subagentName: event.subagentName, threadKey: event.threadKey },
+				linkedPiboSessionId: event.childPiboSessionId,
+				children: [],
+			});
+			break;
+		case "EXECUTION_RESULT":
+			if (isInternalSessionOperation(event.action)) break;
+			upsertTraceNode(nodes, {
+				id: `event:execution_result:${event.runId ?? event.action}`,
+				piboSessionId: view.piboSessionId,
+				eventId: event.runId,
+				type: "execution.command",
+				title: event.action,
+				status: "done",
+				startedAt: createdAt,
+				input: { action: event.action },
+				output: event.result,
+				children: [],
+			});
+			break;
+		case "RAW_EVENT":
+			break;
+	}
+
+	return {
+		...view,
+		nodes,
+		rawEvents: appendRawStreamEvent(view.rawEvents, event, createdAt),
+	};
+}
+
+function cloneTraceNodes(nodes: PiboTraceNode[]): PiboTraceNode[] {
+	return nodes.map((node) => ({ ...node, children: cloneTraceNodes(node.children ?? []) }));
+}
+
+function upsertTraceNode(nodes: PiboTraceNode[], update: PiboTraceNode): void {
+	const existing = findTraceNode(nodes, update.id);
+	if (existing) {
+		Object.assign(existing, { ...update, children: update.children.length ? update.children : existing.children });
+		return;
+	}
+	const parent = update.parentId ? findTraceNode(nodes, update.parentId) : undefined;
+	if (parent) {
+		parent.children = [...(parent.children ?? []), update];
+	} else {
+		nodes.push(update);
+	}
+}
+
+function updateTraceNode(nodes: PiboTraceNode[], id: string, update: (node: PiboTraceNode) => void): void {
+	const node = findTraceNode(nodes, id);
+	if (node) update(node);
+}
+
+function appendTextToNode(nodes: PiboTraceNode[], node: PiboTraceNode, delta: string): void {
+	const existing = findTraceNode(nodes, node.id);
+	if (!existing) {
+		upsertTraceNode(nodes, { ...node, summary: delta, output: delta });
+		return;
+	}
+	const text = `${typeof existing.output === "string" ? existing.output : ""}${delta}`;
+	existing.status = "running";
+	existing.summary = text;
+	existing.output = text;
+}
+
+function findTraceNode(nodes: PiboTraceNode[], id: string): PiboTraceNode | undefined {
+	for (const node of nodes) {
+		if (node.id === id) return node;
+		const child = findTraceNode(node.children ?? [], id);
+		if (child) return child;
+	}
+	return undefined;
+}
+
+function assistantNode(eventId: string, piboSessionId: string, startedAt: string): PiboTraceNode {
+	return {
+		id: assistantMessageNodeId(eventId),
+		parentId: messageTurnNodeId(eventId),
+		piboSessionId,
+		eventId,
+		type: "assistant.message",
+		title: "Agent Message",
+		status: "running",
+		startedAt,
+		summary: "",
+		output: "",
+		children: [],
+	};
+}
+
+function reasoningNode(eventId: string, piboSessionId: string, startedAt: string): PiboTraceNode {
+	return {
+		id: thinkingNodeId(eventId),
+		parentId: messageTurnNodeId(eventId),
+		piboSessionId,
+		eventId,
+		type: "model.reasoning",
+		title: "Thinking",
+		status: "running",
+		startedAt,
+		summary: "",
+		output: "",
+		children: [],
+	};
+}
+
+function appendRawStreamEvent(events: RawEvent[], event: ChatStreamEvent, createdAt: string): RawEvent[] {
+	return [
+		...events.slice(-999),
+		{
+			id: `stream:${createdAt}:${events.length}`,
+			type: event.type,
+			createdAt,
+			payload: event,
+		},
+	];
+}
+
+function messageTurnNodeId(eventId: string): string {
+	return `event:message:${eventId}`;
+}
+
+function assistantMessageNodeId(eventId: string): string {
+	return `event:assistant:${eventId}`;
+}
+
+function thinkingNodeId(eventId: string): string {
+	return `event:thinking:${eventId}`;
+}
+
+function toolNodeId(toolCallId: string): string {
+	return `tool:${toolCallId}`;
+}
+
+function isInternalSessionOperation(action: string): boolean {
+	return action === "session.fork" || action === "session.clone" || action === "session.switch";
+}
+
+function stringifyUnknown(value: unknown): string {
+	if (typeof value === "string") return value;
+	try {
+		return JSON.stringify(value);
+	} catch {
+		return String(value);
 	}
 }
 
@@ -994,15 +1263,27 @@ function profileExists(profiles: BootstrapData["agents"], name: string): boolean
 
 function canMergeRawDelta(left: RawEvent, right: RawEvent): boolean {
 	if (left.type !== right.type) return false;
-	if (left.type !== "assistant_delta" && left.type !== "thinking_delta") return false;
+	if (
+		left.type !== "assistant_delta" &&
+		left.type !== "thinking_delta" &&
+		left.type !== "TEXT_MESSAGE_CONTENT" &&
+		left.type !== "REASONING_MESSAGE_CONTENT"
+	) {
+		return false;
+	}
 	const leftPayload = isRecord(left.payload) ? left.payload : {};
 	const rightPayload = isRecord(right.payload) ? right.payload : {};
-	return leftPayload.piboSessionId === rightPayload.piboSessionId && leftPayload.eventId === rightPayload.eventId;
+	return eventKeyFromPayload(leftPayload) === eventKeyFromPayload(rightPayload);
 }
 
 function textFromPayload(payload: unknown): string {
 	if (!isRecord(payload)) return "";
-	return typeof payload.text === "string" ? payload.text : "";
+	if (typeof payload.text === "string") return payload.text;
+	return typeof payload.delta === "string" ? payload.delta : "";
+}
+
+function eventKeyFromPayload(payload: Record<string, unknown>): unknown {
+	return payload.eventId ?? payload.messageId;
 }
 
 function parseForkActionResponse(value: unknown): ForkActionResponse | null {
