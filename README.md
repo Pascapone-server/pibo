@@ -83,13 +83,19 @@ The main source folders are:
 - `src/runs/` for yielded run tracking and run-control tools
 - `src/auth/`, `src/web/`, and `src/apps/` for Better Auth, the same-origin web host, and web apps
 
+## Agent Designer
+
+The Chat Web App includes an Agent Designer in the Agents area. It creates custom agents, persists them in `.pibo/chat-agents.sqlite`, and registers each saved agent as a dynamic profile for routed sessions.
+
+The designer configures native Pibo agent capabilities only: plugin-registered tools, skills, context files, subagents, built-in Pi tool visibility, and capability packages such as `pibo-run-control`. Curated external CLI tools from `pibo tools` remain global operator tooling and are not selected per agent.
+
 ## Profiles
 
 The default profile is registered by the core plugin. It loads the local `pi-agent-harness` skill, registers the core tools `pibo_echo`, `pibo_workspace_info`, and `pibo_exec`, and appends the example context files from `examples/context/`.
 
 Profiles can opt into registered subagents. Pibo exposes enabled subagents to Pi as generated tools named `pibo_subagent_<name>`, routed through normal pibo sessions.
 
-The `run-yield-qa` profile adds two simple QA subagents. Profiles with yieldable tools expose generated run-control tools for tracked or detached work:
+The `run-yield-qa` profile adds two simple QA subagents. Profiles with yieldable tools can expose generated run-control tools through the `pibo-run-control` capability package:
 
 ```text
 pibo_run_start

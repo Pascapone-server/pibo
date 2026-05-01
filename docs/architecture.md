@@ -104,7 +104,7 @@ Subagent tools are synchronous normal tools: they wait for the correlated child 
 
 ## Yielded Runs
 
-Profiles with yieldable tools receive run-control tools. These are agent-facing tools, not gateway actions:
+Profiles with yieldable tools can receive run-control tools through the `pibo-run-control` capability package. These are agent-facing tools, not gateway actions:
 
 ```text
 pibo_run_start
@@ -121,6 +121,21 @@ pibo_run_ack
 Yielded runs use `tracked` by default. Tracked runs create compact `<pibo_run_notification>` service messages for the parent agent when they start, finish, fail, or remain unconsumed across natural turn boundaries. Notifications contain only run ids and summaries; the agent must call `pibo_run_read` to retrieve the full result. `detached` runs are explicit fire-and-forget work: they remain inspectable with `includeDetached`, but they do not create automatic reminders.
 
 The router keeps one active parent turn at a time by enqueuing notifications as normal service messages. Service notifications do not immediately re-trigger themselves. Running runs are cancelled when their owning session or router is disposed, detached terminal runs are pruned after a short TTL, and consumed terminal tracked runs are kept briefly for debugging.
+
+## Agent Designer
+
+The Chat Web Agents area persists custom agents in `.pibo/chat-agents.sqlite`. Each saved custom agent is registered as a dynamic profile before routed sessions are created.
+
+The designer configures native Pibo agent capabilities only:
+
+- plugin-registered native tools
+- skills
+- context files
+- subagents
+- built-in Pi tool visibility
+- capability packages such as `pibo-run-control`
+
+Curated external CLI tools managed by `pibo tools` are deliberately not part of the per-agent native tool selection. They are global operator tooling available through the agent environment, while native plugin tools remain the profile-specific capability surface.
 
 ## Channels
 

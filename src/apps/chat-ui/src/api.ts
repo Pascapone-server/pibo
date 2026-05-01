@@ -1,4 +1,4 @@
-import type { BootstrapData, CreateSessionData, PiboRoom, PiboSession, PiboSessionTraceView } from "./types";
+import type { AgentCatalog, BootstrapData, CreateSessionData, CustomAgent, PiboRoom, PiboSession, PiboSessionTraceView } from "./types";
 
 export async function getBootstrap(
 	piboSessionId?: string,
@@ -24,6 +24,44 @@ export async function postSession(profile?: string, roomId?: string): Promise<Cr
 		method: "POST",
 		headers: { "content-type": "application/json" },
 		body: JSON.stringify({ ...(profile ? { profile } : {}), ...(roomId ? { roomId } : {}) }),
+	});
+}
+
+export async function getAgentCatalog(): Promise<{
+	catalog: AgentCatalog;
+	profiles: Array<{ name: string; description?: string; aliases: string[] }>;
+}> {
+	return requestJson("/api/chat/agent-catalog");
+}
+
+export async function getCustomAgents(): Promise<{ agents: CustomAgent[] }> {
+	return requestJson("/api/chat/agents");
+}
+
+export type SaveCustomAgentInput = {
+	displayName: string;
+	description?: string;
+	nativeTools: string[];
+	skills: string[];
+	contextFiles: string[];
+	subagents: CustomAgent["subagents"];
+	builtinTools: "default" | "disabled";
+	runControl: boolean;
+};
+
+export async function postCustomAgent(input: SaveCustomAgentInput): Promise<{ agent: CustomAgent }> {
+	return requestJson("/api/chat/agents", {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify(input),
+	});
+}
+
+export async function patchCustomAgent(id: string, input: SaveCustomAgentInput): Promise<{ agent: CustomAgent }> {
+	return requestJson(`/api/chat/agents/${encodeURIComponent(id)}`, {
+		method: "PATCH",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify(input),
 	});
 }
 
@@ -114,6 +152,8 @@ function normalizeBootstrap(payload: Partial<BootstrapData>): BootstrapData {
 		rooms: payload.rooms ?? [],
 		sessions,
 		agents: payload.agents ?? [],
+		customAgents: payload.customAgents ?? [],
+		agentCatalog: payload.agentCatalog,
 		capabilities: {
 			actions: payload.capabilities?.actions ?? [],
 		},

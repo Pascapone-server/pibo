@@ -34,6 +34,7 @@ async function startWebHostChannel(options = {}) {
 	const emitted = [];
 	const listeners = new Set();
 	const sessions = new InMemoryPiboSessionStore();
+	let profiles = [...(options.profiles ?? [])];
 	const storagePath = join(mkdtempSync(join(tmpdir(), "pibo-web-channel-")), "chat.sqlite");
 	const channel = createWebHostChannel({ port: 0, announce: false });
 
@@ -76,7 +77,24 @@ async function startWebHostChannel(options = {}) {
 			return [];
 		},
 		getProfiles() {
-			return options.profiles ?? [];
+			return profiles;
+		},
+		getCapabilityCatalog() {
+			return options.capabilityCatalog ?? {
+				nativeTools: [{ name: "pibo_echo", description: "Echo", yieldable: true, hasDefinition: true }],
+				skills: [{ name: "pi-agent-harness", path: ".codex/skills/pi-agent-harness/SKILL.md" }],
+				subagents: [],
+				contextFiles: [],
+				packages: [{ name: "pibo-run-control", description: "Run control", toolNames: ["pibo_run_start"] }],
+			};
+		},
+		upsertProfile(profile) {
+			profiles = profiles.filter((item) => item.name !== profile.name);
+			profiles.push({
+				name: profile.name,
+				description: profile.description,
+				aliases: [...(profile.aliases ?? [])],
+			});
 		},
 		getWebApps() {
 			return [createChatWebApp({ readModelPath: storagePath })];
@@ -410,6 +428,66 @@ test("chat web app creates sessions with selected agent profiles", async () => {
 		});
 		assert.equal(rejected.status, 400);
 		assert.deepEqual(await rejected.json(), { error: 'Unknown profile "missing-profile"' });
+	} finally {
+		await channel.stop?.();
+	}
+});
+
+test("chat web app creates custom agents from the native capability catalog", async () => {
+	const { channel, baseURL } = await startWebHostChannel({
+		auth: createFakeAuthService(),
+		profiles: [{ name: "pibo-minimal", aliases: ["minimal"] }],
+	});
+
+	try {
+		const catalog = await fetch(`${baseURL}/api/chat/agent-catalog`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(catalog.status, 200);
+		const catalogPayload = await catalog.json();
+		assert.deepEqual(catalogPayload.catalog.nativeTools.map((tool) => tool.name), ["pibo_echo"]);
+
+		const createdAgent = await fetch(`${baseURL}/api/chat/agents`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({
+				displayName: "Research Agent",
+				description: "Uses native catalog entries only.",
+				nativeTools: ["pibo_echo"],
+				skills: ["pi-agent-harness"],
+				runControl: true,
+				subagents: [{ name: "helper", targetProfile: "pibo-minimal", executionMode: "parallel" }],
+			}),
+		});
+		assert.equal(createdAgent.status, 201);
+		const agentPayload = await createdAgent.json();
+		assert.match(agentPayload.agent.profileName, /^custom-agent:agent_/);
+		assert.deepEqual(agentPayload.agent.nativeTools, ["pibo_echo"]);
+		assert.equal(agentPayload.agent.runControl, true);
+
+		const session = await fetch(`${baseURL}/api/chat/sessions`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({ profile: agentPayload.agent.profileName }),
+		});
+		assert.equal(session.status, 201);
+		const sessionPayload = await session.json();
+		assert.equal(sessionPayload.session.profile, agentPayload.agent.profileName);
+
+		const listed = await fetch(`${baseURL}/api/chat/agents`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(listed.status, 200);
+		const listedPayload = await listed.json();
+		assert.deepEqual(listedPayload.agents.map((agent) => agent.displayName), ["Research Agent"]);
 	} finally {
 		await channel.stop?.();
 	}

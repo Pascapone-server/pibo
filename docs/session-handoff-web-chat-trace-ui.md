@@ -38,7 +38,11 @@ Bring the Pibo Chat Web App closer to the existing `pydantic-tracing` trace UI:
 - Added nested session listing based on Pibo Sessions and `parentId`.
 - Added explicit new-session creation from the Web Chat UI through `POST /api/chat/sessions`.
 - Added session rename, archive, unarchive, and archived-session visibility controls.
-- Added basic Agents and Settings areas as V1 placeholders.
+- Replaced the basic Agents placeholder with an Agent Designer.
+  - Custom agents are persisted in `.pibo/chat-agents.sqlite`.
+  - The designer exposes native plugin tools, skills, context files, subagents, and capability packages from the Pibo capability catalog.
+  - Curated external CLI tools from `pibo tools` remain global operator tools and are not configured per agent.
+  - `pibo_run_*` is represented as the `pibo-run-control` package toggle instead of seven independent tool choices.
 - Added slash command menu behavior and Enter/Shift+Enter handling.
 - Added slash command active-item scrolling so keyboard navigation keeps the selected command visible.
 - Added a one-line default composer that grows to five visible lines, then scrolls internally.
@@ -67,12 +71,13 @@ Bring the Pibo Chat Web App closer to the existing `pydantic-tracing` trace UI:
 - Browser settings such as Thinking visibility are stored in `localStorage`.
 - Trace expansion state is browser-local component state. The default expansion depth is `1`, so top-level messages are readable without expanding nested tool and reasoning details.
 - Composer auto-resize is based on rendered textarea metrics. Global form-control font overrides must not override Tailwind text and line-height utilities used by the composer.
-- V1 does not persist custom agent profile templates from the web UI.
+- Custom agent definitions are persisted by the web app and registered as dynamic profiles before routed sessions are created.
+- The Agent Designer configures native Pibo agent capabilities only. CLI tools remain globally available through the operator environment and stay outside agent profile configuration.
 
 ## Known Gaps
 
 - Full TanStack Start structure is still pending if SSR/server-entry semantics are required.
-- The Agents page is an inventory/placeholder, not a profile builder.
+- The Agents page is a V1 Agent Designer. It supports custom agent creation and editing, but does not yet support deleting, importing/exporting, or deep inspection previews.
 - The Settings page only exposes browser-local Thinking visibility.
 - Tree command is intentionally excluded from V1.
 - The legacy inline fallback HTML still exists in `src/apps/chat/web-app.ts`; it is only used when the built UI is missing.
@@ -93,7 +98,7 @@ Result:
 
 - Typecheck passed.
 - Chat UI build passed.
-- Test suite passed: 85/85 tests.
+- Test suite passed: 108/108 tests.
 - Browser-use geometry check passed for composer states with one line, five lines, and overflowing six lines.
 
 ## Next Best Steps
@@ -101,4 +106,4 @@ Result:
 1. Add automated browser smoke coverage for `/apps/chat` once a stable test harness for authenticated Web Chat is available.
 2. Compare the rendered UI visually against `pydantic-tracing` with real tool-call and subagent sessions.
 3. Decide whether to migrate the chat UI from TanStack Router/Vite to full TanStack Start.
-4. Add focused tests for subagent delegation spans and longer multi-turn trace reconstruction.
+4. Add delete/import/export flows and runtime inspection preview for custom agents.

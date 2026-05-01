@@ -97,7 +97,49 @@ export type BootstrapData = {
 	rooms: PiboRoom[];
 	sessions: PiboWebSessionNode[];
 	agents: Array<{ name: string; description?: string; aliases: string[] }>;
+	customAgents: CustomAgent[];
+	agentCatalog?: AgentCatalog;
 	capabilities: { actions: Array<{ name: string; description?: string; slashCommands: string[] }> };
+};
+
+export type AgentCatalog = {
+	nativeTools: Array<{ name: string; description?: string; yieldable: boolean; hasDefinition: boolean }>;
+	skills: Array<{ name: string; path: string }>;
+	subagents: Array<{
+		name: string;
+		description?: string;
+		targetProfile: string;
+		executionMode?: "sequential" | "parallel";
+		timeoutMs?: number;
+		maxDepth?: number;
+	}>;
+	contextFiles: Array<{ key: string; label?: string; path: string }>;
+	packages: Array<{ name: string; description: string; toolNames: string[] }>;
+};
+
+export type CustomAgentSubagent = {
+	name: string;
+	description?: string;
+	targetProfile: string;
+	executionMode?: "sequential" | "parallel";
+	timeoutMs?: number;
+	maxDepth?: number;
+};
+
+export type CustomAgent = {
+	id: string;
+	profileName: string;
+	ownerScope: string;
+	displayName: string;
+	description?: string;
+	nativeTools: string[];
+	skills: string[];
+	contextFiles: string[];
+	subagents: CustomAgentSubagent[];
+	builtinTools: "default" | "disabled";
+	runControl: boolean;
+	createdAt: string;
+	updatedAt: string;
 };
 
 export type CreateSessionData = {

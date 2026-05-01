@@ -352,16 +352,17 @@ Recommended V1:
 - Error rendering.
 - Agent delegation rendering.
 - Basic execution result rendering.
+- Agent Designer for persisted custom profiles built from native plugin tools, skills, context files, subagents, and the `pibo-run-control` package toggle.
 
 Recommended later phases:
 
-- Full profile builder UI.
-- Persistent custom agent templates.
+- Custom agent deletion and import/export.
+- Agent runtime inspection previews.
 - Workspace selection model.
 - Advanced session tree editor.
 - Export/import of trace views.
 
-The profile builder is important long term, but it should not block the initial trace UI.
+The initial Agent Designer is now part of the web surface. It intentionally configures native Pibo agent capabilities only; curated external CLI tools remain global operator tooling outside the profile builder.
 
 ## Key Conclusion
 

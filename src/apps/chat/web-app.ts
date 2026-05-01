@@ -18,6 +18,14 @@ import {
 import { chatStreamFramesFromOutputEvent, createChatStreamState, type ChatStreamEvent } from "./stream.js";
 import { buildSessionNodes, buildTraceView } from "./trace.js";
 import { isChatWebSessionArchived, withChatWebArchived } from "./session-metadata.js";
+import {
+	CustomAgentStore,
+	createDefaultCustomAgentStore,
+	type CustomAgentDefinition,
+	type CustomAgentSubagent,
+	type UpdateCustomAgentInput,
+} from "./agent-store.js";
+import { createCustomAgentProfileDefinition } from "./agent-profiles.js";
 
 export const CHAT_WEB_APP_NAME = "pibo.chat-web";
 export const CHAT_WEB_CHANNEL = "pibo.chat-web";
@@ -29,12 +37,14 @@ export type ChatWebAppOptions = {
 	readModelPath?: string;
 	eventLogPath?: string;
 	roomStorePath?: string;
+	agentStorePath?: string;
 };
 
 type ChatWebAppState = {
 	readModel: ChatWebReadModel;
 	eventLog: ChatEventLog;
 	roomStore: PiboRoomStore;
+	agentStore: CustomAgentStore;
 	subscribedContext?: PiboWebAppContext;
 	unsubscribe?: () => void;
 	liveListeners: Set<(event: StoredChatEvent) => void>;
@@ -56,6 +66,17 @@ type ChatRoomPatchBody = {
 	name?: unknown;
 	topic?: unknown;
 	parentRoomId?: unknown;
+};
+
+type ChatAgentBody = {
+	displayName?: unknown;
+	description?: unknown;
+	nativeTools?: unknown;
+	skills?: unknown;
+	contextFiles?: unknown;
+	subagents?: unknown;
+	builtinTools?: unknown;
+	runControl?: unknown;
 };
 
 type ChatMessageBody = {
@@ -152,6 +173,18 @@ function roomResourcePath(pathname: string): { roomId: string; child?: "events" 
 	}
 }
 
+function agentResourceId(pathname: string): string | undefined {
+	const prefix = `${CHAT_WEB_API_PREFIX}/agents/`;
+	if (!pathname.startsWith(prefix)) return undefined;
+	const encodedId = pathname.slice(prefix.length);
+	if (!encodedId || encodedId.includes("/")) return undefined;
+	try {
+		return decodeURIComponent(encodedId);
+	} catch {
+		throw new PiboWebHttpError("Invalid agent id", 400);
+	}
+}
+
 function normalizeRoomName(value: unknown, fallback = "New Chat"): string {
 	if (value === undefined) return fallback;
 	if (typeof value !== "string") throw new PiboWebHttpError("Room name must be a string", 400);
@@ -195,6 +228,88 @@ function normalizeOptionalParentRoomId(value: unknown): string | null | undefine
 	return value;
 }
 
+function normalizeAgentDisplayName(value: unknown, fallback = "New Agent"): string {
+	if (value === undefined) return fallback;
+	if (typeof value !== "string") throw new PiboWebHttpError("Agent name must be a string", 400);
+	const name = value.replace(/\s+/g, " ").trim();
+	if (!name) throw new PiboWebHttpError("Agent name is required", 400);
+	if (name.length > 120) throw new PiboWebHttpError("Agent name is too long", 400);
+	return name;
+}
+
+function normalizeAgentDescription(value: unknown): string | undefined {
+	if (value === undefined || value === null) return undefined;
+	if (typeof value !== "string") throw new PiboWebHttpError("Agent description must be a string", 400);
+	const description = value.trim();
+	if (!description) return undefined;
+	if (description.length > 1000) throw new PiboWebHttpError("Agent description is too long", 400);
+	return description;
+}
+
+function normalizeNameArray(value: unknown, label: string): string[] {
+	if (value === undefined) return [];
+	if (!Array.isArray(value)) throw new PiboWebHttpError(`${label} must be an array`, 400);
+	const names = value.map((item) => {
+		if (typeof item !== "string" || item.trim().length === 0) {
+			throw new PiboWebHttpError(`${label} entries must be non-empty strings`, 400);
+		}
+		return item.trim();
+	});
+	return [...new Set(names)];
+}
+
+function normalizeBuiltinTools(value: unknown): "default" | "disabled" {
+	if (value === undefined) return "default";
+	if (value === "default" || value === "disabled") return value;
+	throw new PiboWebHttpError("builtinTools must be default or disabled", 400);
+}
+
+function normalizeRunControl(value: unknown): boolean {
+	if (value === undefined) return false;
+	if (typeof value !== "boolean") throw new PiboWebHttpError("runControl must be a boolean", 400);
+	return value;
+}
+
+function normalizeAgentSubagents(value: unknown): CustomAgentSubagent[] {
+	if (value === undefined) return [];
+	if (!Array.isArray(value)) throw new PiboWebHttpError("subagents must be an array", 400);
+	return value.map((item) => {
+		if (!item || typeof item !== "object" || Array.isArray(item)) {
+			throw new PiboWebHttpError("subagent entries must be objects", 400);
+		}
+		const raw = item as Record<string, unknown>;
+		const name = normalizeAgentDisplayName(raw.name, "");
+		if (typeof raw.targetProfile !== "string" || raw.targetProfile.trim().length === 0) {
+			throw new PiboWebHttpError("subagent targetProfile is required", 400);
+		}
+		const subagent: CustomAgentSubagent = {
+			name,
+			targetProfile: raw.targetProfile.trim(),
+		};
+		const description = normalizeAgentDescription(raw.description);
+		if (description) subagent.description = description;
+		if (raw.executionMode !== undefined) {
+			if (raw.executionMode !== "sequential" && raw.executionMode !== "parallel") {
+				throw new PiboWebHttpError("subagent executionMode must be sequential or parallel", 400);
+			}
+			subagent.executionMode = raw.executionMode;
+		}
+		if (raw.timeoutMs !== undefined) {
+			if (typeof raw.timeoutMs !== "number" || !Number.isFinite(raw.timeoutMs) || raw.timeoutMs <= 0) {
+				throw new PiboWebHttpError("subagent timeoutMs must be a positive number", 400);
+			}
+			subagent.timeoutMs = Math.round(raw.timeoutMs);
+		}
+		if (raw.maxDepth !== undefined) {
+			if (typeof raw.maxDepth !== "number" || !Number.isFinite(raw.maxDepth) || raw.maxDepth < 1) {
+				throw new PiboWebHttpError("subagent maxDepth must be a positive number", 400);
+			}
+			subagent.maxDepth = Math.round(raw.maxDepth);
+		}
+		return subagent;
+	});
+}
+
 function normalizeClientTxnId(value: unknown): string | undefined {
 	if (value === undefined) return undefined;
 	if (typeof value !== "string") throw new PiboWebHttpError("clientTxnId must be a string", 400);
@@ -226,6 +341,10 @@ function createEventLog(path?: string): ChatEventLog {
 
 function createRoomStore(path?: string): PiboRoomStore {
 	return path ? new PiboRoomStore(path) : createDefaultPiboRoomStore();
+}
+
+function createAgentStore(path?: string): CustomAgentStore {
+	return path ? new CustomAgentStore(path) : createDefaultCustomAgentStore();
 }
 
 function ensureEventIndexing(state: ChatWebAppState, context: PiboWebAppContext): void {
@@ -430,6 +549,48 @@ function createSessionUpdate(session: PiboSession, body: { title?: unknown; arch
 		throw new PiboWebHttpError("No session update fields provided", 400);
 	}
 	return update;
+}
+
+function ensureCustomAgentProfiles(state: ChatWebAppState, context: PiboWebAppContext): void {
+	if (!context.channelContext.upsertProfile) return;
+	for (const agent of state.agentStore.list()) {
+		context.channelContext.upsertProfile(createCustomAgentProfileDefinition(agent));
+	}
+}
+
+function createAgentInput(ownerScope: string, body: ChatAgentBody) {
+	return {
+		ownerScope,
+		displayName: normalizeAgentDisplayName(body.displayName),
+		description: normalizeAgentDescription(body.description),
+		nativeTools: normalizeNameArray(body.nativeTools, "nativeTools"),
+		skills: normalizeNameArray(body.skills, "skills"),
+		contextFiles: normalizeNameArray(body.contextFiles, "contextFiles"),
+		subagents: normalizeAgentSubagents(body.subagents),
+		builtinTools: normalizeBuiltinTools(body.builtinTools),
+		runControl: normalizeRunControl(body.runControl),
+	};
+}
+
+function createAgentUpdate(body: ChatAgentBody): UpdateCustomAgentInput {
+	const update: UpdateCustomAgentInput = {};
+	if (body.displayName !== undefined) update.displayName = normalizeAgentDisplayName(body.displayName);
+	if (body.description !== undefined) update.description = normalizeAgentDescription(body.description);
+	if (body.nativeTools !== undefined) update.nativeTools = normalizeNameArray(body.nativeTools, "nativeTools");
+	if (body.skills !== undefined) update.skills = normalizeNameArray(body.skills, "skills");
+	if (body.contextFiles !== undefined) update.contextFiles = normalizeNameArray(body.contextFiles, "contextFiles");
+	if (body.subagents !== undefined) update.subagents = normalizeAgentSubagents(body.subagents);
+	if (body.builtinTools !== undefined) update.builtinTools = normalizeBuiltinTools(body.builtinTools);
+	if (body.runControl !== undefined) update.runControl = normalizeRunControl(body.runControl);
+	if (Object.keys(update).length === 0) throw new PiboWebHttpError("No agent update fields provided", 400);
+	return update;
+}
+
+function requireOwnedAgent(agent: CustomAgentDefinition | undefined, webSession: PiboWebSession): CustomAgentDefinition {
+	if (!agent || agent.ownerScope !== webSession.ownerScope) {
+		throw new PiboWebHttpError("Agent is not available for this user", 404);
+	}
+	return agent;
 }
 
 function resolveRequestedSession(
@@ -1581,6 +1742,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 		readModel: createReadModel(storagePath),
 		eventLog: createEventLog(options.eventLogPath ?? storagePath),
 		roomStore: createRoomStore(options.roomStorePath ?? storagePath),
+		agentStore: createAgentStore(options.agentStorePath ?? storagePath),
 		liveListeners: new Set(),
 	};
 
@@ -1596,6 +1758,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 		async handleRequest(request, context) {
 			const url = new URL(request.url);
 			ensureEventIndexing(state, context);
+			ensureCustomAgentProfiles(state, context);
 
 			const builtAsset = responseBuiltChatAsset(url.pathname);
 			if (builtAsset) return builtAsset;
@@ -1653,10 +1816,52 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 					rooms,
 					sessions,
 					agents: context.channelContext.getProfiles?.() ?? [],
+					customAgents: state.agentStore.list(webSession.ownerScope),
+					agentCatalog: context.channelContext.getCapabilityCatalog?.(),
 					capabilities: {
 						actions: context.channelContext.getGatewayActions(),
 					},
 				});
+			}
+
+			if (url.pathname === `${CHAT_WEB_API_PREFIX}/agent-catalog` && request.method === "GET") {
+				await requireSession(request, context);
+				return responseJson({
+					catalog: context.channelContext.getCapabilityCatalog?.() ?? {
+						nativeTools: [],
+						skills: [],
+						subagents: [],
+						contextFiles: [],
+						packages: [],
+					},
+					profiles: context.channelContext.getProfiles?.() ?? [],
+				});
+			}
+
+			if (url.pathname === `${CHAT_WEB_API_PREFIX}/agents` && request.method === "GET") {
+				const webSession = await requireSession(request, context);
+				return responseJson({ agents: state.agentStore.list(webSession.ownerScope) });
+			}
+
+			if (url.pathname === `${CHAT_WEB_API_PREFIX}/agents` && request.method === "POST") {
+				requireSameOriginJsonRequest(request);
+				const webSession = await requireSession(request, context);
+				const body = await readJsonBody<ChatAgentBody>(request);
+				const agent = state.agentStore.create(createAgentInput(webSession.ownerScope, body));
+				context.channelContext.upsertProfile?.(createCustomAgentProfileDefinition(agent));
+				return responseJson({ agent }, { status: 201 });
+			}
+
+			const patchAgentId = agentResourceId(url.pathname);
+			if (patchAgentId && request.method === "PATCH") {
+				requireSameOriginJsonRequest(request);
+				const webSession = await requireSession(request, context);
+				requireOwnedAgent(state.agentStore.get(patchAgentId), webSession);
+				const body = await readJsonBody<ChatAgentBody>(request);
+				const agent = state.agentStore.update(patchAgentId, createAgentUpdate(body));
+				const owned = requireOwnedAgent(agent, webSession);
+				context.channelContext.upsertProfile?.(createCustomAgentProfileDefinition(owned));
+				return responseJson({ agent: owned });
 			}
 
 			if (url.pathname === `${CHAT_WEB_API_PREFIX}/session` && request.method === "GET") {

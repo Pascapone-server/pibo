@@ -39,6 +39,8 @@ Pibo is a minimal TypeScript wrapper around Pi Coding Agent. This file is a shor
 - The Chat Web trace UI defaults to expansion depth `1`, provides compact icon controls for default, collapse all, expand all, and expand to nesting level, and keeps top-level messages readable without opening nested tool details.
 - The Chat Web composer starts as a one-line input, grows through five visible lines, scrolls internally afterward, preserves cursor position during normal edits, keeps the slash command selection scrolled into view, and uses a bottom-aligned send icon button.
 - The Chat Web raw event inspector is hidden behind an explicit debug toggle and compacts adjacent assistant/thinking deltas with the same `eventId` for readability.
+- The Chat Web Agents area is now an Agent Designer. It persists custom agents in `.pibo/chat-agents.sqlite`, registers them as dynamic profiles, and lets users configure native plugin tools, skills, context files, subagents, built-in Pi tool visibility, and the `pibo-run-control` package.
+- Agent Designer configuration intentionally excludes curated external CLI tools from `pibo tools`; those tools remain globally available operator tooling instead of per-agent native tool selections.
 - A minimal Commander-based CLI manages local config values in `.pibo/config.json` and uses progressive, agent-oriented discovery output.
 - `pibo mcp` provides local MCP server discovery, schema inspection, search, tool calls, `mcp_servers.json` config management, and a small opt-in registry for common external MCP servers.
 - The MCP registry command surface is in place, but there are currently no bundled presets.
@@ -104,7 +106,7 @@ metadata: { subagentName, subagentToolName, threadKey }
 
 Omitting `threadKey` creates a fresh child session. Reusing the same parent, target profile, subagent metadata, and `threadKey` continues the same child session, which keeps subagent work inspectable and multi-turn. Subagent tools are synchronous normal tools; long-running subagent work is yielded by wrapping the subagent tool with `pibo_run_start`.
 
-Profiles that expose yieldable tools also expose run-control tools. `pibo_run_start` wraps a yieldable tool call as a yielded run and returns a `runId`; `pibo_run_list`, `pibo_run_status`, `pibo_run_wait`, `pibo_run_read`, `pibo_run_cancel`, and `pibo_run_ack` manage the run afterward. Tracked runs are the default and remind the parent agent with compact `<pibo_run_notification>` service messages until they are read, cancelled, or acknowledged. Detached runs are explicit fire-and-forget work and do not create automatic reminders.
+Profiles that expose yieldable tools can expose run-control tools through the `pibo-run-control` package. `pibo_run_start` wraps a yieldable tool call as a yielded run and returns a `runId`; `pibo_run_list`, `pibo_run_status`, `pibo_run_wait`, `pibo_run_read`, `pibo_run_cancel`, and `pibo_run_ack` manage the run afterward. Tracked runs are the default and remind the parent agent with compact `<pibo_run_notification>` service messages until they are read, cancelled, or acknowledged. Detached runs are explicit fire-and-forget work and do not create automatic reminders.
 
 ## Channels And Pibo Sessions
 
