@@ -1,6 +1,6 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Breadcrumbs } from "@components-pasko/breadcrumbs";
-import { ChevronDown, ChevronRight, ChevronsDown, ChevronsUp, GitBranch, ListTree, MessageSquarePlus, RefreshCw, RotateCcw } from "lucide-react";
+import { ChevronDown, ChevronRight, ChevronsDown, ChevronsUp, GitBranch, GitFork, ListTree, MessageSquarePlus, RefreshCw, RotateCcw } from "lucide-react";
 import type { Span, Trace } from "../types";
 import { countRender } from "../renderMetrics";
 import { SpanNode, type SpanExpansionDepth } from "./SpanNode";
@@ -13,6 +13,7 @@ type TraceTimelineProps = {
 	expandThinking: boolean;
 	sessionAgentProfile?: string;
 	sessionBreadcrumbs?: readonly SessionBreadcrumbItem[];
+	originSession?: SessionOriginLink;
 	agentProfiles?: readonly AgentProfileOption[];
 	selectedAgentProfile?: string;
 	createSessionDisabled?: boolean;
@@ -32,6 +33,11 @@ export type SessionBreadcrumbItem = {
 	label: string;
 };
 
+export type SessionOriginLink = {
+	piboSessionId: string;
+	label: string;
+};
+
 const timelineContentStyle = {
 	"--trace-readable-width": "min(100%, clamp(36rem, 58vw, 64rem))",
 } as CSSProperties;
@@ -45,6 +51,7 @@ export function TraceTimeline({
 	expandThinking,
 	sessionAgentProfile,
 	sessionBreadcrumbs = [],
+	originSession,
 	agentProfiles = [],
 	selectedAgentProfile,
 	createSessionDisabled = false,
@@ -116,10 +123,13 @@ export function TraceTimeline({
 		return (
 			<section className="flex-1 flex flex-col bg-[#0c1214] relative overflow-hidden">
 				<div className="h-14 px-6 border-b border-slate-800 bg-[#1a262b]/80 flex items-center justify-between">
-					<h2 className="text-sm font-bold uppercase tracking-wide flex items-center gap-2">
-						<GitBranch size={18} className="text-[#11a4d4]" />
-						Execution Flow
-					</h2>
+					<div className="flex min-w-0 items-center gap-2">
+						<h2 className="text-sm font-bold uppercase tracking-wide flex items-center gap-2">
+							<GitBranch size={18} className="text-[#11a4d4]" />
+							Execution Flow
+						</h2>
+						{originSession ? <OriginSessionButton originSession={originSession} onOpenSession={onOpenSession} /> : null}
+					</div>
 					<SessionBreadcrumbs items={sessionBreadcrumbs} onOpenSession={onOpenSession} />
 					<AgentSessionControls
 						agentProfiles={agentProfiles}
@@ -158,6 +168,7 @@ export function TraceTimeline({
 						{stats.completed > 0 ? <Badge color="green">{stats.completed} Done</Badge> : null}
 						{sessionAgentProfile ? <Badge color="transparent">{sessionAgentProfile}</Badge> : null}
 						{stats.error > 0 ? <Badge color="orange">{stats.error} Errors</Badge> : null}
+						{originSession ? <OriginSessionButton originSession={originSession} onOpenSession={onOpenSession} /> : null}
 					</div>
 					<div className="col-start-2 min-w-0">
 						<SessionBreadcrumbs items={sessionBreadcrumbs} onOpenSession={onOpenSession} />
@@ -253,6 +264,26 @@ export function TraceTimeline({
 				</button>
 			) : null}
 		</section>
+	);
+}
+
+function OriginSessionButton({
+	originSession,
+	onOpenSession,
+}: {
+	originSession: SessionOriginLink;
+	onOpenSession: (piboSessionId: string) => void;
+}) {
+	return (
+		<button
+			type="button"
+			onClick={() => onOpenSession(originSession.piboSessionId)}
+			title={`Open origin session: ${originSession.label}`}
+			aria-label={`Open origin session: ${originSession.label}`}
+			className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-sm border border-[#f97316]/50 bg-[#f97316]/10 text-[#f97316] transition-colors hover:border-[#f97316] hover:bg-[#f97316]/15"
+		>
+			<GitFork size={13} />
+		</button>
 	);
 }
 

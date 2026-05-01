@@ -12,6 +12,7 @@ export type PiboWebSessionNode = {
 	piboSessionId: string;
 	piSessionId: string;
 	parentId?: string;
+	originId?: string;
 	profile: string;
 	subagentName?: string;
 	title: string;
@@ -168,6 +169,7 @@ export async function buildSessionNodes(
 			piboSessionId: session.id,
 			piSessionId: session.piSessionId,
 			parentId: session.parentId,
+			originId: session.originId,
 			profile: session.profile,
 			subagentName: stringValue(session.metadata?.subagentName),
 			title: createSessionTitle(session, metadata),

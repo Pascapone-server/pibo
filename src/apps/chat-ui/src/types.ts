@@ -54,6 +54,7 @@ export type PiboWebSessionNode = {
 	piboSessionId: string;
 	piSessionId: string;
 	parentId?: string;
+	originId?: string;
 	profile: string;
 	subagentName?: string;
 	title: string;

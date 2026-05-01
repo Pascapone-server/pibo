@@ -262,6 +262,20 @@ test("chat session nodes sort new sessions without activity first", async () => 
 	);
 });
 
+test("chat session nodes expose origin sessions for fork navigation", async () => {
+	const origin = createTestSession({ id: "chat:origin" });
+	const fork = createTestSession({
+		id: "chat:fork",
+		originId: origin.id,
+		createdAt: "2026-04-29T09:00:00.000Z",
+		updatedAt: "2026-04-29T09:00:00.000Z",
+	});
+
+	const nodes = await buildSessionNodes([origin, fork], []);
+
+	assert.equal(nodes.find((node) => node.piboSessionId === fork.id)?.originId, origin.id);
+});
+
 test("chat trace preserves assistant content part order", () => {
 	const nodes = traceNodesFromEntries("chat:test", [
 		{

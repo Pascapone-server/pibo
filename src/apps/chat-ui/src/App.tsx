@@ -28,7 +28,7 @@ import {
 import { deleteCustomAgent, deleteRoom, deleteSession, getBootstrap, getTrace, patchCustomAgent, patchRoom, patchSession, postAction, postCustomAgent, postMessage, postRoom, postSession, signInWithGoogle, signOut, type SaveCustomAgentInput } from "./api";
 import type { AgentCatalog, BootstrapData, CustomAgent, CustomAgentSubagent, PiboRoom, PiboSessionTraceView, PiboTraceNode, PiboTraceOrderKey, PiboWebSessionNode } from "./types";
 import { adaptTrace } from "./tracing/adapt";
-import { TraceTimeline, type SessionBreadcrumbItem } from "./tracing/TraceTimeline";
+import { TraceTimeline, type SessionBreadcrumbItem, type SessionOriginLink } from "./tracing/TraceTimeline";
 import { JsonRenderer } from "./tracing/JsonRenderer";
 import { countRender } from "./renderMetrics";
 import { childTraceOrder, compareTraceOrder, liveTraceOrder } from "../../../shared/trace-order.js";
@@ -340,6 +340,10 @@ export function App({ route }: { route: ChatAppRoute }) {
 	}, [currentTraceView]);
 	const sessionBreadcrumbs = useMemo(
 		() => selectedPiboSessionId ? createSessionBreadcrumbs(bootstrap?.sessions ?? [], selectedPiboSessionId) : [],
+		[bootstrap?.sessions, selectedPiboSessionId],
+	);
+	const originSession = useMemo(
+		() => selectedPiboSessionId ? createOriginSessionLink(bootstrap?.sessions ?? [], selectedPiboSessionId) : undefined,
 		[bootstrap?.sessions, selectedPiboSessionId],
 	);
 
@@ -909,6 +913,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 								expandThinking={expandThinking}
 								sessionAgentProfile={bootstrap.session.profile}
 								sessionBreadcrumbs={sessionBreadcrumbs}
+								originSession={originSession}
 								agentProfiles={bootstrap.agents}
 								selectedAgentProfile={newSessionProfile}
 								createSessionDisabled={creatingSession || selectedRoomArchived}
@@ -1553,12 +1558,31 @@ function sessionTreeHasSession(nodes: PiboWebSessionNode[], piboSessionId: strin
 	return nodes.some((node) => node.piboSessionId === piboSessionId || sessionTreeHasSession(node.children, piboSessionId));
 }
 
+function createOriginSessionLink(nodes: PiboWebSessionNode[], piboSessionId: string): SessionOriginLink | undefined {
+	const selected = findSessionNode(nodes, piboSessionId);
+	if (!selected?.originId) return undefined;
+	const origin = findSessionNode(nodes, selected.originId);
+	return {
+		piboSessionId: selected.originId,
+		label: origin ? sessionBreadcrumbLabel(origin, 0) : selected.originId,
+	};
+}
+
 function createSessionBreadcrumbs(nodes: PiboWebSessionNode[], piboSessionId: string): SessionBreadcrumbItem[] {
 	const path = findSessionPath(nodes, piboSessionId);
 	return path.map((node, index) => ({
 		piboSessionId: node.piboSessionId,
 		label: sessionBreadcrumbLabel(node, index),
 	}));
+}
+
+function findSessionNode(nodes: PiboWebSessionNode[], piboSessionId: string): PiboWebSessionNode | undefined {
+	for (const node of nodes) {
+		if (node.piboSessionId === piboSessionId) return node;
+		const child = findSessionNode(node.children, piboSessionId);
+		if (child) return child;
+	}
+	return undefined;
 }
 
 function findSessionPath(
