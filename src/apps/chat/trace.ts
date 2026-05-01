@@ -99,6 +99,8 @@ type TraceBuildInput = {
 	events: ChatWebStoredEvent[];
 	status?: PiboWebSessionStatus;
 	cwd?: string;
+	includeRawEvents?: boolean;
+	rawEventsLimit?: number;
 };
 
 type MessageSessionEntry = Extract<SessionEntry, { type: "message" }>;
@@ -325,7 +327,7 @@ export async function buildTraceView(input: TraceBuildInput): Promise<PiboSessio
 		piSessionId: input.session.piSessionId,
 		title: createSessionTitle(input.session, metadata),
 		nodes: nestedNodes,
-		rawEvents: input.events,
+		rawEvents: input.includeRawEvents === false ? [] : input.events.slice(-(input.rawEventsLimit ?? input.events.length)),
 	};
 }
 
