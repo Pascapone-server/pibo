@@ -62,6 +62,12 @@ export async function runPiboCli(argv = process.argv): Promise<void> {
 		return;
 	}
 
+	if (argv[2] === "debug") {
+		const { runDebugCli } = await import("./debug/index.js");
+		await runDebugCli([argv[0] ?? "node", "pibo debug", ...argv.slice(3)]);
+		return;
+	}
+
 	if (argv[2] === "config" && (argv[3] === "--help" || argv[3] === "-h" || argv.length === 3)) {
 		printConfigDiscovery();
 		return;
@@ -92,6 +98,18 @@ export async function runPiboCli(argv = process.argv): Promise<void> {
 		.action(async (args: string[]) => {
 			const { runToolsCli } = await import("./tools/index.js");
 			await runToolsCli([argv[0] ?? "node", "pibo tools", ...args]);
+		});
+
+	program
+		.command("debug")
+		.description("Inspect local Pibo data")
+		.helpOption(false)
+		.allowUnknownOption(true)
+		.allowExcessArguments(true)
+		.argument("[args...]")
+		.action(async (args: string[]) => {
+			const { runDebugCli } = await import("./debug/index.js");
+			await runDebugCli([argv[0] ?? "node", "pibo debug", ...args]);
 		});
 
 	const config = program.command("config").description(`Manage pibo config at ${DEFAULT_PIBO_CONFIG_PATH}`).helpOption(false);
@@ -231,6 +249,7 @@ Commands:
   config       Manage local pibo config
   mcp          Discover and call configured MCP servers
   tools        Install and inspect curated external CLI tools
+  debug        Inspect local Pibo data
   profile      Inspect a pibo profile
   tui          Start the direct Pi TUI
   tui:routed   Start the local routed Pibo TUI

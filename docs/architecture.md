@@ -273,6 +273,8 @@ The operator CLIs are optimized for agent-driven discovery. Each level should an
 
 `pibo tools` is the matching operator surface for curated external CLI tools. These are not MCP servers and are not Pibo profile skills. A tool entry can install an isolated runtime, expose doctor/path/env commands, and print on-demand guides for agents. The first curated tool is `browser-use`, installed under `~/.pibo/tools/browser-use` with its own Python venv and tool home.
 
+`pibo debug` is the local operator surface for targeted diagnostics against Pibo-owned SQLite stores. It is not a profile tool and does not expose runtime capabilities to agents. The command can list known stores, discover table schemas, run read-only SQL with row limits, and inspect one Pibo Session from a Pibo Session ID or canonical Chat Web URL. Session inspection summarizes Pibo Session metadata, child sessions, Chat Web read-model state, and optional event headers without dumping full event payloads or Pi JSONL transcripts.
+
 ## MCP CLI
 
 The CLI supports:
@@ -312,6 +314,7 @@ npm run tui:routed -- [profile]
 npm run profile -- [profile]
 npm run dev -- mcp
 npm run dev -- tools
+npm run dev -- debug
 ```
 
 `npm run tui:routed` runs the explicit local routed TUI adapter without requiring the gateway daemon.

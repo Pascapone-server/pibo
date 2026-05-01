@@ -73,6 +73,9 @@ Always read `RULES.md`. It contains all relevant rules for development and our p
 ## Glossary
 Always read `GLOSSARY.md`. It contains a shared vocabulary for our project.
 
+## Session Debugging
+When reading Pibo Sessions, use the debug CLI first: `npm run dev -- debug session --help`.
+
 ## Frontend Design
 If you are doing any frontend design, be sure to read `DESIGN.md`.
 

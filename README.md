@@ -26,6 +26,7 @@ Pi remains the inner engine for model turns, tools, streaming, sessions, and com
 - `npm run client -- <piboSessionId>` starts a console client connected to the gateway.
 - `npm run dev -- mcp` lists configured MCP servers and tools.
 - `npm run dev -- tools` lists curated external CLI tools.
+- `npm run dev -- debug` inspects local Pibo SQLite stores.
 - `npm run dev -- config keys` lists supported local config keys.
 - `npm run build` compiles to `dist/`.
 - `npm run start` runs the compiled entrypoint.
@@ -193,6 +194,19 @@ npm run dev -- tools env browser-use
 The first curated tool is `browser-use`, pinned to `browser-use[cli]==0.12.6` so the CLI surface stays aligned with the bundled guides. It is installed into an isolated runtime under `~/.pibo/tools/browser-use` and uses `~/.pibo/tools/browser-use/home` as its tool home. See `docs/tools.md`.
 
 When using Browser Use from this repo, initialize its shell environment once in a persistent terminal with `eval "$(npm run --silent dev -- tools env browser-use)"`, then run later `browser-use` commands directly in that same terminal.
+
+## Debug CLI
+
+Pibo includes a local operator CLI under `pibo debug` for targeted SQLite diagnostics. It is not an agent profile tool and does not load Pi transcripts or full Chat Web payloads automatically.
+
+```bash
+npm run dev -- debug db stores
+npm run dev -- debug db schema sessions
+npm run dev -- debug db query sessions "select id, profile from pibo_sessions limit 5"
+npm run dev -- debug session /apps/chat/rooms/<roomId>/sessions/<piboSessionId>
+```
+
+`pibo debug db query` opens known stores read-only, accepts only one read-only SQL statement, applies a default row limit when the query has no `limit`, and supports `--json` for machine-readable output.
 
 ## Web Auth
 
