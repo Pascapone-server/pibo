@@ -1918,6 +1918,7 @@ function AgentsView({
 									setDraft(agentToDraft(agent));
 									onSelect(agent.profileName);
 								}}
+								onCopy={() => setDraft(copyCustomAgentToDraft(agent))}
 								onCreateSession={() => {
 									onSelect(agent.profileName);
 									onCreateSession(agent.profileName);
@@ -1938,6 +1939,7 @@ function AgentsView({
 									onSelect={() => {
 										setDraft(agentToDraft(agent));
 									}}
+									onCopy={() => setDraft(copyCustomAgentToDraft(agent))}
 									onCreateSession={() => {}}
 									createSessionDisabled
 								/>
@@ -2086,6 +2088,18 @@ function copyProfileToDraft(profile: BootstrapData["agents"][number], catalog?: 
 		displayName: `${profile.name}-copy`,
 		id: undefined,
 		profileName: undefined,
+		source: "custom",
+	};
+}
+
+function copyCustomAgentToDraft(agent: CustomAgent): AgentDraft {
+	const draft = agentToDraft(agent);
+	return {
+		...draft,
+		displayName: `${agent.profileName}-copy`,
+		id: undefined,
+		profileName: undefined,
+		archivedAt: undefined,
 		source: "custom",
 	};
 }
