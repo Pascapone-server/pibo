@@ -370,7 +370,24 @@ function ensureEventIndexing(state: ChatWebAppState, context: PiboWebAppContext)
 function listOwnedSessions(context: PiboWebAppContext, webSession: PiboWebSession): PiboSession[] {
 	return (context.channelContext.listSessions?.() ?? [])
 		.filter((session) => session.ownerScope === webSession.ownerScope)
+		.map((session) => canonicalizeSessionProfile(context, session))
 		.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
+function canonicalizeSessionProfile(context: PiboWebAppContext, session: PiboSession): PiboSession {
+	const canonicalProfile = canonicalProfileName(context, session.profile);
+	if (!canonicalProfile || canonicalProfile === session.profile) return session;
+	return context.channelContext.updateSession?.(session.id, { profile: canonicalProfile }) ?? {
+		...session,
+		profile: canonicalProfile,
+	};
+}
+
+function canonicalProfileName(context: PiboWebAppContext, profileName: string): string | undefined {
+	const matched = context.channelContext.getProfiles?.().find(
+		(profile) => profile.name === profileName || profile.aliases.includes(profileName),
+	);
+	return matched?.name;
 }
 
 function visibleOwnedSessions(
@@ -630,9 +647,10 @@ function resolveRequestedSession(
 	if (!selected || selected.ownerScope !== webSession.ownerScope) {
 		throw new PiboWebHttpError("Session is not available for this user", 404);
 	}
-	const selectedRoom = ensureSessionRoom(state, context, selected, webSession);
+	const canonicalSelected = canonicalizeSessionProfile(context, selected);
+	const selectedRoom = ensureSessionRoom(state, context, canonicalSelected, webSession);
 	if (roomId && selectedRoom.id !== roomId) throw new PiboWebHttpError("Session is not available in this room", 404);
-	return selected;
+	return canonicalSelected;
 }
 
 function resolveCreateSessionProfile(

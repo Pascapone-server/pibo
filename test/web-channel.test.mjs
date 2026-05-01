@@ -593,6 +593,37 @@ test("chat web app validates custom agent profile names", async () => {
 	}
 });
 
+test("chat web app canonicalizes legacy custom agent session profile aliases", async () => {
+	const { channel, baseURL, sessions } = await startWebHostChannel({
+		auth: createFakeAuthService(),
+		profiles: [
+			{
+				name: "test-agent",
+				aliases: ["agent_02d60a56-9bd4-4606-921b-495e3daf69d8", "custom-agent:agent_02d60a56-9bd4-4606-921b-495e3daf69d8"],
+			},
+		],
+	});
+
+	try {
+		const legacySession = sessions.create({
+			channel: "pibo.chat-web",
+			kind: "chat",
+			profile: "custom-agent:agent_02d60a56-9bd4-4606-921b-495e3daf69d8",
+			ownerScope: "user:user-1",
+		});
+		const response = await fetch(`${baseURL}/api/chat/bootstrap?piboSessionId=${encodeURIComponent(legacySession.id)}`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(response.status, 200);
+		const payload = await response.json();
+		assert.equal(payload.session.profile, "test-agent");
+		assert.equal(sessions.get(legacySession.id).profile, "test-agent");
+		assert.equal(payload.sessions.find((session) => session.piboSessionId === legacySession.id).profile, "test-agent");
+	} finally {
+		await channel.stop?.();
+	}
+});
+
 test("chat web app renames and archives owned sessions", async () => {
 	const { channel, baseURL } = await startWebHostChannel({
 		auth: createFakeAuthService(),

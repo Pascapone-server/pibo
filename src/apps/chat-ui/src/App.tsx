@@ -1284,7 +1284,7 @@ function AgentsView({
 							<AgentSidebarRow
 								key={agent.id}
 								title={agent.displayName}
-								subtitle={agent.id}
+								subtitle={agent.profileName}
 								selected={draft.source === "custom" && draft.id === agent.id}
 								onSelect={() => {
 									setDraft(agentToDraft(agent));
