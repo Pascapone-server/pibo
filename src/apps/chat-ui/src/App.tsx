@@ -688,43 +688,6 @@ export function App({ route }: { route: ChatAppRoute }) {
 					<div className="h-11 px-3 border-b border-slate-800 flex items-center justify-between text-xs font-bold uppercase tracking-wider">
 						<span>{area}</span>
 						<div className="flex items-center gap-1">
-							{area === "sessions" && roomsSupported ? (
-								<button
-									type="button"
-									onClick={() => void createRoom()}
-									disabled={creatingRoom}
-									title="New Room"
-									aria-label="New Room"
-									className="p-1 border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4] disabled:opacity-50"
-								>
-									<FolderPlus size={13} />
-								</button>
-							) : null}
-							{area === "sessions" ? (
-								<button
-									type="button"
-									onClick={() => void createSession()}
-									disabled={creatingSession || selectedRoomArchived}
-									title="New Session"
-									aria-label="New Session"
-									className="p-1 border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4] disabled:opacity-50"
-								>
-									<MessageSquarePlus size={13} />
-								</button>
-							) : null}
-							{area === "sessions" ? (
-								<button
-									type="button"
-									onClick={() => void toggleArchivedSessions()}
-									title={showArchived ? "Hide Archived Sessions" : "Show Archived Sessions"}
-									aria-label={showArchived ? "Hide Archived Sessions" : "Show Archived Sessions"}
-									className={`p-1 border rounded-sm hover:border-[#11a4d4] hover:text-[#11a4d4] ${
-										showArchived ? "border-[#11a4d4] text-[#11a4d4]" : "border-slate-700 text-slate-400"
-									}`}
-								>
-									{showArchived ? <ArchiveRestore size={13} /> : <Archive size={13} />}
-								</button>
-							) : null}
 							<button
 								type="button"
 								onClick={() =>
@@ -759,19 +722,31 @@ export function App({ route }: { route: ChatAppRoute }) {
 										) : null}
 										<div className="flex items-center justify-between gap-2 px-1 pb-1">
 											<div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Rooms</div>
-											<button
-												type="button"
-												onClick={() => {
-													const next = !showArchivedRooms;
-													setShowArchivedRooms(next);
-													localStorage.setItem("pibo.chat.showArchivedRooms", String(next));
-												}}
-												title={showArchivedRooms ? "Hide Archived Rooms" : "Show Archived Rooms"}
-												aria-label={showArchivedRooms ? "Hide Archived Rooms" : "Show Archived Rooms"}
-												className={`h-6 w-6 inline-flex items-center justify-center border rounded-sm hover:border-[#11a4d4] hover:text-[#11a4d4] ${showArchivedRooms ? "border-[#11a4d4] text-[#11a4d4]" : "border-slate-700 text-slate-400"}`}
-											>
-												{showArchivedRooms ? <ArchiveRestore size={12} /> : <Archive size={12} />}
-											</button>
+											<div className="flex items-center gap-1">
+												<button
+													type="button"
+													onClick={() => void createRoom()}
+													disabled={creatingRoom}
+													title="New Room"
+													aria-label="New Room"
+													className="h-6 w-6 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4] disabled:opacity-50"
+												>
+													<Plus size={12} />
+												</button>
+												<button
+													type="button"
+													onClick={() => {
+														const next = !showArchivedRooms;
+														setShowArchivedRooms(next);
+														localStorage.setItem("pibo.chat.showArchivedRooms", String(next));
+													}}
+													title={showArchivedRooms ? "Hide Archived Rooms" : "Show Archived Rooms"}
+													aria-label={showArchivedRooms ? "Hide Archived Rooms" : "Show Archived Rooms"}
+													className={`h-6 w-6 inline-flex items-center justify-center border rounded-sm hover:border-[#11a4d4] hover:text-[#11a4d4] ${showArchivedRooms ? "border-[#11a4d4] text-[#11a4d4]" : "border-slate-700 text-slate-400"}`}
+												>
+													{showArchivedRooms ? <ArchiveRestore size={12} /> : <Archive size={12} />}
+												</button>
+											</div>
 										</div>
 										{roomGroups.active.map((room) => (
 											<RoomNode
@@ -805,7 +780,32 @@ export function App({ route }: { route: ChatAppRoute }) {
 									</div>
 								) : null}
 							<div>
-								<div className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Sessions</div>
+								<div className="flex items-center justify-between gap-2 px-1 pb-1">
+									<div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Sessions</div>
+									<div className="flex items-center gap-1">
+										<button
+											type="button"
+											onClick={() => void createSession()}
+											disabled={creatingSession || selectedRoomArchived}
+											title="New Session"
+											aria-label="New Session"
+											className="h-6 w-6 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4] disabled:opacity-50"
+										>
+											<Plus size={12} />
+										</button>
+										<button
+											type="button"
+											onClick={() => void toggleArchivedSessions()}
+											title={showArchived ? "Hide Archived Sessions" : "Show Archived Sessions"}
+											aria-label={showArchived ? "Hide Archived Sessions" : "Show Archived Sessions"}
+											className={`h-6 w-6 inline-flex items-center justify-center border rounded-sm hover:border-[#11a4d4] hover:text-[#11a4d4] ${
+												showArchived ? "border-[#11a4d4] text-[#11a4d4]" : "border-slate-700 text-slate-400"
+											}`}
+										>
+											{showArchived ? <ArchiveRestore size={12} /> : <Archive size={12} />}
+										</button>
+									</div>
+								</div>
 								{sessionGroups.active.map((session) => (
 									<SessionNode
 										key={session.piboSessionId}
