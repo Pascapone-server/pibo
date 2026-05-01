@@ -22,7 +22,7 @@ import {
 	UserRound,
 	X,
 } from "lucide-react";
-import { getAgentCatalog, getBootstrap, getCustomAgents, getTrace, patchCustomAgent, patchRoom, patchSession, postAction, postCustomAgent, postMessage, postRoom, postSession, signInWithGoogle, signOut, type SaveCustomAgentInput } from "./api";
+import { getBootstrap, getTrace, patchCustomAgent, patchRoom, patchSession, postAction, postCustomAgent, postMessage, postRoom, postSession, signInWithGoogle, signOut, type SaveCustomAgentInput } from "./api";
 import type { AgentCatalog, BootstrapData, CustomAgent, CustomAgentSubagent, PiboRoom, PiboSessionTraceView, PiboTraceNode, PiboWebSessionNode } from "./types";
 import { adaptTrace } from "./tracing/adapt";
 import { TraceTimeline } from "./tracing/TraceTimeline";
@@ -298,12 +298,12 @@ export function App() {
 		if (storedPiboSessionId) setTraceLoadingSessionId(storedPiboSessionId);
 		setTraceView(null);
 		try {
-			await loadBootstrap(storedPiboSessionId, showArchivedRef.current, roomId, { selectSession: Boolean(storedPiboSessionId) });
+			await loadBootstrap(storedPiboSessionId, showArchivedRef.current, roomId);
 		} catch (caught) {
 			if (!storedPiboSessionId) throw caught;
 			removeStoredRoomSelection(roomId);
 			setSelectedPiboSessionId(null);
-			await loadBootstrap(undefined, showArchivedRef.current, roomId, { selectSession: false });
+			await loadBootstrap(undefined, showArchivedRef.current, roomId);
 		} finally {
 			setTraceLoadingSessionId(null);
 			setArea("sessions");
@@ -1229,23 +1229,6 @@ function AgentsView({
 	useEffect(() => {
 		if (initialCatalog) setCatalog(initialCatalog);
 	}, [initialCatalog]);
-	useEffect(() => {
-		let cancelled = false;
-		Promise.all([getAgentCatalog(), getCustomAgents()])
-			.then(([catalogResponse, agentsResponse]) => {
-				if (cancelled) return;
-				setCatalog(catalogResponse.catalog);
-				setCustomAgents(agentsResponse.agents);
-				setDraft((current) => current.id ? current : createBlankAgentDraft(catalogResponse.catalog));
-			})
-			.catch((caught) => {
-				if (!cancelled) setLocalError(caught instanceof Error ? caught.message : String(caught));
-			});
-		return () => {
-			cancelled = true;
-		};
-	}, []);
-
 	const profileOptions = useMemo(
 		() => [
 			...agents.map((agent) => ({ value: agent.name, label: agent.name })),
@@ -1268,8 +1251,10 @@ function AgentsView({
 				runControl: draft.runControl,
 			};
 			const response = draft.id ? await patchCustomAgent(draft.id, input) : await postCustomAgent(input);
-			const agentsResponse = await getCustomAgents();
-			setCustomAgents(agentsResponse.agents);
+			setCustomAgents((current) => {
+				const withoutSaved = current.filter((agent) => agent.id !== response.agent.id);
+				return [response.agent, ...withoutSaved];
+			});
 			setDraft(agentToDraft(response.agent));
 			onSelect(response.agent.profileName);
 			onAgentsChanged();
