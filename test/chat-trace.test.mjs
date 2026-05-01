@@ -272,8 +272,14 @@ test("chat session nodes expose origin sessions for fork navigation", async () =
 	});
 
 	const nodes = await buildSessionNodes([origin, fork], []);
+	const originNode = nodes.find((node) => node.piboSessionId === origin.id);
+	const forkNode = nodes.find((node) => node.piboSessionId === fork.id);
 
-	assert.equal(nodes.find((node) => node.piboSessionId === fork.id)?.originId, origin.id);
+	assert.equal(forkNode?.originId, origin.id);
+	assert.deepEqual(
+		originNode?.derivedSessions.map((session) => session.piboSessionId),
+		[fork.id],
+	);
 });
 
 test("chat trace preserves assistant content part order", () => {

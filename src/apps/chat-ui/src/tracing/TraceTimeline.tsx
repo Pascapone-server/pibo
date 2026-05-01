@@ -14,6 +14,7 @@ type TraceTimelineProps = {
 	sessionAgentProfile?: string;
 	sessionBreadcrumbs?: readonly SessionBreadcrumbItem[];
 	originSession?: SessionOriginLink;
+	derivedSessions?: readonly SessionDerivationLink[];
 	agentProfiles?: readonly AgentProfileOption[];
 	selectedAgentProfile?: string;
 	createSessionDisabled?: boolean;
@@ -38,6 +39,13 @@ export type SessionOriginLink = {
 	label: string;
 };
 
+export type SessionDerivationLink = {
+	piboSessionId: string;
+	label: string;
+	profile: string;
+	status: "idle" | "running" | "error";
+};
+
 const timelineContentStyle = {
 	"--trace-readable-width": "min(100%, clamp(36rem, 58vw, 64rem))",
 } as CSSProperties;
@@ -52,6 +60,7 @@ export function TraceTimeline({
 	sessionAgentProfile,
 	sessionBreadcrumbs = [],
 	originSession,
+	derivedSessions = [],
 	agentProfiles = [],
 	selectedAgentProfile,
 	createSessionDisabled = false,
@@ -129,6 +138,7 @@ export function TraceTimeline({
 							Execution Flow
 						</h2>
 						{originSession ? <OriginSessionButton originSession={originSession} onOpenSession={onOpenSession} /> : null}
+						<DerivedSessionsButton sessions={derivedSessions} onOpenSession={onOpenSession} />
 					</div>
 					<SessionBreadcrumbs items={sessionBreadcrumbs} onOpenSession={onOpenSession} />
 					<AgentSessionControls
@@ -169,6 +179,7 @@ export function TraceTimeline({
 						{sessionAgentProfile ? <Badge color="transparent">{sessionAgentProfile}</Badge> : null}
 						{stats.error > 0 ? <Badge color="orange">{stats.error} Errors</Badge> : null}
 						{originSession ? <OriginSessionButton originSession={originSession} onOpenSession={onOpenSession} /> : null}
+						<DerivedSessionsButton sessions={derivedSessions} onOpenSession={onOpenSession} />
 					</div>
 					<div className="col-start-2 min-w-0">
 						<SessionBreadcrumbs items={sessionBreadcrumbs} onOpenSession={onOpenSession} />
@@ -264,6 +275,64 @@ export function TraceTimeline({
 				</button>
 			) : null}
 		</section>
+	);
+}
+
+function DerivedSessionsButton({
+	sessions,
+	onOpenSession,
+}: {
+	sessions: readonly SessionDerivationLink[];
+	onOpenSession: (piboSessionId: string) => void;
+}) {
+	const [open, setOpen] = useState(false);
+	if (!sessions.length) return null;
+
+	return (
+		<div className="relative">
+			<button
+				type="button"
+				onClick={() => setOpen((current) => !current)}
+				title={`${sessions.length} fork${sessions.length === 1 ? "" : "s"} from this session`}
+				aria-label={`${sessions.length} fork${sessions.length === 1 ? "" : "s"} from this session`}
+				aria-expanded={open}
+				className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-sm border border-[#a855f7]/50 bg-[#a855f7]/10 text-[#a855f7] transition-colors hover:border-[#a855f7] hover:bg-[#a855f7]/15"
+			>
+				<GitFork size={13} />
+			</button>
+			{open ? (
+				<div className="absolute left-0 top-7 z-50 w-72 overflow-hidden rounded-sm border border-slate-700 bg-[#151f24] shadow-xl shadow-black/40">
+					<div className="border-b border-slate-800 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+						Forks
+					</div>
+					<div className="max-h-64 overflow-y-auto p-1">
+						{sessions.map((session) => (
+							<button
+								key={session.piboSessionId}
+								type="button"
+								onClick={() => {
+									setOpen(false);
+									onOpenSession(session.piboSessionId);
+								}}
+								className="grid w-full grid-cols-[8px_minmax(0,1fr)] items-center gap-2 rounded-sm px-2 py-2 text-left text-slate-300 hover:bg-[#1a262b]"
+							>
+								<span
+									className={`h-2 w-2 rounded-full ${
+										session.status === "running" ? "bg-[#0bda57]" : session.status === "error" ? "bg-red-500" : "bg-slate-600"
+									}`}
+								/>
+								<span className="min-w-0">
+									<span className="block truncate text-xs font-semibold text-slate-200">{session.label}</span>
+									<span className="block truncate font-mono text-[10px] text-slate-500">
+										{session.profile} · {session.piboSessionId}
+									</span>
+								</span>
+							</button>
+						))}
+					</div>
+				</div>
+			) : null}
+		</div>
 	);
 }
 

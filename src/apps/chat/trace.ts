@@ -8,6 +8,15 @@ import { isChatWebSessionArchived } from "./session-metadata.js";
 
 export type PiboWebSessionStatus = "idle" | "running" | "error";
 
+export type PiboWebDerivedSessionNode = {
+	piboSessionId: string;
+	profile: string;
+	subagentName?: string;
+	title: string;
+	status: PiboWebSessionStatus;
+	lastActivityAt?: string;
+};
+
 export type PiboWebSessionNode = {
 	piboSessionId: string;
 	piSessionId: string;
@@ -21,6 +30,7 @@ export type PiboWebSessionNode = {
 	status: PiboWebSessionStatus;
 	lastActivityAt?: string;
 	unreadCount?: number;
+	derivedSessions: PiboWebDerivedSessionNode[];
 	children: PiboWebSessionNode[];
 };
 
@@ -178,6 +188,7 @@ export async function buildSessionNodes(
 			status: indexed?.status ?? "idle",
 			lastActivityAt: indexed?.lastActivityAt ?? metadata.modified ?? session.updatedAt,
 			unreadCount: unreadCounts.get(session.id) || undefined,
+			derivedSessions: [],
 			children: [],
 		});
 	}
@@ -192,9 +203,26 @@ export async function buildSessionNodes(
 		}
 	}
 
+	for (const node of nodes.values()) {
+		if (!node.originId) continue;
+		const origin = nodes.get(node.originId);
+		if (!origin) continue;
+		origin.derivedSessions.push({
+			piboSessionId: node.piboSessionId,
+			profile: node.profile,
+			subagentName: node.subagentName,
+			title: node.title,
+			status: node.status,
+			lastActivityAt: node.lastActivityAt,
+		});
+	}
+
 	const sortNodes = (items: PiboWebSessionNode[]): void => {
 		items.sort((left, right) => (right.lastActivityAt ?? "").localeCompare(left.lastActivityAt ?? ""));
-		for (const item of items) sortNodes(item.children);
+		for (const item of items) {
+			item.derivedSessions.sort((left, right) => (right.lastActivityAt ?? "").localeCompare(left.lastActivityAt ?? ""));
+			sortNodes(item.children);
+		}
 	};
 	sortNodes(roots);
 	return roots;

@@ -63,7 +63,17 @@ export type PiboWebSessionNode = {
 	status: "idle" | "running" | "error";
 	lastActivityAt?: string;
 	unreadCount?: number;
+	derivedSessions: PiboWebDerivedSessionNode[];
 	children: PiboWebSessionNode[];
+};
+
+export type PiboWebDerivedSessionNode = {
+	piboSessionId: string;
+	profile: string;
+	subagentName?: string;
+	title: string;
+	status: "idle" | "running" | "error";
+	lastActivityAt?: string;
 };
 
 export type PiboRoom = {

@@ -28,7 +28,7 @@ import {
 import { deleteCustomAgent, deleteRoom, deleteSession, getBootstrap, getTrace, patchCustomAgent, patchRoom, patchSession, postAction, postCustomAgent, postMessage, postRoom, postSession, signInWithGoogle, signOut, type SaveCustomAgentInput } from "./api";
 import type { AgentCatalog, BootstrapData, CustomAgent, CustomAgentSubagent, PiboRoom, PiboSessionTraceView, PiboTraceNode, PiboTraceOrderKey, PiboWebSessionNode } from "./types";
 import { adaptTrace } from "./tracing/adapt";
-import { TraceTimeline, type SessionBreadcrumbItem, type SessionOriginLink } from "./tracing/TraceTimeline";
+import { TraceTimeline, type SessionBreadcrumbItem, type SessionDerivationLink, type SessionOriginLink } from "./tracing/TraceTimeline";
 import { JsonRenderer } from "./tracing/JsonRenderer";
 import { countRender } from "./renderMetrics";
 import { childTraceOrder, compareTraceOrder, liveTraceOrder } from "../../../shared/trace-order.js";
@@ -344,6 +344,10 @@ export function App({ route }: { route: ChatAppRoute }) {
 	);
 	const originSession = useMemo(
 		() => selectedPiboSessionId ? createOriginSessionLink(bootstrap?.sessions ?? [], selectedPiboSessionId) : undefined,
+		[bootstrap?.sessions, selectedPiboSessionId],
+	);
+	const derivedSessions = useMemo(
+		() => selectedPiboSessionId ? createDerivedSessionLinks(bootstrap?.sessions ?? [], selectedPiboSessionId) : [],
 		[bootstrap?.sessions, selectedPiboSessionId],
 	);
 
@@ -914,6 +918,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 								sessionAgentProfile={bootstrap.session.profile}
 								sessionBreadcrumbs={sessionBreadcrumbs}
 								originSession={originSession}
+								derivedSessions={derivedSessions}
 								agentProfiles={bootstrap.agents}
 								selectedAgentProfile={newSessionProfile}
 								createSessionDisabled={creatingSession || selectedRoomArchived}
@@ -1568,6 +1573,16 @@ function createOriginSessionLink(nodes: PiboWebSessionNode[], piboSessionId: str
 	};
 }
 
+function createDerivedSessionLinks(nodes: PiboWebSessionNode[], piboSessionId: string): SessionDerivationLink[] {
+	const selected = findSessionNode(nodes, piboSessionId);
+	return selected?.derivedSessions.map((session) => ({
+		piboSessionId: session.piboSessionId,
+		label: sessionLabel(session),
+		profile: session.profile,
+		status: session.status,
+	})) ?? [];
+}
+
 function createSessionBreadcrumbs(nodes: PiboWebSessionNode[], piboSessionId: string): SessionBreadcrumbItem[] {
 	const path = findSessionPath(nodes, piboSessionId);
 	return path.map((node, index) => ({
@@ -1603,6 +1618,11 @@ function sessionBreadcrumbLabel(node: PiboWebSessionNode, index: number): string
 	if (!index) return node.profile || node.title;
 	if (node.subagentName && node.subagentName !== node.profile) return `${node.subagentName} (${node.profile})`;
 	return node.profile || node.subagentName || node.title;
+}
+
+function sessionLabel(session: Pick<PiboWebSessionNode, "title" | "profile" | "subagentName">): string {
+	if (session.subagentName && session.subagentName !== session.profile) return `${session.subagentName} (${session.profile})`;
+	return session.title || session.profile || session.subagentName || "Untitled Session";
 }
 
 function splitSessionNodesByArchive(nodes: PiboWebSessionNode[]): {
