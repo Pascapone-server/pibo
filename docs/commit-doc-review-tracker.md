@@ -12,13 +12,13 @@ Scope: Last 10 commits on the current branch, metadata only. No diff review yet.
 
 ### 1. `0c43da5` - Merge chat web performance improvements
 
-- Review status: `todo`
-- Documentation follow-up: `tbd`
+- Review status: `done`
+- Documentation follow-up: `none`
 - Date: `2026-05-01T21:22:33+02:00`
 - Author: `pibo`
 - Full hash: `0c43da53e573a36ca7aa810f2cbacf1b81c4eb0c`
 - Description: `-`
-- Notes: `-`
+- Notes: `Merge commit only. The underlying performance changes were reviewed and documented under `cb852fb`.`
 
 ### 2. `cb852fb` - Improve chat web trace and asset performance
 
