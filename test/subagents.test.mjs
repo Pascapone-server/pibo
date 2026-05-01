@@ -151,6 +151,7 @@ test("subagent runner emits a parent link event before waiting for the child rep
 		kind: "chat",
 		profile: "pibo-run-yield-qa",
 		ownerScope: "user:test",
+		metadata: { chatRoomId: "room_parent" },
 	});
 	const router = new PiboSessionRouter({ persistSession: false, sessionStore: store });
 	const events = [];
@@ -179,6 +180,7 @@ test("subagent runner emits a parent link event before waiting for the child rep
 		assert.equal(linkEvent.childPiboSessionId, result.piboSessionId);
 		assert.equal(linkEvent.threadKey, "qa");
 		assert.equal(store.get(result.piboSessionId).parentId, "ps_parent");
+		assert.equal(store.get(result.piboSessionId).metadata.chatRoomId, "room_parent");
 	} finally {
 		await router.disposeAll();
 	}

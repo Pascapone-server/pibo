@@ -305,6 +305,13 @@ export class ChatEventLog {
 		return Number(result.changes ?? 0);
 	}
 
+	deleteRooms(roomIds: string[]): number {
+		if (!roomIds.length) return 0;
+		const placeholders = roomIds.map(() => "?").join(", ");
+		const result = this.db.prepare(`DELETE FROM chat_events WHERE room_id IN (${placeholders})`).run(...roomIds);
+		return Number(result.changes ?? 0);
+	}
+
 	upsertRetentionPolicy(policy: ChatRetentionPolicy): ChatRetentionPolicy {
 		this.db
 			.prepare(`

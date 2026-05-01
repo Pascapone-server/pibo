@@ -70,6 +70,7 @@ This specification does not require migration of existing prototype data.
 - **REQ-020**: Room-scoped session listing must filter by structured `metadata.chatRoomId` and owner access, not by parsing session ids.
 - **REQ-021**: A Pibo Room may contain multiple top-level Pibo Sessions; subagent nesting inside that room still follows `parentId`.
 - **REQ-022**: Pibo Room access and membership are Chat Web product concepts and must not be moved into Pi Session identity.
+- **REQ-023**: When a subagent session is created from a parent Pibo Session that has `metadata.chatRoomId`, the subagent session must inherit the same `metadata.chatRoomId`.
 - **CON-001**: No backward-compatible data migration is required for existing prototype data.
 - **CON-002**: `channel` and `kind` must be open strings, not TypeScript union types.
 - **CON-003**: Plugin-specific state must not require new core database columns.
@@ -325,6 +326,7 @@ Subagent:
 - **AC-011**: Given a room-scoped bootstrap request, When the selected room contains multiple sessions, Then only sessions with matching `metadata.chatRoomId` are returned.
 - **AC-012**: Given a session has no `metadata.chatRoomId`, When the default room is selected during the migration bridge period, Then the session may be treated as belonging to the default room and should be updated with the default room id when practical.
 - **AC-013**: Given a session belongs to Room A, When a message request supplies Room B, Then the request is rejected.
+- **AC-014**: Given a parent session belongs to Room A, When a subagent child session is created, Then the child session metadata contains Room A's `chatRoomId`.
 
 ## 6. Test Automation Strategy
 
@@ -442,6 +444,7 @@ The new fork behavior is intentionally product-centric: forking creates a new vi
   "ownerScope": "user:bIibEngJFSvdfQAlDbk43djVBG6Zr2Qc",
   "parentId": "ps_7e7d5a0f-2d65-4538-b876-8a12e89f58f1",
   "metadata": {
+    "chatRoomId": "room_2a3c",
     "subagentName": "researcher",
     "threadKey": "auth-plan"
   }

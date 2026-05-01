@@ -35,7 +35,7 @@ Pibo is a minimal TypeScript wrapper around Pi Coding Agent. This file is a shor
 - The local routed TUI adapter lives in `src/local/` and uses an in-process router instead of a gateway daemon.
 - An authenticated web gateway path exists through `npm run gateway:web`, split into Better Auth, a same-origin web host, and the chat web app.
 - The Chat Web App can create, rename, archive, restore, and permanently delete personal sessions after `Delete this session` confirmation; session deletion also removes child sessions and their Chat Web read-model/event-log rows. It reconstructs trace nodes from Pi JSONL plus raw Pibo events; groups persisted tool calls under the final assistant response; filters empty reasoning artifacts from trace output; and streams compact AG-UI-inspired SSE frames into running trace nodes.
-- The Chat Web App now has Pibo Rooms, a personal default room on first bootstrap, room-scoped session lists, durable `chat_events`, cursor-based unread badges for rooms and sessions, frame-specific SSE catch-up cursors, and idempotent sends through `clientTxnId`.
+- The Chat Web App now has Pibo Rooms, a locked personal default room on first bootstrap, room-scoped session lists, room archive/restore/delete flows, durable `chat_events`, cursor-based unread badges for rooms and sessions, frame-specific SSE catch-up cursors, and idempotent sends through `clientTxnId`. Archived rooms remain inspectable but are read-only; permanent room deletion requires exact room-name confirmation and deletes contained sessions plus subagent session descendants.
 - The Chat Web trace UI defaults to expansion depth `1`, provides compact icon controls for default, collapse all, expand all, and expand to nesting level, and keeps top-level messages readable without opening nested tool details.
 - The Chat Web composer starts as a one-line input, grows through five visible lines, scrolls internally afterward, preserves cursor position during normal edits, keeps the slash command selection scrolled into view, and uses a bottom-aligned send icon button.
 - The Chat Web raw event inspector is hidden behind an explicit debug toggle and compacts adjacent assistant/thinking deltas with the same `eventId` for readability.
@@ -101,10 +101,10 @@ channel: pibo.subagents
 kind: subagent
 parentId: <parent Pibo Session ID>
 profile: <target profile>
-metadata: { subagentName, subagentToolName, threadKey }
+metadata: { subagentName, subagentToolName, threadKey, chatRoomId }
 ```
 
-Omitting `threadKey` creates a fresh child session. Reusing the same parent, target profile, subagent metadata, and `threadKey` continues the same child session, which keeps subagent work inspectable and multi-turn. Subagent tools are synchronous normal tools; long-running subagent work is yielded by wrapping the subagent tool with `pibo_run_start`.
+Omitting `threadKey` creates a fresh child session. Reusing the same parent, target profile, subagent metadata, and `threadKey` continues the same child session, which keeps subagent work inspectable and multi-turn. When the parent belongs to a Chat Web room, the child inherits `chatRoomId`. Subagent tools are synchronous normal tools; long-running subagent work is yielded by wrapping the subagent tool with `pibo_run_start`.
 
 Profiles that expose yieldable tools can expose run-control tools through the `pibo-run-control` package. `pibo_run_start` wraps a yieldable tool call as a yielded run and returns a `runId`; `pibo_run_list`, `pibo_run_status`, `pibo_run_wait`, `pibo_run_read`, `pibo_run_cancel`, and `pibo_run_ack` manage the run afterward. Tracked runs are the default and remind the parent agent with compact `<pibo_run_notification>` service messages until they are read, cancelled, or acknowledged. Detached runs are explicit fire-and-forget work and do not create automatic reminders.
 

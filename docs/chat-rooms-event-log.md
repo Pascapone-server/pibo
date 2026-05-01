@@ -30,6 +30,8 @@ The default room is named `Personal Chat` and is stored in `.pibo/web-chat.sqlit
 
 This means a brand-new user should always land in a usable personal room with a writable selected session. No manual room creation is required for first use.
 
+The personal room is locked. It is visually separated from user-created rooms in the sidebar and cannot be renamed, archived, or deleted.
+
 ## Data Model
 
 Chat room data is stored in `.pibo/web-chat.sqlite`.
@@ -53,6 +55,27 @@ Chat room data is stored in `.pibo/web-chat.sqlite`.
 - last read stream id
 
 `chat_events` stores durable room/session events with a monotone `stream_id`. It records user accepts/failures, router output events, event type, actor, optional `client_txn_id`, retention class, and JSON payload.
+
+Room archive state is stored in room metadata as `chatRoomArchivedAt`. A room with this metadata remains readable but is not writable.
+
+## Room Lifecycle
+
+User-created rooms have an archive-first lifecycle:
+
+1. Active rooms can receive new sessions and messages.
+2. Archived rooms remain selectable and display their contained sessions.
+3. Archived rooms are read-only. The server rejects new session creation, message sends, room-scoped messages, and execution actions for sessions in archived rooms.
+4. Only archived, non-personal rooms can be permanently deleted.
+
+Permanent deletion requires the exact room name as confirmation. Deleting a room removes:
+
+- the selected room and child rooms
+- sessions whose `PiboSession.metadata.chatRoomId` points into that room subtree
+- descendant sessions of those sessions, including subagent sessions
+- Chat Web read-model rows for those sessions
+- durable `chat_events` rows for deleted rooms and sessions
+
+Subagent sessions inherit the parent session's `metadata.chatRoomId`, so subagent work stays visible in the same room and is included in room deletion.
 
 ## Unread State
 
@@ -120,11 +143,15 @@ Heartbeat comments keep stale connections detectable.
 
 The Chat Web App sidebar shows:
 
-- Rooms first.
+- The locked `Personal Chat` room first.
+- User-created rooms below it.
+- Archived rooms behind an explicit archived-room display control.
 - Sessions for the selected room below.
 - Subsessions under their parent session when present.
 
 Selecting a room clears the previous selected session in the client, asks `/api/chat/bootstrap?roomId=...` for the room-scoped default selection, and disables the composer until the new selected session is ready.
+
+Selecting an archived room asks bootstrap for that archived room and still returns the room-scoped session tree when sessions exist. The composer and new-session controls stay disabled while the archived room is selected.
 
 The composer sends messages to the selected session and active room. On non-secure LAN origins where `crypto.randomUUID()` is unavailable, the UI falls back to a timestamp/random client transaction id so sends still work.
 

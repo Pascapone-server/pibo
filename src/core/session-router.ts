@@ -427,33 +427,53 @@ export class PiboSessionRouter {
 		subagent: SubagentProfile,
 		threadKey?: string,
 	): PiboSession {
-		const targetProfile = this.pluginRegistry.resolveProfileName(subagent.targetProfile);
-		const parent = this.resolvePiboSession(parentPiboSessionId);
-		const resolvedThreadKey = threadKey?.trim() ? threadKey.trim() : randomUUID();
-		const metadata: PiboJsonObject = {
-			subagentName: subagent.name,
-			subagentToolName: createSubagentToolName(subagent.name),
-			threadKey: resolvedThreadKey,
-		};
-		const existing = this.sessionStore.find({
-			channel: "pibo.subagents",
-			kind: "subagent",
-			parentId: parent.id,
-			profile: targetProfile,
-			metadata,
-		})[0];
-		if (existing) return existing;
+			const targetProfile = this.pluginRegistry.resolveProfileName(subagent.targetProfile);
+			const parent = this.resolvePiboSession(parentPiboSessionId);
+			const resolvedThreadKey = threadKey?.trim() ? threadKey.trim() : randomUUID();
+			const metadata: PiboJsonObject = {
+				subagentName: subagent.name,
+				subagentToolName: createSubagentToolName(subagent.name),
+				threadKey: resolvedThreadKey,
+			};
+			const parentChatRoomId = typeof parent.metadata?.chatRoomId === "string" ? parent.metadata.chatRoomId : undefined;
+			if (parentChatRoomId) metadata.chatRoomId = parentChatRoomId;
+			const legacyMetadata: PiboJsonObject = parentChatRoomId
+				? {
+						subagentName: subagent.name,
+						subagentToolName: createSubagentToolName(subagent.name),
+						threadKey: resolvedThreadKey,
+					}
+				: metadata;
+			const existing = this.sessionStore.find({
+				channel: "pibo.subagents",
+				kind: "subagent",
+				parentId: parent.id,
+				profile: targetProfile,
+				metadata,
+			})[0] ?? this.sessionStore.find({
+				channel: "pibo.subagents",
+				kind: "subagent",
+				parentId: parent.id,
+				profile: targetProfile,
+				metadata: legacyMetadata,
+			})[0];
+			if (existing) {
+				if (parentChatRoomId && existing.metadata?.chatRoomId !== parentChatRoomId) {
+					return this.sessionStore.update(existing.id, { metadata: { ...(existing.metadata ?? {}), chatRoomId: parentChatRoomId } }) ?? existing;
+				}
+				return existing;
+			}
 
-		return this.sessionStore.create({
-			channel: "pibo.subagents",
-			kind: "subagent",
-			profile: targetProfile,
-			ownerScope: parent.ownerScope,
-			parentId: parent.id,
-			workspace: parent.workspace,
-			metadata,
-		});
-	}
+			return this.sessionStore.create({
+				channel: "pibo.subagents",
+				kind: "subagent",
+				profile: targetProfile,
+				ownerScope: parent.ownerScope,
+				parentId: parent.id,
+				workspace: parent.workspace,
+				metadata,
+			});
+		}
 
 	private readonly emitOutput = (event: PiboOutputEvent): void => {
 		this.pluginRegistry.notifyEvent(event);

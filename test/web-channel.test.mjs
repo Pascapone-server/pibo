@@ -280,6 +280,182 @@ test("chat web app scopes bootstrap sessions to the selected room", async () => 
 	}
 });
 
+test("chat web app keeps the personal room locked", async () => {
+	const { channel, baseURL } = await startWebHostChannel({
+		auth: createFakeAuthService(),
+	});
+
+	try {
+		const sessionResponse = await fetch(`${baseURL}/api/chat/session`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(sessionResponse.status, 200);
+		const sessionPayload = await sessionResponse.json();
+		const room = sessionPayload.room;
+
+		const patchResponse = await fetch(`${baseURL}/api/chat/rooms/${encodeURIComponent(room.id)}`, {
+			method: "PATCH",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({ name: "Renamed Personal Chat" }),
+		});
+		assert.equal(patchResponse.status, 400);
+
+		const archiveResponse = await fetch(`${baseURL}/api/chat/rooms/${encodeURIComponent(room.id)}`, {
+			method: "PATCH",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({ archived: true }),
+		});
+		assert.equal(archiveResponse.status, 400);
+
+		const deleteResponse = await fetch(`${baseURL}/api/chat/rooms/${encodeURIComponent(room.id)}`, {
+			method: "DELETE",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({ confirmName: room.name }),
+		});
+		assert.equal(deleteResponse.status, 400);
+	} finally {
+		await channel.stop?.();
+	}
+});
+
+test("chat web app archives and deletes rooms with contained session subtrees", async () => {
+	const { channel, baseURL, sessions } = await startWebHostChannel({
+		auth: createFakeAuthService(),
+	});
+
+	try {
+		const roomResponse = await fetch(`${baseURL}/api/chat/rooms`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({ name: "Project Room" }),
+		});
+		assert.equal(roomResponse.status, 201);
+		const roomPayload = await roomResponse.json();
+		const room = roomPayload.room;
+
+		const sessionResponse = await fetch(`${baseURL}/api/chat/bootstrap?roomId=${encodeURIComponent(room.id)}`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(sessionResponse.status, 200);
+		const sessionPayload = await sessionResponse.json();
+		const parent = sessionPayload.session;
+		const child = sessions.create({
+			channel: "pibo.subagents",
+			kind: "subagent",
+			profile: parent.profile,
+			ownerScope: parent.ownerScope,
+			parentId: parent.id,
+			metadata: { chatRoomId: room.id },
+		});
+
+		const deleteBeforeArchive = await fetch(`${baseURL}/api/chat/rooms/${encodeURIComponent(room.id)}`, {
+			method: "DELETE",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({ confirmName: room.name }),
+		});
+		assert.equal(deleteBeforeArchive.status, 400);
+
+		const archiveResponse = await fetch(`${baseURL}/api/chat/rooms/${encodeURIComponent(room.id)}`, {
+			method: "PATCH",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({ archived: true }),
+		});
+		assert.equal(archiveResponse.status, 200);
+		const archivePayload = await archiveResponse.json();
+		assert.equal(typeof archivePayload.room.metadata.chatRoomArchivedAt, "string");
+
+		const archivedBootstrap = await fetch(
+			`${baseURL}/api/chat/bootstrap?roomId=${encodeURIComponent(room.id)}&piboSessionId=${encodeURIComponent(parent.id)}`,
+			{
+				headers: { "x-test-user": "user-1" },
+			},
+		);
+		assert.equal(archivedBootstrap.status, 200);
+		const archivedBootstrapPayload = await archivedBootstrap.json();
+		assert.equal(archivedBootstrapPayload.selectedRoomId, room.id);
+		assert.equal(archivedBootstrapPayload.selectedPiboSessionId, parent.id);
+		assert.equal(
+			archivedBootstrapPayload.sessions.some((session) => session.piboSessionId === parent.id),
+			true,
+		);
+
+		const createInArchivedRoom = await fetch(`${baseURL}/api/chat/sessions`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({ roomId: room.id }),
+		});
+		assert.equal(createInArchivedRoom.status, 403);
+
+		const messageInArchivedRoom = await fetch(`${baseURL}/api/chat/message`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({
+				roomId: room.id,
+				piboSessionId: parent.id,
+				text: "Should stay read-only",
+				clientTxnId: "archived-room-message",
+			}),
+		});
+		assert.equal(messageInArchivedRoom.status, 403);
+
+		const deleteResponse = await fetch(`${baseURL}/api/chat/rooms/${encodeURIComponent(room.id)}`, {
+			method: "DELETE",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({ confirmName: room.name }),
+		});
+		assert.equal(deleteResponse.status, 200);
+		const deletePayload = await deleteResponse.json();
+		assert.deepEqual(new Set(deletePayload.deletedSessionIds), new Set([parent.id, child.id]));
+		assert.equal(sessions.get(parent.id), undefined);
+		assert.equal(sessions.get(child.id), undefined);
+
+		const roomsResponse = await fetch(`${baseURL}/api/chat/rooms`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(roomsResponse.status, 200);
+		const roomsPayload = await roomsResponse.json();
+		assert.equal(roomsPayload.rooms.some((item) => item.id === room.id), false);
+	} finally {
+		await channel.stop?.();
+	}
+});
+
 test("chat web app exposes unread room and session counts", async () => {
 	const { channel, baseURL, emitOutput } = await startWebHostChannel({
 		auth: createFakeAuthService(),

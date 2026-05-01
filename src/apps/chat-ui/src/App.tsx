@@ -13,6 +13,7 @@ import {
 	EyeOff,
 	FolderPlus,
 	Layers,
+	Lock,
 	LogOut,
 	MessageSquarePlus,
 	Plus,
@@ -24,7 +25,7 @@ import {
 	UserRound,
 	X,
 } from "lucide-react";
-import { deleteCustomAgent, deleteSession, getBootstrap, getTrace, patchCustomAgent, patchRoom, patchSession, postAction, postCustomAgent, postMessage, postRoom, postSession, signInWithGoogle, signOut, type SaveCustomAgentInput } from "./api";
+import { deleteCustomAgent, deleteRoom, deleteSession, getBootstrap, getTrace, patchCustomAgent, patchRoom, patchSession, postAction, postCustomAgent, postMessage, postRoom, postSession, signInWithGoogle, signOut, type SaveCustomAgentInput } from "./api";
 import type { AgentCatalog, BootstrapData, CustomAgent, CustomAgentSubagent, PiboRoom, PiboSessionTraceView, PiboTraceNode, PiboWebSessionNode } from "./types";
 import { adaptTrace } from "./tracing/adapt";
 import { TraceTimeline } from "./tracing/TraceTimeline";
@@ -75,11 +76,15 @@ export function App({ route }: { route: ChatAppRoute }) {
 	const [expandThinking, setExpandThinking] = useState(() => localStorage.getItem("pibo.chat.expandThinking") !== "false");
 	const [showRawEvents, setShowRawEvents] = useState(() => localStorage.getItem("pibo.chat.showRawEvents") === "true");
 	const [showArchived, setShowArchived] = useState(() => localStorage.getItem("pibo.chat.showArchived") === "true");
+	const [showArchivedRooms, setShowArchivedRooms] = useState(() => localStorage.getItem("pibo.chat.showArchivedRooms") === "true");
 	const [newSessionProfile, setNewSessionProfile] = useState(() => localStorage.getItem("pibo.chat.newSessionProfile") ?? "");
 	const [composerText, setComposerText] = useState("");
 	const [composerFocusSignal, setComposerFocusSignal] = useState(0);
 	const [creatingSession, setCreatingSession] = useState(false);
 	const [creatingRoom, setCreatingRoom] = useState(false);
+	const [deleteRoomTarget, setDeleteRoomTarget] = useState<PiboRoom | null>(null);
+	const [deleteRoomConfirmName, setDeleteRoomConfirmName] = useState("");
+	const [deletingRoom, setDeletingRoom] = useState(false);
 	const [deleteSessionTarget, setDeleteSessionTarget] = useState<PiboWebSessionNode | null>(null);
 	const [deleteSessionConfirmText, setDeleteSessionConfirmText] = useState("");
 	const [deletingSession, setDeletingSession] = useState(false);
@@ -90,6 +95,9 @@ export function App({ route }: { route: ChatAppRoute }) {
 	const traceViewSessionId = useRef<string | null>(null);
 	const pendingStreamEventsBySession = useRef(new Map<string, ChatStreamEvent[]>());
 	const pendingStreamFrame = useRef<number | undefined>(undefined);
+	const activeRoomId = selectedRoomId ?? bootstrap?.selectedRoomId ?? null;
+	const selectedRoom = activeRoomId && bootstrap ? findRoomById(bootstrap.rooms, activeRoomId) ?? bootstrap.room : undefined;
+	const selectedRoomArchived = selectedRoom ? isArchivedRoom(selectedRoom) : false;
 
 	useEffect(() => {
 		showArchivedRef.current = showArchived;
@@ -396,7 +404,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 	}, [loadBootstrap, navigateToSelectedSession]);
 
 	const createSession = async (profile = newSessionProfile) => {
-		if (creatingSession) return;
+		if (creatingSession || selectedRoomArchived) return;
 		setCreatingSession(true);
 		try {
 			const created = await postSession(profile || undefined, selectedRoomId ?? undefined);
@@ -524,8 +532,50 @@ export function App({ route }: { route: ChatAppRoute }) {
 		}
 	};
 
+	const setRoomArchived = async (roomId: string, archived: boolean) => {
+		try {
+			await patchRoom(roomId, { archived });
+			if (archived) {
+				setShowArchivedRooms(true);
+				localStorage.setItem("pibo.chat.showArchivedRooms", "true");
+			}
+			const data = await loadBootstrap(selectedPiboSessionId ?? undefined, showArchivedRef.current, selectedRoomId ?? undefined);
+			if (area === "sessions") navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
+			setError(null);
+		} catch (caught) {
+			setError(caught instanceof Error ? caught.message : String(caught));
+		}
+	};
+
+	const requestRoomDelete = (room: PiboRoom) => {
+		setDeleteRoomTarget(room);
+		setDeleteRoomConfirmName("");
+	};
+
+	const permanentlyDeleteRoom = async () => {
+		if (!deleteRoomTarget) return;
+		setDeletingRoom(true);
+		try {
+			await deleteRoom(deleteRoomTarget.id, deleteRoomConfirmName);
+			if (selectedRoomId === deleteRoomTarget.id) {
+				setSelectedRoomId(null);
+				setSelectedPiboSessionId(null);
+				setTraceView(null);
+			}
+			const data = await loadBootstrap(undefined, showArchivedRef.current);
+			if (area === "sessions") navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
+			setDeleteRoomTarget(null);
+			setDeleteRoomConfirmName("");
+			setError(null);
+		} catch (caught) {
+			setError(caught instanceof Error ? caught.message : String(caught));
+		} finally {
+			setDeletingRoom(false);
+		}
+	};
+
 	const runCommand = async (text: string) => {
-		if (!selectedPiboSessionId) return false;
+		if (!selectedPiboSessionId || selectedRoomArchived) return false;
 		const commandText = text.trim().split(/\s+/)[0];
 		const command = slashCommands.find((candidate) => candidate.slash === commandText);
 		if (!command) return false;
@@ -549,7 +599,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 	};
 
 	const forkFrom = useCallback(async (entryId: string) => {
-		if (!selectedPiboSessionId) return;
+		if (!selectedPiboSessionId || selectedRoomArchived) return;
 		const result = parseForkActionResponse(await postAction(selectedPiboSessionId, "session.fork", { entryId }));
 		if (result?.result.cancelled) return;
 		if (!result) throw new Error("Unexpected fork action response");
@@ -560,7 +610,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 		if (result.result.piboSessionId) {
 			await selectSession(result.result.piboSessionId);
 		}
-	}, [selectSession, selectedPiboSessionId]);
+	}, [selectSession, selectedPiboSessionId, selectedRoomArchived]);
 
 	const openSession = useCallback((piboSessionId: string) => void selectSession(piboSessionId), [selectSession]);
 
@@ -573,6 +623,8 @@ export function App({ route }: { route: ChatAppRoute }) {
 	}
 	const roomsSupported = Boolean(bootstrap.selectedRoomId || bootstrap.room || bootstrap.rooms.length);
 	const sessionGroups = splitSessionNodesByArchive(bootstrap.sessions);
+	const personalRoom = findPersonalRoom(bootstrap.rooms);
+	const roomGroups = splitRoomNodes(bootstrap.rooms);
 
 	return (
 		<div className="h-screen overflow-hidden bg-[#101d22] text-slate-200 grid grid-rows-[56px_1fr]">
@@ -627,7 +679,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 						}}
 						onCreateSession={(profile) => void createSession(profile)}
 						onAgentsChanged={() => void loadBootstrap(selectedPiboSessionId ?? undefined, showArchivedRef.current, selectedRoomId ?? undefined, { selectSession: false })}
-						creatingSession={creatingSession}
+						creatingSession={creatingSession || selectedRoomArchived}
 					/>
 				) : (
 				<>
@@ -651,7 +703,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 								<button
 									type="button"
 									onClick={() => void createSession()}
-									disabled={creatingSession}
+									disabled={creatingSession || selectedRoomArchived}
 									title="New Session"
 									aria-label="New Session"
 									className="p-1 border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4] disabled:opacity-50"
@@ -689,20 +741,68 @@ export function App({ route }: { route: ChatAppRoute }) {
 					</div>
 					{area === "sessions" ? (
 						<div className="p-2 space-y-3">
-							{roomsSupported ? (
-								<div>
-									<div className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Rooms</div>
-									{bootstrap.rooms.map((room) => (
-										<RoomNode
-											key={room.id}
-											room={room}
-											selectedRoomId={selectedRoomId}
-											onSelect={(roomId) => void selectRoom(roomId)}
-											onUpdate={(roomId, input) => void updateRoom(roomId, input)}
-										/>
-									))}
-								</div>
-							) : null}
+								{roomsSupported ? (
+									<div>
+										{personalRoom ? (
+											<div className="mb-3">
+												<div className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Personal Chat</div>
+												<RoomNode
+													room={personalRoom}
+													selectedRoomId={selectedRoomId}
+													onSelect={(roomId) => void selectRoom(roomId)}
+													onUpdate={(roomId, input) => void updateRoom(roomId, input)}
+													onArchive={(roomId, archived) => void setRoomArchived(roomId, archived)}
+													onDelete={requestRoomDelete}
+												/>
+											</div>
+										) : null}
+										<div className="flex items-center justify-between gap-2 px-1 pb-1">
+											<div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Rooms</div>
+											<button
+												type="button"
+												onClick={() => {
+													const next = !showArchivedRooms;
+													setShowArchivedRooms(next);
+													localStorage.setItem("pibo.chat.showArchivedRooms", String(next));
+												}}
+												title={showArchivedRooms ? "Hide Archived Rooms" : "Show Archived Rooms"}
+												aria-label={showArchivedRooms ? "Hide Archived Rooms" : "Show Archived Rooms"}
+												className={`h-6 w-6 inline-flex items-center justify-center border rounded-sm hover:border-[#11a4d4] hover:text-[#11a4d4] ${showArchivedRooms ? "border-[#11a4d4] text-[#11a4d4]" : "border-slate-700 text-slate-400"}`}
+											>
+												{showArchivedRooms ? <ArchiveRestore size={12} /> : <Archive size={12} />}
+											</button>
+										</div>
+										{roomGroups.active.map((room) => (
+											<RoomNode
+												key={room.id}
+												room={room}
+												selectedRoomId={selectedRoomId}
+												onSelect={(roomId) => void selectRoom(roomId)}
+												onUpdate={(roomId, input) => void updateRoom(roomId, input)}
+												onArchive={(roomId, archived) => void setRoomArchived(roomId, archived)}
+												onDelete={requestRoomDelete}
+											/>
+										))}
+										{roomGroups.active.length === 0 ? <div className="px-2 py-3 text-xs text-slate-500 border border-dashed border-slate-700 rounded-sm">No rooms</div> : null}
+										{showArchivedRooms ? (
+											<div className="mt-3">
+												<div className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Archived Rooms</div>
+												{roomGroups.archived.map((room) => (
+													<RoomNode
+														key={room.id}
+														room={room}
+														selectedRoomId={selectedRoomId}
+														onSelect={(roomId) => void selectRoom(roomId)}
+														onUpdate={(roomId, input) => void updateRoom(roomId, input)}
+														onArchive={(roomId, archived) => void setRoomArchived(roomId, archived)}
+														onDelete={requestRoomDelete}
+													/>
+												))}
+												{roomGroups.archived.length === 0 ? <div className="px-2 py-3 text-xs text-slate-500 border border-dashed border-slate-700 rounded-sm">No archived rooms</div> : null}
+											</div>
+										) : null}
+									</div>
+								) : null}
 							<div>
 								<div className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Sessions</div>
 								{sessionGroups.active.map((session) => (
@@ -806,14 +906,14 @@ export function App({ route }: { route: ChatAppRoute }) {
 								onOpenSession={openSession}
 							/>
 							<Composer
-								disabled={!selectedPiboSessionId}
+								disabled={!selectedPiboSessionId || selectedRoomArchived}
 								commands={slashCommands}
 								value={composerText}
 								focusSignal={composerFocusSignal}
 								onValueChange={setComposerText}
 								onCommand={runCommand}
 								onSend={async (text) => {
-									if (!selectedPiboSessionId) return;
+									if (!selectedPiboSessionId || selectedRoomArchived) return;
 									try {
 										await postMessage(selectedPiboSessionId, text, createClientTxnId(), selectedRoomId ?? undefined);
 										await loadBootstrap(selectedPiboSessionId, showArchivedRef.current, selectedRoomId ?? undefined);
@@ -835,8 +935,8 @@ export function App({ route }: { route: ChatAppRoute }) {
 					)}
 				</main>
 
-				{showRawEvents ? (
-					<aside className="min-h-0 overflow-auto bg-[#0e1116] border-l border-slate-800 max-[980px]:hidden">
+					{showRawEvents ? (
+						<aside className="min-h-0 overflow-auto bg-[#0e1116] border-l border-slate-800 max-[980px]:hidden">
 						<div className="h-11 px-3 border-b border-slate-800 flex items-center text-xs font-bold uppercase tracking-wider">Raw Events</div>
 						<div className="p-3 flex flex-col gap-2">
 							{rawEvents.slice(-80).reverse().map((event) => (
@@ -848,10 +948,23 @@ export function App({ route }: { route: ChatAppRoute }) {
 									<JsonRenderer value={event.payload} showControls={false} />
 								</div>
 							))}
-						</div>
-					</aside>
-				) : null}
-				{deleteSessionTarget ? (
+							</div>
+						</aside>
+					) : null}
+					{deleteRoomTarget ? (
+						<DeleteRoomModal
+							room={deleteRoomTarget}
+							confirmName={deleteRoomConfirmName}
+							deleting={deletingRoom}
+							onConfirmNameChange={setDeleteRoomConfirmName}
+							onCancel={() => {
+								setDeleteRoomTarget(null);
+								setDeleteRoomConfirmName("");
+							}}
+							onDelete={() => void permanentlyDeleteRoom()}
+						/>
+					) : null}
+					{deleteSessionTarget ? (
 					<DeleteSessionModal
 						session={deleteSessionTarget}
 						confirmText={deleteSessionConfirmText}
@@ -988,6 +1101,79 @@ function DeleteSessionModal({
 	);
 }
 
+function DeleteRoomModal({
+	room,
+	confirmName,
+	deleting,
+	onConfirmNameChange,
+	onCancel,
+	onDelete,
+}: {
+	room: PiboRoom;
+	confirmName: string;
+	deleting: boolean;
+	onConfirmNameChange: (value: string) => void;
+	onCancel: () => void;
+	onDelete: () => void;
+}) {
+	return (
+		<div className="fixed inset-0 z-50 bg-black/70 grid place-items-center p-4">
+			<div className="w-full max-w-lg border border-red-500/70 bg-[#1a262b] rounded-sm shadow-xl">
+				<div className="px-4 py-3 border-b border-red-500/50 flex items-center justify-between gap-3">
+					<div>
+						<h2 className="text-sm font-bold uppercase tracking-wider text-red-200">Delete Room</h2>
+						<div className="font-mono text-[11px] text-slate-500 truncate">{room.id}</div>
+					</div>
+					<button
+						type="button"
+						onClick={onCancel}
+						disabled={deleting}
+						title="Cancel"
+						aria-label="Cancel"
+						className="h-8 w-8 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4] disabled:opacity-50"
+					>
+						<X size={14} />
+					</button>
+				</div>
+				<div className="p-4 grid gap-3">
+					<div className="border border-red-500/60 bg-red-500/10 text-red-100 rounded-sm p-3 text-sm">
+						This permanently deletes the archived room, child rooms, all contained sessions, subagent sessions, and their Chat events. This cannot be undone.
+					</div>
+					<div className="text-sm text-slate-300">
+						Type <span className="font-mono text-red-200">{room.name}</span> to confirm.
+					</div>
+					<input
+						value={confirmName}
+						onChange={(event) => onConfirmNameChange(event.target.value)}
+						className="min-w-0 bg-[#0e1116] border border-slate-700 rounded-sm px-3 py-2 text-sm outline-none focus:border-red-500"
+						placeholder={room.name}
+						autoFocus
+					/>
+					<div className="flex justify-end gap-2">
+						<button
+							type="button"
+							onClick={onCancel}
+							disabled={deleting}
+							className="h-8 inline-flex items-center border border-slate-700 rounded-sm px-3 text-slate-300 hover:border-[#11a4d4] hover:text-[#11a4d4] disabled:opacity-50"
+						>
+							Cancel
+						</button>
+						<button
+							type="button"
+							onClick={onDelete}
+							disabled={deleting || confirmName !== room.name}
+							className="h-8 inline-flex items-center gap-2 border border-red-500 rounded-sm px-3 text-red-200 bg-red-500/10 disabled:opacity-50"
+						>
+							<Trash2 size={14} />
+							Delete permanently
+						</button>
+					</div>
+				</div>
+			</div>
+		</div>
+	);
+}
+
 function UnreadBadge({ count }: { count?: number }) {
 	if (!count || count <= 0) return null;
 	const label = count > 99 ? "99+" : String(count);
@@ -1007,17 +1193,23 @@ function RoomNode({
 	selectedRoomId,
 	onSelect,
 	onUpdate,
+	onArchive,
+	onDelete,
 	depth = 0,
 }: {
 	room: PiboRoom;
 	selectedRoomId: string | null;
 	onSelect: (roomId: string) => void;
 	onUpdate: (roomId: string, input: { name?: string; topic?: string | null }) => void;
+	onArchive: (roomId: string, archived: boolean) => void;
+	onDelete: (room: PiboRoom) => void;
 	depth?: number;
 }) {
 	const [editing, setEditing] = useState(false);
 	const [draftName, setDraftName] = useState(room.name);
 	const [draftTopic, setDraftTopic] = useState(room.topic ?? "");
+	const personal = isPersonalRoom(room);
+	const archived = isArchivedRoom(room);
 
 	useEffect(() => {
 		if (!editing) {
@@ -1037,12 +1229,20 @@ function RoomNode({
 		<div>
 			<div
 				className={`group mb-1 border rounded-sm ${
-					room.id === selectedRoomId ? "border-[#11a4d4] bg-[#11a4d4]/10" : "border-transparent"
+					personal
+						? room.id === selectedRoomId
+							? "border-[#0bda57] bg-[#0bda57]/10"
+							: "border-[#0bda57]/50 bg-[#0bda57]/5"
+						: room.id === selectedRoomId
+							? "border-[#11a4d4] bg-[#11a4d4]/10"
+							: archived
+								? "border-[#f59e0b]/40 bg-[#f59e0b]/5"
+								: "border-transparent"
 				}`}
 				style={{ marginLeft: depth * 12 }}
 				title={room.id}
 			>
-				{editing ? (
+				{editing && !personal ? (
 					<form
 						className="grid gap-1 p-1"
 						onSubmit={(event) => {
@@ -1080,23 +1280,66 @@ function RoomNode({
 						<button
 							type="button"
 							onClick={() => onSelect(room.id)}
-							className="min-w-0 text-left px-2 py-1 grid grid-cols-[minmax(0,1fr)_auto] gap-2 items-center"
+							className="min-w-0 text-left px-2 py-1 grid grid-cols-[auto_minmax(0,1fr)_auto] gap-2 items-center"
 						>
+							<span className={`h-6 w-6 inline-flex items-center justify-center rounded-sm ${personal ? "bg-[#0bda57]/15 text-[#0bda57]" : archived ? "bg-[#f59e0b]/15 text-[#f59e0b]" : "bg-[#151f24] text-slate-500"}`}>
+								{personal ? <Lock size={13} /> : archived ? <Archive size={13} /> : <FolderPlus size={13} />}
+							</span>
 							<span className="min-w-0">
-								<span className="block text-sm truncate text-slate-200">{room.name}</span>
-								<span className="block text-[10px] font-mono truncate text-slate-500">{room.topic || room.type}</span>
+								<span className={`block text-sm truncate ${archived ? "text-slate-500" : "text-slate-200"}`}>{room.name}</span>
+								<span className="block text-[10px] font-mono truncate text-slate-500">{personal ? "locked personal room" : archived ? "archived" : room.topic || room.type}</span>
 							</span>
 							<UnreadBadge count={room.unreadCount} />
 						</button>
-						<button
-							type="button"
-							onClick={() => setEditing(true)}
-							title="Edit Room"
-							aria-label="Edit Room"
-							className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:border-[#11a4d4] hover:text-[#11a4d4]"
-						>
-							<Edit3 size={13} />
-						</button>
+						<div className="flex items-center gap-1 pr-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+							{personal ? (
+								<span title="Personal Chat is locked" aria-label="Personal Chat is locked" className="h-7 w-7 inline-flex items-center justify-center border border-[#0bda57]/50 rounded-sm text-[#0bda57]">
+									<Lock size={13} />
+								</span>
+							) : archived ? (
+								<>
+									<button
+										type="button"
+										onClick={() => onArchive(room.id, false)}
+										title="Restore Room"
+										aria-label="Restore Room"
+										className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]"
+									>
+										<ArchiveRestore size={13} />
+									</button>
+									<button
+										type="button"
+										onClick={() => onDelete(room)}
+										title="Delete Room"
+										aria-label="Delete Room"
+										className="h-7 w-7 inline-flex items-center justify-center border border-red-500/70 rounded-sm text-red-300 hover:bg-red-500/10"
+									>
+										<Trash2 size={13} />
+									</button>
+								</>
+							) : (
+								<>
+									<button
+										type="button"
+										onClick={() => setEditing(true)}
+										title="Edit Room"
+										aria-label="Edit Room"
+										className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]"
+									>
+										<Edit3 size={13} />
+									</button>
+									<button
+										type="button"
+										onClick={() => onArchive(room.id, true)}
+										title="Archive Room"
+										aria-label="Archive Room"
+										className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]"
+									>
+										<Archive size={13} />
+									</button>
+								</>
+							)}
+						</div>
 					</div>
 				)}
 			</div>
@@ -1104,11 +1347,13 @@ function RoomNode({
 				<RoomNode
 					key={child.id}
 					room={child}
-					selectedRoomId={selectedRoomId}
-					onSelect={onSelect}
-					onUpdate={onUpdate}
-					depth={depth + 1}
-				/>
+						selectedRoomId={selectedRoomId}
+						onSelect={onSelect}
+						onUpdate={onUpdate}
+						onArchive={onArchive}
+						onDelete={onDelete}
+						depth={depth + 1}
+					/>
 			))}
 		</div>
 	);
@@ -1312,6 +1557,56 @@ function splitSessionNodesByArchive(nodes: PiboWebSessionNode[]): {
 		archived.push(...children.archived);
 	}
 	return { active, archived };
+}
+
+function findPersonalRoom(rooms: PiboRoom[]): PiboRoom | undefined {
+	for (const room of rooms) {
+		if (isPersonalRoom(room)) return room;
+		const child = findPersonalRoom(room.children ?? []);
+		if (child) return child;
+	}
+	return undefined;
+}
+
+function findRoomById(rooms: PiboRoom[], roomId: string): PiboRoom | undefined {
+	for (const room of rooms) {
+		if (room.id === roomId) return room;
+		const child = findRoomById(room.children ?? [], roomId);
+		if (child) return child;
+	}
+	return undefined;
+}
+
+function splitRoomNodes(nodes: PiboRoom[]): {
+	active: PiboRoom[];
+	archived: PiboRoom[];
+} {
+	const active: PiboRoom[] = [];
+	const archived: PiboRoom[] = [];
+	for (const node of nodes) {
+		if (isPersonalRoom(node)) {
+			const children = splitRoomNodes(node.children ?? []);
+			active.push(...children.active);
+			archived.push(...children.archived);
+			continue;
+		}
+		if (isArchivedRoom(node)) {
+			archived.push(node);
+			continue;
+		}
+		const children = splitRoomNodes(node.children ?? []);
+		active.push({ ...node, children: children.active });
+		archived.push(...children.archived);
+	}
+	return { active, archived };
+}
+
+function isPersonalRoom(room: PiboRoom): boolean {
+	return room.metadata.default === true;
+}
+
+function isArchivedRoom(room: PiboRoom): boolean {
+	return typeof room.metadata.chatRoomArchivedAt === "string";
 }
 
 function Composer({

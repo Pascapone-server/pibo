@@ -140,6 +140,11 @@ Out of scope for V1:
 - **REQ-069A**: When the user navigates to a room or session deep link, the Web App MUST request bootstrap data for the URL-selected room and/or session before considering browser-local fallback state.
 - **REQ-070**: If a stored room or room-session selection is unavailable, unauthorized, archived outside the current filter, or no longer present, the Web App must discard only the invalid stored selection and fall back to a valid server-selected room or session.
 - **REQ-071**: When no selected Pibo Session is available during a room switch or bootstrap refresh, the composer must be disabled and must not send messages to the previously selected session.
+- **REQ-071A**: The Web App MUST display the `Personal Chat` room separately above user-created rooms and visually communicate that it is locked.
+- **REQ-071B**: The Web App MUST NOT expose rename, archive, or delete controls for the `Personal Chat` room.
+- **REQ-071C**: User-created rooms MUST support archive and restore controls. Archived rooms MUST be hidden from the active room list by default and retrievable through an explicit archived-room display control.
+- **REQ-071D**: Selecting an archived room MUST keep its sessions visible when the backend returns them and MUST disable new-session creation, composer sending, slash-command execution, and fork actions for that room.
+- **REQ-071E**: Room deletion UI MUST be available only for archived non-personal rooms, display a destructive warning, require typing the exact room name, and call the permanent delete API only after confirmation matches.
 - **REQ-072**: Assistant messages must render safe Markdown, including GitHub-Flavored Markdown tables, lists, blockquotes, code blocks, links, and inline code.
 - **REQ-073**: Markdown rendering must skip raw HTML and must restrict link targets to safe URL forms such as relative links, anchors, `http:`, `https:`, and `mailto:`.
 - **REQ-074**: Direct generated subagent calls must render visible `agent.delegation` trace nodes linked to the child Pibo Session.
@@ -326,6 +331,9 @@ The full `/tree` command is not a V1 Web Chat command because full tree browsing
 - **AC-026**: Given the user switches from Room A to Room B and back to Room A, When Room A has a stored selected session, Then that session is restored instead of selecting a different room default.
 - **AC-027**: Given a stored room-session pair no longer exists, When bootstrap for that pair fails, Then the app removes that stored room-session entry and loads a valid fallback for the room.
 - **AC-028**: Given a room switch is in progress with no selected session, When the user presses send, Then no message is emitted to the previous session.
+- **AC-028A**: Given an archived room contains sessions, When the user selects it from the archived-room list, Then the room's sessions remain visible and the composer and new-session button are disabled.
+- **AC-028B**: Given the `Personal Chat` room is visible, When the user hovers or focuses its room row, Then rename, archive, and delete controls are not available and a locked affordance is visible.
+- **AC-028C**: Given an archived non-personal room, When the user opens delete confirmation, Then the delete button stays disabled until the exact room name is entered.
 - **AC-029**: Given assistant output contains Markdown, When it renders, Then supported Markdown renders structurally and unsafe raw HTML is not rendered.
 - **AC-030**: Given a direct generated subagent tool runs, When the parent trace is reconstructed or streamed, Then an `agent.delegation` node links to the child Pibo Session when known.
 - **AC-031**: Given `pibo_run_start` starts a `pibo_subagent_*` tool, When the trace is reconstructed or streamed, Then the trace shows the `pibo_run_start` context and a visible async agent child identifying the subagent.
@@ -484,6 +492,9 @@ Web App navigates to /apps/chat/rooms/<room-a-id>/sessions/<session-a2-id> or us
 If Session A2 is valid, the main trace renders Session A2
 If Session A2 is invalid, only Room A's stored session entry is removed and Room A falls back to a valid server-selected session
 Web App replaces the URL with the valid fallback room/session selection
+User selects Archived Rooms and opens archived Room C
+If Room C contains sessions, the session tree remains visible
+Composer, New Session, slash command execution, and fork actions stay disabled while Room C is archived
 ```
 
 ### 9.7 Async Subagent Run

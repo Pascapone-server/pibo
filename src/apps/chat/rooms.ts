@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { PiboJsonObject } from "../../core/events.js";
 
 export const CHAT_ROOM_ID_METADATA_KEY = "chatRoomId";
+const CHAT_ROOM_ARCHIVED_AT_METADATA_KEY = "chatRoomArchivedAt";
 
 export type PiboRoomType = "space" | "chat" | "agent";
 export type PiboRoomRole = "owner" | "admin" | "member" | "viewer";
@@ -198,6 +199,14 @@ export class PiboRoomStore {
 		return this.getRoom(id);
 	}
 
+	deleteRooms(ids: string[]): number {
+		if (!ids.length) return 0;
+		const placeholders = ids.map(() => "?").join(", ");
+		this.db.prepare(`DELETE FROM pibo_room_members WHERE room_id IN (${placeholders})`).run(...ids);
+		const result = this.db.prepare(`DELETE FROM pibo_rooms WHERE id IN (${placeholders})`).run(...ids);
+		return Number(result.changes ?? 0);
+	}
+
 	getRoom(id: string): PiboRoom | undefined {
 		const row = this.db.prepare("SELECT * FROM pibo_rooms WHERE id = ?").get(id) as RoomRow | undefined;
 		return row ? roomFromRow(row) : undefined;
@@ -224,6 +233,26 @@ export class PiboRoomStore {
 		}
 		sortRoomNodes(roots);
 		return roots;
+	}
+
+	listRoomSubtree(roomId: string): PiboRoom[] {
+		const root = this.getRoom(roomId);
+		if (!root) return [];
+		const rooms = this.listRooms(root.ownerScope);
+		const byParent = new Map<string, PiboRoom[]>();
+		for (const room of rooms) {
+			if (!room.parentRoomId) continue;
+			const children = byParent.get(room.parentRoomId) ?? [];
+			children.push(room);
+			byParent.set(room.parentRoomId, children);
+		}
+		const result: PiboRoom[] = [];
+		const visit = (room: PiboRoom): void => {
+			result.push(room);
+			for (const child of byParent.get(room.id) ?? []) visit(child);
+		};
+		visit(root);
+		return result;
 	}
 
 	ensureDefaultRoom(input: { ownerScope: string; principalId: string; name?: string }): PiboRoom {
@@ -309,6 +338,24 @@ export function chatRoomIdFromMetadata(metadata: PiboJsonObject | undefined): st
 
 export function withChatRoomId(metadata: PiboJsonObject | undefined, roomId: string): PiboJsonObject {
 	return { ...(metadata ?? {}), [CHAT_ROOM_ID_METADATA_KEY]: roomId };
+}
+
+export function isDefaultPiboRoom(room: Pick<PiboRoom, "metadata">): boolean {
+	return room.metadata.default === true;
+}
+
+export function isPiboRoomArchived(room: Pick<PiboRoom, "metadata">): boolean {
+	return typeof room.metadata[CHAT_ROOM_ARCHIVED_AT_METADATA_KEY] === "string";
+}
+
+export function withPiboRoomArchived(metadata: PiboJsonObject | undefined, archived: boolean): PiboJsonObject {
+	const next: PiboJsonObject = { ...(metadata ?? {}) };
+	if (archived) {
+		next[CHAT_ROOM_ARCHIVED_AT_METADATA_KEY] = new Date().toISOString();
+	} else {
+		delete next[CHAT_ROOM_ARCHIVED_AT_METADATA_KEY];
+	}
+	return next;
 }
 
 function roomFromRow(row: RoomRow): PiboRoom {

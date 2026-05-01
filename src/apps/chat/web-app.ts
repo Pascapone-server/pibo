@@ -10,8 +10,11 @@ import { ChatWebReadModel, createDefaultChatWebReadModel } from "./read-model.js
 import {
 	chatRoomIdFromMetadata,
 	createDefaultPiboRoomStore,
+	isDefaultPiboRoom,
+	isPiboRoomArchived,
 	PiboRoomStore,
 	withChatRoomId,
+	withPiboRoomArchived,
 	type PiboRoom,
 	type PiboRoomNode,
 } from "./rooms.js";
@@ -71,6 +74,11 @@ type ChatRoomPatchBody = {
 	name?: unknown;
 	topic?: unknown;
 	parentRoomId?: unknown;
+	archived?: unknown;
+};
+
+type ChatRoomDeleteBody = {
+	confirmName?: unknown;
 };
 
 type ChatAgentBody = {
@@ -233,6 +241,19 @@ function normalizeOptionalParentRoomId(value: unknown): string | null | undefine
 	if (value === null || value === "") return null;
 	if (typeof value !== "string") throw new PiboWebHttpError("Parent room id must be a string", 400);
 	return value;
+}
+
+function normalizeRoomArchived(value: unknown): boolean | undefined {
+	if (value === undefined) return undefined;
+	if (typeof value !== "boolean") throw new PiboWebHttpError("Room archived flag must be boolean", 400);
+	return value;
+}
+
+function normalizeRoomDeleteConfirmation(value: unknown): string {
+	if (typeof value !== "string" || value.trim().length === 0) {
+		throw new PiboWebHttpError("Type the room name to permanently delete it.", 400);
+	}
+	return value.trim();
 }
 
 function normalizeAgentDisplayName(value: unknown, fallback = "new-agent"): string {
@@ -477,7 +498,7 @@ function ensureDefaultChatSession(
 	roomId?: string,
 ): PiboSession {
 	const room = roomId
-		? requireRoom(state, roomId, webSession, "write")
+		? requireRoom(state, roomId, webSession, "read")
 		: state.roomStore.ensureDefaultRoom({
 				ownerScope: webSession.ownerScope,
 				principalId: principalIdFor(webSession),
@@ -489,6 +510,13 @@ function ensureDefaultChatSession(
 			chatRoomIdFromMetadata(session.metadata) === room.id,
 	);
 	if (existing) return existing;
+	if (isPiboRoomArchived(room)) {
+		const archivedExisting = listOwnedSessions(context, webSession).find(
+			(session) => !session.parentId && chatRoomIdFromMetadata(session.metadata) === room.id,
+		);
+		if (archivedExisting) return archivedExisting;
+		throw new PiboWebHttpError("Archived room has no sessions", 404);
+	}
 	return createPersonalChatSession(context, webSession, defaultProfile, room.id);
 }
 
@@ -519,11 +547,16 @@ function requireRoom(
 	webSession: PiboWebSession,
 	action: "read" | "write" | "admin" = "read",
 ): PiboRoom {
+	let room: PiboRoom;
 	try {
-		return state.roomStore.requireRoomAccess(roomId, principalIdFor(webSession), action);
+		room = state.roomStore.requireRoomAccess(roomId, principalIdFor(webSession), action);
 	} catch (error) {
 		accessDenied(error);
 	}
+	if (action === "write" && isPiboRoomArchived(room)) {
+		throw new PiboWebHttpError("Archived rooms are read-only", 403);
+	}
+	return room;
 }
 
 function createPersonalChatSession(
@@ -587,6 +620,32 @@ function createSessionUpdate(session: PiboSession, body: { title?: unknown; arch
 	if (metadata) update.metadata = metadata;
 	if (!("title" in update) && !("metadata" in update)) {
 		throw new PiboWebHttpError("No session update fields provided", 400);
+	}
+	return update;
+}
+
+function createRoomUpdate(room: PiboRoom, body: ChatRoomPatchBody): {
+	name?: string;
+	topic?: string | null;
+	parentRoomId?: string | null;
+	metadata?: PiboJsonObject;
+} {
+	if (isDefaultPiboRoom(room)) {
+		throw new PiboWebHttpError("Personal Chat cannot be changed", 400);
+	}
+	const update: {
+		name?: string;
+		topic?: string | null;
+		parentRoomId?: string | null;
+		metadata?: PiboJsonObject;
+	} = {};
+	if (body.name !== undefined) update.name = normalizeRoomName(body.name);
+	if (body.topic !== undefined) update.topic = normalizeOptionalRoomTopic(body.topic);
+	if (body.parentRoomId !== undefined) update.parentRoomId = normalizeOptionalParentRoomId(body.parentRoomId);
+	const archived = normalizeRoomArchived(body.archived);
+	if (archived !== undefined) update.metadata = withPiboRoomArchived(room.metadata, archived);
+	if (Object.keys(update).length === 0) {
+		throw new PiboWebHttpError("No room update fields provided", 400);
 	}
 	return update;
 }
@@ -721,6 +780,53 @@ function deleteSessionSubtree(
 	return orderedIds;
 }
 
+function deleteRoomTree(
+	state: ChatWebAppState,
+	context: PiboWebAppContext,
+	webSession: PiboWebSession,
+	room: PiboRoom,
+	confirmName: string,
+): { deletedRoomIds: string[]; deletedSessionIds: string[] } {
+	if (isDefaultPiboRoom(room)) throw new PiboWebHttpError("Personal Chat cannot be deleted", 400);
+	if (!isPiboRoomArchived(room)) throw new PiboWebHttpError("Archive the room before permanently deleting it.", 400);
+	if (confirmName !== room.name) throw new PiboWebHttpError(`Type "${room.name}" to permanently delete this room.`, 400);
+	const deleteSession = context.channelContext.deleteSession;
+	if (!deleteSession) throw new PiboWebHttpError("Session deletion is not available", 501);
+	const rooms = state.roomStore.listRoomSubtree(room.id);
+	const roomIds = rooms.map((item) => item.id);
+	const roomIdSet = new Set(roomIds);
+	const ownedSessions = listOwnedSessions(context, webSession);
+	const sessionsById = new Map(ownedSessions.map((session) => [session.id, session]));
+	const ids = new Set(
+		ownedSessions
+			.filter((session) => {
+				const roomId = chatRoomIdFromMetadata(session.metadata);
+				return roomId ? roomIdSet.has(roomId) : false;
+			})
+			.map((session) => session.id),
+	);
+	let changed = true;
+	while (changed) {
+		changed = false;
+		for (const session of ownedSessions) {
+			if (session.parentId && ids.has(session.parentId) && !ids.has(session.id)) {
+				ids.add(session.id);
+				changed = true;
+			}
+		}
+	}
+	const orderedSessionIds = [...ids].sort(
+		(left, right) => sessionDepth(sessionsById.get(right), sessionsById) - sessionDepth(sessionsById.get(left), sessionsById),
+	);
+	state.readModel.deleteSessions(orderedSessionIds);
+	state.eventLog.deleteSessions(orderedSessionIds);
+	state.eventLog.deleteRooms(roomIds);
+	for (const id of orderedSessionIds) deleteSession(id);
+	const orderedRoomIds = [...roomIds].reverse();
+	state.roomStore.deleteRooms(orderedRoomIds);
+	return { deletedRoomIds: orderedRoomIds, deletedSessionIds: orderedSessionIds };
+}
+
 function sessionDepth(session: PiboSession | undefined, sessionsById: ReadonlyMap<string, PiboSession>): number {
 	let depth = 0;
 	let current = session;
@@ -739,8 +845,7 @@ function resolveRequestedSession(
 	piboSessionId?: string,
 	roomId?: string,
 ): PiboSession {
-	const fallback = ensureDefaultChatSession(state, context, webSession, defaultProfile, roomId);
-	if (!piboSessionId || piboSessionId === fallback.id) return fallback;
+	if (!piboSessionId) return ensureDefaultChatSession(state, context, webSession, defaultProfile, roomId);
 	const selected = context.channelContext.getSession(piboSessionId);
 	if (!selected || selected.ownerScope !== webSession.ownerScope) {
 		throw new PiboWebHttpError("Session is not available for this user", 404);
@@ -956,6 +1061,9 @@ async function sendChatMessage(input: {
 	const room = ensureSessionRoom(input.state, input.context, selectedSession, input.webSession);
 	if (requestedRoomId && room.id !== requestedRoomId) {
 		throw new PiboWebHttpError("Session is not available in this room", 404);
+	}
+	if (isPiboRoomArchived(room)) {
+		throw new PiboWebHttpError("Archived rooms are read-only", 403);
 	}
 	input.state.readModel.upsertSession(selectedSession);
 	const actorId = principalIdFor(input.webSession);
@@ -2153,23 +2261,28 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 			if (roomResource && roomResource.child === undefined && request.method === "PATCH") {
 				requireSameOriginJsonRequest(request);
 				const webSession = await requireSession(request, context);
-				requireRoom(state, roomResource.roomId, webSession, "admin");
+				const existingRoom = requireRoom(state, roomResource.roomId, webSession, "admin");
 				const body = await readJsonBody<ChatRoomPatchBody>(request);
-				const update: {
-					name?: string;
-					topic?: string | null;
-					parentRoomId?: string | null;
-				} = {};
-				if (body.name !== undefined) update.name = normalizeRoomName(body.name);
-				if (body.topic !== undefined) update.topic = normalizeOptionalRoomTopic(body.topic);
-				if (body.parentRoomId !== undefined) {
-					const parentRoomId = normalizeOptionalParentRoomId(body.parentRoomId);
-					if (parentRoomId) requireRoom(state, parentRoomId, webSession, "admin");
-					update.parentRoomId = parentRoomId;
-				}
+				const update = createRoomUpdate(existingRoom, body);
+				if (update.parentRoomId) requireRoom(state, update.parentRoomId, webSession, "admin");
 				const room = state.roomStore.updateRoom(roomResource.roomId, update);
 				if (!room) throw new PiboWebHttpError("Room not found", 404);
 				return responseJson({ room });
+			}
+
+			if (roomResource && roomResource.child === undefined && request.method === "DELETE") {
+				requireSameOriginJsonRequest(request);
+				const webSession = await requireSession(request, context);
+				const room = requireRoom(state, roomResource.roomId, webSession, "admin");
+				const body = await readJsonBody<ChatRoomDeleteBody>(request);
+				const deleted = deleteRoomTree(
+					state,
+					context,
+					webSession,
+					room,
+					normalizeRoomDeleteConfirmation(body.confirmName),
+				);
+				return responseJson(deleted);
 			}
 
 			if (roomResource && roomResource.child === "events" && request.method === "GET") {
@@ -2280,6 +2393,10 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 					defaultProfile,
 					typeof body.piboSessionId === "string" ? body.piboSessionId : undefined,
 				);
+				const room = ensureSessionRoom(state, context, selectedSession, webSession);
+				if (isPiboRoomArchived(room)) {
+					throw new PiboWebHttpError("Archived rooms are read-only", 403);
+				}
 				state.readModel.upsertSession(selectedSession);
 				const output = await context.channelContext.emit({
 					type: "execution",

@@ -102,6 +102,8 @@ parent Pibo Session
 
 If `threadKey` is omitted, pibo creates a new subagent session. If the caller passes the same `threadKey` again, the same subagent session is continued, which allows multi-turn delegation. Reuse is based on structured Pibo Session fields: parent id, target profile, and metadata containing the subagent name/tool name/thread key.
 
+When the parent session belongs to a Chat Web room, subagent child sessions inherit the parent's `metadata.chatRoomId`. This keeps subagent work visible in the same room-scoped session tree and lets room deletion remove the full contained session subtree.
+
 Subagent tools are synchronous normal tools: they wait for the correlated child reply and return it to the calling agent. A depth guard prevents accidental recursive subagent loops. Long-running subagent work should be started through yielded runs by wrapping the subagent tool with `pibo_run_start`.
 
 ## Yielded Runs
@@ -233,6 +235,8 @@ Authenticated user
 Rooms are stored in `.pibo/web-chat.sqlite` through `pibo_rooms` and `pibo_room_members`. A room is the UI container and access boundary. A Pibo Session is still the runtime route into Pi Coding Agent. The current migration bridge links sessions to rooms with `PiboSession.metadata.chatRoomId`.
 
 On first Chat Web bootstrap for an owner scope, Pibo ensures a personal default room named `Personal Chat`, adds the user as owner, and ensures a top-level chat session in that room. This makes a first login immediately usable without manual setup.
+
+The personal room is locked product state: it is shown separately in the sidebar, cannot be renamed, cannot be archived, and cannot be deleted. User-created rooms have an archive-first lifecycle. An archived room remains readable and selectable so the user can inspect contained sessions before restoring or deleting it, but it is read-only: session creation, message sends, and execution actions are rejected. Permanent room deletion is available only for archived, non-personal rooms, requires typing the exact room name, and deletes child rooms, contained sessions, subagent session descendants, read-model rows, and durable chat events.
 
 The same SQLite file also contains `chat_events`, a durable event log with monotone `stream_id` values. The event log stores accepted user messages, failure records, router output events, actor information, optional `client_txn_id`, retention class, and JSON payload. It is written in parallel with the older `web_chat_events` read model so trace reconstruction stays compatible while room sync gains a durable source.
 

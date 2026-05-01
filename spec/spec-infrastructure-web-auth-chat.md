@@ -77,8 +77,8 @@ This specification does not define non-web local gateway behavior except where w
 - **REQ-034**: The personal default Pibo Room MUST add the authenticated principal as an `owner` member.
 - **REQ-035**: Pibo Sessions created for Chat Web MUST be associated with a Pibo Room through `PiboSession.metadata.chatRoomId`.
 - **REQ-036**: `GET /api/chat/bootstrap` and `GET /api/chat/sessions` MUST scope returned sessions to the selected or requested Pibo Room.
-- **REQ-037**: `POST /api/chat/sessions` MUST accept optional `roomId` and create the session in that room after write access is verified.
-- **REQ-038**: `POST /api/chat/message` MUST accept optional `roomId` and MUST reject sends where the selected Pibo Session is not available in that room.
+- **REQ-037**: `POST /api/chat/sessions` MUST accept optional `roomId` and create the session in that room after write access is verified. Write access MUST reject archived rooms.
+- **REQ-038**: `POST /api/chat/message` MUST accept optional `roomId` and MUST reject sends where the selected Pibo Session is not available in that room or the selected room is archived.
 - **REQ-039**: Message sends SHOULD include a `clientTxnId`; when present, the server MUST make sends idempotent per `(roomId, actorId, clientTxnId)`.
 - **REQ-040**: The Chat Event Log MUST store accepted user messages, failed user messages, router output events, actor id, optional client transaction id, retention class, JSON payload, and monotone `stream_id`.
 - **REQ-041**: `GET /api/chat/events` MUST support session-scoped streaming by `piboSessionId` and room-scoped filtering by `roomId` when supplied.
@@ -87,9 +87,13 @@ This specification does not define non-web local gateway behavior except where w
 - **REQ-044**: The Chat Web App MUST continue to tolerate legacy bootstrap payloads without room fields; full room controls require room-aware backend responses.
 - **REQ-045**: `GET /api/chat/rooms` MUST require an auth session and return the authenticated user's room tree.
 - **REQ-046**: `POST /api/chat/rooms` MUST require same-origin JSON and create a Pibo Room owned by the authenticated user's owner scope.
-- **REQ-047**: `PATCH /api/chat/rooms/:roomId` MUST require same-origin JSON, admin access, and update mutable room fields such as name and topic.
+- **REQ-047**: `PATCH /api/chat/rooms/:roomId` MUST require same-origin JSON, admin access, and update mutable room fields such as name, topic, parent room, and archived state.
 - **REQ-048**: `GET /api/chat/rooms/:roomId/events` MUST require read access and return durable room events after an optional cursor.
 - **REQ-049**: `POST /api/chat/rooms/:roomId/messages` MUST require write access and send a room-scoped message to the selected or supplied Pibo Session.
+- **REQ-050**: The personal default Pibo Room MUST be immutable through Chat Web APIs. It MUST NOT be renamed, archived, or deleted.
+- **REQ-051**: Archived non-personal rooms MUST remain readable through bootstrap, room lookup, and session listing APIs. They MUST be read-only for new sessions, message sends, room-scoped messages, and execution actions.
+- **REQ-052**: `DELETE /api/chat/rooms/:roomId` MUST require same-origin JSON, admin access, an archived non-personal room, and exact room-name confirmation before permanent deletion.
+- **REQ-053**: Permanent room deletion MUST remove the room subtree, sessions whose `metadata.chatRoomId` belongs to that subtree, descendant sessions of those sessions, Chat Web read-model rows, and durable chat events for the deleted rooms and sessions.
 - **SEC-001**: Chat mutation routes MUST reject non-JSON content types with `415`.
 - **SEC-002**: Chat mutation routes MUST reject missing `Origin` headers with `403`.
 - **SEC-003**: Chat mutation routes MUST reject cross-origin `Origin` headers with `403`.
@@ -148,7 +152,8 @@ type PiboWebApp = {
 | `/api/chat/rooms` | GET | required | Returns authenticated user's room tree |
 | `/api/chat/rooms` | POST | required | Creates a room and owner membership |
 | `/api/chat/rooms/:roomId` | GET | required | Returns room, membership, and sessions for the room |
-| `/api/chat/rooms/:roomId` | PATCH | required | Updates mutable room metadata |
+| `/api/chat/rooms/:roomId` | PATCH | required | Updates mutable room metadata, including archived state |
+| `/api/chat/rooms/:roomId` | DELETE | required | Permanently deletes an archived non-personal room after exact-name confirmation |
 | `/api/chat/rooms/:roomId/events` | GET | required | Returns durable room events after optional cursor |
 | `/api/chat/rooms/:roomId/messages` | POST | required | Sends a room-scoped message |
 | `/api/auth/*` | any | auth-service-owned | Delegates to Better Auth |
@@ -214,6 +219,10 @@ type PiboWebApp = {
 - **AC-018**: Given an SSE client reconnects with `Last-Event-ID: <streamId>:<frameIndex>`, When durable chat events are replayed, Then already delivered frames from that stored event are not replayed.
 - **AC-019**: Given a subagent session link output event is streamed, When compact chat frames are generated, Then an `AGENT_DELEGATION` Chat Stream Event is emitted.
 - **AC-020**: Given a legacy backend omits room fields from bootstrap, When the React client normalizes the payload, Then it does not crash and hides room-specific controls.
+- **AC-021**: Given an archived room contains sessions, When `/api/chat/bootstrap?roomId=<room>&piboSessionId=<session>` is requested, Then the response is `200` and contains the archived room's session tree.
+- **AC-022**: Given an archived room is selected, When the user requests `POST /api/chat/sessions`, `POST /api/chat/message`, `POST /api/chat/rooms/:roomId/messages`, or `POST /api/chat/action`, Then the response is rejected as read-only.
+- **AC-023**: Given the personal default room, When rename, archive, or delete is requested, Then the response is rejected.
+- **AC-024**: Given an archived non-personal room and exact room-name confirmation, When `DELETE /api/chat/rooms/:roomId` is requested, Then the room subtree, contained session subtree, and related chat rows are deleted.
 
 ## 6. Test Automation Strategy
 

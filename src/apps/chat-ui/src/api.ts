@@ -84,11 +84,19 @@ export async function postRoom(input: { name: string; topic?: string }): Promise
 	});
 }
 
-export async function patchRoom(roomId: string, input: { name?: string; topic?: string | null }): Promise<{ room: PiboRoom }> {
+export async function patchRoom(roomId: string, input: { name?: string; topic?: string | null; archived?: boolean }): Promise<{ room: PiboRoom }> {
 	return requestJson<{ room: PiboRoom }>(`/api/chat/rooms/${encodeURIComponent(roomId)}`, {
 		method: "PATCH",
 		headers: { "content-type": "application/json" },
 		body: JSON.stringify(input),
+	});
+}
+
+export async function deleteRoom(roomId: string, confirmName: string): Promise<{ deletedRoomIds: string[]; deletedSessionIds: string[] }> {
+	return requestJson<{ deletedRoomIds: string[]; deletedSessionIds: string[] }>(`/api/chat/rooms/${encodeURIComponent(roomId)}`, {
+		method: "DELETE",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ confirmName }),
 	});
 }
 

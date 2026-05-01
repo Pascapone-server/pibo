@@ -75,6 +75,8 @@ Pibo Sessions are stored in SQLite by default at `.pibo/pibo-sessions.sqlite`. A
 
 In the Chat Web App, personal sessions can be archived before deletion. Permanent deletion is available only for archived sessions and requires typing `Delete this session`; it removes the selected Pibo Session, child sessions, and their Chat Web read-model/event-log rows.
 
+The Chat Web App also has Pibo Rooms. Each user gets a locked `Personal Chat` room automatically. The personal room is shown separately from user-created rooms and cannot be renamed, archived, or deleted. User-created rooms can be archived first, then permanently deleted after typing the room name. Archived rooms remain inspectable and show their contained sessions, but they are read-only: no new sessions, messages, or execution actions can be started in that room. Permanent room deletion removes the room subtree, contained sessions, subagent session descendants, and Chat Web read-model/event-log rows.
+
 The main source folders are:
 
 - `src/core/` for runtime, events, profiles, and session routing
@@ -102,6 +104,8 @@ The designer configures native Pibo agent capabilities only: plugin-registered t
 The default profile is registered by the core plugin. It loads the local `pi-agent-harness` skill, registers the core tools `pibo_echo`, `pibo_workspace_info`, and `pibo_exec`, and appends the example context files from `examples/context/`.
 
 Profiles can opt into registered subagents. Pibo exposes enabled subagents to Pi as generated tools named `pibo_subagent_<name>`, routed through normal pibo sessions.
+
+Subagent sessions use `parentId` for hierarchy and inherit the parent session's `metadata.chatRoomId` when the parent belongs to a Chat Web room, so room-scoped session views and room deletion include subagent work.
 
 The `run-yield-qa` profile adds two simple QA subagents. Profiles with yieldable tools can expose generated run-control tools through the `pibo-run-control` capability package:
 
