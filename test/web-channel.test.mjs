@@ -134,6 +134,19 @@ test("chat web app requires auth for localhost requests", async () => {
 	}
 });
 
+test("chat web app serves the React shell for deep app links", async () => {
+	const { channel, baseURL } = await startWebHostChannel();
+
+	try {
+		const response = await fetch(`${baseURL}/apps/chat/rooms/room_test/sessions/ps_test`);
+		assert.equal(response.status, 200);
+		assert.match(response.headers.get("content-type") ?? "", /^text\/html/);
+		assert.match(await response.text(), /<div id="root"><\/div>/);
+	} finally {
+		await channel.stop?.();
+	}
+});
+
 test("chat web app maps authenticated users to chat sessions", async () => {
 	const { channel, baseURL, emitted } = await startWebHostChannel({
 		auth: createFakeAuthService(),

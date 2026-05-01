@@ -985,6 +985,11 @@ function responseBuiltChatAsset(pathname: string): Response | undefined {
 	});
 }
 
+function isChatAppPath(pathname: string): boolean {
+	if (pathname.startsWith(`${CHAT_WEB_MOUNT_PATH}/assets/`)) return false;
+	return pathname === CHAT_WEB_MOUNT_PATH || pathname.startsWith(`${CHAT_WEB_MOUNT_PATH}/`);
+}
+
 function contentTypeFor(path: string): string {
 	switch (extname(path)) {
 		case ".js":
@@ -1875,7 +1880,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 			const builtAsset = responseBuiltChatAsset(url.pathname);
 			if (builtAsset) return builtAsset;
 
-			if (url.pathname === CHAT_WEB_MOUNT_PATH && request.method === "GET") {
+			if (isChatAppPath(url.pathname) && request.method === "GET") {
 				return responseBuiltChatIndex() ?? responseHtml(createChatHtml());
 			}
 

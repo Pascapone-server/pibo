@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import {
 	Archive,
 	ArchiveRestore,
@@ -32,6 +33,11 @@ import { countRender } from "./renderMetrics";
 
 type Area = "sessions" | "agents" | "settings";
 
+export type ChatAppRoute =
+	| { area: "sessions"; roomId?: string; piboSessionId?: string }
+	| { area: "agents" }
+	| { area: "settings" };
+
 type ForkActionResponse = {
 	result: {
 		piboSessionId?: string;
@@ -52,14 +58,17 @@ type StoredSelection = {
 	sessionsByRoom?: Record<string, string>;
 };
 
-export function App() {
+export function App({ route }: { route: ChatAppRoute }) {
 	countRender("App");
+	const navigate = useNavigate();
+	const area = route.area;
+	const routeRoomId = route.area === "sessions" ? route.roomId : undefined;
+	const routePiboSessionId = route.area === "sessions" ? route.piboSessionId : undefined;
 	const [bootstrap, setBootstrap] = useState<BootstrapData | null>(null);
 	const [traceView, setTraceView] = useState<PiboSessionTraceView | null>(null);
 	const [traceLoadingSessionId, setTraceLoadingSessionId] = useState<string | null>(null);
 	const [selectedPiboSessionId, setSelectedPiboSessionId] = useState<string | null>(null);
 	const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
-	const [area, setArea] = useState<Area>("sessions");
 	const [error, setError] = useState<string | null>(null);
 	const [showThinking, setShowThinking] = useState(() => localStorage.getItem("pibo.chat.showThinking") !== "false");
 	const [expandThinking, setExpandThinking] = useState(() => localStorage.getItem("pibo.chat.expandThinking") !== "false");
@@ -131,6 +140,48 @@ export function App() {
 		};
 	}, []);
 
+	const navigateToRoute = useCallback(
+		(target: ChatAppRoute, replace = false) => {
+			if (target.area === "agents") {
+				void navigate({ to: "/agents", replace });
+				return;
+			}
+			if (target.area === "settings") {
+				void navigate({ to: "/settings", replace });
+				return;
+			}
+			if (target.roomId && target.piboSessionId) {
+				void navigate({
+					to: "/rooms/$roomId/sessions/$piboSessionId",
+					params: { roomId: target.roomId, piboSessionId: target.piboSessionId },
+					replace,
+				});
+				return;
+			}
+			if (target.roomId) {
+				void navigate({ to: "/rooms/$roomId", params: { roomId: target.roomId }, replace });
+				return;
+			}
+			if (target.piboSessionId) {
+				void navigate({ to: "/sessions/$piboSessionId", params: { piboSessionId: target.piboSessionId }, replace });
+				return;
+			}
+			void navigate({ to: "/", replace });
+		},
+		[navigate],
+	);
+
+	const navigateToSelectedSession = useCallback(
+		(roomId: string | undefined, piboSessionId: string | undefined, replace = false) => {
+			if (!piboSessionId) {
+				navigateToRoute({ area: "sessions", ...(roomId ? { roomId } : {}) }, replace);
+				return;
+			}
+			navigateToRoute({ area: "sessions", ...(roomId ? { roomId } : {}), piboSessionId }, replace);
+		},
+		[navigateToRoute],
+	);
+
 	const loadBootstrap = useCallback(async (
 		piboSessionId?: string,
 		includeArchived = showArchivedRef.current,
@@ -166,26 +217,53 @@ export function App() {
 
 	useEffect(() => {
 		const stored = readStoredSelection();
-		loadBootstrap(stored.piboSessionId, showArchivedRef.current, stored.roomId).catch((caught) => {
-			if (stored.piboSessionId && stored.roomId) {
-				loadBootstrap(stored.piboSessionId, showArchivedRef.current).catch(() => {
-					clearStoredSelection();
-					loadBootstrap().catch((fallbackCaught) =>
+		const storedPiboSessionId = routeRoomId ? stored.sessionsByRoom?.[routeRoomId] : stored.piboSessionId;
+		const requestedRoomId = route.area === "sessions" ? (routeRoomId ?? (!routePiboSessionId ? stored.roomId : undefined)) : stored.roomId;
+		const requestedPiboSessionId = route.area === "sessions"
+			? (routePiboSessionId ?? (!routePiboSessionId ? storedPiboSessionId : undefined))
+			: stored.piboSessionId;
+
+		const canonicalizeSessionsRoute = (data: BootstrapData, replace = true) => {
+			if (route.area !== "sessions") return;
+			if (!data.selectedPiboSessionId) return;
+			if (route.roomId === data.selectedRoomId && route.piboSessionId === data.selectedPiboSessionId) return;
+			navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId, replace);
+		};
+
+		loadBootstrap(requestedPiboSessionId, showArchivedRef.current, requestedRoomId)
+			.then((data) => {
+				canonicalizeSessionsRoute(data);
+				setError(null);
+			})
+			.catch((caught) => {
+				if (route.area === "sessions" && routeRoomId && !routePiboSessionId && requestedPiboSessionId) {
+					removeStoredRoomSelection(routeRoomId);
+					loadBootstrap(undefined, showArchivedRef.current, routeRoomId)
+						.then((data) => {
+							canonicalizeSessionsRoute(data);
+							setError(null);
+						})
+						.catch((fallbackCaught) =>
+							setError(fallbackCaught instanceof Error ? fallbackCaught.message : String(fallbackCaught)),
+						);
+					return;
+				}
+				const explicitRouteSelection = route.area === "sessions" && Boolean(routeRoomId || routePiboSessionId);
+				if (explicitRouteSelection || (!requestedPiboSessionId && !requestedRoomId)) {
+					setError(caught instanceof Error ? caught.message : String(caught));
+					return;
+				}
+				clearStoredSelection();
+				loadBootstrap()
+					.then((data) => {
+						canonicalizeSessionsRoute(data);
+						setError(null);
+					})
+					.catch((fallbackCaught) =>
 						setError(fallbackCaught instanceof Error ? fallbackCaught.message : String(fallbackCaught)),
 					);
-				});
-				return;
-			}
-			if (!stored.piboSessionId && !stored.roomId) {
-				setError(caught instanceof Error ? caught.message : String(caught));
-				return;
-			}
-			clearStoredSelection();
-			loadBootstrap().catch((fallbackCaught) =>
-				setError(fallbackCaught instanceof Error ? fallbackCaught.message : String(fallbackCaught)),
-			);
-		});
-	}, [loadBootstrap]);
+			});
+	}, [loadBootstrap, navigateToSelectedSession, route.area, routePiboSessionId, routeRoomId]);
 
 	useEffect(() => {
 		if (!selectedRoomId && !selectedPiboSessionId) return;
@@ -289,8 +367,9 @@ export function App() {
 		setTraceLoadingSessionId(piboSessionId);
 		setSelectedPiboSessionId(piboSessionId);
 		setTraceView((current) => (current?.piboSessionId === piboSessionId ? current : null));
-		await loadBootstrap(piboSessionId);
-	}, [loadBootstrap]);
+		const data = await loadBootstrap(piboSessionId);
+		navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
+	}, [loadBootstrap, navigateToSelectedSession]);
 
 	const selectRoom = useCallback(async (roomId: string) => {
 		const storedPiboSessionId = readStoredSelection().sessionsByRoom?.[roomId];
@@ -299,17 +378,18 @@ export function App() {
 		if (storedPiboSessionId) setTraceLoadingSessionId(storedPiboSessionId);
 		setTraceView(null);
 		try {
-			await loadBootstrap(storedPiboSessionId, showArchivedRef.current, roomId);
+			const data = await loadBootstrap(storedPiboSessionId, showArchivedRef.current, roomId);
+			navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
 		} catch (caught) {
 			if (!storedPiboSessionId) throw caught;
 			removeStoredRoomSelection(roomId);
 			setSelectedPiboSessionId(null);
-			await loadBootstrap(undefined, showArchivedRef.current, roomId);
+			const data = await loadBootstrap(undefined, showArchivedRef.current, roomId);
+			navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
 		} finally {
 			setTraceLoadingSessionId(null);
-			setArea("sessions");
 		}
-	}, [loadBootstrap]);
+	}, [loadBootstrap, navigateToSelectedSession]);
 
 	const createSession = async (profile = newSessionProfile) => {
 		if (creatingSession) return;
@@ -317,10 +397,10 @@ export function App() {
 		try {
 			const created = await postSession(profile || undefined, selectedRoomId ?? undefined);
 			setTraceLoadingSessionId(created.session.id);
-			setArea("sessions");
 			setSelectedPiboSessionId(created.session.id);
 			setTraceView(null);
-			await loadBootstrap(created.session.id, showArchivedRef.current, selectedRoomId ?? undefined);
+			const data = await loadBootstrap(created.session.id, showArchivedRef.current, selectedRoomId ?? undefined);
+			navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
 			setError(null);
 		} catch (caught) {
 			setError(caught instanceof Error ? caught.message : String(caught));
@@ -339,6 +419,7 @@ export function App() {
 				setTraceLoadingSessionId(data.selectedPiboSessionId);
 				setTraceView(null);
 			}
+			if (area === "sessions") navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
 			setError(null);
 		} catch (caught) {
 			setError(caught instanceof Error ? caught.message : String(caught));
@@ -350,6 +431,7 @@ export function App() {
 			await patchSession(piboSessionId, { title });
 			const data = await loadBootstrap(selectedPiboSessionId ?? undefined, showArchivedRef.current, selectedRoomId ?? undefined);
 			if (area === "sessions") await loadTrace(data.selectedPiboSessionId);
+			if (area === "sessions") navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
 			setError(null);
 		} catch (caught) {
 			setError(caught instanceof Error ? caught.message : String(caught));
@@ -369,6 +451,7 @@ export function App() {
 				setTraceLoadingSessionId(data.selectedPiboSessionId);
 				setTraceView(null);
 			}
+			if (area === "sessions") navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
 			setError(null);
 		} catch (caught) {
 			setError(caught instanceof Error ? caught.message : String(caught));
@@ -392,7 +475,8 @@ export function App() {
 	const updateRoom = async (roomId: string, input: { name?: string; topic?: string | null }) => {
 		try {
 			await patchRoom(roomId, input);
-			await loadBootstrap(selectedPiboSessionId ?? undefined, showArchivedRef.current, roomId);
+			const data = await loadBootstrap(selectedPiboSessionId ?? undefined, showArchivedRef.current, roomId);
+			if (area === "sessions") navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
 			setError(null);
 		} catch (caught) {
 			setError(caught instanceof Error ? caught.message : String(caught));
@@ -416,7 +500,8 @@ export function App() {
 		if ((command.action === "session.clone" || command.action === "session.fork") && derivedPiboSessionId) {
 			await selectSession(derivedPiboSessionId);
 		} else {
-			await loadBootstrap(selectedPiboSessionId, showArchivedRef.current, selectedRoomId ?? undefined);
+			const data = await loadBootstrap(selectedPiboSessionId, showArchivedRef.current, selectedRoomId ?? undefined);
+			if (area === "sessions") navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
 			await loadTrace(selectedPiboSessionId);
 		}
 		return true;
@@ -456,7 +541,13 @@ export function App() {
 						<button
 							key={item}
 							type="button"
-							onClick={() => setArea(item)}
+							onClick={() => {
+								if (item === "sessions") {
+									navigateToSelectedSession(selectedRoomId ?? bootstrap.selectedRoomId, selectedPiboSessionId ?? bootstrap.selectedPiboSessionId);
+									return;
+								}
+								navigateToRoute({ area: item });
+							}}
 							className={`h-8 px-3 border rounded-sm text-xs uppercase tracking-wider ${
 								area === item ? "border-[#11a4d4] text-[#11a4d4] bg-[#11a4d4]/10" : "border-slate-700 text-slate-400"
 							}`}
@@ -541,7 +632,11 @@ export function App() {
 							) : null}
 							<button
 								type="button"
-								onClick={() => void loadBootstrap(selectedPiboSessionId ?? undefined, showArchivedRef.current, selectedRoomId ?? undefined)}
+								onClick={() =>
+									void loadBootstrap(selectedPiboSessionId ?? undefined, showArchivedRef.current, selectedRoomId ?? undefined).then((data) => {
+										if (area === "sessions") navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
+									})
+								}
 								title="Refresh"
 								aria-label="Refresh"
 								className="p-1 border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]"
