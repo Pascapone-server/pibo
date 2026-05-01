@@ -12,8 +12,18 @@ type TraceTimelineProps = {
 	expandThinking: boolean;
 	sessionAgentProfile?: string;
 	activeAgentProfile?: string;
+	agentProfiles?: readonly AgentProfileOption[];
+	selectedAgentProfile?: string;
+	createSessionDisabled?: boolean;
+	onAgentProfileChange?: (profile: string) => void;
+	onCreateSession?: (profile: string) => void;
 	onFork: (entryId: string) => void;
 	onOpenSession: (piboSessionId: string) => void;
+};
+
+type AgentProfileOption = {
+	name: string;
+	description?: string;
 };
 
 const timelineContentStyle = {
@@ -29,6 +39,11 @@ export function TraceTimeline({
 	expandThinking,
 	sessionAgentProfile,
 	activeAgentProfile,
+	agentProfiles = [],
+	selectedAgentProfile,
+	createSessionDisabled = false,
+	onAgentProfileChange,
+	onCreateSession,
 	onFork,
 	onOpenSession,
 }: TraceTimelineProps) {
@@ -102,6 +117,13 @@ export function TraceTimeline({
 						<GitBranch size={18} className="text-[#11a4d4]" />
 						Execution Flow
 					</h2>
+					<AgentSessionControls
+						agentProfiles={agentProfiles}
+						selectedAgentProfile={selectedAgentProfile}
+						createSessionDisabled={createSessionDisabled}
+						onAgentProfileChange={onAgentProfileChange}
+						onCreateSession={onCreateSession}
+					/>
 				</div>
 				<div className="flex-1 flex items-center justify-center text-slate-500">
 					{isLoading ? <TraceLoadingIndicator /> : "No Trace Selected"}
@@ -136,6 +158,13 @@ export function TraceTimeline({
 					</div>
 				</div>
 				<div className="flex items-center gap-1">
+					<AgentSessionControls
+						agentProfiles={agentProfiles}
+						selectedAgentProfile={selectedAgentProfile}
+						createSessionDisabled={createSessionDisabled}
+						onAgentProfileChange={onAgentProfileChange}
+						onCreateSession={onCreateSession}
+					/>
 					<TimelineIconButton
 						title="Default expansion"
 						active={expansionDepth === DEFAULT_EXPANSION_DEPTH}
@@ -218,6 +247,52 @@ export function TraceTimeline({
 				</button>
 			) : null}
 		</section>
+	);
+}
+
+function AgentSessionControls({
+	agentProfiles,
+	selectedAgentProfile,
+	createSessionDisabled,
+	onAgentProfileChange,
+	onCreateSession,
+}: {
+	agentProfiles: readonly AgentProfileOption[];
+	selectedAgentProfile?: string;
+	createSessionDisabled: boolean;
+	onAgentProfileChange?: (profile: string) => void;
+	onCreateSession?: (profile: string) => void;
+}) {
+	if (!agentProfiles.length) return null;
+	const selectedProfile = agentProfiles.some((profile) => profile.name === selectedAgentProfile)
+		? selectedAgentProfile
+		: agentProfiles[0]?.name ?? "";
+	return (
+		<div className="mr-2 flex h-8 items-center overflow-hidden rounded-sm border border-slate-700 bg-[#151f24]/80 focus-within:border-[#11a4d4]">
+			<select
+				value={selectedProfile}
+				onChange={(event) => onAgentProfileChange?.(event.target.value)}
+				title="New Session Agent"
+				aria-label="New Session Agent"
+				className="h-full max-w-52 min-w-0 bg-transparent px-2 text-xs font-mono text-slate-300 outline-none"
+			>
+				{agentProfiles.map((profile) => (
+					<option key={profile.name} value={profile.name} title={profile.description}>
+						{profile.name}
+					</option>
+				))}
+			</select>
+			<button
+				type="button"
+				onClick={() => selectedProfile && onCreateSession?.(selectedProfile)}
+				disabled={createSessionDisabled || !selectedProfile}
+				title="New Session With Agent"
+				aria-label="New Session With Agent"
+				className="inline-flex h-full w-8 items-center justify-center border-l border-slate-700 text-slate-400 hover:text-[#11a4d4] disabled:opacity-50"
+			>
+				<MessageSquarePlus size={14} />
+			</button>
+		</div>
 	);
 }
 
