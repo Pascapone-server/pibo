@@ -240,6 +240,61 @@ test("chat web trace returns raw events only when requested", async () => {
 	}
 });
 
+test("chat web trace returns fresh payload when a known trace version changes", async () => {
+	const { channel, baseURL, emitOutput } = await startWebHostChannel({
+		auth: createFakeAuthService(),
+	});
+
+	try {
+		const sessionResponse = await fetch(`${baseURL}/api/chat/session`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(sessionResponse.status, 200);
+		const sessionPayload = await sessionResponse.json();
+
+		emitOutput({
+			type: "assistant_message",
+			piboSessionId: sessionPayload.session.id,
+			eventId: "answer-1",
+			text: "first",
+		});
+
+		const first = await fetch(
+			`${baseURL}/api/chat/trace?piboSessionId=${encodeURIComponent(sessionPayload.session.id)}`,
+			{ headers: { "x-test-user": "user-1" } },
+		);
+		assert.equal(first.status, 200);
+		const firstEtag = first.headers.get("etag");
+		const firstVersion = first.headers.get("x-pibo-trace-version");
+		assert.ok(firstEtag);
+		assert.ok(firstVersion);
+
+		emitOutput({
+			type: "assistant_message",
+			piboSessionId: sessionPayload.session.id,
+			eventId: "answer-2",
+			text: "second",
+		});
+
+		const changed = await fetch(
+			`${baseURL}/api/chat/trace?piboSessionId=${encodeURIComponent(sessionPayload.session.id)}`,
+			{
+				headers: {
+					"x-test-user": "user-1",
+					"if-none-match": firstEtag,
+				},
+			},
+		);
+		assert.equal(changed.status, 200);
+		assert.notEqual(changed.headers.get("etag"), firstEtag);
+		assert.notEqual(changed.headers.get("x-pibo-trace-version"), firstVersion);
+		const changedTrace = await changed.json();
+		assert.match(JSON.stringify(changedTrace.nodes), /second/);
+	} finally {
+		await channel.stop?.();
+	}
+});
+
 test("chat web app maps authenticated users to chat sessions", async () => {
 	const { channel, baseURL, emitted } = await startWebHostChannel({
 		auth: createFakeAuthService(),
@@ -740,6 +795,63 @@ test("chat web app replays durable SSE frames with stream cursors", async () => 
 		assert.match(text, /id: \d+:1/);
 		assert.match(text, /TEXT_MESSAGE_END/);
 		assert.match(text, /hello from history/);
+	} finally {
+		await channel.stop?.();
+	}
+});
+
+test("chat web app room SSE frames include unfocused session ids", async () => {
+	const { channel, baseURL, emitOutput } = await startWebHostChannel({
+		auth: createFakeAuthService(),
+	});
+
+	try {
+		const sessionResponse = await fetch(`${baseURL}/api/chat/session`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(sessionResponse.status, 200);
+		const sessionPayload = await sessionResponse.json();
+		const bootstrapResponse = await fetch(`${baseURL}/api/chat/bootstrap`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(bootstrapResponse.status, 200);
+		const bootstrap = await bootstrapResponse.json();
+		const secondResponse = await fetch(`${baseURL}/api/chat/sessions`, {
+			method: "POST",
+			headers: { "x-test-user": "user-1", "content-type": "application/json", origin: baseURL },
+			body: JSON.stringify({ roomId: bootstrap.selectedRoomId }),
+		});
+		assert.equal(secondResponse.status, 201);
+		const secondPayload = await secondResponse.json();
+
+		emitOutput({
+			type: "assistant_message",
+			piboSessionId: secondPayload.session.id,
+			eventId: "unfocused-answer",
+			text: "hello while unfocused",
+		});
+
+		const controller = new AbortController();
+		const response = await fetch(
+			`${baseURL}/api/chat/events?roomId=${encodeURIComponent(bootstrap.selectedRoomId)}&piboSessionId=${encodeURIComponent(sessionPayload.session.id)}&since=0`,
+			{
+				headers: { "x-test-user": "user-1" },
+				signal: controller.signal,
+			},
+		);
+		assert.equal(response.status, 200);
+		const reader = response.body.getReader();
+		const decoder = new TextDecoder();
+		let text = "";
+		for (let index = 0; index < 8 && !text.includes("hello while unfocused"); index += 1) {
+			const chunk = await reader.read();
+			assert.equal(chunk.done, false);
+			text += decoder.decode(chunk.value, { stream: true });
+		}
+		controller.abort();
+
+		assert.match(text, new RegExp(`"piboSessionId":"${secondPayload.session.id}"`));
+		assert.match(text, /hello while unfocused/);
 	} finally {
 		await channel.stop?.();
 	}

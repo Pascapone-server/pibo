@@ -38,6 +38,17 @@ import { ContextFilesView } from "./context/ContextFilesView";
 import { PiboToolsView } from "./context/PiboToolsView";
 import { getChatSessionView, listChatSessionViews } from "./session-views/registry";
 import { DEFAULT_CHAT_SESSION_VIEW_ID, type ChatSessionViewId } from "./session-views/types";
+import {
+	BOOTSTRAP_GC_TIME_MS,
+	BOOTSTRAP_STALE_TIME_MS,
+	DEFAULT_RAW_EVENTS_LIMIT,
+	TRACE_GC_TIME_MS,
+	chatBootstrapQueryKey,
+	chatTraceQueryKey,
+	isTraceView,
+	setChatNavigationCache,
+	traceQueriesForSession,
+} from "./cache";
 
 type Area = "sessions" | "agents" | "context" | "settings";
 type ContextPanel = "context-files" | "pibo-tools";
@@ -64,33 +75,12 @@ type LoadBootstrapOptions = {
 const LAST_SELECTION_STORAGE_KEY = "pibo.chat.lastSelection";
 const SESSION_VIEW_STORAGE_KEY = "pibo.chat.sessionView";
 const SESSION_DELETE_CONFIRM_TEXT = "Delete this session";
-const BOOTSTRAP_STALE_TIME_MS = 30_000;
-const BOOTSTRAP_GC_TIME_MS = 30 * 60_000;
-const TRACE_GC_TIME_MS = 30 * 60_000;
-const DEFAULT_RAW_EVENTS_LIMIT = 80;
 
 type StoredSelection = {
 	roomId?: string;
 	piboSessionId?: string;
 	sessionsByRoom?: Record<string, string>;
 };
-
-function chatBootstrapQueryKey(piboSessionId?: string, includeArchived = false, roomId?: string): readonly [string, string, string, string, string] {
-	return ["chat", "bootstrap", piboSessionId ?? "", includeArchived ? "archived" : "active", roomId ?? ""];
-}
-
-function chatTraceQueryKey(
-	piboSessionId: string,
-	options: { includeRawEvents?: boolean; rawEventsLimit?: number } = {},
-): readonly [string, string, string, string, number] {
-	return [
-		"chat",
-		"trace",
-		piboSessionId,
-		options.includeRawEvents ? "raw" : "compact",
-		options.rawEventsLimit ?? DEFAULT_RAW_EVENTS_LIMIT,
-	];
-}
 
 async function loadBootstrapQueryData(
 	queryClient: QueryClient,
@@ -106,17 +96,20 @@ async function loadBootstrapQueryData(
 	if (input.markRead) {
 		const data = await getBootstrap(input.piboSessionId, input.includeArchived, input.roomId, true);
 		queryClient.setQueryData(queryKey, data);
+		setChatNavigationCache(queryClient.setQueryData.bind(queryClient), data, input.includeArchived, input.roomId);
 		return data;
 	}
 	if (input.force) {
 		await queryClient.invalidateQueries({ queryKey, exact: true, refetchType: "none" });
 	}
-	return queryClient.fetchQuery({
+	const data = await queryClient.fetchQuery({
 		queryKey,
 		queryFn: () => getBootstrap(input.piboSessionId, input.includeArchived, input.roomId, false),
 		staleTime: BOOTSTRAP_STALE_TIME_MS,
 		gcTime: BOOTSTRAP_GC_TIME_MS,
 	});
+	setChatNavigationCache(queryClient.setQueryData.bind(queryClient), data, input.includeArchived, input.roomId);
+	return data;
 }
 
 async function loadTraceQueryData(
@@ -256,6 +249,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 		const queryKey = chatBootstrapQueryKey(piboSessionId, includeArchived, roomId);
 		const cached = queryClient.getQueryData<BootstrapData>(queryKey);
 		if (cached && requestId === bootstrapRequestId.current) {
+			setChatNavigationCache(queryClient.setQueryData.bind(queryClient), cached, includeArchived, roomId);
 			setBootstrap(cached);
 			if (options.selectSession !== false) setSelectedPiboSessionId(cached.selectedPiboSessionId);
 			setSelectedRoomId(cached.selectedRoomId);
@@ -1045,17 +1039,19 @@ function SessionTracePane({
 	});
 
 	const flushPendingStreamEvents = useCallback((piboSessionId: string) => {
-		if (!traceQueryKey) return;
 		const pending = pendingStreamEventsBySession.current.get(piboSessionId);
 		if (!pending?.length) return;
-		let applied = false;
-		queryClient.setQueryData<PiboSessionTraceView>(traceQueryKey, (current: PiboSessionTraceView | undefined) => {
-			if (!current || current.piboSessionId !== piboSessionId) return current;
-			applied = true;
-			return applyChatStreamEvents(current, pending);
-		});
+		const queries = queryClient.getQueryCache().findAll({ queryKey: traceQueriesForSession(piboSessionId) });
+		let applied = queries.length === 0;
+		for (const query of queries) {
+			queryClient.setQueryData<PiboSessionTraceView>(query.queryKey, (current: PiboSessionTraceView | undefined) => {
+				if (!isTraceView(current) || current.piboSessionId !== piboSessionId) return current;
+				applied = true;
+				return applyChatStreamEvents(current, pending);
+			});
+		}
 		if (applied) pendingStreamEventsBySession.current.delete(piboSessionId);
-	}, [queryClient, traceQueryKey]);
+	}, [queryClient]);
 
 	const schedulePendingStreamFlush = useCallback(() => {
 		if (pendingStreamFrame.current !== undefined || !selectedPiboSessionId) return;
@@ -1069,12 +1065,12 @@ function SessionTracePane({
 		const pending = pendingStreamEventsBySession.current.get(piboSessionId) ?? [];
 		pending.push(event);
 		pendingStreamEventsBySession.current.set(piboSessionId, pending);
-		if (flushImmediately) {
+		if (flushImmediately || piboSessionId !== selectedPiboSessionId) {
 			flushPendingStreamEvents(piboSessionId);
 		} else {
 			schedulePendingStreamFlush();
 		}
-	}, [flushPendingStreamEvents, schedulePendingStreamFlush]);
+	}, [flushPendingStreamEvents, schedulePendingStreamFlush, selectedPiboSessionId]);
 
 	useEffect(() => {
 		return () => {
@@ -1086,8 +1082,9 @@ function SessionTracePane({
 
 	useEffect(() => {
 		if (!selectedPiboSessionId || !traceQueryKey) return;
-		const params = new URLSearchParams({ piboSessionId: selectedPiboSessionId });
-		if (selectedRoomId) params.set("roomId", selectedRoomId);
+		const params = selectedRoomId
+			? new URLSearchParams({ roomId: selectedRoomId, piboSessionId: selectedPiboSessionId })
+			: new URLSearchParams({ piboSessionId: selectedPiboSessionId });
 		const events = new EventSource(`/api/chat/events?${params.toString()}`);
 		let traceTimer: ReturnType<typeof setTimeout> | undefined;
 		let bootstrapTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1108,13 +1105,14 @@ function SessionTracePane({
 		events.addEventListener("pibo", (message) => {
 			const event = chatStreamEvent(message);
 			if (!event) return;
+			const targetPiboSessionId = event.piboSessionId || selectedPiboSessionId;
 			const flushImmediately = event.type !== "TEXT_MESSAGE_CONTENT" && event.type !== "REASONING_MESSAGE_CONTENT";
-			enqueueStreamEvent(selectedPiboSessionId, event, flushImmediately);
-			if (event.type === "RUN_FINISHED" || event.type === "RUN_ERROR" || event.type === "TEXT_MESSAGE_END") {
+			enqueueStreamEvent(targetPiboSessionId, event, flushImmediately);
+			if (targetPiboSessionId === selectedPiboSessionId && eventShouldRefreshTrace(event)) {
 				scheduleTraceRefresh(0);
-				scheduleBootstrapRefresh(0);
-			} else if (event.type !== "TEXT_MESSAGE_CONTENT" && event.type !== "REASONING_MESSAGE_CONTENT") {
-				scheduleBootstrapRefresh(150);
+			}
+			if (eventShouldRefreshNavigation(event)) {
+				scheduleBootstrapRefresh(targetPiboSessionId === selectedPiboSessionId ? 0 : 150);
 			}
 		});
 		return () => {
@@ -2862,6 +2860,7 @@ type RawEvent = PiboSessionTraceView["rawEvents"][number];
 type CompactRawEvent = RawEvent & { count: number };
 
 type ChatStreamEventMeta = {
+	piboSessionId?: string;
 	streamFrameId?: string;
 	streamFrameIndex?: number;
 };
@@ -2905,6 +2904,14 @@ function streamFrameIndexFromId(value: string): number | undefined {
 	if (frame === undefined) return undefined;
 	const parsed = Number(frame);
 	return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+function eventShouldRefreshTrace(event: ChatStreamEvent): boolean {
+	return event.type === "RUN_FINISHED" || event.type === "RUN_ERROR" || event.type === "TEXT_MESSAGE_END";
+}
+
+function eventShouldRefreshNavigation(event: ChatStreamEvent): boolean {
+	return event.type === "RUN_STARTED" || event.type === "RUN_FINISHED" || event.type === "RUN_ERROR" || event.type === "TEXT_MESSAGE_END";
 }
 
 function liveOrder(event: ChatStreamEvent, nodeType: PiboTraceNode["type"]): PiboTraceOrderKey {

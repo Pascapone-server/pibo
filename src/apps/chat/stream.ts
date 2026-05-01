@@ -1,6 +1,6 @@
 import type { PiboOutputEvent } from "../../core/events.js";
 
-export type ChatStreamEvent =
+export type ChatStreamEvent = { piboSessionId?: string } & (
 	| { type: "ready"; piboSessionId: string }
 	| { type: "RUN_STARTED"; runId: string; input?: { text?: string; source?: string } }
 	| { type: "RUN_FINISHED"; runId: string }
@@ -16,7 +16,8 @@ export type ChatStreamEvent =
 	| { type: "TOOL_CALL_RESULT"; toolCallId: string; result: unknown; isError: boolean }
 	| { type: "AGENT_DELEGATION"; toolCallId?: string; toolName: string; subagentName: string; childPiboSessionId: string; threadKey?: string }
 	| { type: "EXECUTION_RESULT"; runId?: string; action: string; result: unknown }
-	| { type: "RAW_EVENT"; event: PiboOutputEvent };
+	| { type: "RAW_EVENT"; event: PiboOutputEvent }
+);
 
 export type ChatStreamState = {
 	textMessageIds: Set<string>;

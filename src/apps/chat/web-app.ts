@@ -119,6 +119,7 @@ type PiboRoomNodeWithUnread = PiboRoom & {
 
 const CHAT_UI_DIST_DIR = resolve(process.cwd(), "dist/apps/chat-ui");
 const compressedAssetCache = new Map<string, Uint8Array>();
+const TRACE_CACHE_MAX_ENTRIES = 128;
 
 function writeSse(
 	controller: ReadableStreamDefaultController<Uint8Array>,
@@ -222,6 +223,16 @@ function requestMatchesVersion(request: Request, version: string): boolean {
 
 function traceCacheKey(piboSessionId: string, version: string, includeRawEvents: boolean, rawEventsLimit: number): string {
 	return [piboSessionId, version, includeRawEvents ? "raw" : "compact", rawEventsLimit].join(":");
+}
+
+function setTraceCache(cache: Map<string, PiboSessionTraceView>, key: string, trace: PiboSessionTraceView): void {
+	cache.delete(key);
+	cache.set(key, trace);
+	while (cache.size > TRACE_CACHE_MAX_ENTRIES) {
+		const oldestKey = cache.keys().next().value;
+		if (typeof oldestKey !== "string") break;
+		cache.delete(oldestKey);
+	}
 }
 
 function normalizeRoomName(value: unknown, fallback = "New Chat"): string {
@@ -1041,10 +1052,11 @@ function writeStoredChatEventFrames(
 	cursor?: ChatEventCursor,
 ): void {
 	if (!isPiboOutputEvent(stored.payload)) return;
+	const piboSessionId = stored.piboSessionId ?? stored.payload.piboSessionId;
 	const frames = chatStreamFramesFromOutputEvent(stored.payload, state);
 	for (let index = 0; index < frames.length; index += 1) {
 		if (cursor && stored.streamId === cursor.streamId && index <= cursor.frameIndex) continue;
-		writeSse(controller, "pibo", frames[index], `${stored.streamId}:${index}`);
+		writeSse(controller, "pibo", { ...frames[index], piboSessionId }, `${stored.streamId}:${index}`);
 	}
 }
 
@@ -2477,7 +2489,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 					status: indexedSession?.status,
 					metadata,
 				});
-				const headers = { etag: etagForVersion(version) };
+				const headers = { etag: etagForVersion(version), "x-pibo-trace-version": version };
 				if (requestMatchesVersion(request, version)) {
 					return new Response(null, { status: 304, headers });
 				}
@@ -2492,7 +2504,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 					includeRawEvents,
 					rawEventsLimit,
 				});
-				state.traceCache.set(cacheKey, trace);
+				setTraceCache(state.traceCache, cacheKey, trace);
 				return responseJson(trace, { headers });
 			}
 
@@ -2551,7 +2563,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				const cursor = parseSseCursor(url.searchParams.get("since")) ?? parseSseCursor(request.headers.get("last-event-id"));
 				return createEventStream({
 					roomId: url.searchParams.has("roomId") ? roomId : undefined,
-					piboSessionId: selectedSession.id,
+					piboSessionId: url.searchParams.has("roomId") ? undefined : selectedSession.id,
 					context,
 					state,
 					cursor,
