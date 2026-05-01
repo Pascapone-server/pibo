@@ -168,11 +168,21 @@ export class PiboPluginRegistry {
 	}
 
 	getProfileInfos(): PiboProfileInfo[] {
-		return [...this.profiles.values()].map((profile) => ({
-			name: profile.name,
-			description: profile.description,
-			aliases: [...(profile.aliases ?? [])],
-		}));
+		const context = this.createProfileBuildContext();
+		return [...this.profiles.values()].map((profile) => {
+			const sessionContext = profile.create(context);
+			return {
+				name: profile.name,
+				description: profile.description,
+				aliases: [...(profile.aliases ?? [])],
+				nativeTools: sessionContext.tools.filter((tool) => tool.enabled !== false).map((tool) => tool.name),
+				skills: sessionContext.skills.filter((skill) => skill.enabled !== false).map((skill) => skill.name),
+				contextFiles: sessionContext.contextFiles.filter((contextFile) => contextFile.enabled !== false).map(contextFileKey),
+				subagents: sessionContext.subagents.filter((subagent) => subagent.enabled !== false),
+				builtinTools: sessionContext.builtinTools,
+				runControl: sessionContext.toolPackages.runControl === true,
+			};
+		});
 	}
 
 	getCapabilityCatalog(): PiboCapabilityCatalog {

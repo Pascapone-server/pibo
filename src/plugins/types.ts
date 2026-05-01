@@ -16,6 +16,7 @@ import type { PiboAuthService } from "../auth/types.js";
 import type { PiboWebApp } from "../web/types.js";
 import type {
 	ContextFileProfile,
+	BuiltinToolsMode,
 	InitialSessionContext,
 	SkillProfile,
 	SubagentProfile,
@@ -42,6 +43,12 @@ export type PiboProfileInfo = {
 	name: string;
 	description?: string;
 	aliases: string[];
+	nativeTools: string[];
+	skills: string[];
+	contextFiles: string[];
+	subagents: SubagentProfile[];
+	builtinTools: BuiltinToolsMode;
+	runControl: boolean;
 };
 
 export type PiboNativeToolInfo = {

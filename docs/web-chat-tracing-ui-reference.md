@@ -352,7 +352,7 @@ Recommended V1:
 - Error rendering.
 - Agent delegation rendering.
 - Basic execution result rendering.
-- Agent Designer for persisted custom profiles built from native plugin tools, skills, context files, subagents, and the `pibo-run-control` package toggle.
+- Agent Designer for persisted custom profiles built from native plugin tools, skills, context files, subagents, and the `pibo-run-control` package toggle. The Agents area uses a single profile sidebar with editable custom agents and read-only plugin profile inspection plus copy-to-custom actions.
 
 Recommended later phases:
 

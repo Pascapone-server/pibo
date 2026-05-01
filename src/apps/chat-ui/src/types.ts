@@ -96,10 +96,22 @@ export type BootstrapData = {
 	selectedPiboSessionId: string;
 	rooms: PiboRoom[];
 	sessions: PiboWebSessionNode[];
-	agents: Array<{ name: string; description?: string; aliases: string[] }>;
+	agents: AgentProfile[];
 	customAgents: CustomAgent[];
 	agentCatalog?: AgentCatalog;
 	capabilities: { actions: Array<{ name: string; description?: string; slashCommands: string[] }> };
+};
+
+export type AgentProfile = {
+	name: string;
+	description?: string;
+	aliases: string[];
+	nativeTools?: string[];
+	skills?: string[];
+	contextFiles?: string[];
+	subagents?: CustomAgentSubagent[];
+	builtinTools?: "default" | "disabled";
+	runControl?: boolean;
 };
 
 export type AgentCatalog = {

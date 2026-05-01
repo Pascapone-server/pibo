@@ -87,6 +87,8 @@ The main source folders are:
 
 The Chat Web App includes an Agent Designer in the Agents area. It creates custom agents, persists them in `.pibo/chat-agents.sqlite`, and registers each saved agent as a dynamic profile for routed sessions.
 
+The Agents area uses one sidebar for both editable custom agents and read-only plugin profiles. Plugin profiles can be inspected with their registered tools, skills, context files, subagents, built-in tool mode, and run-control package state, then copied into a custom agent when changes are needed.
+
 The designer configures native Pibo agent capabilities only: plugin-registered tools, skills, context files, subagents, built-in Pi tool visibility, and capability packages such as `pibo-run-control`. Curated external CLI tools from `pibo tools` remain global operator tooling and are not selected per agent.
 
 ## Profiles

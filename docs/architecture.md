@@ -126,6 +126,8 @@ The router keeps one active parent turn at a time by enqueuing notifications as 
 
 The Chat Web Agents area persists custom agents in `.pibo/chat-agents.sqlite`. Each saved custom agent is registered as a dynamic profile before routed sessions are created.
 
+The Agents UI has a single profile sidebar. User-created custom agents are editable; plugin-registered profiles are read-only inspection targets that expose their selected native tools, skills, context files, subagents, built-in tool mode, and run-control package state. Copying a read-only profile creates an editable custom agent draft.
+
 The designer configures native Pibo agent capabilities only:
 
 - plugin-registered native tools

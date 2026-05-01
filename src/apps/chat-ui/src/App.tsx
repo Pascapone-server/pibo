@@ -474,12 +474,29 @@ export function App() {
 			</header>
 
 			<div
-				className={`min-h-0 grid ${
-					showRawEvents
+				className={`min-h-0 ${
+					area === "agents" ? "" : `grid ${
+						showRawEvents
 						? "grid-cols-[300px_minmax(0,1fr)_320px] max-[980px]:grid-cols-[240px_minmax(0,1fr)]"
 						: "grid-cols-[300px_minmax(0,1fr)] max-[980px]:grid-cols-[240px_minmax(0,1fr)]"
+					}`
 				}`}
 			>
+				{area === "agents" ? (
+					<AgentsView
+						agents={bootstrap.agents}
+						initialCustomAgents={bootstrap.customAgents}
+						initialCatalog={bootstrap.agentCatalog}
+						onSelect={(profile) => {
+							setNewSessionProfile(profile);
+							localStorage.setItem("pibo.chat.newSessionProfile", profile);
+						}}
+						onCreateSession={(profile) => void createSession(profile)}
+						onAgentsChanged={() => void loadBootstrap(selectedPiboSessionId ?? undefined, showArchivedRef.current, selectedRoomId ?? undefined, { selectSession: false })}
+						creatingSession={creatingSession}
+					/>
+				) : (
+				<>
 				<aside className="min-h-0 overflow-auto bg-[#1a262b] border-r border-slate-800">
 					<div className="h-11 px-3 border-b border-slate-800 flex items-center justify-between text-xs font-bold uppercase tracking-wider">
 						<span>{area}</span>
@@ -561,27 +578,6 @@ export function App() {
 									/>
 								))}
 							</div>
-						</div>
-					) : area === "agents" ? (
-						<div className="p-2">
-							{bootstrap.agents.map((agent) => (
-								<button
-									key={agent.name}
-									type="button"
-									onClick={() => {
-										setNewSessionProfile(agent.name);
-										localStorage.setItem("pibo.chat.newSessionProfile", agent.name);
-									}}
-									className={`w-full mb-1 px-2 py-2 border rounded-sm text-left ${
-										agent.name === newSessionProfile ? "border-[#11a4d4] bg-[#11a4d4]/10" : "border-transparent"
-									}`}
-								>
-									<span className="block text-sm truncate text-slate-200">{agent.name}</span>
-									<span className="block text-[10px] font-mono truncate text-slate-500">
-										{agent.aliases.length ? agent.aliases.join(", ") : "profile"}
-									</span>
-								</button>
-							))}
 						</div>
 					) : (
 						<div className="p-3 text-sm text-slate-400">Browser-local settings.</div>
@@ -672,20 +668,6 @@ export function App() {
 								}}
 							/>
 						</>
-					) : area === "agents" ? (
-						<AgentsView
-							agents={bootstrap.agents}
-							initialCustomAgents={bootstrap.customAgents}
-							initialCatalog={bootstrap.agentCatalog}
-							selectedProfile={newSessionProfile}
-							onSelect={(profile) => {
-								setNewSessionProfile(profile);
-								localStorage.setItem("pibo.chat.newSessionProfile", profile);
-							}}
-							onCreateSession={(profile) => void createSession(profile)}
-							onAgentsChanged={() => void loadBootstrap(selectedPiboSessionId ?? undefined, showArchivedRef.current, selectedRoomId ?? undefined, { selectSession: false })}
-							creatingSession={creatingSession}
-						/>
 					) : (
 						<SettingsView
 							showThinking={showThinking}
@@ -712,6 +694,8 @@ export function App() {
 						</div>
 					</aside>
 				) : null}
+				</>
+				)}
 			</div>
 
 		</div>
@@ -1204,7 +1188,6 @@ function AgentsView({
 	agents,
 	initialCustomAgents,
 	initialCatalog,
-	selectedProfile,
 	onSelect,
 	onCreateSession,
 	onAgentsChanged,
@@ -1213,7 +1196,6 @@ function AgentsView({
 	agents: BootstrapData["agents"];
 	initialCustomAgents: CustomAgent[];
 	initialCatalog?: AgentCatalog;
-	selectedProfile: string;
 	onSelect: (profile: string) => void;
 	onCreateSession: (profile: string) => void;
 	onAgentsChanged: () => void;
@@ -1230,15 +1212,19 @@ function AgentsView({
 	useEffect(() => {
 		if (initialCatalog) setCatalog(initialCatalog);
 	}, [initialCatalog]);
+	const customProfileNames = useMemo(() => new Set(customAgents.map((agent) => agent.profileName)), [customAgents]);
+	const pluginProfiles = useMemo(
+		() => agents.filter((agent) => !customProfileNames.has(agent.name)),
+		[agents, customProfileNames],
+	);
 	const profileOptions = useMemo(
-		() => [
-			...agents.map((agent) => ({ value: agent.name, label: agent.name })),
-			...customAgents.map((agent) => ({ value: agent.profileName, label: agent.displayName })),
-		],
+		() => uniqueProfileOptions(agents, customAgents),
 		[agents, customAgents],
 	);
+	const readOnly = draft.source === "profile";
 
 	const saveDraft = async () => {
+		if (readOnly) return;
 		if (!designerAvailable) {
 			setLocalError(agentDesignerUnavailableMessage());
 			return;
@@ -1273,70 +1259,92 @@ function AgentsView({
 	};
 
 	return (
-		<div className="min-h-0 overflow-auto grid grid-cols-[280px_minmax(0,1fr)] max-[920px]:grid-cols-1">
-			<aside className="border-r border-slate-800 bg-[#151f24] p-3 min-h-0 overflow-auto">
-				<div className="flex items-center justify-between mb-3">
-					<h1 className="text-xs font-bold uppercase tracking-wider">Agents</h1>
-					<button type="button" onClick={() => setDraft(createBlankAgentDraft(catalog ?? undefined))} title="New Agent" aria-label="New Agent" className="h-8 w-8 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]">
-						<Plus size={14} />
-					</button>
-				</div>
-				<AgentList title="Custom">
-					{customAgents.map((agent) => (
-						<button key={agent.id} type="button" onClick={() => setDraft(agentToDraft(agent))} className={`w-full mb-1 px-2 py-2 border rounded-sm text-left ${draft.id === agent.id ? "border-[#11a4d4] bg-[#11a4d4]/10" : "border-transparent hover:border-slate-700"}`}>
-							<span className="block text-sm truncate text-slate-200">{agent.displayName}</span>
-							<span className="block text-[10px] font-mono truncate text-slate-500">{agent.profileName}</span>
+		<div className="min-h-0 grid grid-cols-[300px_minmax(0,1fr)] max-[920px]:grid-cols-1">
+			<aside className="border-r border-slate-800 bg-[#1a262b] min-h-0 overflow-auto">
+				<div className="h-11 px-3 border-b border-slate-800 flex items-center justify-between text-xs font-bold uppercase tracking-wider">
+					<span>Agents</span>
+					<div className="flex items-center gap-1">
+						<button type="button" onClick={() => setDraft(createBlankAgentDraft(catalog ?? undefined))} title="New Agent" aria-label="New Agent" className="p-1 border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]">
+							<Plus size={13} />
 						</button>
-					))}
-					{customAgents.length === 0 ? <div className="px-2 py-3 text-xs text-slate-500 border border-dashed border-slate-700 rounded-sm">No custom agents</div> : null}
-				</AgentList>
-				<AgentList title="Plugin Profiles">
-					{agents.map((agent) => (
-						<div key={agent.name} className={`mb-1 border rounded-sm ${agent.name === selectedProfile ? "border-[#11a4d4] bg-[#11a4d4]/10" : "border-transparent"}`}>
-							<div className="grid grid-cols-[1fr_auto_auto] items-center gap-1 p-1">
-								<button type="button" onClick={() => onSelect(agent.name)} className="min-w-0 text-left px-1 py-1">
-									<span className="block text-sm truncate text-slate-200">{agent.name}</span>
-									<span className="block text-[10px] font-mono truncate text-slate-500">{agent.aliases.join(", ") || "plugin"}</span>
-								</button>
-								<button type="button" onClick={() => setDraft(profileToDraft(agent, catalog ?? undefined))} title="Copy To Custom Agent" aria-label="Copy To Custom Agent" className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]">
-									<CopyPlus size={13} />
-								</button>
-								<button type="button" onClick={() => { onSelect(agent.name); onCreateSession(agent.name); }} disabled={creatingSession} title="New Session With Profile" aria-label="New Session With Profile" className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4] disabled:opacity-50">
-									<MessageSquarePlus size={13} />
-								</button>
-							</div>
-						</div>
-					))}
-				</AgentList>
+						<button type="button" onClick={onAgentsChanged} title="Refresh" aria-label="Refresh" className="p-1 border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]">
+							<RefreshCw size={13} />
+						</button>
+					</div>
+				</div>
+				<div className="p-2">
+					<AgentList title="Custom Agents">
+						{customAgents.map((agent) => (
+							<AgentSidebarRow
+								key={agent.id}
+								title={agent.displayName}
+								subtitle={agent.id}
+								selected={draft.source === "custom" && draft.id === agent.id}
+								onSelect={() => {
+									setDraft(agentToDraft(agent));
+									onSelect(agent.profileName);
+								}}
+								onCreateSession={() => {
+									onSelect(agent.profileName);
+									onCreateSession(agent.profileName);
+								}}
+								createSessionDisabled={creatingSession}
+							/>
+						))}
+						{customAgents.length === 0 ? <div className="px-2 py-3 text-xs text-slate-500 border border-dashed border-slate-700 rounded-sm">No custom agents</div> : null}
+					</AgentList>
+					<AgentList title="Read-only Profiles">
+						{pluginProfiles.map((agent) => (
+							<AgentSidebarRow
+								key={agent.name}
+								title={agent.name}
+								subtitle={agent.aliases.join(", ") || "plugin"}
+								selected={draft.source === "profile" && draft.profileName === agent.name}
+								onSelect={() => {
+									setDraft(profileToDraft(agent, catalog ?? undefined));
+									onSelect(agent.name);
+								}}
+								onCopy={() => setDraft(copyProfileToDraft(agent, catalog ?? undefined))}
+								onCreateSession={() => {
+									onSelect(agent.name);
+									onCreateSession(agent.name);
+								}}
+								createSessionDisabled={creatingSession}
+							/>
+						))}
+					</AgentList>
+				</div>
 			</aside>
 			<section className="min-h-0 overflow-auto p-5">
 				<div className="flex items-center justify-between gap-3 mb-4">
 					<div className="min-w-0">
 						<h1 className="text-sm font-bold uppercase tracking-wider">Agent Designer</h1>
 						<div className="font-mono text-[11px] text-slate-500 truncate">{draft.profileName ?? "new custom profile"}</div>
+						<div className="text-[11px] uppercase tracking-wider text-slate-500">{readOnly ? "read-only plugin profile" : "custom agent"}</div>
 					</div>
 					<div className="flex items-center gap-2">
 						<button type="button" onClick={() => draft.profileName && onCreateSession(draft.profileName)} disabled={!draft.profileName || creatingSession} title="New Session With Agent" aria-label="New Session With Agent" className="h-8 w-8 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4] disabled:opacity-50">
 							<MessageSquarePlus size={14} />
 						</button>
-						<button type="button" onClick={() => void saveDraft()} disabled={!designerAvailable || saving || !draft.displayName.trim()} title="Save Agent" aria-label="Save Agent" className="h-8 w-8 inline-flex items-center justify-center border border-[#11a4d4] rounded-sm text-[#11a4d4] bg-[#11a4d4]/10 disabled:opacity-50">
+						<button type="button" onClick={() => void saveDraft()} disabled={readOnly || !designerAvailable || saving || !draft.displayName.trim()} title="Save Agent" aria-label="Save Agent" className="h-8 w-8 inline-flex items-center justify-center border border-[#11a4d4] rounded-sm text-[#11a4d4] bg-[#11a4d4]/10 disabled:opacity-50">
 							<Save size={14} />
 						</button>
 					</div>
 				</div>
 				{designerAvailable ? null : <div className="mb-3 border border-[#f59e0b]/60 bg-[#f59e0b]/10 text-amber-100 px-3 py-2 text-sm rounded-sm">{agentDesignerUnavailableMessage()}</div>}
+				{readOnly ? <div className="mb-3 border border-slate-700 bg-[#151f24] text-slate-300 px-3 py-2 text-sm rounded-sm">This profile is registered by a plugin. Copy it to create an editable custom agent.</div> : null}
 				{localError ? <div className="mb-3 border border-red-500/60 bg-red-500/10 text-red-200 px-3 py-2 text-sm rounded-sm">{localError}</div> : null}
 				<div className="grid gap-4">
 					<DesignerPanel title="Basics">
-						<input value={draft.displayName} onChange={(event) => setDraft((current) => ({ ...current, displayName: event.target.value }))} className="min-w-0 bg-[#0e1116] border border-slate-700 rounded-sm px-3 py-2 text-sm outline-none focus:border-[#11a4d4]" placeholder="Agent name" />
-						<textarea value={draft.description} onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))} className="min-h-[72px] bg-[#0e1116] border border-slate-700 rounded-sm px-3 py-2 text-sm outline-none focus:border-[#11a4d4]" placeholder="Description" />
-						<label className="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" checked={draft.builtinTools === "disabled"} onChange={(event) => setDraft((current) => ({ ...current, builtinTools: event.target.checked ? "disabled" : "default" }))} />Disable Pi built-in tools</label>
+						<input value={draft.displayName} disabled={readOnly} onChange={(event) => setDraft((current) => ({ ...current, displayName: event.target.value }))} className="min-w-0 bg-[#0e1116] border border-slate-700 rounded-sm px-3 py-2 text-sm outline-none focus:border-[#11a4d4] disabled:opacity-60" placeholder="Agent name" />
+						<textarea value={draft.description} disabled={readOnly} onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))} className="min-h-[72px] bg-[#0e1116] border border-slate-700 rounded-sm px-3 py-2 text-sm outline-none focus:border-[#11a4d4] disabled:opacity-60" placeholder="Description" />
+						<label className="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" disabled={readOnly} checked={draft.builtinTools === "disabled"} onChange={(event) => setDraft((current) => ({ ...current, builtinTools: event.target.checked ? "disabled" : "default" }))} />Disable Pi built-in tools</label>
 					</DesignerPanel>
-					<CatalogSection title="Native Tools">{catalog?.nativeTools.map((tool) => <CatalogToggle key={tool.name} checked={draft.nativeTools.includes(tool.name)} title={tool.name} description={tool.description} meta={tool.yieldable ? "yieldable" : "direct only"} onToggle={() => setDraft((current) => ({ ...current, nativeTools: toggleName(current.nativeTools, tool.name) }))} />) ?? <EmptyCatalog />}</CatalogSection>
-					<CatalogSection title="Skills">{catalog?.skills.map((skill) => <CatalogToggle key={skill.name} checked={draft.skills.includes(skill.name)} title={skill.name} description={skill.path} onToggle={() => setDraft((current) => ({ ...current, skills: toggleName(current.skills, skill.name) }))} />) ?? <EmptyCatalog />}</CatalogSection>
-					<CatalogSection title="Packages"><CatalogToggle checked={draft.runControl} title="pibo-run-control" description="Expose pibo_run_* as one package for yielded native tools and subagents." meta="package" onToggle={() => setDraft((current) => ({ ...current, runControl: !current.runControl }))} /></CatalogSection>
-					<CatalogSection title="Context Files">{catalog?.contextFiles.map((contextFile) => <CatalogToggle key={contextFile.key} checked={draft.contextFiles.includes(contextFile.key)} title={contextFile.label ?? contextFile.key} description={contextFile.path} onToggle={() => setDraft((current) => ({ ...current, contextFiles: toggleName(current.contextFiles, contextFile.key) }))} />) ?? <EmptyCatalog />}</CatalogSection>
-					<SubagentDesigner draft={draft} setDraft={setDraft} profileOptions={profileOptions} />
+					<CatalogSection title="Native Tools">{catalog?.nativeTools.map((tool) => <CatalogToggle key={tool.name} disabled={readOnly} checked={draft.nativeTools.includes(tool.name)} title={tool.name} description={tool.description} meta={tool.yieldable ? "yieldable" : "direct only"} onToggle={() => setDraft((current) => ({ ...current, nativeTools: toggleName(current.nativeTools, tool.name) }))} />) ?? <EmptyCatalog />}</CatalogSection>
+					<CatalogSection title="Skills">{catalog?.skills.map((skill) => <CatalogToggle key={skill.name} disabled={readOnly} checked={draft.skills.includes(skill.name)} title={skill.name} description={skill.path} onToggle={() => setDraft((current) => ({ ...current, skills: toggleName(current.skills, skill.name) }))} />) ?? <EmptyCatalog />}</CatalogSection>
+					<CatalogSection title="Packages"><CatalogToggle disabled={readOnly} checked={draft.runControl} title="pibo-run-control" description="Expose pibo_run_* as one package for yielded native tools and subagents." meta="package" onToggle={() => setDraft((current) => ({ ...current, runControl: !current.runControl }))} /></CatalogSection>
+					<CatalogSection title="Context Files">{catalog?.contextFiles.map((contextFile) => <CatalogToggle key={contextFile.key} disabled={readOnly} checked={draft.contextFiles.includes(contextFile.key)} title={contextFile.label ?? contextFile.key} description={contextFile.path} onToggle={() => setDraft((current) => ({ ...current, contextFiles: toggleName(current.contextFiles, contextFile.key) }))} />) ?? <EmptyCatalog />}</CatalogSection>
+					<SubagentDesigner draft={draft} setDraft={setDraft} profileOptions={profileOptions} readOnly={readOnly} />
 				</div>
 			</section>
 		</div>
@@ -1346,6 +1354,7 @@ function AgentsView({
 type AgentDraft = SaveCustomAgentInput & {
 	id?: string;
 	profileName?: string;
+	source: "custom" | "profile";
 };
 
 function createBlankAgentDraft(catalog?: AgentCatalog): AgentDraft {
@@ -1358,6 +1367,7 @@ function createBlankAgentDraft(catalog?: AgentCatalog): AgentDraft {
 		subagents: [],
 		builtinTools: "default",
 		runControl: false,
+		source: "custom",
 	};
 }
 
@@ -1373,15 +1383,44 @@ function agentToDraft(agent: CustomAgent): AgentDraft {
 		subagents: agent.subagents,
 		builtinTools: agent.builtinTools,
 		runControl: agent.runControl,
+		source: "custom",
 	};
 }
 
 function profileToDraft(profile: BootstrapData["agents"][number], catalog?: AgentCatalog): AgentDraft {
 	return {
-		...createBlankAgentDraft(catalog),
-		displayName: `${profile.name} Copy`,
+		displayName: profile.name,
 		description: profile.description ?? "",
+		nativeTools: profile.nativeTools ?? [],
+		skills: profile.skills ?? (catalog?.skills.some((skill) => skill.name === "pi-agent-harness") ? ["pi-agent-harness"] : []),
+		contextFiles: profile.contextFiles ?? [],
+		subagents: profile.subagents ?? [],
+		builtinTools: profile.builtinTools ?? "default",
+		runControl: profile.runControl ?? false,
+		profileName: profile.name,
+		source: "profile",
 	};
+}
+
+function copyProfileToDraft(profile: BootstrapData["agents"][number], catalog?: AgentCatalog): AgentDraft {
+	const draft = profileToDraft(profile, catalog);
+	return {
+		...draft,
+		displayName: `${profile.name} Copy`,
+		id: undefined,
+		profileName: undefined,
+		source: "custom",
+	};
+}
+
+function uniqueProfileOptions(
+	agents: BootstrapData["agents"],
+	customAgents: CustomAgent[],
+): Array<{ value: string; label: string }> {
+	const options = new Map<string, string>();
+	for (const agent of agents) options.set(agent.name, agent.name);
+	for (const agent of customAgents) options.set(agent.profileName, agent.displayName);
+	return [...options.entries()].map(([value, label]) => ({ value, label }));
 }
 
 function toggleName(names: string[], name: string): string[] {
@@ -1393,6 +1432,45 @@ function AgentList({ title, children }: { title: string; children: ReactNode }) 
 		<div className="mb-4">
 			<div className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">{title}</div>
 			{children}
+		</div>
+	);
+}
+
+function AgentSidebarRow({
+	title,
+	subtitle,
+	selected,
+	onSelect,
+	onCopy,
+	onCreateSession,
+	createSessionDisabled,
+}: {
+	title: string;
+	subtitle: string;
+	selected: boolean;
+	onSelect: () => void;
+	onCopy?: () => void;
+	onCreateSession: () => void;
+	createSessionDisabled: boolean;
+}) {
+	return (
+		<div className={`mb-1 border rounded-sm ${selected ? "border-[#11a4d4] bg-[#11a4d4]/10" : "border-transparent hover:border-slate-700"}`}>
+			<div className="grid grid-cols-[1fr_auto_auto] items-center gap-1 p-1">
+				<button type="button" onClick={onSelect} className="min-w-0 text-left px-1 py-1">
+					<span className="block text-sm truncate text-slate-200">{title}</span>
+					<span className="block text-[10px] font-mono truncate text-slate-500">{subtitle}</span>
+				</button>
+				{onCopy ? (
+					<button type="button" onClick={onCopy} title="Copy To Custom Agent" aria-label="Copy To Custom Agent" className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]">
+						<CopyPlus size={13} />
+					</button>
+				) : (
+					<span className="h-7 w-7" />
+				)}
+				<button type="button" onClick={onCreateSession} disabled={createSessionDisabled} title="New Session With Profile" aria-label="New Session With Profile" className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4] disabled:opacity-50">
+					<MessageSquarePlus size={13} />
+				</button>
+			</div>
 		</div>
 	);
 }
@@ -1416,12 +1494,14 @@ function CatalogSection({ title, children }: { title: string; children: ReactNod
 
 function CatalogToggle({
 	checked,
+	disabled,
 	title,
 	description,
 	meta,
 	onToggle,
 }: {
 	checked: boolean;
+	disabled?: boolean;
 	title: string;
 	description?: string;
 	meta?: string;
@@ -1431,7 +1511,8 @@ function CatalogToggle({
 		<button
 			type="button"
 			onClick={onToggle}
-			className={`min-w-0 border rounded-sm p-2 text-left grid grid-cols-[18px_1fr] gap-2 ${
+			disabled={disabled}
+			className={`min-w-0 border rounded-sm p-2 text-left grid grid-cols-[18px_1fr] gap-2 disabled:opacity-60 ${
 				checked ? "border-[#11a4d4] bg-[#11a4d4]/10" : "border-slate-800 bg-[#151f24] hover:border-slate-700"
 			}`}
 		>
@@ -1463,10 +1544,12 @@ function SubagentDesigner({
 	draft,
 	setDraft,
 	profileOptions,
+	readOnly,
 }: {
 	draft: AgentDraft;
 	setDraft: Dispatch<SetStateAction<AgentDraft>>;
 	profileOptions: Array<{ value: string; label: string }>;
+	readOnly: boolean;
 }) {
 	const updateSubagent = (index: number, patch: Partial<CustomAgentSubagent>) => {
 		setDraft((current) => ({
@@ -1480,11 +1563,12 @@ function SubagentDesigner({
 			<div className="flex justify-end">
 				<button
 					type="button"
+					disabled={readOnly}
 					onClick={() => setDraft((current) => ({
 						...current,
 						subagents: [...current.subagents, { name: "helper", targetProfile: profileOptions[0]?.value ?? "pibo-minimal", executionMode: "parallel", maxDepth: 3 }],
 					}))}
-					className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]"
+					className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4] disabled:opacity-50"
 					title="Add Subagent"
 					aria-label="Add Subagent"
 				>
@@ -1494,16 +1578,16 @@ function SubagentDesigner({
 			<div className="grid gap-2">
 				{draft.subagents.map((subagent, index) => (
 					<div key={index} className="grid grid-cols-[1fr_1fr_120px_80px_auto] max-[1100px]:grid-cols-1 gap-2 border border-slate-800 bg-[#151f24] p-2 rounded-sm">
-						<input value={subagent.name} onChange={(event) => updateSubagent(index, { name: event.target.value })} className="min-w-0 bg-[#0e1116] border border-slate-700 rounded-sm px-2 py-1 text-sm outline-none focus:border-[#11a4d4]" placeholder="name" />
-						<select value={subagent.targetProfile} onChange={(event) => updateSubagent(index, { targetProfile: event.target.value })} className="min-w-0 bg-[#0e1116] border border-slate-700 rounded-sm px-2 py-1 text-sm outline-none focus:border-[#11a4d4]">
+						<input value={subagent.name} disabled={readOnly} onChange={(event) => updateSubagent(index, { name: event.target.value })} className="min-w-0 bg-[#0e1116] border border-slate-700 rounded-sm px-2 py-1 text-sm outline-none focus:border-[#11a4d4] disabled:opacity-60" placeholder="name" />
+						<select value={subagent.targetProfile} disabled={readOnly} onChange={(event) => updateSubagent(index, { targetProfile: event.target.value })} className="min-w-0 bg-[#0e1116] border border-slate-700 rounded-sm px-2 py-1 text-sm outline-none focus:border-[#11a4d4] disabled:opacity-60">
 							{profileOptions.map((profile) => <option key={profile.value} value={profile.value}>{profile.label}</option>)}
 						</select>
-						<select value={subagent.executionMode ?? "parallel"} onChange={(event) => updateSubagent(index, { executionMode: event.target.value as "parallel" | "sequential" })} className="bg-[#0e1116] border border-slate-700 rounded-sm px-2 py-1 text-sm outline-none focus:border-[#11a4d4]">
+						<select value={subagent.executionMode ?? "parallel"} disabled={readOnly} onChange={(event) => updateSubagent(index, { executionMode: event.target.value as "parallel" | "sequential" })} className="bg-[#0e1116] border border-slate-700 rounded-sm px-2 py-1 text-sm outline-none focus:border-[#11a4d4] disabled:opacity-60">
 							<option value="parallel">parallel</option>
 							<option value="sequential">sequential</option>
 						</select>
-						<input type="number" min={1} value={subagent.maxDepth ?? 3} onChange={(event) => updateSubagent(index, { maxDepth: Number(event.target.value) || 1 })} className="bg-[#0e1116] border border-slate-700 rounded-sm px-2 py-1 text-sm outline-none focus:border-[#11a4d4]" />
-						<button type="button" onClick={() => setDraft((current) => ({ ...current, subagents: current.subagents.filter((_, itemIndex) => itemIndex !== index) }))} className="h-8 w-8 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-red-500 hover:text-red-300" title="Remove Subagent" aria-label="Remove Subagent">
+						<input type="number" min={1} disabled={readOnly} value={subagent.maxDepth ?? 3} onChange={(event) => updateSubagent(index, { maxDepth: Number(event.target.value) || 1 })} className="bg-[#0e1116] border border-slate-700 rounded-sm px-2 py-1 text-sm outline-none focus:border-[#11a4d4] disabled:opacity-60" />
+						<button type="button" disabled={readOnly} onClick={() => setDraft((current) => ({ ...current, subagents: current.subagents.filter((_, itemIndex) => itemIndex !== index) }))} className="h-8 w-8 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-red-500 hover:text-red-300 disabled:opacity-50" title="Remove Subagent" aria-label="Remove Subagent">
 							<X size={14} />
 						</button>
 					</div>
