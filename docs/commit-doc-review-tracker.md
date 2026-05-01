@@ -42,13 +42,13 @@ Scope: Last 10 commits on the current branch, metadata only. No diff review yet.
 
 ### 4. `63003e5` - Document browser-use auth lease workflow
 
-- Review status: `todo`
-- Documentation follow-up: `tbd`
+- Review status: `done`
+- Documentation follow-up: `none`
 - Date: `2026-05-01T21:09:45+02:00`
 - Author: `pibo`
 - Full hash: `63003e50172e0b0186fe5015d25fc8611b9ce7fb`
 - Description: `-`
-- Notes: `-`
+- Notes: `Existing docs update is still correct: authenticated Chat Web browser testing should prefer isolated Browser Use leases, with `pibo-auth` kept only as a fallback.`
 
 ### 5. `a39afca` - Show origin session link for forked chats
 
