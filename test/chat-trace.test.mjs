@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { SessionManager } from "@mariozechner/pi-coding-agent";
 import { ChatWebReadModel } from "../dist/apps/chat/read-model.js";
@@ -140,6 +141,66 @@ test("chat read model assigns stable per-session event sequence", () => {
 		[1, 2, 3],
 	);
 	readModel.close();
+});
+
+test("chat read model migrates existing events before creating sequence index", () => {
+	const dir = mkdtempSync(join(tmpdir(), "pibo-chat-read-migrate-"));
+	const dbPath = join(dir, "web-chat.sqlite");
+	const session = createTestSession();
+	const db = new DatabaseSync(dbPath);
+	try {
+		db.exec(`
+			CREATE TABLE web_chat_sessions (
+				pibo_session_id TEXT PRIMARY KEY,
+				pi_session_id TEXT NOT NULL,
+				parent_id TEXT,
+				profile TEXT NOT NULL,
+				channel TEXT NOT NULL,
+				kind TEXT NOT NULL,
+				created_at TEXT NOT NULL,
+				updated_at TEXT NOT NULL,
+				last_activity_at TEXT,
+				status TEXT NOT NULL DEFAULT 'idle'
+			);
+
+			CREATE TABLE web_chat_events (
+				id TEXT PRIMARY KEY,
+				pibo_session_id TEXT NOT NULL,
+				event_id TEXT,
+				type TEXT NOT NULL,
+				created_at TEXT NOT NULL,
+				payload_json TEXT NOT NULL
+			);
+		`);
+		db.prepare(
+			"INSERT INTO web_chat_events (id, pibo_session_id, event_id, type, created_at, payload_json) VALUES (?, ?, ?, ?, ?, ?)",
+		).run(
+			"event-1",
+			session.id,
+			"turn-1",
+			"assistant_delta",
+			"2026-04-29T08:00:00.000Z",
+			JSON.stringify({ type: "assistant_delta", piboSessionId: session.id, eventId: "turn-1", text: "legacy" }),
+		);
+	} finally {
+		db.close();
+	}
+
+	const readModel = new ChatWebReadModel(dbPath);
+	try {
+		assert.deepEqual(
+			readModel.listEvents(session.id).map((event) => event.eventSequence),
+			[1],
+		);
+		readModel.recordEvent({ type: "assistant_message", piboSessionId: session.id, eventId: "turn-1", text: "final" }, session);
+		assert.deepEqual(
+			readModel.listEvents(session.id).map((event) => event.eventSequence),
+			[1, 2],
+		);
+	} finally {
+		readModel.close();
+		rmSync(dir, { recursive: true, force: true });
+	}
 });
 
 test("chat read model keeps sessions running after live thinking finishes", () => {

@@ -85,6 +85,9 @@ export class ChatWebReadModel {
 				created_at TEXT NOT NULL,
 				payload_json TEXT NOT NULL
 			);
+		`);
+		this.migrateEventSequence();
+		this.db.exec(`
 
 			CREATE INDEX IF NOT EXISTS idx_web_chat_events_session_created
 				ON web_chat_events(pibo_session_id, created_at, id);
@@ -95,7 +98,6 @@ export class ChatWebReadModel {
 			CREATE INDEX IF NOT EXISTS idx_web_chat_sessions_parent
 				ON web_chat_sessions(parent_id);
 		`);
-		this.migrateEventSequence();
 		this.resetInterruptedSessions();
 	}
 
