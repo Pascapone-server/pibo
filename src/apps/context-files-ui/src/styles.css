@@ -480,7 +480,7 @@ input:focus {
 	background: transparent !important;
 	color: #94a3b8 !important;
 	box-shadow: none !important;
-	font-weight: 500 !important;
+	font-weight: 400 !important;
 }
 
 .mdxeditor [class*="_iconButton_"] svg,
@@ -491,6 +491,9 @@ input:focus {
 .mdxeditor [class*="_toolbarButtonSelectTrigger_"] svg {
 	color: #94a3b8 !important;
 	stroke: currentColor !important;
+	width: 18px !important;
+	height: 18px !important;
+	opacity: 0.88;
 }
 
 .mdxeditor [class*="_iconButton_"]:hover,
@@ -511,6 +514,7 @@ input:focus {
 .mdxeditor [class*="_toolbarNodeKindSelectTrigger_"]:hover svg,
 .mdxeditor [class*="_toolbarButtonSelectTrigger_"]:hover svg {
 	color: #cbd5e1 !important;
+	opacity: 0.94;
 }
 
 .mdxeditor [data-state="on"],
@@ -523,6 +527,7 @@ input:focus {
 .mdxeditor [data-state="on"] svg,
 .mdxeditor [aria-checked="true"] svg {
 	color: #7dd3fc !important;
+	opacity: 1;
 }
 
 .mdxeditor [disabled] {
