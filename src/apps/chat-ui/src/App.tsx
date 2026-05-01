@@ -361,6 +361,11 @@ export function App({ route }: { route: ChatAppRoute }) {
 		localStorage.setItem("pibo.chat.newSessionProfile", fallbackProfile);
 	}, [bootstrap, newSessionProfile]);
 
+	const setPreferredNewSessionProfile = useCallback((profile: string) => {
+		setNewSessionProfile(profile);
+		localStorage.setItem("pibo.chat.newSessionProfile", profile);
+	}, []);
+
 	const slashCommands = useMemo(() => {
 		const actions = bootstrap?.capabilities.actions ?? [];
 		const commands = actions.flatMap((action) =>
@@ -674,10 +679,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 						agents={bootstrap.agents}
 						initialCustomAgents={bootstrap.customAgents}
 						initialCatalog={bootstrap.agentCatalog}
-						onSelect={(profile) => {
-							setNewSessionProfile(profile);
-							localStorage.setItem("pibo.chat.newSessionProfile", profile);
-						}}
+						onSelect={setPreferredNewSessionProfile}
 						onCreateSession={(profile) => void createSession(profile)}
 						onAgentsChanged={() => void loadBootstrap(selectedPiboSessionId ?? undefined, showArchivedRef.current, selectedRoomId ?? undefined, { selectSession: false })}
 						creatingSession={creatingSession || selectedRoomArchived}
@@ -903,6 +905,11 @@ export function App({ route }: { route: ChatAppRoute }) {
 								expandThinking={expandThinking}
 								sessionAgentProfile={bootstrap.session.profile}
 								activeAgentProfile={newSessionProfile}
+								agentProfiles={bootstrap.agents}
+								selectedAgentProfile={newSessionProfile}
+								createSessionDisabled={creatingSession || selectedRoomArchived}
+								onAgentProfileChange={setPreferredNewSessionProfile}
+								onCreateSession={(profile) => void createSession(profile)}
 								onFork={forkFrom}
 								onOpenSession={openSession}
 							/>
