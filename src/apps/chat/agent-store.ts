@@ -92,6 +92,7 @@ export class CustomAgentStore {
 	}
 
 	list(ownerScope?: string): CustomAgentDefinition[] {
+		this.migrateLegacyProfileNames();
 		const rows = ownerScope
 			? this.db.prepare("SELECT * FROM chat_agents WHERE owner_scope = ? ORDER BY updated_at DESC").all(ownerScope)
 			: this.db.prepare("SELECT * FROM chat_agents ORDER BY updated_at DESC").all();
@@ -99,11 +100,13 @@ export class CustomAgentStore {
 	}
 
 	get(id: string): CustomAgentDefinition | undefined {
+		this.migrateLegacyProfileNames();
 		const row = this.db.prepare("SELECT * FROM chat_agents WHERE id = ?").get(id) as AgentRow | undefined;
 		return row ? agentFromRow(row) : undefined;
 	}
 
 	create(input: CreateCustomAgentInput): CustomAgentDefinition {
+		this.migrateLegacyProfileNames();
 		const now = new Date().toISOString();
 		const id = `agent_${randomUUID()}`;
 		const profileName = input.displayName;
@@ -130,6 +133,7 @@ export class CustomAgentStore {
 	}
 
 	update(id: string, input: UpdateCustomAgentInput): CustomAgentDefinition | undefined {
+		this.migrateLegacyProfileNames();
 		const existing = this.get(id);
 		if (!existing) return undefined;
 		const profileName = input.displayName ?? existing.displayName;
