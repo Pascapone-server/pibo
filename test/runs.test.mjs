@@ -274,3 +274,61 @@ test("router converts yielded tool errors into failed run notifications", async 
 	assert.match(messages[0].text, /"failed"/);
 	assert.match(messages[0].text, /"runId":"run_/);
 });
+
+test("router invalidates stale queued run notifications after read", async () => {
+	const router = new PiboSessionRouter({ persistSession: false });
+	const messages = [];
+	const session = {
+		enqueueMessage(event) {
+			messages.push(event);
+			return {
+				type: "message_queued",
+				piboSessionId: event.piboSessionId,
+				eventId: event.id,
+				queuedMessages: messages.length,
+				text: event.text,
+				source: event.source,
+			};
+		},
+		removeQueuedMessages(predicate) {
+			let removed = 0;
+			for (let index = messages.length - 1; index >= 0; index -= 1) {
+				if (!predicate(messages[index])) continue;
+				messages.splice(index, 1);
+				removed += 1;
+			}
+			return removed;
+		},
+	};
+	router.getOrCreateSession = async () => session;
+	router.sessions.set("parent", session);
+
+	const controller = router.createRunToolController("parent");
+	const consumedRun = controller.startToolRun({
+		toolName: "first",
+		async execute() {
+			return { text: "first done" };
+		},
+	});
+	const pendingRun = controller.startToolRun({
+		toolName: "second",
+		async execute() {
+			return { text: "second done" };
+		},
+	});
+	await new Promise((resolve) => setImmediate(resolve));
+
+	assert.equal(messages.length, 1);
+	assert.match(messages[0].text, new RegExp(consumedRun.runId));
+	assert.match(messages[0].text, new RegExp(pendingRun.runId));
+
+	const read = controller.readRun(consumedRun.runId);
+	assert.equal(read.status, "completed");
+	assert.equal(read.consumed, true);
+	assert.equal(messages.length, 0);
+
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.equal(messages.length, 1);
+	assert.doesNotMatch(messages[0].text, new RegExp(consumedRun.runId));
+	assert.match(messages[0].text, new RegExp(pendingRun.runId));
+});

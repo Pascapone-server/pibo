@@ -108,6 +108,14 @@ function formatRunNotification(notification: PiboRunNotification): string {
 	].join("\n");
 }
 
+function isRunNotificationServiceMessage(event: PiboMessageEvent): boolean {
+	return event.source === "service" && event.text.startsWith("<pibo_run_notification>");
+}
+
+function isTerminalRunStatus(status: string): boolean {
+	return status === "completed" || status === "failed" || status === "cancelled";
+}
+
 function asJsonObject(value: PiboJsonObject | undefined): PiboJsonObject {
 	return value ?? {};
 }
@@ -371,12 +379,23 @@ export class PiboSessionRouter {
 			listRuns: (options) => this.runRegistry.list(parentPiboSessionId, options),
 			getRunStatus: (runId) => this.runRegistry.status(parentPiboSessionId, runId),
 			waitForRun: (runId, timeoutMs) => this.runRegistry.wait(parentPiboSessionId, runId, timeoutMs),
-			readRun: (runId) => this.runRegistry.read(parentPiboSessionId, runId),
+			readRun: (runId) => {
+				const run = this.runRegistry.read(parentPiboSessionId, runId);
+				if (run.consumed && isTerminalRunStatus(run.status)) {
+					this.refreshQueuedRunNotifications(parentPiboSessionId);
+				}
+				return run;
+			},
 			cancelRun: async (runId) => {
 				const cancelled = this.runRegistry.cancel(parentPiboSessionId, runId);
+				this.refreshQueuedRunNotifications(parentPiboSessionId);
 				return cancelled;
 			},
-			ackRun: (runId) => this.runRegistry.ack(parentPiboSessionId, runId),
+			ackRun: (runId) => {
+				const run = this.runRegistry.ack(parentPiboSessionId, runId);
+				this.refreshQueuedRunNotifications(parentPiboSessionId);
+				return run;
+			},
 		};
 	}
 
@@ -458,6 +477,11 @@ export class PiboSessionRouter {
 		queueMicrotask(() => {
 			void this.deliverRunNotification(piboSessionId);
 		});
+	}
+
+	private refreshQueuedRunNotifications(piboSessionId: string): void {
+		const removed = this.sessions.get(piboSessionId)?.removeQueuedMessages(isRunNotificationServiceMessage) ?? 0;
+		if (removed > 0) this.scheduleRunNotification(piboSessionId, true);
 	}
 
 	private async deliverRunNotification(piboSessionId: string): Promise<void> {

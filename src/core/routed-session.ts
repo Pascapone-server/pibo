@@ -306,6 +306,18 @@ export class RoutedSession {
 		};
 	}
 
+	removeQueuedMessages(predicate: (event: PiboMessageEvent) => boolean): number {
+		this.assertActive();
+
+		let removed = 0;
+		for (let index = this.queue.length - 1; index >= 0; index -= 1) {
+			if (!predicate(this.queue[index])) continue;
+			this.queue.splice(index, 1);
+			removed += 1;
+		}
+		return removed;
+	}
+
 	getCurrentSession(): PiboPiSessionSnapshot {
 		return this.createSessionSnapshot();
 	}
