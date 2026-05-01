@@ -70,6 +70,8 @@ This specification does not define internal runtime event contracts.
 - **REQ-032**: `pibo debug trace --check` MUST report trace consistency diagnostics for duplicate ids, missing parents, missing source/stable-key/order metadata, and stable-order regressions.
 - **REQ-033**: `pibo debug events <pibo-session-id>` MUST inspect compact Chat Web event rows and MUST support selecting event types and payload field paths.
 - **REQ-034**: `pibo debug events --fields` MUST extract only the requested payload fields and MUST NOT dump the complete stored payload by default.
+- **REQ-035**: `pibo debug events stats` MUST report grouped counts for retained events and MUST support filtering by topic, session key, and retention class.
+- **REQ-036**: `pibo debug events prune` MUST require explicit `--topic`, `--retention`, and `--before` filters and MUST preserve rows still needed by named consumers unless `--destructive` is passed.
 - **CON-001**: The CLI is agent-facing; avoid large all-in-one help text.
 - **CON-002**: Optional external tools and MCP servers are configured on demand and are not bundled into the core runtime.
 - **CON-003**: The Debug CLI is local operator tooling. It MUST NOT become a profile tool or expose runtime capabilities to agents.
@@ -161,6 +163,8 @@ type CliToolEntry = {
 | `pibo debug session <url-or-pibo-session-id>` | Summarize one Pibo Session and Chat Web read-model state |
 | `pibo debug trace <pibo-session-id>` | Rebuild one Chat Web trace view; `--check` adds consistency diagnostics |
 | `pibo debug events <pibo-session-id>` | Inspect compact event headers and selected payload fields |
+| `pibo debug events stats` | Count retained events by topic, session key, and retention class |
+| `pibo debug events prune` | Prune retained events before a cutoff, with non-destructive consumer protection by default |
 
 ## 5. Acceptance Criteria
 
@@ -177,6 +181,8 @@ type CliToolEntry = {
 - **AC-011**: Given a Chat Web session with running trace nodes, When `pibo debug trace <id> --running-only` runs, Then output includes only running trace nodes.
 - **AC-012**: Given a Chat Web session, When `pibo debug trace <id> --check --json` runs, Then the JSON output contains a `checks` object with a status and issue list.
 - **AC-013**: Given stored Chat Web events, When `pibo debug events <id> --type tool_execution_finished --fields toolName,toolCallId,result.details.status` runs, Then output includes those fields and omits full payload dumps.
+- **AC-014**: Given retained `pibo.output` events, When `pibo debug events stats --topic pibo.output --session ps_... --retention live_delta` runs, Then output includes a grouped count row for that session and retention class.
+- **AC-015**: Given retained `pibo.output` `live_delta` rows older than a cutoff, When `pibo debug events prune --topic pibo.output --retention live_delta --before <iso-date>` runs, Then output reports the bounded prune result and does not require `--destructive` for consumer-safe cleanup.
 
 ## 6. Test Automation Strategy
 
@@ -184,7 +190,7 @@ type CliToolEntry = {
 - **Frameworks**: Node.js built-in test runner.
 - **Primary Command**: `npm test`.
 - **Focused Commands**: `node --test test/mcp-cli.test.mjs`, `node --test test/tools-cli.test.mjs`, `node --test test/config.test.mjs`, `node --test test/debug-cli.test.mjs`.
-- **Manual Smoke Checks**: `npm run dev -- config keys`, `npm run dev -- tools list`, `npm run dev -- mcp`, `npm run dev -- debug trace ps_... --running-only`, `npm run dev -- debug trace ps_... --check`.
+- **Manual Smoke Checks**: `npm run dev -- config keys`, `npm run dev -- tools list`, `npm run dev -- mcp`, `npm run dev -- debug trace ps_... --running-only`, `npm run dev -- debug trace ps_... --check`, `npm run dev -- debug events stats --topic pibo.output --session ps_... --retention live_delta`.
 
 ## 7. Rationale & Context
 
@@ -231,6 +237,8 @@ pibo debug session /apps/chat/rooms/<room-id>/sessions/<pibo-session-id>
 pibo debug trace <pibo-session-id> --running-only
 pibo debug trace <pibo-session-id> --check
 pibo debug events <pibo-session-id> --type tool_execution_finished --fields toolName,toolCallId,result.details.status
+pibo debug events stats --topic pibo.output --session <pibo-session-id> --retention live_delta
+pibo debug events prune --topic pibo.output --retention live_delta --before 2026-05-01T00:00:00.000Z
 ```
 
 ### Config List Values

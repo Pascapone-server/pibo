@@ -207,9 +207,11 @@ npm run dev -- debug session /apps/chat/rooms/<roomId>/sessions/<piboSessionId>
 npm run dev -- debug trace <piboSessionId> --running-only
 npm run dev -- debug trace <piboSessionId> --check
 npm run dev -- debug events <piboSessionId> --type tool_execution_finished --fields toolName,toolCallId,result.details.status
+npm run dev -- debug events stats --topic pibo.output --session <piboSessionId> --retention live_delta
+npm run dev -- debug events prune --topic pibo.output --retention live_delta --before 2026-05-01T00:00:00.000Z
 ```
 
-`pibo debug db query` opens known stores read-only, accepts only one read-only SQL statement, applies a default row limit when the query has no `limit`, and supports `--json` for machine-readable output. `pibo debug trace` rebuilds the same Chat Web trace view as `/api/chat/trace`; `--check` adds trace consistency diagnostics for ids, parents, stable order metadata, and source/stable-key coverage. `pibo debug events` extracts selected payload fields without dumping full event payloads.
+`pibo debug db query` opens known stores read-only, accepts only one read-only SQL statement, applies a default row limit when the query has no `limit`, and supports `--json` for machine-readable output. `pibo debug trace` rebuilds the same Chat Web trace view as `/api/chat/trace`; `--check` adds trace consistency diagnostics for ids, parents, stable order metadata, and source/stable-key coverage. `pibo debug events` extracts selected payload fields without dumping full event payloads, can summarize retained event counts by topic/session/retention class, and can prune old `live_delta` rows once replay consumers no longer need them.
 
 ## Web Auth
 
