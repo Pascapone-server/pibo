@@ -230,7 +230,7 @@ export async function deleteRoom(roomId: string, confirmName: string): Promise<{
 
 export async function patchSession(
 	piboSessionId: string,
-	input: { title?: string | null; archived?: boolean },
+	input: { title?: string | null; archived?: boolean; profile?: string },
 ): Promise<{ session: PiboSession }> {
 	return requestJson<{ session: PiboSession }>(`/api/chat/sessions/${encodeURIComponent(piboSessionId)}`, {
 		method: "PATCH",

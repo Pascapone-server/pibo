@@ -62,6 +62,7 @@ This specification does not define non-web local gateway behavior except where w
 - **REQ-020**: The chat web app page MUST be served at `GET /apps/chat`.
 - **REQ-020A**: The chat web app MUST serve the same React shell for non-asset `GET /apps/chat/*` deep links so browser reloads and shared URLs do not return `404`.
 - **REQ-020B**: Built Chat Web assets under `/apps/chat/assets/*` MUST send immutable cache headers and SHOULD use negotiated Brotli or gzip compression for compressible asset types.
+- **REQ-020C**: The integrated Chat Web shell MUST expose a Context area at `GET /apps/chat/context`.
 - **REQ-021**: `GET /api/chat/bootstrap` MUST require an auth session and return identity, selected Pibo Room, selected Pibo Session, room-scoped session tree, room tree, agent inventory, and available gateway actions.
 - **REQ-022**: Chat session ownership MUST use `ownerScope=user:<authenticated user id>` and default profile `pibo-minimal` unless overridden.
 - **REQ-023**: `POST /api/chat/sessions` MUST require same-origin JSON and create a new top-level personal Pibo Session.
@@ -98,6 +99,13 @@ This specification does not define non-web local gateway behavior except where w
 - **REQ-053**: Permanent room deletion MUST remove the room subtree, sessions whose `metadata.chatRoomId` belongs to that subtree, descendant sessions of those sessions, Chat Web read-model rows, and durable chat events for the deleted rooms and sessions.
 - **REQ-054**: Chat custom-agent create and update APIs MUST accept optional boolean `autoContextFiles`, default it to `true`, persist it with the custom agent, and expose it in agent inventory responses.
 - **REQ-055**: Chat custom-agent subagent configuration MUST accept `name`, optional `description`, `targetProfile`, optional `timeoutMs`, and optional `maxDepth`. It MUST NOT expose or persist per-subagent execution mode.
+- **REQ-056**: The same authenticated web gateway MUST expose managed context-file routes at `/apps/context-files` and `/api/context-files`.
+- **REQ-057**: `GET /api/context-files` MUST require an auth session and return the currently registered context-file catalog with source, scope, and file-state metadata.
+- **REQ-058**: `POST /api/context-files` MUST require same-origin JSON, create a managed markdown context file, and support `scope: "global"` or `scope: "agent"` with `agentProfileName` required for agent-scoped files.
+- **REQ-059**: `PUT /api/context-files/:key` MUST require same-origin JSON, persist markdown updates, and use optimistic concurrency when an expected file version is supplied.
+- **REQ-060**: `PATCH /api/context-files/:key` MUST require same-origin JSON and allow updating managed context-file metadata such as label, scope, and agent profile association.
+- **REQ-061**: `DELETE /api/context-files/:key` MUST require same-origin JSON and allow removing managed context files, optionally deleting the backing file from disk.
+- **REQ-062**: `GET /api/context-files/events` MUST require an auth session and stream context-file product events for live UI refresh.
 - **SEC-001**: Chat mutation routes MUST reject non-JSON content types with `415`.
 - **SEC-002**: Chat mutation routes MUST reject missing `Origin` headers with `403`.
 - **SEC-003**: Chat mutation routes MUST reject cross-origin `Origin` headers with `403`.
@@ -143,7 +151,9 @@ type PiboWebApp = {
 | `/apps/chat/sessions/:piboSessionId` | GET | UI handles auth state | Returns HTML chat app for a session deep link |
 | `/apps/chat/rooms/:roomId/sessions/:piboSessionId` | GET | UI handles auth state | Returns HTML chat app for the canonical room-session deep link |
 | `/apps/chat/agents` | GET | UI handles auth state | Returns HTML chat app for the Agents area |
+| `/apps/chat/context` | GET | UI handles auth state | Returns HTML chat app for the Context area |
 | `/apps/chat/settings` | GET | UI handles auth state | Returns HTML chat app for the Settings area |
+| `/apps/context-files` | GET | UI handles auth state | Returns the standalone managed context-files app |
 | `/api/chat/bootstrap` | GET | required | Returns identity, selected room, selected session, room-scoped session tree, room tree, capabilities |
 | `/api/chat/session` | GET | required | Compatibility endpoint returning identity, selected session, selected room, capabilities |
 | `/api/chat/sessions` | GET | required | Returns owned session tree scoped to optional `roomId` |
@@ -160,6 +170,13 @@ type PiboWebApp = {
 | `/api/chat/rooms/:roomId` | DELETE | required | Permanently deletes an archived non-personal room after exact-name confirmation |
 | `/api/chat/rooms/:roomId/events` | GET | required | Returns durable room events after optional cursor |
 | `/api/chat/rooms/:roomId/messages` | POST | required | Sends a room-scoped message |
+| `/api/context-files` | GET | required | Returns managed and plugin context-file catalog entries with file-state metadata |
+| `/api/context-files` | POST | required | Creates a managed context file |
+| `/api/context-files/:key` | GET | required | Returns one context-file document and markdown content |
+| `/api/context-files/:key` | PUT | required | Saves managed context-file markdown |
+| `/api/context-files/:key` | PATCH | required | Updates managed context-file metadata |
+| `/api/context-files/:key` | DELETE | required | Removes a managed context file |
+| `/api/context-files/events` | GET | required | Opens the context-file product-event SSE stream |
 | `/api/auth/*` | any | auth-service-owned | Delegates to Better Auth |
 
 ### Custom Agent Contract
@@ -259,6 +276,10 @@ type CustomAgent = {
 - **AC-025**: Given a custom agent is created without `autoContextFiles`, When the agent is persisted and returned, Then `autoContextFiles` is `true`.
 - **AC-026**: Given a custom agent is created or updated with `autoContextFiles: false`, When a routed session is created with that profile, Then automatic local context files are disabled for that runtime.
 - **AC-027**: Given a request for a built Chat Web asset with `Accept-Encoding: br, gzip`, When the asset is compressible, Then the response includes immutable cache headers plus a matching `Content-Encoding`.
+- **AC-028**: Given an authenticated user opens `/apps/chat/context`, When the Chat Web shell resolves the route, Then the integrated Context area is rendered inside the main Chat UI.
+- **AC-029**: Given an authenticated user requests `GET /api/context-files`, When managed and plugin context files exist, Then the response includes source and scope metadata for both kinds.
+- **AC-030**: Given an authenticated user creates an agent-scoped managed context file without `agentProfileName`, When `POST /api/context-files` is handled, Then the response is rejected.
+- **AC-031**: Given a context file changes on disk after the API watcher starts, When `GET /api/context-files/events` is subscribed, Then a `context-file.external_updated` product event is streamed.
 
 ## 6. Test Automation Strategy
 

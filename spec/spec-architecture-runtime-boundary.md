@@ -35,6 +35,7 @@ This specification does not define future marketplace behavior, remote deploymen
 - **Yielded run**: A background execution wrapper for a yieldable tool that can be tracked, waited on, read, cancelled, or acknowledged.
 - **Subagent**: A profile-scoped generated tool that routes a message into another Pibo session using a target profile.
 - **Subagent session link**: A router output event that connects a parent generated subagent tool call to the child Pibo Session.
+- **Product event**: A non-chat product lifecycle event emitted by a plugin for UI synchronization, such as managed context-file changes.
 
 ## 3. Requirements, Constraints & Guidelines
 
@@ -45,6 +46,7 @@ This specification does not define future marketplace behavior, remote deploymen
 - **REQ-005**: A profile MUST be built through registered resources. Unknown profile resources MUST throw errors during profile creation.
 - **REQ-006**: Runtime creation MUST load enabled skills and enabled explicit context files relative to the runtime cwd unless their paths are absolute.
 - **REQ-006A**: Runtime creation MUST load automatic local context files by default and MUST suppress automatic local context files when profile `autoContextFiles` is `false`. Explicit profile context files MUST still be eligible for loading when automatic context files are disabled.
+- **REQ-006B**: The plugin layer MUST support upserting and removing context-file catalog entries after startup so product-managed context files can appear alongside plugin-shipped files.
 - **REQ-007**: Runtime creation MUST include enabled custom tool definitions, generated subagent tools, and generated run-control tools when a run controller is available and at least one tool is yieldable.
 - **REQ-008**: Builtin Pi tools MUST be disabled only when the profile `builtinTools` mode is `"disabled"`.
 - **REQ-009**: A `PiboSessionRouter` MUST create routed sessions lazily by `piboSessionId`.
@@ -59,6 +61,7 @@ This specification does not define future marketplace behavior, remote deploymen
 - **REQ-018**: Disposing a session MUST remove it from the router and cancel runs owned by that session.
 - **REQ-019**: Router output events MUST be delivered to plugin listeners and router subscribers.
 - **REQ-020**: Plugin listener failures MUST be collected as registry event errors and MUST NOT prevent other listeners from receiving events.
+- **REQ-020A**: The plugin layer MUST provide a separate product-event surface for non-router product lifecycle changes and MUST allow plugins to emit and subscribe to those events without routing them as `PiboOutputEvent` values.
 - **REQ-021**: A subagent definition MUST point to a registered target profile.
 - **REQ-022**: A subagent call MUST create or reuse a routed child Pibo Session with `channel: "pibo.subagents"`, `kind: "subagent"`, `parentId`, target profile, and subagent metadata.
 - **REQ-023**: Omitted subagent `threadKey` values MUST create a new child session using a generated UUID.
@@ -125,7 +128,7 @@ type PiboPlugin = {
 };
 ```
 
-The plugin API supports registration of tools, subagents, skills, context files, profiles, gateway actions, channels, auth services, web apps, and output event listeners.
+The plugin API supports registration of tools, subagents, skills, context files, profiles, gateway actions, channels, auth services, web apps, output event listeners, product event listeners, and dynamic context-file catalog updates.
 
 ### Channel Contract
 
@@ -181,6 +184,8 @@ type PiboChannelContext = {
 - **AC-011**: Given `pibo_run_start` starts a generated subagent tool, When Chat Web reconstructs the trace, Then the result remains inspectable as a yielded run and as an async subagent/delegation node.
 - **AC-012**: Given a profile disables `autoContextFiles`, When runtime creation loads resources, Then automatic local context files are omitted while explicit profile context files remain available.
 - **AC-013**: Given a generated subagent tool is inspected, When tool definitions are created, Then its execution mode is `"parallel"` and no subagent profile field can override it.
+- **AC-014**: Given a product-managed context file is created or removed after startup, When the capability catalog is queried, Then the context-file entry appears or disappears without restarting the process.
+- **AC-015**: Given a plugin emits a product event for a managed context-file change, When subscribed UIs are connected, Then they can receive that event without it appearing as routed chat output.
 
 ## 6. Test Automation Strategy
 

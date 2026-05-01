@@ -80,7 +80,7 @@ When reading Pibo Sessions, use the debug CLI first: `npm run dev -- debug sessi
 If you are doing any frontend design, be sure to read `DESIGN.md`.
 
 ## Browser Use
-Always use `browser-use` for frontend development. In one persistent terminal, initialize the Browser Use environment once with `eval "$(npm run --silent dev -- tools env browser-use)"`, then run later `browser-use` commands directly from that same terminal. Use `npm run dev -- tools guide browser-use` for the full guide.
-For authenticated Pibo Chat Web App browser testing, prefer an isolated Browser Use lease so parallel agents do not share tabs or element indices:
-`eval "$(npm run --silent dev -- tools browser-use lease acquire --app pibo-chat --owner "$USER")"`.
-The lease sets `PIBO_BROWSER_USE_SESSION`, so later `browser-use` commands in that shell use the leased session by default. Use `browser-use --session pibo-auth state` only as a legacy fallback when a lease is unavailable.
+Always use `browser-use` for frontend development.
+Start in one persistent terminal with `eval "$(npm run --silent dev -- tools env browser-use)"`, then keep using that same shell for later `browser-use` commands.
+For authenticated Pibo Chat Web App testing, prefer `eval "$(npm run --silent dev -- tools browser-use lease acquire --app pibo-chat --owner "$USER")"`.
+Discover the rest procedurally through `npm run dev -- tools show browser-use`, `npm run dev -- tools browser-use`, and `npm run dev -- tools guide browser-use browser-use`.

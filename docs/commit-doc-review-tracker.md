@@ -110,3 +110,55 @@ Method: Started as a metadata-only list, then expanded with per-commit diff revi
 - Full hash: `cc31dcfda8d3e783ad5322db1128e9a9f9720a8d`
 - Description: `-`
 - Notes: `README.md` and `spec/spec-tool-operator-cli.md` updated to document the new `pibo debug events stats` and `pibo debug events prune` flows that the code and architecture doc already expose.
+
+## Additional Commits
+
+### 11. `2d7898d` - Add managed context files editor
+
+- Review status: `done`
+- Documentation follow-up: `required`
+- Date: `2026-05-01T21:36:35+02:00`
+- Author: `pibo`
+- Full hash: `2d7898d34c88820bb79237f4e1d88ce98d67d3d7`
+- Description: `-`
+- Notes: `Documented the managed context-files plugin, its dynamic context-file catalog updates, and the authenticated `/api/context-files` web surface in README, architecture, runtime, and web-gateway docs.`
+
+### 12. `9f84349` - Merge branch 'feature/context-files-editor'
+
+- Review status: `done`
+- Documentation follow-up: `none`
+- Date: `2026-05-01T21:39:38+02:00`
+- Author: `pibo`
+- Full hash: `9f84349db5496c52700619f6535089312dbaa27e`
+- Description: `-`
+- Notes: `Merge commit only. The underlying managed context-files editor work was reviewed against `2d7898d`.`
+
+### 13. `ffbf194` - Refine markdown editor toolbar weight
+
+- Review status: `done`
+- Documentation follow-up: `none`
+- Date: `2026-05-01T21:44:58+02:00`
+- Author: `pibo`
+- Full hash: `ffbf194cf0386dd97afa0112c8bf3cc3f33b2c98`
+- Description: `-`
+- Notes: `Visual-only toolbar styling refinement in the context-files editor. No separate documentation change needed.`
+
+### 14. `175837f` - Integrate context files into chat UI
+
+- Review status: `done`
+- Documentation follow-up: `required`
+- Date: `2026-05-01T22:24:21+02:00`
+- Author: `pibo`
+- Full hash: `175837f76eadc2cb4df5ed50dd4b193e2cf2e97e`
+- Description: `-`
+- Notes: `Documented the new integrated Chat Web Context area at `/apps/chat/context` and clarified that it reuses the managed context-file APIs while the standalone `/apps/context-files` app remains available.`
+
+### 15. `59d484f` - Merge remote-tracking branch 'origin/main' into HEAD
+
+- Review status: `done`
+- Documentation follow-up: `none`
+- Date: `2026-05-01T22:26:05+02:00`
+- Author: `pibo`
+- Full hash: `59d484f510bfbbd30bd1304dc1693921d62d5aeb`
+- Description: `-`
+- Notes: `Merge commit only. The relevant functional work was reviewed under `2d7898d` and `175837f`.`

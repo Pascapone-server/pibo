@@ -78,6 +78,8 @@ In the Chat Web App, personal sessions can be archived before deletion. Permanen
 
 The Chat Web App also has Pibo Rooms. Each user gets a locked `Personal Chat` room automatically. The personal room is shown separately from user-created rooms and cannot be renamed, archived, or deleted. User-created rooms can be archived first, then permanently deleted after typing the room name. Archived rooms remain inspectable and show their contained sessions, but they are read-only: no new sessions, messages, or execution actions can be started in that room. Permanent room deletion removes the room subtree, contained sessions, subagent session descendants, and Chat Web read-model/event-log rows.
 
+Managed context files are now a first-class product capability. The `pibo.context-files` plugin exposes editable global and agent-scoped markdown context files through `/api/context-files`, persists managed file metadata under the Pibo home directory, and emits product events when managed files are created, changed, removed, or updated on disk.
+
 The main source folders are:
 
 - `src/core/` for runtime, events, profiles, and session routing
@@ -99,6 +101,8 @@ Custom agent names are profile names. They must be lowercase kebab-case, such as
 Custom agents can be archived before deletion. Archived custom agents are removed from the active profile catalog, cannot start new sessions, and become read-only until restored. Permanent deletion is available only for archived agents and requires typing the agent profile name; it deletes the custom agent and Chat sessions using that profile.
 
 The designer configures native Pibo agent capabilities only: plugin-registered tools, skills, context files, subagents, automatic local context-file loading, built-in Pi tool visibility, and capability packages such as `pibo-run-control`. Curated external CLI tools from `pibo tools` remain global operator tooling and are not selected per agent.
+
+The Chat Web App now also has a dedicated Context area at `/apps/chat/context`. It reuses the managed context-file APIs inside the main Chat UI shell so operators can create, edit, relocate, and remove managed context files without leaving the authenticated Chat Web App.
 
 ## Profiles
 

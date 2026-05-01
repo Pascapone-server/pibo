@@ -389,6 +389,20 @@ export function App({ route }: { route: ChatAppRoute }) {
 		localStorage.setItem("pibo.chat.newSessionProfile", profile);
 	}, []);
 
+	const updateSelectedSessionProfile = useCallback(async (profile: string) => {
+		if (!selectedPiboSessionId || !bootstrap || profile === bootstrap.session.profile) return;
+		try {
+			await patchSession(selectedPiboSessionId, { profile });
+			setPreferredNewSessionProfile(profile);
+			const data = await loadBootstrap(selectedPiboSessionId, showArchivedRef.current, selectedRoomId ?? undefined);
+			if (area === "sessions") navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
+			await loadTrace(selectedPiboSessionId);
+			setError(null);
+		} catch (caught) {
+			setError(caught instanceof Error ? caught.message : String(caught));
+		}
+	}, [area, bootstrap, loadBootstrap, loadTrace, navigateToSelectedSession, selectedPiboSessionId, selectedRoomId, setPreferredNewSessionProfile]);
+
 	const slashCommands = useMemo(() => {
 		const actions = bootstrap?.capabilities.actions ?? [];
 		const commands = actions.flatMap((action) =>
@@ -942,10 +956,8 @@ export function App({ route }: { route: ChatAppRoute }) {
 								originSession={originSession}
 								derivedSessions={derivedSessions}
 								agentProfiles={bootstrap.agents}
-								selectedAgentProfile={newSessionProfile}
-								createSessionDisabled={creatingSession || selectedRoomArchived}
-								onAgentProfileChange={setPreferredNewSessionProfile}
-								onCreateSession={(profile) => void createSession(profile)}
+								sessionProfileChangeDisabled={creatingSession || selectedRoomArchived}
+								onSessionAgentProfileChange={(profile) => void updateSelectedSessionProfile(profile)}
 								onFork={forkFrom}
 								onOpenSession={openSession}
 							/>

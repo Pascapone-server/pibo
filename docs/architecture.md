@@ -76,6 +76,8 @@ Plugins are static and internal for now. They register capabilities into `PiboPl
 
 The registry is a catalog. It does not run sessions and does not own transport. Runtime code consumes the catalog when it creates profiles, exposes actions, or starts plugin channels.
 
+Context file registration is no longer static-only at process start. Plugins can upsert and remove context-file catalog entries later, which allows product-managed context files to appear in the same capability catalog as plugin-shipped files. Product-level changes that are not routed agent output, such as context-file lifecycle events, are emitted as separate product events so UIs can refresh catalog state without pretending those changes are model turns.
+
 ## Subagents
 
 Subagents are profile-scoped capabilities, exposed to Pi as generated tools. A plugin registers a subagent definition, and a profile chooses which subagents are visible in the same builder pattern used for tools, skills, and context files.
@@ -188,6 +190,15 @@ The designer configures native Pibo agent capabilities only:
 
 Curated external CLI tools managed by `pibo tools` are deliberately not part of the per-agent native tool selection. They are global operator tooling available through the agent environment, while native plugin tools remain the profile-specific capability surface.
 
+Managed context files are now a product-owned extension of that capability surface. Pibo ships a `pibo.context-files` plugin that:
+
+- serves a managed context-file API at `/api/context-files`
+- stores managed file metadata under the Pibo home directory
+- supports global and agent-scoped markdown files
+- emits product events such as `context-file.created`, `context-file.updated`, `context-file.removed`, and `context-file.external_updated`
+
+Managed files are exposed through the same capability catalog as plugin context files, with extra metadata for source and scope. Agent-scoped managed files remain ordinary explicit profile context files at runtime; the extra product metadata exists so UIs can create and organize them.
+
 ## Channels
 
 Channels are plugin-owned adapters. They translate an external transport into pibo events and translate pibo output events back to that transport.
@@ -221,6 +232,8 @@ Same-Origin Web Host
 The V1 chat web app uses Better Auth Google sign-in for every request path, including localhost. The authenticated Better Auth user id becomes `ownerScope=user:<userId>`. New personal sessions are top-level Pibo Sessions with `channel: "pibo.chat-web"` and `kind: "chat"`. Fork and clone results are visible branch sessions with `originId`. `parentId` is reserved for true child sessions such as subagents, not for ordinary sessions owned by the same user.
 
 Chat Web navigation is URL-based. The browser URL is the primary source of truth for the visible area and selected room/session. The canonical session URL is `/apps/chat/rooms/<roomId>/sessions/<piboSessionId>`, with additional app URLs for `/apps/chat/agents` and `/apps/chat/settings`. Opening `/apps/chat` may use browser-local last-selection state as an entry fallback, but bootstrap must replace it with the canonical room/session URL. The same-origin web host serves the React shell for non-asset `/apps/chat/*` paths so direct links and page reloads keep the selected area instead of falling back to the base app.
+
+The authenticated Chat Web shell also includes a Context area at `/apps/chat/context`. This area reuses the managed context-file API instead of maintaining a second auth flow or a disconnected editor surface. The older dedicated `/apps/context-files` web app still exists as a standalone plugin web app, but the main operator path is now the integrated Chat Web area.
 
 The auth boundary is enforced before channel input reaches the session router:
 

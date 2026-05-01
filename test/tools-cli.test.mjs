@@ -169,6 +169,8 @@ test("pibo tools browser-use manages isolated authenticated leases", async () =>
 
 		const discovery = await execFileAsync("node", [cliPath, "tools", "browser-use"], { cwd, env });
 		assert.match(discovery.stdout, /pibo tools browser-use - browser-use helpers/);
+		assert.match(discovery.stdout, /eval "\$\(pibo tools env browser-use\)"/);
+		assert.match(discovery.stdout, /pibo tools guide browser-use browser-use/);
 		assert.match(discovery.stdout, /lease acquire/);
 
 		const templateEnv = await execFileAsync("node", [cliPath, "tools", "browser-use", "auth-template", "env"], { cwd, env });
@@ -226,6 +228,10 @@ test("pibo tools pins browser-use to the guide-compatible version", async () => 
 		const result = await execFileAsync("node", [cliPath, "tools", "show", "browser-use"], { cwd, env });
 
 		assert.match(result.stdout, /browser-use 0\.12\.6/);
+		assert.match(result.stdout, /Next:/);
+		assert.match(result.stdout, /pibo tools env browser-use/);
+		assert.match(result.stdout, /pibo tools guide browser-use browser-use/);
+		assert.match(result.stdout, /pibo tools browser-use/);
 	} finally {
 		await rm(cwd, { recursive: true, force: true });
 	}

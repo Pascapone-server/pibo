@@ -1,6 +1,6 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Breadcrumbs } from "@components-pasko/breadcrumbs";
-import { ChevronDown, ChevronRight, ChevronsDown, ChevronsUp, GitBranch, GitFork, ListTree, MessageSquarePlus, RefreshCw, RotateCcw } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, ChevronsDown, ChevronsUp, GitBranch, GitFork, ListTree, MessageSquarePlus, RefreshCw, RotateCcw } from "lucide-react";
 import type { Span, Trace } from "../types";
 import { countRender } from "../renderMetrics";
 import { SpanNode, type SpanExpansionDepth } from "./SpanNode";
@@ -16,10 +16,8 @@ type TraceTimelineProps = {
 	originSession?: SessionOriginLink;
 	derivedSessions?: readonly SessionDerivationLink[];
 	agentProfiles?: readonly AgentProfileOption[];
-	selectedAgentProfile?: string;
-	createSessionDisabled?: boolean;
-	onAgentProfileChange?: (profile: string) => void;
-	onCreateSession?: (profile: string) => void;
+	sessionProfileChangeDisabled?: boolean;
+	onSessionAgentProfileChange?: (profile: string) => void;
 	onFork: (entryId: string) => void;
 	onOpenSession: (piboSessionId: string) => void;
 };
@@ -62,10 +60,8 @@ export function TraceTimeline({
 	originSession,
 	derivedSessions = [],
 	agentProfiles = [],
-	selectedAgentProfile,
-	createSessionDisabled = false,
-	onAgentProfileChange,
-	onCreateSession,
+	sessionProfileChangeDisabled = false,
+	onSessionAgentProfileChange,
 	onFork,
 	onOpenSession,
 }: TraceTimelineProps) {
@@ -141,13 +137,6 @@ export function TraceTimeline({
 						<DerivedSessionsButton sessions={derivedSessions} onOpenSession={onOpenSession} />
 					</div>
 					<SessionBreadcrumbs items={sessionBreadcrumbs} onOpenSession={onOpenSession} />
-					<AgentSessionControls
-						agentProfiles={agentProfiles}
-						selectedAgentProfile={selectedAgentProfile}
-						createSessionDisabled={createSessionDisabled}
-						onAgentProfileChange={onAgentProfileChange}
-						onCreateSession={onCreateSession}
-					/>
 				</div>
 				<div className="flex-1 flex items-center justify-center text-slate-500">
 					{isLoading ? <TraceLoadingIndicator /> : "No Trace Selected"}
@@ -186,13 +175,6 @@ export function TraceTimeline({
 					</div>
 				</div>
 				<div className="flex shrink-0 items-center gap-1 self-center">
-					<AgentSessionControls
-						agentProfiles={agentProfiles}
-						selectedAgentProfile={selectedAgentProfile}
-						createSessionDisabled={createSessionDisabled}
-						onAgentProfileChange={onAgentProfileChange}
-						onCreateSession={onCreateSession}
-					/>
 					<TimelineIconButton
 						title="Default expansion"
 						active={expansionDepth === DEFAULT_EXPANSION_DEPTH}
@@ -260,7 +242,12 @@ export function TraceTimeline({
 						{isStreaming ? <StreamingIndicator /> : null}
 					</div>
 				) : (
-					<EmptyTraceState />
+					<EmptyTraceState
+						agentProfiles={agentProfiles}
+						sessionAgentProfile={sessionAgentProfile}
+						profileChangeDisabled={sessionProfileChangeDisabled}
+						onSelectAgentProfile={onSessionAgentProfileChange}
+					/>
 				)}
 			</div>
 			{showJumpToBottom ? (
@@ -409,48 +396,49 @@ function SessionBreadcrumbs({
 	);
 }
 
-function AgentSessionControls({
+function EmptyTraceAgentChooser({
 	agentProfiles,
-	selectedAgentProfile,
-	createSessionDisabled,
-	onAgentProfileChange,
-	onCreateSession,
+	sessionAgentProfile,
+	profileChangeDisabled,
+	onSelectAgentProfile,
 }: {
 	agentProfiles: readonly AgentProfileOption[];
-	selectedAgentProfile?: string;
-	createSessionDisabled: boolean;
-	onAgentProfileChange?: (profile: string) => void;
-	onCreateSession?: (profile: string) => void;
+	sessionAgentProfile?: string;
+	profileChangeDisabled: boolean;
+	onSelectAgentProfile?: (profile: string) => void;
 }) {
 	if (!agentProfiles.length) return null;
-	const selectedProfile = agentProfiles.some((profile) => profile.name === selectedAgentProfile)
-		? selectedAgentProfile
-		: agentProfiles[0]?.name ?? "";
 	return (
-		<div className="mr-2 flex h-8 items-center overflow-hidden rounded-sm border border-slate-700 bg-[#151f24]/80 focus-within:border-[#11a4d4]">
-			<select
-				value={selectedProfile}
-				onChange={(event) => onAgentProfileChange?.(event.target.value)}
-				title="New Session Agent"
-				aria-label="New Session Agent"
-				className="h-full max-w-52 min-w-0 bg-transparent px-2 text-xs font-mono text-slate-300 outline-none"
-			>
-				{agentProfiles.map((profile) => (
-					<option key={profile.name} value={profile.name} title={profile.description}>
-						{profile.name}
-					</option>
-				))}
-			</select>
-			<button
-				type="button"
-				onClick={() => selectedProfile && onCreateSession?.(selectedProfile)}
-				disabled={createSessionDisabled || !selectedProfile}
-				title="New Session With Agent"
-				aria-label="New Session With Agent"
-				className="inline-flex h-full w-8 items-center justify-center border-l border-slate-700 text-slate-400 hover:text-[#11a4d4] disabled:opacity-50"
-			>
-				<MessageSquarePlus size={14} />
-			</button>
+		<div className="mt-8 w-full max-w-3xl">
+			<div className="mb-3 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500">Session Agent</div>
+			<div className="grid gap-3 sm:grid-cols-2">
+				{agentProfiles.map((profile) => {
+					const active = profile.name === sessionAgentProfile;
+					return (
+						<button
+							key={profile.name}
+							type="button"
+							onClick={() => onSelectAgentProfile?.(profile.name)}
+							disabled={profileChangeDisabled || active}
+							className={`grid min-h-24 w-full grid-cols-[1fr_auto] gap-3 rounded-sm border px-4 py-3 text-left transition-colors ${
+								active
+									? "border-[#11a4d4] bg-[#11a4d4]/10 text-slate-100"
+									: "border-slate-700 bg-[#151f24] text-slate-300 hover:border-[#11a4d4] hover:text-slate-100"
+							} disabled:cursor-default disabled:opacity-100`}
+						>
+							<span className="min-w-0">
+								<span className="block truncate font-mono text-sm text-slate-100">{profile.name}</span>
+								<span className="mt-2 block text-sm leading-6 text-slate-500">
+									{profile.description || "Use this profile for the first message in this session."}
+								</span>
+							</span>
+							<span className="mt-0.5 inline-flex h-6 min-w-6 items-center justify-center rounded-full border border-current/30 px-2 text-[10px] font-bold uppercase tracking-wide">
+								{active ? <Check size={12} /> : "Set"}
+							</span>
+						</button>
+					);
+				})}
+			</div>
 		</div>
 	);
 }
@@ -515,15 +503,31 @@ function TraceLoadingIndicator() {
 	);
 }
 
-function EmptyTraceState() {
+function EmptyTraceState({
+	agentProfiles,
+	sessionAgentProfile,
+	profileChangeDisabled,
+	onSelectAgentProfile,
+}: {
+	agentProfiles: readonly AgentProfileOption[];
+	sessionAgentProfile?: string;
+	profileChangeDisabled: boolean;
+	onSelectAgentProfile?: (profile: string) => void;
+}) {
 	return (
 		<div className="flex min-h-full items-center justify-center p-6">
-			<div className="flex max-w-md flex-col items-center text-center">
+			<div className="flex w-full max-w-3xl flex-col items-center text-center">
 				<div className="mb-4 flex h-12 w-12 items-center justify-center rounded-sm border border-[#11a4d4]/35 bg-[#11a4d4]/10 text-[#11a4d4]">
 					<MessageSquarePlus size={22} />
 				</div>
 				<h3 className="text-2xl font-semibold text-slate-200">No Traces</h3>
 				<p className="mt-2 text-sm leading-6 text-slate-500">Send a message to the agent to start an execution trace.</p>
+				<EmptyTraceAgentChooser
+					agentProfiles={agentProfiles}
+					sessionAgentProfile={sessionAgentProfile}
+					profileChangeDisabled={profileChangeDisabled}
+					onSelectAgentProfile={onSelectAgentProfile}
+				/>
 			</div>
 		</div>
 	);

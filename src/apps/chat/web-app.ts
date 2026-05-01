@@ -645,13 +645,20 @@ function metadataWithArchiveState(session: PiboSession, archived: unknown): Pibo
 	return withChatWebArchived(session.metadata, archived);
 }
 
-function createSessionUpdate(session: PiboSession, body: { title?: unknown; archived?: unknown }): UpdatePiboSessionInput {
+function createSessionUpdate(
+	context: PiboWebAppContext,
+	session: PiboSession,
+	body: { title?: unknown; archived?: unknown; profile?: unknown },
+): UpdatePiboSessionInput {
 	const update: UpdatePiboSessionInput = {};
 	const title = normalizeSessionTitle(body.title);
 	if (title !== undefined) update.title = title;
 	const metadata = metadataWithArchiveState(session, body.archived);
 	if (metadata) update.metadata = metadata;
-	if (!("title" in update) && !("metadata" in update)) {
+	if (body.profile !== undefined) {
+		update.profile = resolveCreateSessionProfile(context, session.profile, body.profile);
+	}
+	if (!("title" in update) && !("metadata" in update) && !("profile" in update)) {
 		throw new PiboWebHttpError("No session update fields provided", 400);
 	}
 	return update;
@@ -2382,12 +2389,26 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				requireSameOriginJsonRequest(request);
 				const webSession = await requireSession(request, context);
 				const selectedSession = resolveRequestedSession(state, context, webSession, defaultProfile, patchSessionId);
-				const body = await readJsonBody<{ title?: unknown; archived?: unknown }>(request);
+				const body = await readJsonBody<{ title?: unknown; archived?: unknown; profile?: unknown }>(request);
 				const updateSession = context.channelContext.updateSession;
 				if (!updateSession) {
 					throw new PiboWebHttpError("Session updates are not available", 501);
 				}
-				const updated = updateSession(selectedSession.id, createSessionUpdate(selectedSession, body));
+				if (body.profile !== undefined) {
+					const ownedSessions = listOwnedSessions(context, webSession);
+					const indexedSession = state.readModel.listSessions().find((item) => item.piboSessionId === selectedSession.id);
+					const trace = await buildTraceView({
+						session: selectedSession,
+						sessions: ownedSessions,
+						events: state.readModel.listEvents(selectedSession.id),
+						status: indexedSession?.status,
+						includeRawEvents: false,
+					});
+					if (trace.nodes.length > 0) {
+						throw new PiboWebHttpError("Session profile can only be changed before the first message.", 400);
+					}
+				}
+				const updated = updateSession(selectedSession.id, createSessionUpdate(context, selectedSession, body));
 				if (!updated) throw new PiboWebHttpError("Session not found", 404);
 				state.readModel.upsertSession(updated);
 				return responseJson({ session: updated });

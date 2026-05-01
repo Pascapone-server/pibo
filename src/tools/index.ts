@@ -78,6 +78,13 @@ function printShow(name: string): void {
     console.log('Notes:');
     for (const note of entry.notes) console.log(`  - ${note}`);
   }
+  console.log('');
+  console.log('Next:');
+  console.log(`  pibo tools env ${entry.name}`);
+  console.log(`  pibo tools guide ${entry.name} ${entry.guides[0]?.name ?? ''}`.trimEnd());
+  if (entry.name === 'browser-use') {
+    console.log('  pibo tools browser-use');
+  }
 }
 
 function printGuides(name: string): void {
@@ -155,6 +162,9 @@ function parsePositiveInteger(value: string): number {
 function printBrowserUseDiscovery(): void {
   console.log(`pibo tools browser-use - browser-use helpers
 
+Start:
+  eval "$(pibo tools env browser-use)"
+
 Commands:
   auth-template path          Print the default authenticated template profile path
   auth-template env           Print shell exports for preparing the auth template profile
@@ -164,6 +174,8 @@ Commands:
   lease reap-stale            Release expired or dead browser slots
 
 Next:
+  pibo tools show browser-use
+  pibo tools guide browser-use browser-use
   pibo tools browser-use auth-template env
   pibo tools browser-use lease acquire`);
 }

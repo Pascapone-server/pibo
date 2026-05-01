@@ -1091,6 +1091,66 @@ test("chat web app renames and archives owned sessions", async () => {
 	}
 });
 
+test("chat web app changes session profiles only before the first trace event", async () => {
+	const { channel, baseURL, emitOutput } = await startWebHostChannel({
+		auth: createFakeAuthService(),
+		profiles: [
+			{ name: "pibo-minimal", aliases: ["minimal"] },
+			{ name: "pibo-run-yield-qa", aliases: ["yield-qa"] },
+		],
+	});
+
+	try {
+		const created = await fetch(`${baseURL}/api/chat/sessions`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({ profile: "minimal" }),
+		});
+		assert.equal(created.status, 201);
+		const payload = await created.json();
+
+		const changed = await fetch(`${baseURL}/api/chat/sessions/${encodeURIComponent(payload.session.id)}`, {
+			method: "PATCH",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({ profile: "yield-qa" }),
+		});
+		assert.equal(changed.status, 200);
+		const changedPayload = await changed.json();
+		assert.equal(changedPayload.session.profile, "pibo-run-yield-qa");
+
+		emitOutput({
+			type: "assistant_delta",
+			piboSessionId: payload.session.id,
+			eventId: "trace-start",
+			text: "started",
+		});
+
+		const rejected = await fetch(`${baseURL}/api/chat/sessions/${encodeURIComponent(payload.session.id)}`, {
+			method: "PATCH",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({ profile: "minimal" }),
+		});
+		assert.equal(rejected.status, 400);
+		assert.deepEqual(await rejected.json(), {
+			error: "Session profile can only be changed before the first message.",
+		});
+	} finally {
+		await channel.stop?.();
+	}
+});
+
 test("chat web app permanently deletes archived sessions with their child sessions", async () => {
 	const { channel, baseURL, sessions } = await startWebHostChannel({
 		auth: createFakeAuthService(),
