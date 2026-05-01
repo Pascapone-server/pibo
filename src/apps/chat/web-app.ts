@@ -642,9 +642,11 @@ function indexOwnedSessions(readModel: ChatWebReadModel, sessions: PiboSession[]
 	for (const session of sessions) readModel.upsertSession(session);
 }
 
-function markSessionRead(state: ChatWebAppState, piboSessionId: string, principalId: string): void {
-	const latestStreamId = state.eventLog.getLatestStreamId({ piboSessionId });
-	if (latestStreamId !== undefined) state.eventLog.markSessionRead(piboSessionId, principalId, latestStreamId);
+function markSessionsRead(state: ChatWebAppState, sessions: PiboSession[], principalId: string): void {
+	for (const session of sessions) {
+		const latestStreamId = state.eventLog.getLatestStreamId({ piboSessionId: session.id });
+		if (latestStreamId !== undefined) state.eventLog.markSessionRead(session.id, principalId, latestStreamId);
+	}
 }
 
 function buildSessionUnreadCounts(
@@ -1781,7 +1783,6 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 					url.searchParams.get("piboSessionId") || undefined,
 					requestedRoomId,
 				);
-				if (markRead) markSessionRead(state, selectedSession.id, principalId);
 				const selectedRoomId = selectedRoomIdForSession(state, context, selectedSession);
 				const ownedSessions = listOwnedSessions(context, webSession);
 				const roomSessions = visibleSessionsInRoom({
@@ -1793,6 +1794,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 					selectedRoomId,
 					includeArchived,
 				});
+				if (markRead) markSessionsRead(state, roomSessions, principalId);
 				indexOwnedSessions(state.readModel, roomSessions);
 				const sessionUnreadCounts = buildSessionUnreadCounts(state, ownedSessions, principalId);
 				const sessions = await buildSessionNodes(

@@ -301,6 +301,67 @@ test("chat web app exposes unread room and session counts", async () => {
 	}
 });
 
+test("chat web app marks unread child sessions read when opening the room", async () => {
+	const { channel, baseURL, emitOutput, sessions } = await startWebHostChannel({
+		auth: createFakeAuthService(),
+	});
+
+	try {
+		const sessionResponse = await fetch(`${baseURL}/api/chat/session`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(sessionResponse.status, 200);
+		const sessionPayload = await sessionResponse.json();
+		const parent = sessionPayload.session;
+		const room = sessionPayload.room;
+		const child = sessions.create({
+			channel: parent.channel,
+			kind: parent.kind,
+			profile: parent.profile,
+			ownerScope: parent.ownerScope,
+			parentId: parent.id,
+			metadata: { chatRoomId: room.id },
+		});
+
+		emitOutput({
+			type: "assistant_message",
+			piboSessionId: child.id,
+			eventId: "child-turn-1",
+			text: "child answer one",
+		});
+		emitOutput({
+			type: "assistant_message",
+			piboSessionId: child.id,
+			eventId: "child-turn-2",
+			text: "child answer two",
+		});
+
+		const unreadResponse = await fetch(
+			`${baseURL}/api/chat/bootstrap?markRead=false&piboSessionId=${encodeURIComponent(parent.id)}`,
+			{
+				headers: { "x-test-user": "user-1" },
+			},
+		);
+		assert.equal(unreadResponse.status, 200);
+		const unreadData = await unreadResponse.json();
+		assert.equal(unreadData.rooms[0].unreadCount, 2);
+		assert.equal(unreadData.sessions[0].children[0].unreadCount, 2);
+
+		const readResponse = await fetch(
+			`${baseURL}/api/chat/bootstrap?markRead=true&roomId=${encodeURIComponent(room.id)}`,
+			{
+				headers: { "x-test-user": "user-1" },
+			},
+		);
+		assert.equal(readResponse.status, 200);
+		const readData = await readResponse.json();
+		assert.equal(readData.rooms[0].unreadCount, undefined);
+		assert.equal(readData.sessions[0].children[0].unreadCount, undefined);
+	} finally {
+		await channel.stop?.();
+	}
+});
+
 test("chat web app makes message sends idempotent by client transaction id", async () => {
 	const { channel, baseURL, emitted } = await startWebHostChannel({
 		auth: createFakeAuthService(),
