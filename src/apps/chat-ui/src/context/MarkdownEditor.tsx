@@ -6,8 +6,6 @@ import {
 	CodeMirrorEditor,
 	CodeToggle,
 	CreateLink,
-	DiffSourceToggleWrapper,
-	IS_CODE,
 	InsertCodeBlock,
 	InsertTable,
 	InsertThematicBreak,
@@ -16,31 +14,16 @@ import {
 	UndoRedo,
 	codeBlockPlugin,
 	codeMirrorPlugin,
-	createRootEditorSubscription$,
-	diffSourcePlugin,
-	frontmatterPlugin,
 	headingsPlugin,
 	linkDialogPlugin,
 	linkPlugin,
 	listsPlugin,
 	markdownShortcutPlugin,
 	quotePlugin,
-	realmPlugin,
 	tablePlugin,
 	thematicBreakPlugin,
 	toolbarPlugin,
 } from "@mdxeditor/editor";
-import {
-	$getSelection,
-	$isRangeSelection,
-	$isRootOrShadowRoot,
-	$isTextNode,
-	COMMAND_PRIORITY_HIGH,
-	KEY_ARROW_RIGHT_COMMAND,
-	type ElementNode,
-	type LexicalNode,
-	type TextNode,
-} from "lexical";
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { SaveState } from "../api";
 import "@mdxeditor/editor/style.css";
@@ -50,6 +33,7 @@ type MarkdownEditorProps = {
 	initialMarkdown: string;
 	onPersist(markdown: string): Promise<void>;
 	onSaveStateChange(state: SaveState): void;
+	readOnly?: boolean;
 };
 
 export type MarkdownEditorHandle = {
@@ -78,71 +62,9 @@ const CODE_BLOCK_LANGUAGES = {
 	cron: "Cron",
 } as const;
 
-function getInlineCodeExitTarget(node: TextNode): { parent: ElementNode; offset: number } | null {
-	let current: LexicalNode = node;
-	let movedAcrossInlineBoundary = false;
-
-	while (true) {
-		const parent = current.getParent();
-		if (parent === null || $isRootOrShadowRoot(parent)) return null;
-
-		const nextSibling = current.getNextSibling();
-		if (nextSibling !== null) {
-			if (!movedAcrossInlineBoundary && $isTextNode(nextSibling)) return null;
-			return { parent, offset: current.getIndexWithinParent() + 1 };
-		}
-
-		if (!parent.isInline()) return { parent, offset: current.getIndexWithinParent() + 1 };
-
-		current = parent;
-		movedAcrossInlineBoundary = true;
-	}
-}
-
-const inlineCodeArrowExitPlugin = realmPlugin({
-	init(realm) {
-		realm.pub(createRootEditorSubscription$, (editor) =>
-			editor.registerCommand(
-				KEY_ARROW_RIGHT_COMMAND,
-				(event) => {
-					const keyboardEvent = event as KeyboardEvent;
-					if (keyboardEvent.shiftKey || keyboardEvent.altKey || keyboardEvent.ctrlKey || keyboardEvent.metaKey) return false;
-
-					let handled = false;
-					editor.update(() => {
-						const selection = $getSelection();
-						if (!$isRangeSelection(selection) || !selection.isCollapsed() || selection.anchor.type !== "text") return;
-
-						const anchorNode = selection.anchor.getNode();
-						if (
-							!$isTextNode(anchorNode) ||
-							(anchorNode.getFormat() & IS_CODE) === 0 ||
-							selection.anchor.offset !== anchorNode.getTextContentSize()
-						) {
-							return;
-						}
-
-						const exitTarget = getInlineCodeExitTarget(anchorNode);
-						if (!exitTarget) return;
-						selection.anchor.set(exitTarget.parent.getKey(), exitTarget.offset, "element");
-						selection.focus.set(exitTarget.parent.getKey(), exitTarget.offset, "element");
-						selection.setFormat(selection.format & ~IS_CODE);
-						handled = true;
-					});
-
-					if (!handled) return false;
-					keyboardEvent.preventDefault();
-					return true;
-				},
-				COMMAND_PRIORITY_HIGH,
-			),
-		);
-	},
-});
-
 export const MarkdownEditor = memo(
 	forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditorImpl(
-		{ documentKey, initialMarkdown, onPersist, onSaveStateChange },
+		{ documentKey, initialMarkdown, onPersist, onSaveStateChange, readOnly = false },
 		ref,
 	) {
 		const editorRef = useRef<MDXEditorMethods>(null);
@@ -163,6 +85,10 @@ export const MarkdownEditor = memo(
 		}, []);
 
 		const persistIfNeeded = useCallback(async () => {
+			if (readOnly) {
+				onSaveStateChange("saved");
+				return;
+			}
 			if (savePromiseRef.current) await savePromiseRef.current;
 			const nextMarkdown = currentMarkdownRef.current;
 			if (nextMarkdown === savedMarkdownRef.current) {
@@ -190,15 +116,16 @@ export const MarkdownEditor = memo(
 			} finally {
 				if (savePromiseRef.current === savePromise) savePromiseRef.current = null;
 			}
-		}, [onPersist, onSaveStateChange]);
+		}, [onPersist, onSaveStateChange, readOnly]);
 
 		const scheduleAutosave = useCallback(() => {
+			if (readOnly) return;
 			clearAutosaveTimer();
 			timeoutRef.current = window.setTimeout(() => {
 				timeoutRef.current = null;
 				void persistIfNeeded();
 			}, AUTOSAVE_DELAY_MS);
-		}, [clearAutosaveTimer, persistIfNeeded]);
+		}, [clearAutosaveTimer, persistIfNeeded, readOnly]);
 
 		const handleEditorChange = useCallback(
 			(markdown: string) => {
@@ -211,10 +138,14 @@ export const MarkdownEditor = memo(
 					return;
 				}
 				currentMarkdownRef.current = markdown;
+				if (readOnly) {
+					onSaveStateChange("saved");
+					return;
+				}
 				onSaveStateChange("idle");
 				scheduleAutosave();
 			},
-			[onSaveStateChange, scheduleAutosave],
+			[onSaveStateChange, readOnly, scheduleAutosave],
 		);
 
 		const plugins = useMemo(
@@ -231,13 +162,10 @@ export const MarkdownEditor = memo(
 					codeBlockEditorDescriptors: [{ priority: -10, match: () => true, Editor: CodeMirrorEditor }],
 				}),
 				codeMirrorPlugin({ codeBlockLanguages: CODE_BLOCK_LANGUAGES }),
-				frontmatterPlugin(),
-				diffSourcePlugin({ viewMode: "rich-text" }),
 				markdownShortcutPlugin(),
-				inlineCodeArrowExitPlugin(),
 				toolbarPlugin({
 					toolbarContents: () => (
-						<DiffSourceToggleWrapper options={["rich-text", "source"]}>
+						<>
 							<UndoRedo />
 							<BoldItalicUnderlineToggles />
 							<CodeToggle />
@@ -247,7 +175,7 @@ export const MarkdownEditor = memo(
 							<InsertTable />
 							<InsertThematicBreak />
 							<InsertCodeBlock />
-						</DiffSourceToggleWrapper>
+						</>
 					),
 				}),
 			],
@@ -278,19 +206,22 @@ export const MarkdownEditor = memo(
 			setPlainMarkdown(initialMarkdown);
 			setEditorMode("rich");
 			onSaveStateChange("saved");
-			editorRef.current?.setMarkdown(initialMarkdown);
 		}, [documentKey, initialMarkdown, onSaveStateChange, clearAutosaveTimer]);
 
-		if (editorMode === "plain") {
+		if (editorMode === "plain" || readOnly) {
 			return (
 				<div className="context-files-plain-fallback">
 					<p className="context-files-plain-fallback__notice">
-						The rich editor could not safely load this document. You are editing raw markdown.
+						{readOnly
+							? "This document is read-only. Create a managed copy to edit it."
+							: "The rich editor could not safely load this document. You are editing raw markdown."}
 					</p>
 					<textarea
 						className="context-files-plain-fallback__textarea"
-						value={plainMarkdown}
+						value={readOnly ? initialMarkdown : plainMarkdown}
+						readOnly={readOnly}
 						onChange={(event) => {
+							if (readOnly) return;
 							const markdown = event.currentTarget.value;
 							setPlainMarkdown(markdown);
 							currentMarkdownRef.current = markdown;
@@ -305,6 +236,7 @@ export const MarkdownEditor = memo(
 
 		return (
 			<MDXEditor
+				key={documentKey}
 				ref={editorRef}
 				markdown={initialMarkdown}
 				onChange={handleEditorChange}
@@ -314,6 +246,7 @@ export const MarkdownEditor = memo(
 					setEditorMode("plain");
 				}}
 				contentEditableClassName="context-files-mdx-content"
+				readOnly={readOnly}
 				plugins={plugins}
 			/>
 		);

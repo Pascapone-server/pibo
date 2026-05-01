@@ -50,6 +50,7 @@ type MarkdownEditorProps = {
 	initialMarkdown: string;
 	onPersist(markdown: string): Promise<void>;
 	onSaveStateChange(state: SaveState): void;
+	readOnly?: boolean;
 };
 
 export type MarkdownEditorHandle = {
@@ -142,7 +143,7 @@ const inlineCodeArrowExitPlugin = realmPlugin({
 
 export const MarkdownEditor = memo(
 	forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditorImpl(
-		{ documentKey, initialMarkdown, onPersist, onSaveStateChange },
+		{ documentKey, initialMarkdown, onPersist, onSaveStateChange, readOnly = false },
 		ref,
 	) {
 		const editorRef = useRef<MDXEditorMethods>(null);
@@ -163,6 +164,10 @@ export const MarkdownEditor = memo(
 		}, []);
 
 		const persistIfNeeded = useCallback(async () => {
+			if (readOnly) {
+				onSaveStateChange("saved");
+				return;
+			}
 			if (savePromiseRef.current) await savePromiseRef.current;
 			const nextMarkdown = currentMarkdownRef.current;
 			if (nextMarkdown === savedMarkdownRef.current) {
@@ -190,15 +195,16 @@ export const MarkdownEditor = memo(
 			} finally {
 				if (savePromiseRef.current === savePromise) savePromiseRef.current = null;
 			}
-		}, [onPersist, onSaveStateChange]);
+		}, [onPersist, onSaveStateChange, readOnly]);
 
 		const scheduleAutosave = useCallback(() => {
+			if (readOnly) return;
 			clearAutosaveTimer();
 			timeoutRef.current = window.setTimeout(() => {
 				timeoutRef.current = null;
 				void persistIfNeeded();
 			}, AUTOSAVE_DELAY_MS);
-		}, [clearAutosaveTimer, persistIfNeeded]);
+		}, [clearAutosaveTimer, persistIfNeeded, readOnly]);
 
 		const handleEditorChange = useCallback(
 			(markdown: string) => {
@@ -211,10 +217,14 @@ export const MarkdownEditor = memo(
 					return;
 				}
 				currentMarkdownRef.current = markdown;
+				if (readOnly) {
+					onSaveStateChange("saved");
+					return;
+				}
 				onSaveStateChange("idle");
 				scheduleAutosave();
 			},
-			[onSaveStateChange, scheduleAutosave],
+			[onSaveStateChange, readOnly, scheduleAutosave],
 		);
 
 		const plugins = useMemo(
@@ -287,16 +297,20 @@ export const MarkdownEditor = memo(
 			editorRef.current?.setMarkdown(initialMarkdown);
 		}, [documentKey, initialMarkdown, onSaveStateChange, clearAutosaveTimer]);
 
-		if (editorMode === "plain") {
+		if (editorMode === "plain" || readOnly) {
 			return (
 				<div className="plain-markdown-fallback">
 					<p className="plain-markdown-fallback__notice">
-						The rich editor could not safely load this document. You are editing raw markdown.
+						{readOnly
+							? "This document is read-only. Create a managed copy to edit it."
+							: "The rich editor could not safely load this document. You are editing raw markdown."}
 					</p>
 					<textarea
 						className="plain-markdown-fallback__textarea"
-						value={plainMarkdown}
+						value={readOnly ? initialMarkdown : plainMarkdown}
+						readOnly={readOnly}
 						onChange={(event) => {
+							if (readOnly) return;
 							const markdown = event.currentTarget.value;
 							setPlainMarkdown(markdown);
 							currentMarkdownRef.current = markdown;
@@ -320,6 +334,7 @@ export const MarkdownEditor = memo(
 					setEditorMode("plain");
 				}}
 				contentEditableClassName="mdx-content"
+				readOnly={readOnly}
 				plugins={plugins}
 			/>
 		);

@@ -1,14 +1,22 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { AlertTriangle, FilePlus2, Files, RefreshCw, Save, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, ChevronDown, FilePlus2, Files, RefreshCw, Save, Trash2 } from "lucide-react";
 import {
+	adoptContextFileSource,
 	createContextFile,
+	diffContextFile,
+	linkContextFileFromPlugin,
+	listContextFileRevisions,
 	listContextFiles,
 	readContextFile,
 	removeContextFile,
+	resetContextFileToSource,
+	restoreContextFileRevision,
 	saveContextFile,
 	updateContextFileMetadata,
+	type ContextFileDiff,
 	type ContextFileDocument,
 	type ContextFileInfo,
+	type ContextFileRevision,
 	type ProductEvent,
 	type SaveState,
 } from "../api";
@@ -16,19 +24,20 @@ import { MarkdownEditor, type MarkdownEditorHandle } from "./MarkdownEditor";
 
 type ContextFileScope = "global" | "agent";
 
-export function ContextFilesView({ agentProfiles }: { agentProfiles: string[] }) {
+export function ContextFilesView({ agentProfiles, selectedFileKey }: { agentProfiles: string[]; selectedFileKey?: string | null }) {
 	const agentOptions = useMemo(() => [...new Set(agentProfiles)].sort((left, right) => left.localeCompare(right)), [agentProfiles]);
 	const editorRef = useRef<MarkdownEditorHandle>(null);
 	const saveStateRef = useRef<SaveState>("saved");
-	const createAgentListId = useId();
-	const metadataAgentListId = useId();
 	const [files, setFiles] = useState<ContextFileInfo[]>([]);
 	const [selectedKey, setSelectedKey] = useState<string | null>(null);
 	const [document, setDocument] = useState<ContextFileDocument | null>(null);
+	const [revisions, setRevisions] = useState<ContextFileRevision[]>([]);
+	const [diff, setDiff] = useState<ContextFileDiff | null>(null);
 	const [saveState, setSaveState] = useState<SaveState>("saved");
 	const [conflict, setConflict] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [loading, setLoading] = useState(true);
+	const [actionBusy, setActionBusy] = useState(false);
 	const [formLabel, setFormLabel] = useState("");
 	const [formScope, setFormScope] = useState<ContextFileScope>("global");
 	const [formAgent, setFormAgent] = useState("");
@@ -38,6 +47,24 @@ export function ContextFilesView({ agentProfiles }: { agentProfiles: string[] })
 		saveStateRef.current = saveState;
 	}, [saveState]);
 
+	const hydrateDocument = useCallback(async (nextDocument: ContextFileDocument) => {
+		setDocument(nextDocument);
+		setSelectedKey(nextDocument.key);
+		setConflict(null);
+		setError(null);
+		if (!nextDocument.managed) {
+			setRevisions([]);
+			setDiff(null);
+			return;
+		}
+		const [revisionPayload, nextDiff] = await Promise.all([
+			listContextFileRevisions(nextDocument.key),
+			nextDocument.sourceRef ? diffContextFile(nextDocument.key).catch(() => null) : Promise.resolve(null),
+		]);
+		setRevisions(revisionPayload.revisions);
+		setDiff(nextDiff);
+	}, []);
+
 	const refreshFiles = useCallback(async () => {
 		const nextFiles = await listContextFiles();
 		setFiles(nextFiles);
@@ -46,11 +73,8 @@ export function ContextFilesView({ agentProfiles }: { agentProfiles: string[] })
 
 	const loadDocument = useCallback(async (key: string) => {
 		const nextDocument = await readContextFile(key);
-		setDocument(nextDocument);
-		setSelectedKey(key);
-		setConflict(null);
-		setError(null);
-	}, []);
+		await hydrateDocument(nextDocument);
+	}, [hydrateDocument]);
 
 	useEffect(() => {
 		refreshFiles()
@@ -96,6 +120,11 @@ export function ContextFilesView({ agentProfiles }: { agentProfiles: string[] })
 		setMetadataAgent(document?.agentProfileName ?? "");
 	}, [document?.agentProfileName, document?.key]);
 
+	useEffect(() => {
+		if (formScope !== "agent" || formAgent || agentOptions.length === 0) return;
+		setFormAgent(agentOptions[0]);
+	}, [agentOptions, formAgent, formScope]);
+
 	const handleSelect = useCallback(async (key: string) => {
 		try {
 			await editorRef.current?.flushSave();
@@ -104,6 +133,22 @@ export function ContextFilesView({ agentProfiles }: { agentProfiles: string[] })
 			setError(caught instanceof Error ? caught.message : String(caught));
 		}
 	}, [loadDocument]);
+
+	useEffect(() => {
+		if (!selectedFileKey || selectedFileKey === selectedKey) return;
+		let cancelled = false;
+		void (async () => {
+			try {
+				await editorRef.current?.flushSave();
+				if (!cancelled) setSelectedKey(selectedFileKey);
+			} catch (caught) {
+				if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught));
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, [selectedFileKey, selectedKey]);
 
 	const handleSubmit = useCallback(async () => {
 		try {
@@ -115,14 +160,13 @@ export function ContextFilesView({ agentProfiles }: { agentProfiles: string[] })
 			});
 			setFormLabel("");
 			setFormAgent("");
-			setSelectedKey(created.key);
-			setDocument(created);
+			await hydrateDocument(created);
 			await refreshFiles();
 			setError(null);
 		} catch (caught) {
 			setError(caught instanceof Error ? caught.message : String(caught));
 		}
-	}, [formAgent, formLabel, formScope, refreshFiles]);
+	}, [formAgent, formLabel, formScope, hydrateDocument, refreshFiles]);
 
 	const handlePersist = useCallback(async (markdown: string) => {
 		if (!document) return;
@@ -131,20 +175,20 @@ export function ContextFilesView({ agentProfiles }: { agentProfiles: string[] })
 				markdown,
 				expectedVersion: document.version,
 			});
-			setDocument(saved);
+			await hydrateDocument(saved);
 			await refreshFiles();
 			setConflict(null);
 			setError(null);
 		} catch (caught) {
 			if (isConflictError(caught)) {
-				setDocument(caught.data.file);
+				await hydrateDocument(caught.data.file);
 				setConflict("This file changed on disk before your save completed. Reload the latest version and retry.");
 				return;
 			}
 			setError(caught instanceof Error ? caught.message : String(caught));
 			throw caught;
 		}
-	}, [document, refreshFiles]);
+	}, [document, hydrateDocument, refreshFiles]);
 
 	const handleReload = useCallback(async () => {
 		if (!selectedKey) return;
@@ -167,21 +211,98 @@ export function ContextFilesView({ agentProfiles }: { agentProfiles: string[] })
 
 	const handleScopeChange = useCallback(async (scope: ContextFileScope) => {
 		if (!document?.managed) return;
+		setActionBusy(true);
 		try {
 			const updated = await updateContextFileMetadata(document.key, {
 				scope,
 				agentProfileName: scope === "agent" ? metadataAgent.trim() || undefined : undefined,
 			});
-			setDocument(updated);
+			await hydrateDocument(updated);
 			await refreshFiles();
 			setError(null);
 		} catch (caught) {
 			setError(caught instanceof Error ? caught.message : String(caught));
+		} finally {
+			setActionBusy(false);
 		}
-	}, [document, metadataAgent, refreshFiles]);
+	}, [document, hydrateDocument, metadataAgent, refreshFiles]);
+
+	const handleMetadataAgentChange = useCallback((nextAgent: string) => {
+		setMetadataAgent(nextAgent);
+		if (!document?.managed || !nextAgent || (document.scope === "agent" && nextAgent === (document.agentProfileName ?? ""))) return;
+		setActionBusy(true);
+		void updateContextFileMetadata(document.key, {
+			scope: "agent",
+			agentProfileName: nextAgent,
+		})
+			.then(async (updated) => {
+				await hydrateDocument(updated);
+				await refreshFiles();
+				setError(null);
+			})
+			.catch((caught) => setError(caught instanceof Error ? caught.message : String(caught)))
+			.finally(() => setActionBusy(false));
+	}, [document, hydrateDocument, refreshFiles]);
+
+	const handleLinkCopy = useCallback(async () => {
+		if (!selectedFile || selectedFile.source !== "plugin") return;
+		setActionBusy(true);
+		try {
+			const created = await linkContextFileFromPlugin(selectedFile.key);
+			await refreshFiles();
+			await hydrateDocument(created);
+			setError(null);
+		} catch (caught) {
+			setError(caught instanceof Error ? caught.message : String(caught));
+		} finally {
+			setActionBusy(false);
+		}
+	}, [hydrateDocument, refreshFiles, selectedFile]);
+
+	const handleResetToSource = useCallback(async () => {
+		if (!document?.managed || !document.sourceRef) return;
+		setActionBusy(true);
+		try {
+			const updated = await resetContextFileToSource(document.key);
+			await refreshFiles();
+			await hydrateDocument(updated);
+		} catch (caught) {
+			setError(caught instanceof Error ? caught.message : String(caught));
+		} finally {
+			setActionBusy(false);
+		}
+	}, [document, hydrateDocument, refreshFiles]);
+
+	const handleAdoptSource = useCallback(async () => {
+		if (!document?.managed || document.linkState !== "linked-stale") return;
+		setActionBusy(true);
+		try {
+			const updated = await adoptContextFileSource(document.key);
+			await refreshFiles();
+			await hydrateDocument(updated);
+		} catch (caught) {
+			setError(caught instanceof Error ? caught.message : String(caught));
+		} finally {
+			setActionBusy(false);
+		}
+	}, [document, hydrateDocument, refreshFiles]);
+
+	const handleRestoreRevision = useCallback(async (revisionId: string) => {
+		if (!document?.managed) return;
+		setActionBusy(true);
+		try {
+			const updated = await restoreContextFileRevision(document.key, revisionId);
+			await refreshFiles();
+			await hydrateDocument(updated);
+		} catch (caught) {
+			setError(caught instanceof Error ? caught.message : String(caught));
+		} finally {
+			setActionBusy(false);
+		}
+	}, [document, hydrateDocument, refreshFiles]);
 
 	return (
-		<div className="context-files-view grid h-full min-h-0 grid-cols-[minmax(0,1fr)_320px] max-[1180px]:grid-cols-[minmax(0,1fr)_280px] max-[920px]:grid-cols-1">
+		<div className="context-files-view grid h-full min-h-0 grid-cols-[minmax(0,1fr)_300px] max-[1120px]:grid-cols-[minmax(0,1fr)_260px]">
 			<main className="flex min-h-0 flex-col bg-[#101d22]">
 				<div className="flex h-14 items-center justify-between gap-3 border-b border-slate-800 bg-[#151f24] px-4">
 					<div className="min-w-0">
@@ -221,6 +342,26 @@ export function ContextFilesView({ agentProfiles }: { agentProfiles: string[] })
 				<div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
 					{error ? <StatusBanner tone="error" text={error} /> : null}
 					{conflict ? <StatusBanner tone="warning" text={conflict} /> : null}
+					{document ? (
+						<div className="flex flex-wrap items-center gap-3 border border-slate-800 bg-[#151f24] px-3 py-2 text-xs text-slate-400">
+							<div>State: <span className="text-slate-100">{linkStateLabel(document.linkState)}</span></div>
+							{document.sourceRef ? <div className="font-mono text-[11px] text-slate-500">{document.sourceRef}</div> : null}
+							{document.sourceHash ? <div className="font-mono text-[11px] text-slate-500">{document.sourceHash}</div> : null}
+						</div>
+					) : null}
+					{document?.source === "plugin" ? (
+						<div className="flex flex-wrap items-center gap-3 border border-slate-800 bg-[#151f24] p-3 text-xs text-slate-400">
+							<div>Plugin context files are immutable in Pibo. Create a managed copy before editing.</div>
+							<button
+								className="inline-flex h-8 items-center justify-center border border-[#11a4d4] bg-[#11a4d4]/10 px-3 text-xs uppercase tracking-wider text-[#7dd3fc] disabled:opacity-45"
+								type="button"
+								disabled={actionBusy}
+								onClick={() => void handleLinkCopy()}
+							>
+								Create Managed Copy
+							</button>
+						</div>
+					) : null}
 					{document?.managed ? (
 						<div className="flex flex-wrap items-center gap-2 border border-slate-800 bg-[#151f24] p-3 text-xs text-slate-400">
 							<div className="flex gap-1">
@@ -232,6 +373,7 @@ export function ContextFilesView({ agentProfiles }: { agentProfiles: string[] })
 											: "border-slate-700 text-slate-400 hover:border-slate-600 hover:text-slate-300"
 									}`}
 									onClick={() => void handleScopeChange("global")}
+									disabled={actionBusy}
 								>
 									Global
 								</button>
@@ -243,23 +385,39 @@ export function ContextFilesView({ agentProfiles }: { agentProfiles: string[] })
 											: "border-slate-700 text-slate-400 hover:border-slate-600 hover:text-slate-300"
 									}`}
 									onClick={() => void handleScopeChange("agent")}
-									disabled={!metadataAgent.trim()}
+									disabled={actionBusy || !metadataAgent.trim()}
 								>
 									Agent
 								</button>
 							</div>
-							<input
-								className="h-8 min-w-[16rem] flex-1 border border-slate-700 bg-[#0e1116] px-3 text-xs text-slate-200 outline-none placeholder:text-slate-500 focus:border-[#11a4d4]"
+							<AgentProfileSelect
 								value={metadataAgent}
-								onChange={(event) => setMetadataAgent(event.currentTarget.value)}
-								placeholder="agent-profile-name"
-								list={metadataAgentListId}
+								options={optionListWithSelectedAgent(agentOptions, metadataAgent)}
+								placeholder="Select agent"
+								disabled={actionBusy}
+								onChange={handleMetadataAgentChange}
+								compact
 							/>
-							<datalist id={metadataAgentListId}>
-								{agentOptions.map((profile) => (
-									<option key={profile} value={profile} />
-								))}
-							</datalist>
+							{document.sourceRef ? (
+								<button
+									className="inline-flex h-8 items-center justify-center border border-[#11a4d4] bg-[#11a4d4]/10 px-3 uppercase tracking-wider text-[#7dd3fc] disabled:opacity-45"
+									type="button"
+									disabled={actionBusy}
+									onClick={() => void handleResetToSource()}
+								>
+									Reset To Source
+								</button>
+							) : null}
+							{document.linkState === "linked-stale" ? (
+								<button
+									className="inline-flex h-8 items-center justify-center border border-amber-400/70 bg-amber-400/10 px-3 uppercase tracking-wider text-amber-100 disabled:opacity-45"
+									type="button"
+									disabled={actionBusy}
+									onClick={() => void handleAdoptSource()}
+								>
+									Adopt Source
+								</button>
+							) : null}
 						</div>
 					) : null}
 
@@ -271,6 +429,7 @@ export function ContextFilesView({ agentProfiles }: { agentProfiles: string[] })
 								initialMarkdown={document.markdown}
 								onPersist={handlePersist}
 								onSaveStateChange={setSaveState}
+								readOnly={!document.editable}
 							/>
 						</div>
 					) : (
@@ -279,10 +438,52 @@ export function ContextFilesView({ agentProfiles }: { agentProfiles: string[] })
 							{document ? "The selected file is missing on disk." : "Select or create a context file."}
 						</div>
 					)}
+					{document?.managed && revisions.length > 0 ? (
+						<div className="border border-slate-800 bg-[#151f24] p-3">
+							<div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">Revisions</div>
+							<div className="space-y-2">
+								{revisions.map((revision) => (
+									<div key={revision.id} className="flex flex-wrap items-center justify-between gap-2 border border-slate-800 bg-[#101d22] px-3 py-2 text-xs text-slate-400">
+										<div>
+											<div className="text-slate-100">{revision.kind} {revision.active ? "(active)" : ""}</div>
+											<div>{revision.note ?? revision.id}</div>
+											<div className="font-mono text-[11px] text-slate-500">{revision.createdAt}</div>
+										</div>
+										{revision.active ? null : (
+											<button
+												className="inline-flex h-8 items-center justify-center border border-slate-700 px-3 uppercase tracking-wider text-slate-300 hover:border-[#11a4d4] hover:text-[#7dd3fc] disabled:opacity-45"
+												type="button"
+												disabled={actionBusy}
+												onClick={() => void handleRestoreRevision(revision.id)}
+											>
+												Restore
+											</button>
+										)}
+									</div>
+								))}
+							</div>
+						</div>
+					) : null}
+					{document?.managed && diff ? (
+						<div className="border border-slate-800 bg-[#151f24] p-3">
+							<div className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-500">Diff</div>
+							<div className="space-y-1 overflow-auto">
+								{diff.chunks.map((chunk, index) => (
+									<pre key={`${chunk.type}-${index}`} className={`overflow-auto border px-3 py-2 text-xs ${
+										chunk.type === "add"
+											? "border-emerald-500/60 bg-emerald-500/10 text-emerald-100"
+											: chunk.type === "remove"
+												? "border-red-500/60 bg-red-500/10 text-red-100"
+												: "border-slate-800 bg-[#101d22] text-slate-300"
+									}`}>{chunk.lines.map((line) => `${chunk.type === "add" ? "+" : chunk.type === "remove" ? "-" : " "} ${line}`).join("\n")}</pre>
+								))}
+							</div>
+						</div>
+					) : null}
 				</div>
 			</main>
 
-			<aside className="min-h-0 overflow-auto border-l border-slate-800 bg-[#1a262b] max-[920px]:border-l-0 max-[920px]:border-t">
+			<aside className="min-h-0 overflow-auto border-l border-slate-800 bg-[#1a262b]">
 				<div className="border-b border-slate-800 px-4 py-3">
 					<div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#11a4d4]">Context</div>
 					<h1 className="mt-1 text-sm font-semibold text-slate-100">Context Files</h1>
@@ -323,20 +524,12 @@ export function ContextFilesView({ agentProfiles }: { agentProfiles: string[] })
 							placeholder="Context file name"
 						/>
 						{formScope === "agent" ? (
-							<>
-								<input
-									className="h-9 w-full border border-slate-700 bg-[#0e1116] px-3 text-sm text-slate-200 outline-none placeholder:text-slate-500 focus:border-[#11a4d4]"
-									value={formAgent}
-									onChange={(event) => setFormAgent(event.currentTarget.value)}
-									placeholder="agent-profile-name"
-									list={createAgentListId}
-								/>
-								<datalist id={createAgentListId}>
-									{agentOptions.map((profile) => (
-										<option key={profile} value={profile} />
-									))}
-								</datalist>
-							</>
+							<AgentProfileSelect
+								value={formAgent}
+								options={agentOptions}
+								placeholder="Select agent"
+								onChange={setFormAgent}
+							/>
 						) : null}
 						<button
 							className="inline-flex h-9 items-center justify-center border border-[#11a4d4] bg-[#11a4d4] px-3 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-45"
@@ -371,6 +564,9 @@ export function ContextFilesView({ agentProfiles }: { agentProfiles: string[] })
 									<div className="mt-2 flex flex-wrap items-center gap-1.5">
 										<span className={`inline-flex border px-1.5 py-0.5 text-[10px] uppercase tracking-wider ${scopeBadgeClass(file)}`}>
 											{scopeLabel(file)}
+										</span>
+										<span className={`inline-flex border px-1.5 py-0.5 text-[10px] uppercase tracking-wider ${linkStateBadgeClass(file.linkState)}`}>
+											{linkStateLabel(file.linkState)}
 										</span>
 										{file.exists ? null : (
 											<span className="inline-flex border border-amber-400/70 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-amber-200">
@@ -413,6 +609,47 @@ function savePillClass(state: SaveState): string {
 	return "border-amber-400/80 bg-amber-400/10 text-amber-100";
 }
 
+function AgentProfileSelect({
+	value,
+	options,
+	placeholder,
+	disabled = false,
+	onChange,
+	compact = false,
+}: {
+	value: string;
+	options: string[];
+	placeholder: string;
+	disabled?: boolean;
+	onChange: (value: string) => void;
+	compact?: boolean;
+}) {
+	return (
+		<div className={`relative ${compact ? "min-w-[16rem] flex-1" : ""}`}>
+			<select
+				className={`w-full appearance-none border border-slate-700 bg-[#0e1116] pr-9 text-slate-200 outline-none focus:border-[#11a4d4] disabled:cursor-not-allowed disabled:opacity-60 ${compact ? "h-8 px-3 text-xs" : "h-9 px-3 text-sm"}`}
+				value={value}
+				disabled={disabled || options.length === 0}
+				onChange={(event) => onChange(event.currentTarget.value)}
+			>
+				{!value ? <option value="">{placeholder}</option> : null}
+				{options.length === 0 ? <option value="">{placeholder}</option> : null}
+				{options.map((profile) => (
+					<option key={profile} value={profile}>{profile}</option>
+				))}
+			</select>
+			<span className="pointer-events-none absolute inset-y-0 right-3 inline-flex items-center text-slate-500">
+				<ChevronDown size={14} />
+			</span>
+		</div>
+	);
+}
+
+function optionListWithSelectedAgent(options: string[], selectedAgent: string): string[] {
+	if (!selectedAgent || options.includes(selectedAgent)) return options;
+	return [selectedAgent, ...options];
+}
+
 function scopeLabel(file: Pick<ContextFileInfo, "source" | "scope" | "agentProfileName">): string {
 	if (file.source === "plugin") return "Plugin Global";
 	if (file.scope === "agent") return file.agentProfileName ? `Agent ${file.agentProfileName}` : "Agent Local";
@@ -423,6 +660,24 @@ function scopeBadgeClass(file: Pick<ContextFileInfo, "source" | "scope">): strin
 	if (file.source === "plugin") return "border-cyan-500/70 text-cyan-200";
 	if (file.scope === "agent") return "border-fuchsia-500/70 text-fuchsia-200";
 	return "border-[#11a4d4]/80 text-[#7dd3fc]";
+}
+
+function linkStateLabel(state: ContextFileInfo["linkState"]): string {
+	if (state === "plugin-only") return "Plugin Only";
+	if (state === "linked-clean") return "Linked Clean";
+	if (state === "linked-dirty") return "Linked Dirty";
+	if (state === "linked-stale") return "Linked Stale";
+	if (state === "orphaned") return "Orphaned";
+	return "Managed Unlinked";
+}
+
+function linkStateBadgeClass(state: ContextFileInfo["linkState"]): string {
+	if (state === "plugin-only") return "border-cyan-500/70 text-cyan-200";
+	if (state === "linked-clean") return "border-emerald-500/70 text-emerald-200";
+	if (state === "linked-dirty") return "border-orange-400/70 text-orange-100";
+	if (state === "linked-stale") return "border-amber-400/70 text-amber-100";
+	if (state === "orphaned") return "border-red-500/70 text-red-200";
+	return "border-slate-600 text-slate-300";
 }
 
 function parseProductEvent(message: MessageEvent): ProductEvent | undefined {

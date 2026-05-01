@@ -11,8 +11,8 @@ Pi remains the inner engine for model turns, tools, streaming, sessions, and com
 - `docs/tools.md` documents curated external CLI tools.
 - `docs/agent-run-yield-spec.md` documents yielded agent runs and run-control tools.
 - `docs/chat-rooms-event-log.md` documents Chat Web rooms, default-room startup, durable chat events, unread cursors, SSE cursors, and idempotent sends.
-- `docs/progress.md` is the short implementation status snapshot.
 - `docs/codex-compact-terminal-design.md` documents the compact Codex-style Chat session view.
+- `docs/progress.md` is the short implementation status snapshot.
 
 ## Scripts
 
@@ -81,7 +81,7 @@ The Chat Web App also has Pibo Rooms. Each user gets a locked `Personal Chat` ro
 
 Within the Sessions area, the Chat Web App now has an internal session-view registry. The existing nested trace renderer remains the default `Trace` view, and the same `PiboSessionTraceView` data can also be rendered through a compact Codex-style `Terminal` view selected by `?view=trace|terminal` or by browser-local preference.
 
-Managed context files are now a first-class product capability. The `pibo.context-files` plugin exposes editable global and agent-scoped markdown context files through `/api/context-files`, persists managed file metadata under the Pibo home directory, and emits product events when managed files are created, changed, removed, or updated on disk.
+Managed context files are now a first-class product capability. The `pibo.context-files` plugin exposes editable global and agent-scoped markdown context files through `/api/context-files`, stores managed-file metadata and revisions in `.pibo/context-files/context-files.sqlite`, and emits product events when managed files are created, changed, removed, or updated on disk. Plugin-shipped context files remain immutable source files; the product can create linked managed copies from them, track source hashes and link state, diff the managed copy against its source, reset back to source, restore older revisions, or adopt a changed source as the new managed baseline.
 
 The main source folders are:
 
@@ -105,7 +105,7 @@ Custom agents can be archived before deletion. Archived custom agents are remove
 
 The designer configures native Pibo agent capabilities only: plugin-registered tools, skills, context files, subagents, automatic local context-file loading, built-in Pi tool visibility, and capability packages such as `pibo-run-control`. Curated external CLI tools from `pibo tools` remain global operator tooling and are not selected per agent.
 
-The Chat Web App now also has a dedicated Context area at `/apps/chat/context`. It reuses the managed context-file APIs inside the main Chat UI shell so operators can create, edit, relocate, and remove managed context files without leaving the authenticated Chat Web App.
+The Chat Web App now also has a dedicated Context area at `/apps/chat/context`. It reuses the managed context-file APIs inside the main Chat UI shell so operators can create, edit, relocate, and remove managed context files without leaving the authenticated Chat Web App. Plugin context files are shown there as read-only sources, and both the Context area and Agent Designer can create linked managed copies when a user wants to customize shipped content safely.
 
 ## Profiles
 

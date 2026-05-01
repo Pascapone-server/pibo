@@ -2255,7 +2255,7 @@ function AgentsView({
 							<button type="button" disabled={readOnly} onClick={() => setNewContextFileScope("global")} className={`px-2 py-1 text-xs rounded-sm ${newContextFileScope === "global" ? "bg-[#11a4d4]/20 text-sky-100" : "text-slate-500 hover:text-slate-300"}`}>Global</button>
 						</div>
 						<div className="grid grid-cols-2 max-[1100px]:grid-cols-1 gap-2">
-							{catalog ? visibleContextFiles.map((contextFile) => <CatalogToggle key={contextFile.key} disabled={readOnly} checked={draft.contextFiles.includes(contextFile.key)} title={contextFile.label ?? contextFile.key} description={contextFile.path} meta={contextFileMeta(contextFile)} actionLabel="Edit" actionIcon={<Edit3 size={12} />} onAction={() => onEditContextFile(contextFile.key)} onToggle={() => setDraft((current) => ({ ...current, contextFiles: toggleName(current.contextFiles, contextFile.key) }))} />) : <EmptyCatalog />}
+							{catalog ? visibleContextFiles.map((contextFile) => <CatalogToggle key={contextFile.key} disabled={readOnly} checked={draft.contextFiles.includes(contextFile.key)} title={contextFile.label ?? contextFile.key} description={contextFile.path} meta={contextFileMeta(contextFile)} metaClass="text-[#11a4d4]" actionLabel="Edit" actionIcon={<Edit3 size={12} />} onAction={() => onEditContextFile(contextFile.key)} onToggle={() => setDraft((current) => ({ ...current, contextFiles: toggleName(current.contextFiles, contextFile.key) }))} />) : <EmptyCatalog />}
 						</div>
 					</DesignerPanel>
 					<SubagentDesigner draft={draft} setDraft={setDraft} profileOptions={profileOptions} readOnly={readOnly} />
@@ -2518,6 +2518,7 @@ function CatalogToggle({
 	title,
 	description,
 	meta,
+	metaClass,
 	actionLabel,
 	actionIcon,
 	actionDisabled,
@@ -2529,6 +2530,7 @@ function CatalogToggle({
 	title: string;
 	description?: string;
 	meta?: string;
+	metaClass?: string;
 	actionLabel?: string;
 	actionIcon?: ReactNode;
 	actionDisabled?: boolean;
@@ -2550,37 +2552,41 @@ function CatalogToggle({
 				{checked ? <Check size={12} /> : null}
 			</span>
 			<span className="min-w-0">
-				<span className="block text-sm truncate text-slate-200">{title}</span>
-				{description ? <span className="block text-xs text-slate-500 truncate">{description}</span> : null}
-				{meta ? <span className="block font-mono text-[10px] text-slate-600 mt-1">{meta}</span> : null}
-				{actionLabel && onAction ? (
-					<span className="mt-1.5 block">
-						<span
-							role="button"
-							tabIndex={0}
-							onClick={(event) => {
-								event.preventDefault();
-								event.stopPropagation();
-								if (!actionDisabled) onAction();
-							}}
-							onKeyDown={(event) => {
-								if ((event.key === "Enter" || event.key === " ") && !actionDisabled) {
+				<span className="flex items-start justify-between gap-2">
+					<span className="min-w-0 flex-1">
+						<span className="block text-sm truncate text-slate-200">{title}</span>
+					</span>
+					{actionLabel && onAction ? (
+						<span className="shrink-0">
+							<span
+								role="button"
+								tabIndex={0}
+								onClick={(event) => {
 									event.preventDefault();
 									event.stopPropagation();
-									onAction();
-								}
-							}}
-							className={`inline-flex h-6 items-center justify-center gap-1 border px-1.5 text-[10px] uppercase tracking-wider ${
-								actionDisabled
-									? "border-slate-800 text-slate-600"
-									: "border-[#11a4d4]/70 text-[#7dd3fc] hover:border-[#11a4d4] hover:text-sky-100"
-							}`}
-						>
-							{actionIcon}
-							{actionLabel}
+									if (!actionDisabled) onAction();
+								}}
+								onKeyDown={(event) => {
+									if ((event.key === "Enter" || event.key === " ") && !actionDisabled) {
+										event.preventDefault();
+										event.stopPropagation();
+										onAction();
+									}
+								}}
+								className={`inline-flex h-6 items-center justify-center gap-1 border px-1.5 text-[10px] uppercase tracking-wider ${
+									actionDisabled
+										? "border-slate-800 text-slate-600"
+										: "border-[#11a4d4]/70 text-[#7dd3fc] hover:border-[#11a4d4] hover:text-sky-100"
+								}`}
+							>
+								{actionIcon}
+								{actionLabel}
+							</span>
 						</span>
-					</span>
-				) : null}
+					) : null}
+				</span>
+				{description ? <span className="block text-xs text-slate-500 truncate">{description}</span> : null}
+				{meta ? <span className={`block font-mono text-[10px] mt-1 ${metaClass ?? "text-slate-600"}`}>{meta}</span> : null}
 			</span>
 		</button>
 	);

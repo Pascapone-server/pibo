@@ -193,11 +193,14 @@ Curated external CLI tools managed by `pibo tools` are deliberately not part of 
 Managed context files are now a product-owned extension of that capability surface. Pibo ships a `pibo.context-files` plugin that:
 
 - serves a managed context-file API at `/api/context-files`
-- stores managed file metadata under the Pibo home directory
+- stores managed file metadata and revisions in `.pibo/context-files/context-files.sqlite`
 - supports global and agent-scoped markdown files
+- supports linked managed copies created from plugin-shipped context files
 - emits product events such as `context-file.created`, `context-file.updated`, `context-file.removed`, and `context-file.external_updated`
 
-Managed files are exposed through the same capability catalog as plugin context files, with extra metadata for source and scope. Agent-scoped managed files remain ordinary explicit profile context files at runtime; the extra product metadata exists so UIs can create and organize them.
+Managed files are exposed through the same capability catalog as plugin context files, with extra metadata for source and scope. Plugin files remain read-only source entries. When a user wants to customize one, the product creates a managed copy linked back to the plugin source via `sourceRef` and `sourceHash`. That link produces explicit product states such as `plugin-only`, `linked-clean`, `linked-dirty`, `linked-stale`, `orphaned`, and `managed-unlinked`, so UIs can show whether a managed copy is unchanged, locally edited, behind a changed plugin source, disconnected from its source, or never linked.
+
+The managed context-file API also owns revision and comparison workflows. A managed file keeps an active revision history, can be diffed against its source or a stored revision, can be reset exactly to the current plugin source, can restore an older managed revision, and can adopt a changed plugin source as the new managed baseline. Agent-scoped managed files still become ordinary explicit profile context files at runtime; the extra product metadata exists so the product can manage editing, linking, and recovery flows outside the agent runtime.
 
 ## Channels
 
@@ -233,9 +236,9 @@ The V1 chat web app uses Better Auth Google sign-in for every request path, incl
 
 Chat Web navigation is URL-based. The browser URL is the primary source of truth for the visible area and selected room/session. The canonical session URL is `/apps/chat/rooms/<roomId>/sessions/<piboSessionId>`, with additional app URLs for `/apps/chat/agents` and `/apps/chat/settings`. Opening `/apps/chat` may use browser-local last-selection state as an entry fallback, but bootstrap must replace it with the canonical room/session URL. The same-origin web host serves the React shell for non-asset `/apps/chat/*` paths so direct links and page reloads keep the selected area instead of falling back to the base app.
 
-The authenticated Chat Web shell also includes a Context area at `/apps/chat/context`. This area reuses the managed context-file API instead of maintaining a second auth flow or a disconnected editor surface. Inside the integrated Chat shell, the Context editor remains the primary center workspace while the managed-file creation and selection panel sits on the right side so the shell does not present two competing left sidebars. The older dedicated `/apps/context-files` web app still exists as a standalone plugin web app, but the main operator path is now the integrated Chat Web area.
 Inside the Sessions area, rendering is now mediated by a small Chat-Web-specific session-view registry in the frontend bundle. The registry keeps the existing nested trace renderer as the default `trace` view and adds a second compact `terminal` view that renders the same `PiboSessionTraceView` projection without changing router/runtime contracts. Session-view selection is a browser/UI concern only: it persists through the `view` search param and browser-local preference, and it does not alter the canonical room/session route identity.
 
+The authenticated Chat Web shell also includes a Context area at `/apps/chat/context`. This area reuses the managed context-file API instead of maintaining a second auth flow or a disconnected editor surface. Inside the integrated Chat shell, the Context editor remains the primary center workspace while the managed-file creation and selection panel sits on the right side so the shell does not present two competing left sidebars. The older dedicated `/apps/context-files` web app still exists as a standalone plugin web app, but the main operator path is now the integrated Chat Web area.
 
 The auth boundary is enforced before channel input reaches the session router:
 

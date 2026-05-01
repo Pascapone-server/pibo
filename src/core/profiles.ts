@@ -33,6 +33,7 @@ export type ContextFileProfile = {
 	enabled?: boolean;
 	scope?: ContextFileScope;
 	source?: ContextFileSource;
+	pluginId?: string;
 	agentProfileName?: string;
 };
 

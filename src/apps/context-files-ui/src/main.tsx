@@ -9,14 +9,22 @@ import {
 	Trash2,
 } from "lucide-react";
 import {
+	adoptContextFileSource,
 	createContextFile,
+	diffContextFile,
+	linkContextFileFromPlugin,
+	listContextFileRevisions,
 	listContextFiles,
 	readContextFile,
 	removeContextFile,
+	resetContextFileToSource,
+	restoreContextFileRevision,
 	saveContextFile,
 	updateContextFileMetadata,
+	type ContextFileDiff,
 	type ContextFileDocument,
 	type ContextFileInfo,
+	type ContextFileRevision,
 	type ProductEvent,
 	type SaveState,
 } from "./api";
@@ -31,10 +39,13 @@ function App() {
 	const [files, setFiles] = useState<ContextFileInfo[]>([]);
 	const [selectedKey, setSelectedKey] = useState<string | null>(null);
 	const [document, setDocument] = useState<ContextFileDocument | null>(null);
+	const [revisions, setRevisions] = useState<ContextFileRevision[]>([]);
+	const [diff, setDiff] = useState<ContextFileDiff | null>(null);
 	const [saveState, setSaveState] = useState<SaveState>("saved");
 	const [conflict, setConflict] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [loading, setLoading] = useState(true);
+	const [actionBusy, setActionBusy] = useState(false);
 	const [formLabel, setFormLabel] = useState("");
 	const [formScope, setFormScope] = useState<ContextFileScope>("global");
 	const [formAgent, setFormAgent] = useState("");
@@ -44,6 +55,24 @@ function App() {
 		saveStateRef.current = saveState;
 	}, [saveState]);
 
+	const hydrateDocument = useCallback(async (nextDocument: ContextFileDocument) => {
+		setDocument(nextDocument);
+		setSelectedKey(nextDocument.key);
+		setConflict(null);
+		setError(null);
+		if (!nextDocument.managed) {
+			setRevisions([]);
+			setDiff(null);
+			return;
+		}
+		const [revisionPayload, nextDiff] = await Promise.all([
+			listContextFileRevisions(nextDocument.key),
+			nextDocument.sourceRef ? diffContextFile(nextDocument.key).catch(() => null) : Promise.resolve(null),
+		]);
+		setRevisions(revisionPayload.revisions);
+		setDiff(nextDiff);
+	}, []);
+
 	const refreshFiles = useCallback(async () => {
 		const nextFiles = await listContextFiles();
 		setFiles(nextFiles);
@@ -52,11 +81,8 @@ function App() {
 
 	const loadDocument = useCallback(async (key: string) => {
 		const nextDocument = await readContextFile(key);
-		setDocument(nextDocument);
-		setSelectedKey(key);
-		setConflict(null);
-		setError(null);
-	}, []);
+		await hydrateDocument(nextDocument);
+	}, [hydrateDocument]);
 
 	useEffect(() => {
 		refreshFiles()
@@ -128,13 +154,12 @@ function App() {
 			setFormLabel("");
 			setFormAgent("");
 			await refreshFiles();
-			setSelectedKey(file.key);
-			setDocument(file);
+			await hydrateDocument(file);
 			setError(null);
 		} catch (caught) {
 			setError(caught instanceof Error ? caught.message : String(caught));
 		}
-	}, [formAgent, formLabel, formScope, refreshFiles]);
+	}, [formAgent, formLabel, formScope, hydrateDocument, refreshFiles]);
 
 	const handlePersist = useCallback(
 		async (markdown: string) => {
@@ -144,18 +169,18 @@ function App() {
 					markdown,
 					expectedVersion: document.version,
 				});
-				setDocument(saved);
+				await hydrateDocument(saved);
 				setConflict(null);
 				await refreshFiles();
 			} catch (caught) {
 				if (isConflictError(caught)) {
-					setDocument(caught.data.file);
+					await hydrateDocument(caught.data.file);
 					setConflict("The file changed before save. The editor reloaded the latest disk version.");
 				}
 				throw caught;
 			}
 		},
-		[document, refreshFiles],
+		[document, hydrateDocument, refreshFiles],
 	);
 
 	const handleReload = useCallback(async () => {
@@ -185,15 +210,72 @@ function App() {
 					scope,
 					agentProfileName: scope === "agent" ? metadataAgent : undefined,
 				});
-				setDocument(updated);
+				await hydrateDocument(updated);
 				await refreshFiles();
 				setError(null);
 			} catch (caught) {
 				setError(caught instanceof Error ? caught.message : String(caught));
 			}
 		},
-		[document, metadataAgent, refreshFiles],
+		[document, hydrateDocument, metadataAgent, refreshFiles],
 	);
+
+	const handleLinkCopy = useCallback(async () => {
+		if (!selectedFile || selectedFile.source !== "plugin") return;
+		setActionBusy(true);
+		try {
+			const created = await linkContextFileFromPlugin(selectedFile.key);
+			await refreshFiles();
+			await hydrateDocument(created);
+			setError(null);
+		} catch (caught) {
+			setError(caught instanceof Error ? caught.message : String(caught));
+		} finally {
+			setActionBusy(false);
+		}
+	}, [hydrateDocument, refreshFiles, selectedFile]);
+
+	const handleResetToSource = useCallback(async () => {
+		if (!document?.managed || !document.sourceRef) return;
+		setActionBusy(true);
+		try {
+			const updated = await resetContextFileToSource(document.key);
+			await refreshFiles();
+			await hydrateDocument(updated);
+		} catch (caught) {
+			setError(caught instanceof Error ? caught.message : String(caught));
+		} finally {
+			setActionBusy(false);
+		}
+	}, [document, hydrateDocument, refreshFiles]);
+
+	const handleAdoptSource = useCallback(async () => {
+		if (!document?.managed || document.linkState !== "linked-stale") return;
+		setActionBusy(true);
+		try {
+			const updated = await adoptContextFileSource(document.key);
+			await refreshFiles();
+			await hydrateDocument(updated);
+		} catch (caught) {
+			setError(caught instanceof Error ? caught.message : String(caught));
+		} finally {
+			setActionBusy(false);
+		}
+	}, [document, hydrateDocument, refreshFiles]);
+
+	const handleRestoreRevision = useCallback(async (revisionId: string) => {
+		if (!document?.managed) return;
+		setActionBusy(true);
+		try {
+			const updated = await restoreContextFileRevision(document.key, revisionId);
+			await refreshFiles();
+			await hydrateDocument(updated);
+		} catch (caught) {
+			setError(caught instanceof Error ? caught.message : String(caught));
+		} finally {
+			setActionBusy(false);
+		}
+	}, [document, hydrateDocument, refreshFiles]);
 
 	return (
 		<div className="app-shell">
@@ -242,6 +324,7 @@ function App() {
 							<span className="file-name">{file.label || file.key}</span>
 							<span className="file-path">{file.path}</span>
 							<span className={`scope-badge scope-badge--${file.scope}`}>{scopeLabel(file)}</span>
+							<span className={`scope-badge scope-badge--${file.scope}`}>{linkStateLabel(file.linkState)}</span>
 							{file.exists ? null : <span className="missing">missing</span>}
 						</button>
 					))}
@@ -278,6 +361,21 @@ function App() {
 
 				{error ? <StatusBanner tone="error" text={error} /> : null}
 				{conflict ? <StatusBanner tone="warning" text={conflict} /> : null}
+				{document ? (
+					<div className="scope-controls">
+						<div>State: <strong>{linkStateLabel(document.linkState)}</strong></div>
+						{document.sourceRef ? <div>Source: <code>{document.sourceRef}</code></div> : null}
+						{document.sourceHash ? <div>Hash: <code>{document.sourceHash}</code></div> : null}
+					</div>
+				) : null}
+				{document?.source === "plugin" ? (
+					<div className="scope-controls">
+						<div>This is a plugin-owned source file. Create a managed copy before editing.</div>
+						<button className="primary-action" type="button" disabled={actionBusy} onClick={() => void handleLinkCopy()}>
+							Create Managed Copy
+						</button>
+					</div>
+				) : null}
 				{document?.managed ? (
 					<div className="scope-controls">
 						<div className="segmented">
@@ -289,6 +387,18 @@ function App() {
 							</button>
 						</div>
 						<input value={metadataAgent} onChange={(event) => setMetadataAgent(event.currentTarget.value)} placeholder="agent-profile-name" />
+						{document.sourceRef ? (
+							<>
+								<button className="primary-action" type="button" disabled={actionBusy} onClick={() => void handleResetToSource()}>
+									Reset To Source
+								</button>
+								{document.linkState === "linked-stale" ? (
+									<button className="primary-action" type="button" disabled={actionBusy} onClick={() => void handleAdoptSource()}>
+										Adopt Source
+									</button>
+								) : null}
+							</>
+						) : null}
 					</div>
 				) : null}
 
@@ -300,6 +410,7 @@ function App() {
 							initialMarkdown={document.markdown}
 							onPersist={handlePersist}
 							onSaveStateChange={setSaveState}
+							readOnly={!document.editable}
 						/>
 					</div>
 				) : (
@@ -308,6 +419,37 @@ function App() {
 						{document ? "The selected file is missing on disk." : "Select or create a context file."}
 					</div>
 				)}
+				{document?.managed && revisions.length > 0 ? (
+					<div className="scope-controls">
+						<h3>Revisions</h3>
+						<div className="file-list">
+							{revisions.map((revision) => (
+								<div key={revision.id} className="file-row">
+									<div>
+										<strong>{revision.kind}</strong> {revision.active ? "(active)" : ""}
+									</div>
+									<div>{revision.note ?? revision.id}</div>
+									<div>{revision.createdAt}</div>
+									{revision.active ? null : (
+										<button className="primary-action" type="button" disabled={actionBusy} onClick={() => void handleRestoreRevision(revision.id)}>
+											Restore
+										</button>
+									)}
+								</div>
+							))}
+						</div>
+					</div>
+				) : null}
+				{document?.managed && diff ? (
+					<div className="scope-controls">
+						<h3>Diff</h3>
+						<div className="file-list">
+							{diff.chunks.map((chunk, index) => (
+								<pre key={`${chunk.type}-${index}`} className="file-row">{chunk.lines.map((line) => `${chunk.type === "add" ? "+" : chunk.type === "remove" ? "-" : " "} ${line}`).join("\n")}</pre>
+							))}
+						</div>
+					</div>
+				) : null}
 			</main>
 		</div>
 	);
@@ -328,6 +470,15 @@ function scopeLabel(file: Pick<ContextFileInfo, "source" | "scope" | "agentProfi
 	if (file.source === "plugin") return "Plugin Global";
 	if (file.scope === "agent") return file.agentProfileName ? `Agent ${file.agentProfileName}` : "Agent Local";
 	return "Global";
+}
+
+function linkStateLabel(state: ContextFileInfo["linkState"]): string {
+	if (state === "plugin-only") return "Plugin Only";
+	if (state === "linked-clean") return "Linked Clean";
+	if (state === "linked-dirty") return "Linked Dirty";
+	if (state === "linked-stale") return "Linked Stale";
+	if (state === "orphaned") return "Orphaned";
+	return "Managed Unlinked";
 }
 
 function parseProductEvent(message: MessageEvent): ProductEvent | undefined {
