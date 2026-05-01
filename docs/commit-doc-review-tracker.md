@@ -22,13 +22,13 @@ Scope: Last 10 commits on the current branch, metadata only. No diff review yet.
 
 ### 2. `cb852fb` - Improve chat web trace and asset performance
 
-- Review status: `todo`
-- Documentation follow-up: `tbd`
+- Review status: `done`
+- Documentation follow-up: `required`
 - Date: `2026-05-01T21:22:18+02:00`
 - Author: `pibo`
 - Full hash: `cb852fb9f0e8b996464eb8cdd4b01805e71ec6b7`
 - Description: `-`
-- Notes: `-`
+- Notes: `Documented the compact `/api/chat/trace` raw-event fetch behavior and the immutable compressed Chat Web asset serving contract in the web gateway spec and architecture overview.`
 
 ### 3. `51e8629` - Show derived session picker in trace header
 

@@ -242,6 +242,8 @@ The same-origin web path is intentionally split:
 
 This avoids iframe and cross-origin complexity for V1. Apps can use normal same-origin cookies and call their own API routes while sharing the gateway auth boundary.
 
+Built Chat Web assets under `/apps/chat/assets/*` are served as immutable static assets. The web host advertises long-lived cache headers and negotiates Brotli or gzip compression for compressible JS, CSS, HTML, and JSON payloads so the React shell reload path stays small.
+
 When the web host sits behind a local reverse proxy, it reconstructs the public request origin from `X-Forwarded-Host` and `X-Forwarded-Proto` only for loopback proxy connections. This lets nginx map `http://4788.<lan-ip>.sslip.io` to `127.0.0.1:4788` without breaking chat mutation CSRF checks. Direct non-loopback clients cannot spoof those forwarded headers.
 
 ### Chat Web Live Stream
@@ -258,7 +260,7 @@ The adapter lives in `src/apps/chat/stream.ts`. It turns full router events into
 - `EXECUTION_RESULT` carries wrapper action results.
 - `RAW_EVENT` is the compatibility fallback for output events without a compact frame yet.
 
-The HTTP response still uses plain SSE with `event: pibo`; the optimization is the payload shape. Content deltas send only the new token or character chunk plus a stable message id. The React chat UI applies these frames directly to the current trace view and only refreshes `/api/chat/trace` for lifecycle or structural updates. The raw Pibo event log remains persisted in the Chat Web Read Model for reconstruction and debugging.
+The HTTP response still uses plain SSE with `event: pibo`; the optimization is the payload shape. Content deltas send only the new token or character chunk plus a stable message id. The React chat UI applies these frames directly to the current trace view and only refreshes `/api/chat/trace` for lifecycle or structural updates. Normal trace reloads stay compact: raw event rows are omitted unless the inspector explicitly requests them with `includeRawEvents=true`, and `rawEventsLimit` bounds the replay window when they are requested. The raw Pibo event log remains persisted in the Chat Web Read Model for reconstruction and debugging.
 
 Trace rendering uses explicit order metadata instead of treating wall-clock timestamps as the semantic ordering source. Transcript-backed nodes use Pi JSONL entry/content-part order. Stored event-derived nodes use the Chat Web read model's per-session `event_sequence`. Live SSE nodes use the frame index from the SSE cursor. Shared order helpers in `src/shared/trace-order.ts` are used by the server trace rebuild, debug checks, and the React trace display path so refreshes do not reorder completed conceptual nodes just because timestamps changed.
 

@@ -61,6 +61,7 @@ This specification does not define non-web local gateway behavior except where w
 - **REQ-019A**: Better Auth MUST include configured `auth.trustedOrigins` in its trusted origins.
 - **REQ-020**: The chat web app page MUST be served at `GET /apps/chat`.
 - **REQ-020A**: The chat web app MUST serve the same React shell for non-asset `GET /apps/chat/*` deep links so browser reloads and shared URLs do not return `404`.
+- **REQ-020B**: Built Chat Web assets under `/apps/chat/assets/*` MUST send immutable cache headers and SHOULD use negotiated Brotli or gzip compression for compressible asset types.
 - **REQ-021**: `GET /api/chat/bootstrap` MUST require an auth session and return identity, selected Pibo Room, selected Pibo Session, room-scoped session tree, room tree, agent inventory, and available gateway actions.
 - **REQ-022**: Chat session ownership MUST use `ownerScope=user:<authenticated user id>` and default profile `pibo-minimal` unless overridden.
 - **REQ-023**: `POST /api/chat/sessions` MUST require same-origin JSON and create a new top-level personal Pibo Session.
@@ -73,6 +74,7 @@ This specification does not define non-web local gateway behavior except where w
 - **REQ-030**: Chat UI thinking output MUST be user-toggleable and hidden by default.
 - **REQ-031**: Chat APIs that accept a `piboSessionId` MUST reject sessions whose `ownerScope` does not match the authenticated user.
 - **REQ-032**: `GET /api/chat/trace` MUST pass the selected session's current read-model status into trace reconstruction so live running nodes can be distinguished from interrupted stale nodes.
+- **REQ-032A**: `GET /api/chat/trace` MUST omit raw event rows by default and MUST accept opt-in `includeRawEvents=true` plus a bounded `rawEventsLimit` for trace-inspector fetches.
 - **REQ-033**: The Chat Web App MUST ensure a personal default Pibo Room for each authenticated `ownerScope` during bootstrap.
 - **REQ-034**: The personal default Pibo Room MUST add the authenticated principal as an `owner` member.
 - **REQ-035**: Pibo Sessions created for Chat Web MUST be associated with a Pibo Room through `PiboSession.metadata.chatRoomId`.
@@ -147,7 +149,7 @@ type PiboWebApp = {
 | `/api/chat/sessions` | GET | required | Returns owned session tree scoped to optional `roomId` |
 | `/api/chat/sessions` | POST | required | Creates a new top-level personal session in optional `roomId` |
 | `/api/chat/sessions/:piboSessionId` | PATCH | required | Updates mutable session metadata such as title or archived state |
-| `/api/chat/trace` | GET | required | Returns selected session trace view |
+| `/api/chat/trace` | GET | required | Returns selected session trace view; raw events are opt-in through query parameters |
 | `/api/chat/message` | POST | required | Persists a durable chat event and emits a message event |
 | `/api/chat/action` | POST | required | Emits execution event |
 | `/api/chat/events` | GET | required | Opens SSE stream |
@@ -240,6 +242,7 @@ type CustomAgent = {
 - **AC-009**: Given an authenticated user requests another user's `piboSessionId`, When the request is handled, Then the response is rejected.
 - **AC-010**: Given an authenticated user patches their own session title or archived state, When the request is valid, Then the returned session and subsequent bootstrap response reflect the update.
 - **AC-011**: Given a trace request for a running selected session, When live delta events exist, Then trace reconstruction receives the session status as `running`.
+- **AC-011A**: Given a trace request without `includeRawEvents=true`, When the response is returned, Then raw event rows are omitted from the default payload.
 - **AC-012**: Given a same-origin mutation delivered through a local reverse proxy with `X-Forwarded-Host` and `X-Forwarded-Proto`, When the request origin matches the forwarded public origin, Then the mutation is accepted.
 - **AC-013**: Given a non-loopback direct client sends spoofed forwarded headers, When the request is handled, Then those forwarded headers are not trusted for origin reconstruction.
 - **AC-014**: Given a new authenticated user, When `/api/chat/bootstrap` is requested, Then a personal default Pibo Room and a room-scoped selected Pibo Session are returned.
@@ -255,6 +258,7 @@ type CustomAgent = {
 - **AC-024**: Given an archived non-personal room and exact room-name confirmation, When `DELETE /api/chat/rooms/:roomId` is requested, Then the room subtree, contained session subtree, and related chat rows are deleted.
 - **AC-025**: Given a custom agent is created without `autoContextFiles`, When the agent is persisted and returned, Then `autoContextFiles` is `true`.
 - **AC-026**: Given a custom agent is created or updated with `autoContextFiles: false`, When a routed session is created with that profile, Then automatic local context files are disabled for that runtime.
+- **AC-027**: Given a request for a built Chat Web asset with `Accept-Encoding: br, gzip`, When the asset is compressible, Then the response includes immutable cache headers plus a matching `Content-Encoding`.
 
 ## 6. Test Automation Strategy
 
