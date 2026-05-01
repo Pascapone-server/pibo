@@ -572,6 +572,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 		return <div className="min-h-screen bg-[#101d22] text-slate-300 grid place-items-center">Loading Pibo Chat...</div>;
 	}
 	const roomsSupported = Boolean(bootstrap.selectedRoomId || bootstrap.room || bootstrap.rooms.length);
+	const sessionGroups = splitSessionNodesByArchive(bootstrap.sessions);
 
 	return (
 		<div className="h-screen overflow-hidden bg-[#101d22] text-slate-200 grid grid-rows-[56px_1fr]">
@@ -704,7 +705,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 							) : null}
 							<div>
 								<div className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Sessions</div>
-								{bootstrap.sessions.map((session) => (
+								{sessionGroups.active.map((session) => (
 									<SessionNode
 										key={session.piboSessionId}
 										node={session}
@@ -715,7 +716,25 @@ export function App({ route }: { route: ChatAppRoute }) {
 										onDelete={requestSessionDelete}
 									/>
 								))}
+								{sessionGroups.active.length === 0 ? <div className="px-2 py-3 text-xs text-slate-500 border border-dashed border-slate-700 rounded-sm">No active sessions</div> : null}
 							</div>
+							{showArchived ? (
+								<div>
+									<div className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Archived Sessions</div>
+									{sessionGroups.archived.map((session) => (
+										<SessionNode
+											key={session.piboSessionId}
+											node={session}
+											selectedPiboSessionId={selectedPiboSessionId}
+											onSelect={(piboSessionId) => void selectSession(piboSessionId)}
+											onRename={(piboSessionId, title) => void renameSession(piboSessionId, title)}
+											onArchive={(piboSessionId, archived) => void setSessionArchived(piboSessionId, archived)}
+											onDelete={requestSessionDelete}
+										/>
+									))}
+									{sessionGroups.archived.length === 0 ? <div className="px-2 py-3 text-xs text-slate-500 border border-dashed border-slate-700 rounded-sm">No archived sessions</div> : null}
+								</div>
+							) : null}
 						</div>
 					) : (
 						<div className="p-3 text-sm text-slate-400">Browser-local settings.</div>
@@ -1275,6 +1294,24 @@ function SessionNode({
 
 function sessionTreeHasSession(nodes: PiboWebSessionNode[], piboSessionId: string): boolean {
 	return nodes.some((node) => node.piboSessionId === piboSessionId || sessionTreeHasSession(node.children, piboSessionId));
+}
+
+function splitSessionNodesByArchive(nodes: PiboWebSessionNode[]): {
+	active: PiboWebSessionNode[];
+	archived: PiboWebSessionNode[];
+} {
+	const active: PiboWebSessionNode[] = [];
+	const archived: PiboWebSessionNode[] = [];
+	for (const node of nodes) {
+		if (node.archived) {
+			archived.push(node);
+			continue;
+		}
+		const children = splitSessionNodesByArchive(node.children);
+		active.push({ ...node, children: children.active });
+		archived.push(...children.archived);
+	}
+	return { active, archived };
 }
 
 function Composer({
