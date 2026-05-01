@@ -187,6 +187,13 @@ export class ChatWebReadModel {
 		return rows.map(eventFromRow);
 	}
 
+	getLatestEventSequence(piboSessionId: string): number {
+		const row = this.db
+			.prepare("SELECT COALESCE(MAX(event_sequence), 0) AS latest_sequence FROM web_chat_events WHERE pibo_session_id = ?")
+			.get(piboSessionId) as { latest_sequence: number };
+		return row.latest_sequence;
+	}
+
 	deleteSessions(piboSessionIds: string[]): number {
 		if (!piboSessionIds.length) return 0;
 		const placeholders = piboSessionIds.map(() => "?").join(", ");

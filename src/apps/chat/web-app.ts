@@ -20,7 +20,7 @@ import {
 	type PiboRoomNode,
 } from "./rooms.js";
 import { chatStreamFramesFromOutputEvent, createChatStreamState, type ChatStreamEvent } from "./stream.js";
-import { buildSessionNodes, buildTraceView } from "./trace.js";
+import { buildSessionNodes, buildTraceView, createTraceViewVersion, loadPiSessionMetadata, type PiboSessionTraceView } from "./trace.js";
 import { isChatWebSessionArchived, withChatWebArchived } from "./session-metadata.js";
 import {
 	CustomAgentStore,
@@ -53,6 +53,7 @@ type ChatWebAppState = {
 	roomStore: PiboRoomStore;
 	agentStore: CustomAgentStore;
 	reliabilityStore: PiboReliabilityStore;
+	traceCache: Map<string, PiboSessionTraceView>;
 	subscribedContext?: PiboWebAppContext;
 	unsubscribe?: () => void;
 	liveListeners: Set<(event: StoredChatEvent) => void>;
@@ -204,6 +205,23 @@ function agentResourceId(pathname: string): string | undefined {
 	} catch {
 		throw new PiboWebHttpError("Invalid agent id", 400);
 	}
+}
+
+function etagForVersion(version: string): string {
+	return `"${version}"`;
+}
+
+function requestMatchesVersion(request: Request, version: string): boolean {
+	const header = request.headers.get("if-none-match");
+	if (!header) return false;
+	return header
+		.split(",")
+		.map((value) => value.trim())
+		.some((value) => value === "*" || value === etagForVersion(version) || value === `W/${etagForVersion(version)}`);
+}
+
+function traceCacheKey(piboSessionId: string, version: string, includeRawEvents: boolean, rawEventsLimit: number): string {
+	return [piboSessionId, version, includeRawEvents ? "raw" : "compact", rawEventsLimit].join(":");
 }
 
 function normalizeRoomName(value: unknown, fallback = "New Chat"): string {
@@ -2080,6 +2098,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 		roomStore: createRoomStore(options.roomStorePath ?? storagePath),
 		agentStore: createAgentStore(options.agentStorePath ?? storagePath),
 		reliabilityStore: createReliabilityStore(options.reliabilityStorePath),
+		traceCache: new Map(),
 		liveListeners: new Set(),
 	};
 
@@ -2447,16 +2466,34 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				const indexedSession = state.readModel
 					.listSessions()
 					.find((item) => item.piboSessionId === selectedSession.id);
-				return responseJson(
-					await buildTraceView({
-						session: selectedSession,
-						sessions: ownedSessions,
-						events: state.readModel.listEvents(selectedSession.id),
-						status: indexedSession?.status,
-						includeRawEvents,
-						rawEventsLimit,
-					}),
-				);
+				const metadata = await loadPiSessionMetadata(selectedSession, selectedSession.workspace ?? process.cwd());
+				const lastEventSequence = state.readModel.getLatestEventSequence(selectedSession.id);
+				const version = createTraceViewVersion({
+					session: selectedSession,
+					sessions: ownedSessions,
+					events: lastEventSequence > 0
+						? [{ id: `seq:${lastEventSequence}`, eventSequence: lastEventSequence, createdAt: indexedSession?.lastActivityAt ?? "" }]
+						: [],
+					status: indexedSession?.status,
+					metadata,
+				});
+				const headers = { etag: etagForVersion(version) };
+				if (requestMatchesVersion(request, version)) {
+					return new Response(null, { status: 304, headers });
+				}
+				const cacheKey = traceCacheKey(selectedSession.id, version, includeRawEvents, rawEventsLimit);
+				const cached = state.traceCache.get(cacheKey);
+				if (cached) return responseJson(cached, { headers });
+				const trace = await buildTraceView({
+					session: selectedSession,
+					sessions: ownedSessions,
+					events: state.readModel.listEvents(selectedSession.id),
+					status: indexedSession?.status,
+					includeRawEvents,
+					rawEventsLimit,
+				});
+				state.traceCache.set(cacheKey, trace);
+				return responseJson(trace, { headers });
 			}
 
 			if (url.pathname === `${CHAT_WEB_API_PREFIX}/message` && request.method === "POST") {

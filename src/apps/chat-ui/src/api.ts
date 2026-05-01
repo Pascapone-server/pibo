@@ -62,8 +62,6 @@ export type ProductEvent = {
 	};
 };
 
-const bootstrapRequests = new Map<string, Promise<BootstrapData>>();
-
 export async function getBootstrap(
 	piboSessionId?: string,
 	includeArchived = false,
@@ -76,24 +74,36 @@ export async function getBootstrap(
 	if (roomId) params.set("roomId", roomId);
 	if (markRead) params.set("markRead", "true");
 	const suffix = params.size ? `?${params.toString()}` : "";
-	const path = `/api/chat/bootstrap${suffix}`;
-	const existing = bootstrapRequests.get(path);
-	if (existing) return existing;
-	const request = requestJson<Partial<BootstrapData>>(path)
-		.then(normalizeBootstrap)
-		.finally(() => bootstrapRequests.delete(path));
-	bootstrapRequests.set(path, request);
-	return request;
+	return requestJson<Partial<BootstrapData>>(`/api/chat/bootstrap${suffix}`).then(normalizeBootstrap);
 }
 
 export async function getTrace(
 	piboSessionId: string,
-	options: { includeRawEvents?: boolean; rawEventsLimit?: number } = {},
-): Promise<PiboSessionTraceView> {
+	options: { includeRawEvents?: boolean; rawEventsLimit?: number; knownVersion?: string } = {},
+): Promise<{ trace?: PiboSessionTraceView; notModified: boolean; version?: string }> {
 	const params = new URLSearchParams({ piboSessionId });
 	if (options.includeRawEvents) params.set("includeRawEvents", "true");
 	if (options.rawEventsLimit) params.set("rawEventsLimit", String(options.rawEventsLimit));
-	return requestJson<PiboSessionTraceView>(`/api/chat/trace?${params.toString()}`);
+	const response = await fetch(`/api/chat/trace?${params.toString()}`, {
+		headers: options.knownVersion ? { "if-none-match": toEtag(options.knownVersion) } : undefined,
+	});
+	if (response.status === 304) {
+		return { notModified: true, version: fromEtag(response.headers.get("etag")) ?? options.knownVersion };
+	}
+	const payload = await response.json().catch(() => undefined);
+	if (!response.ok) {
+		const message =
+			payload && typeof payload === "object" && "error" in payload ? String(payload.error) : "Request failed";
+		const error = new Error(message) as Error & { status?: number; data?: unknown };
+		error.status = response.status;
+		error.data = payload;
+		throw error;
+	}
+	return {
+		trace: payload as PiboSessionTraceView,
+		notModified: false,
+		version: fromEtag(response.headers.get("etag")) ?? (payload as PiboSessionTraceView).version,
+	};
 }
 
 export async function postSession(profile?: string, roomId?: string): Promise<CreateSessionData> {
@@ -391,4 +401,16 @@ function normalizeBootstrap(payload: Partial<BootstrapData>): BootstrapData {
 			actions: payload.capabilities?.actions ?? [],
 		},
 	};
+}
+
+function toEtag(version: string): string {
+	return `"${version}"`;
+}
+
+function fromEtag(value: string | null): string | undefined {
+	if (!value) return undefined;
+	const trimmed = value.trim();
+	if (trimmed.startsWith("W/")) return fromEtag(trimmed.slice(2));
+	if (trimmed.startsWith("\"") && trimmed.endsWith("\"")) return trimmed.slice(1, -1);
+	return trimmed;
 }

@@ -111,6 +111,7 @@ export type PiboSessionTraceView = {
 	piboSessionId: string;
 	piSessionId: string;
 	title: string;
+	version: string;
 	nodes: PiboTraceNode[];
 	rawEvents: Array<{ id: string; type: string; createdAt: string; payload: unknown }>;
 };

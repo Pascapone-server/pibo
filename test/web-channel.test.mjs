@@ -211,8 +211,21 @@ test("chat web trace returns raw events only when requested", async () => {
 			{ headers: { "x-test-user": "user-1" } },
 		);
 		assert.equal(compactResponse.status, 200);
+		assert.ok(compactResponse.headers.get("etag"));
 		const compactTrace = await compactResponse.json();
+		assert.equal(typeof compactTrace.version, "string");
 		assert.equal(compactTrace.rawEvents.length, 0);
+
+		const cachedResponse = await fetch(
+			`${baseURL}/api/chat/trace?piboSessionId=${encodeURIComponent(sessionPayload.session.id)}`,
+			{
+				headers: {
+					"x-test-user": "user-1",
+					"if-none-match": compactResponse.headers.get("etag"),
+				},
+			},
+		);
+		assert.equal(cachedResponse.status, 304);
 
 		const rawResponse = await fetch(
 			`${baseURL}/api/chat/trace?piboSessionId=${encodeURIComponent(sessionPayload.session.id)}&includeRawEvents=true&rawEventsLimit=2`,

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { parseSessionEntries, SessionManager, type SessionEntry } from "@mariozechner/pi-coding-agent";
 import type { PiboOutputEvent, PiboSessionListItem } from "../../core/events.js";
@@ -82,6 +83,7 @@ export type PiboSessionTraceView = {
 	piboSessionId: string;
 	piSessionId: string;
 	title: string;
+	version: string;
 	nodes: PiboTraceNode[];
 	rawEvents: ChatWebStoredEvent[];
 };
@@ -326,9 +328,59 @@ export async function buildTraceView(input: TraceBuildInput): Promise<PiboSessio
 		piboSessionId: input.session.id,
 		piSessionId: input.session.piSessionId,
 		title: createSessionTitle(input.session, metadata),
+		version: createTraceViewVersion({
+			session: input.session,
+			sessions: input.sessions,
+			events: input.events,
+			status: sessionStatus,
+			metadata,
+		}),
 		nodes: nestedNodes,
 		rawEvents: input.includeRawEvents === false ? [] : input.events.slice(-(input.rawEventsLimit ?? input.events.length)),
 	};
+}
+
+export function createTraceViewVersion(input: {
+	session: PiboSession;
+	sessions: PiboSession[];
+	events: Pick<ChatWebStoredEvent, "id" | "eventSequence" | "createdAt">[];
+	status?: PiboWebSessionStatus;
+	metadata?: SessionMetadata;
+}): string {
+	const relevantSessions = input.sessions
+		.map((session) => ({
+			id: session.id,
+			parentId: session.parentId ?? null,
+			originId: session.originId ?? null,
+			updatedAt: session.updatedAt,
+			title: session.title ?? null,
+		}))
+		.sort((left, right) => left.id.localeCompare(right.id));
+	const eventTail = input.events.at(-1);
+	return createHash("sha1")
+		.update(
+			JSON.stringify({
+				session: {
+					id: input.session.id,
+					piSessionId: input.session.piSessionId,
+					profile: input.session.profile,
+					title: input.session.title ?? null,
+					updatedAt: input.session.updatedAt,
+				},
+				metadata: {
+					name: input.metadata?.name ?? null,
+					firstMessage: input.metadata?.firstMessage ?? null,
+					modified: input.metadata?.modified ?? null,
+				},
+				status: input.status ?? "idle",
+				events: {
+					lastSequence: eventTail?.eventSequence ?? null,
+					lastCreatedAt: eventTail?.createdAt ?? null,
+				},
+				sessions: relevantSessions,
+			}),
+		)
+		.digest("hex");
 }
 
 export async function listPiSessions(cwd = process.cwd()): Promise<PiboSessionListItem[]> {

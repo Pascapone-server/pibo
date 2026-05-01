@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
 	Archive,
@@ -57,11 +58,16 @@ type ForkActionResponse = {
 
 type LoadBootstrapOptions = {
 	selectSession?: boolean;
+	force?: boolean;
 };
 
 const LAST_SELECTION_STORAGE_KEY = "pibo.chat.lastSelection";
 const SESSION_VIEW_STORAGE_KEY = "pibo.chat.sessionView";
 const SESSION_DELETE_CONFIRM_TEXT = "Delete this session";
+const BOOTSTRAP_STALE_TIME_MS = 30_000;
+const BOOTSTRAP_GC_TIME_MS = 30 * 60_000;
+const TRACE_GC_TIME_MS = 30 * 60_000;
+const DEFAULT_RAW_EVENTS_LIMIT = 80;
 
 type StoredSelection = {
 	roomId?: string;
@@ -69,16 +75,76 @@ type StoredSelection = {
 	sessionsByRoom?: Record<string, string>;
 };
 
+function chatBootstrapQueryKey(piboSessionId?: string, includeArchived = false, roomId?: string): readonly [string, string, string, string, string] {
+	return ["chat", "bootstrap", piboSessionId ?? "", includeArchived ? "archived" : "active", roomId ?? ""];
+}
+
+function chatTraceQueryKey(
+	piboSessionId: string,
+	options: { includeRawEvents?: boolean; rawEventsLimit?: number } = {},
+): readonly [string, string, string, string, number] {
+	return [
+		"chat",
+		"trace",
+		piboSessionId,
+		options.includeRawEvents ? "raw" : "compact",
+		options.rawEventsLimit ?? DEFAULT_RAW_EVENTS_LIMIT,
+	];
+}
+
+async function loadBootstrapQueryData(
+	queryClient: QueryClient,
+	input: {
+		piboSessionId?: string;
+		includeArchived?: boolean;
+		roomId?: string;
+		markRead?: boolean;
+		force?: boolean;
+	},
+): Promise<BootstrapData> {
+	const queryKey = chatBootstrapQueryKey(input.piboSessionId, input.includeArchived, input.roomId);
+	if (input.markRead) {
+		const data = await getBootstrap(input.piboSessionId, input.includeArchived, input.roomId, true);
+		queryClient.setQueryData(queryKey, data);
+		return data;
+	}
+	if (input.force) {
+		await queryClient.invalidateQueries({ queryKey, exact: true, refetchType: "none" });
+	}
+	return queryClient.fetchQuery({
+		queryKey,
+		queryFn: () => getBootstrap(input.piboSessionId, input.includeArchived, input.roomId, false),
+		staleTime: BOOTSTRAP_STALE_TIME_MS,
+		gcTime: BOOTSTRAP_GC_TIME_MS,
+	});
+}
+
+async function loadTraceQueryData(
+	queryClient: QueryClient,
+	piboSessionId: string,
+	options: { includeRawEvents?: boolean; rawEventsLimit?: number } = {},
+): Promise<PiboSessionTraceView> {
+	const queryKey = chatTraceQueryKey(piboSessionId, options);
+	const cached = queryClient.getQueryData<PiboSessionTraceView>(queryKey);
+	const response = await getTrace(piboSessionId, {
+		includeRawEvents: options.includeRawEvents,
+		rawEventsLimit: options.rawEventsLimit,
+		knownVersion: cached?.version,
+	});
+	if (response.notModified && cached) return cached;
+	if (!response.trace) throw new Error("Trace response missing payload.");
+	return response.trace;
+}
+
 export function App({ route }: { route: ChatAppRoute }) {
 	countRender("App");
 	const navigate = useNavigate();
+	const queryClient = useQueryClient();
 	const area = route.area;
 	const routeRoomId = route.area === "sessions" ? route.roomId : undefined;
 	const routePiboSessionId = route.area === "sessions" ? route.piboSessionId : undefined;
 	const routeSessionViewId = route.area === "sessions" ? route.sessionViewId : undefined;
 	const [bootstrap, setBootstrap] = useState<BootstrapData | null>(null);
-	const [traceView, setTraceView] = useState<PiboSessionTraceView | null>(null);
-	const [traceLoadingSessionId, setTraceLoadingSessionId] = useState<string | null>(null);
 	const [selectedPiboSessionId, setSelectedPiboSessionId] = useState<string | null>(null);
 	const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
@@ -102,13 +168,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 	const [deleteSessionConfirmText, setDeleteSessionConfirmText] = useState("");
 	const [deletingSession, setDeletingSession] = useState(false);
 	const showArchivedRef = useRef(showArchived);
-	const showRawEventsRef = useRef(showRawEvents);
 	const bootstrapRequestId = useRef(0);
-	const traceRequestId = useRef(0);
-	const selectedPiboSessionIdRef = useRef<string | null>(null);
-	const traceViewSessionId = useRef<string | null>(null);
-	const pendingStreamEventsBySession = useRef(new Map<string, ChatStreamEvent[]>());
-	const pendingStreamFrame = useRef<number | undefined>(undefined);
 	const activeRoomId = selectedRoomId ?? bootstrap?.selectedRoomId ?? null;
 	const selectedRoom = activeRoomId && bootstrap ? findRoomById(bootstrap.rooms, activeRoomId) ?? bootstrap.room : undefined;
 	const selectedRoomArchived = selectedRoom ? isArchivedRoom(selectedRoom) : false;
@@ -116,18 +176,6 @@ export function App({ route }: { route: ChatAppRoute }) {
 	useEffect(() => {
 		showArchivedRef.current = showArchived;
 	}, [showArchived]);
-
-	useEffect(() => {
-		showRawEventsRef.current = showRawEvents;
-	}, [showRawEvents]);
-
-	useEffect(() => {
-		selectedPiboSessionIdRef.current = selectedPiboSessionId;
-	}, [selectedPiboSessionId]);
-
-	useEffect(() => {
-		traceViewSessionId.current = traceView?.piboSessionId ?? null;
-	}, [traceView?.piboSessionId]);
 
 	useEffect(() => {
 		if (area !== "sessions") return;
@@ -138,48 +186,6 @@ export function App({ route }: { route: ChatAppRoute }) {
 	useEffect(() => {
 		writeStoredSessionView(sessionViewId);
 	}, [sessionViewId]);
-
-	const flushPendingStreamEvents = useCallback((piboSessionId: string) => {
-		const pending = pendingStreamEventsBySession.current.get(piboSessionId);
-		if (!pending?.length) return;
-		pendingStreamEventsBySession.current.delete(piboSessionId);
-		setTraceView((current) => {
-			if (current?.piboSessionId !== piboSessionId) return current;
-			return applyChatStreamEvents(current, pending);
-		});
-	}, []);
-
-	const schedulePendingStreamFlush = useCallback(() => {
-		if (pendingStreamFrame.current !== undefined) return;
-		pendingStreamFrame.current = requestAnimationFrame(() => {
-			pendingStreamFrame.current = undefined;
-			const piboSessionId = selectedPiboSessionIdRef.current;
-			if (piboSessionId) flushPendingStreamEvents(piboSessionId);
-		});
-	}, [flushPendingStreamEvents]);
-
-	const enqueueStreamEvent = useCallback(
-		(piboSessionId: string, event: ChatStreamEvent, flushImmediately = false) => {
-			const pending = pendingStreamEventsBySession.current.get(piboSessionId) ?? [];
-			pending.push(event);
-			pendingStreamEventsBySession.current.set(piboSessionId, pending);
-			if (flushImmediately) {
-				flushPendingStreamEvents(piboSessionId);
-			} else {
-				schedulePendingStreamFlush();
-			}
-		},
-		[flushPendingStreamEvents, schedulePendingStreamFlush],
-	);
-
-	useEffect(() => {
-		return () => {
-			if (pendingStreamFrame.current !== undefined) {
-				cancelAnimationFrame(pendingStreamFrame.current);
-			}
-		};
-	}, []);
-
 	const navigateToRoute = useCallback(
 		(target: ChatAppRoute, replace = false, nextSessionViewId = sessionViewId) => {
 			const sessionViewSearch = { view: nextSessionViewId };
@@ -247,30 +253,26 @@ export function App({ route }: { route: ChatAppRoute }) {
 	) => {
 		const requestId = bootstrapRequestId.current + 1;
 		bootstrapRequestId.current = requestId;
-		const data = await getBootstrap(piboSessionId, includeArchived, roomId, options.selectSession !== false);
+		const queryKey = chatBootstrapQueryKey(piboSessionId, includeArchived, roomId);
+		const cached = queryClient.getQueryData<BootstrapData>(queryKey);
+		if (cached && requestId === bootstrapRequestId.current) {
+			setBootstrap(cached);
+			if (options.selectSession !== false) setSelectedPiboSessionId(cached.selectedPiboSessionId);
+			setSelectedRoomId(cached.selectedRoomId);
+		}
+		const data = await loadBootstrapQueryData(queryClient, {
+			piboSessionId,
+			includeArchived,
+			roomId,
+			markRead: options.selectSession !== false,
+			force: options.force,
+		});
 		if (requestId !== bootstrapRequestId.current) return data;
 		setBootstrap(data);
 		if (options.selectSession !== false) setSelectedPiboSessionId(data.selectedPiboSessionId);
 		setSelectedRoomId(data.selectedRoomId);
 		return data;
-	}, []);
-
-	const loadTrace = useCallback(async (piboSessionId: string, options: { showLoading?: boolean } = {}) => {
-		const requestId = traceRequestId.current + 1;
-		traceRequestId.current = requestId;
-		if (options.showLoading) setTraceLoadingSessionId(piboSessionId);
-		try {
-			const trace = await getTrace(piboSessionId, { includeRawEvents: showRawEventsRef.current, rawEventsLimit: 80 });
-			if (requestId !== traceRequestId.current) return;
-			const pending = pendingStreamEventsBySession.current.get(piboSessionId) ?? [];
-			pendingStreamEventsBySession.current.delete(piboSessionId);
-			setTraceView(applyChatStreamEvents(trace, pending));
-		} finally {
-			if (requestId === traceRequestId.current) {
-				setTraceLoadingSessionId((current) => (current === piboSessionId ? null : current));
-			}
-		}
-	}, []);
+	}, [queryClient]);
 
 	useEffect(() => {
 		const stored = readStoredSelection();
@@ -330,75 +332,6 @@ export function App({ route }: { route: ChatAppRoute }) {
 		});
 	}, [selectedPiboSessionId, selectedRoomId]);
 
-	useEffect(() => {
-		if (!selectedPiboSessionId || area !== "sessions") return;
-		setTraceView((current) => (current?.piboSessionId === selectedPiboSessionId ? current : null));
-		loadTrace(selectedPiboSessionId, { showLoading: traceViewSessionId.current !== selectedPiboSessionId }).catch((caught) =>
-			setError(caught instanceof Error ? caught.message : String(caught)),
-		);
-		const params = new URLSearchParams({ piboSessionId: selectedPiboSessionId });
-		if (selectedRoomId) params.set("roomId", selectedRoomId);
-		const events = new EventSource(`/api/chat/events?${params.toString()}`);
-		let traceTimer: ReturnType<typeof setTimeout> | undefined;
-		let bootstrapTimer: ReturnType<typeof setTimeout> | undefined;
-		const scheduleTraceRefresh = (delayMs: number) => {
-			if (traceTimer) return;
-			traceTimer = setTimeout(() => {
-				traceTimer = undefined;
-				loadTrace(selectedPiboSessionId).catch((caught) => setError(caught instanceof Error ? caught.message : String(caught)));
-			}, delayMs);
-		};
-		const scheduleBootstrapRefresh = (delayMs: number) => {
-			if (bootstrapTimer) return;
-			bootstrapTimer = setTimeout(() => {
-				bootstrapTimer = undefined;
-				loadBootstrap(selectedPiboSessionId, showArchivedRef.current, selectedRoomId ?? undefined).catch((caught) =>
-					setError(caught instanceof Error ? caught.message : String(caught)),
-				);
-			}, delayMs);
-		};
-		events.addEventListener("pibo", (message) => {
-			const event = chatStreamEvent(message);
-			if (!event) return;
-			const flushImmediately = event.type !== "TEXT_MESSAGE_CONTENT" && event.type !== "REASONING_MESSAGE_CONTENT";
-			enqueueStreamEvent(selectedPiboSessionId, event, flushImmediately);
-			if (event.type === "RUN_FINISHED" || event.type === "RUN_ERROR" || event.type === "TEXT_MESSAGE_END") {
-				scheduleTraceRefresh(0);
-				scheduleBootstrapRefresh(0);
-			} else if (event.type !== "TEXT_MESSAGE_CONTENT" && event.type !== "REASONING_MESSAGE_CONTENT") {
-				scheduleBootstrapRefresh(150);
-			}
-		});
-		return () => {
-			if (traceTimer) clearTimeout(traceTimer);
-			if (bootstrapTimer) clearTimeout(bootstrapTimer);
-			events.close();
-		};
-	}, [area, enqueueStreamEvent, loadBootstrap, loadTrace, selectedPiboSessionId, selectedRoomId]);
-
-	const currentTraceView = traceView?.piboSessionId === selectedPiboSessionId ? traceView : null;
-
-	const selectedTrace = useMemo(() => {
-		if (!currentTraceView) return null;
-		return adaptTrace(currentTraceView.piboSessionId, currentTraceView.title, currentTraceView.nodes);
-	}, [currentTraceView]);
-	const sessionBreadcrumbs = useMemo(
-		() => selectedPiboSessionId ? createSessionBreadcrumbs(bootstrap?.sessions ?? [], selectedPiboSessionId) : [],
-		[bootstrap?.sessions, selectedPiboSessionId],
-	);
-	const originSession = useMemo(
-		() => selectedPiboSessionId ? createOriginSessionLink(bootstrap?.sessions ?? [], selectedPiboSessionId) : undefined,
-		[bootstrap?.sessions, selectedPiboSessionId],
-	);
-	const derivedSessions = useMemo(
-		() => selectedPiboSessionId ? createDerivedSessionLinks(bootstrap?.sessions ?? [], selectedPiboSessionId) : [],
-		[bootstrap?.sessions, selectedPiboSessionId],
-	);
-
-	const rawEvents = useMemo(
-		() => (showRawEvents ? compactRawEvents(currentTraceView?.rawEvents ?? []) : []),
-		[showRawEvents, currentTraceView?.rawEvents],
-	);
 	const sessionViews = useMemo(() => listChatSessionViews(), []);
 	const currentSessionView = useMemo(() => getChatSessionView(sessionViewId), [sessionViewId]);
 
@@ -424,6 +357,11 @@ export function App({ route }: { route: ChatAppRoute }) {
 		localStorage.setItem("pibo.chat.newSessionProfile", profile);
 	}, []);
 
+	const refreshTrace = useCallback(async (piboSessionId: string) => {
+		await queryClient.invalidateQueries({ queryKey: ["chat", "trace", piboSessionId], refetchType: "none" });
+		await queryClient.refetchQueries({ queryKey: ["chat", "trace", piboSessionId], type: "active" });
+	}, [queryClient]);
+
 	const updateSelectedSessionProfile = useCallback(async (profile: string) => {
 		if (!selectedPiboSessionId || !bootstrap || profile === bootstrap.session.profile) return;
 		try {
@@ -431,12 +369,12 @@ export function App({ route }: { route: ChatAppRoute }) {
 			setPreferredNewSessionProfile(profile);
 			const data = await loadBootstrap(selectedPiboSessionId, showArchivedRef.current, selectedRoomId ?? undefined);
 			if (area === "sessions") navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
-			await loadTrace(selectedPiboSessionId);
+			await refreshTrace(selectedPiboSessionId);
 			setError(null);
 		} catch (caught) {
 			setError(caught instanceof Error ? caught.message : String(caught));
 		}
-	}, [area, bootstrap, loadBootstrap, loadTrace, navigateToSelectedSession, selectedPiboSessionId, selectedRoomId, setPreferredNewSessionProfile]);
+	}, [area, bootstrap, loadBootstrap, navigateToSelectedSession, refreshTrace, selectedPiboSessionId, selectedRoomId, setPreferredNewSessionProfile]);
 
 	const slashCommands = useMemo(() => {
 		const actions = bootstrap?.capabilities.actions ?? [];
@@ -454,9 +392,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 	}, [bootstrap]);
 
 	const selectSession = useCallback(async (piboSessionId: string) => {
-		setTraceLoadingSessionId(piboSessionId);
 		setSelectedPiboSessionId(piboSessionId);
-		setTraceView((current) => (current?.piboSessionId === piboSessionId ? current : null));
 		const data = await loadBootstrap(piboSessionId);
 		navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
 	}, [loadBootstrap, navigateToSelectedSession]);
@@ -465,8 +401,6 @@ export function App({ route }: { route: ChatAppRoute }) {
 		const storedPiboSessionId = readStoredSelection().sessionsByRoom?.[roomId];
 		setSelectedRoomId(roomId);
 		setSelectedPiboSessionId(storedPiboSessionId ?? null);
-		if (storedPiboSessionId) setTraceLoadingSessionId(storedPiboSessionId);
-		setTraceView(null);
 		try {
 			const data = await loadBootstrap(storedPiboSessionId, showArchivedRef.current, roomId);
 			navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
@@ -476,8 +410,6 @@ export function App({ route }: { route: ChatAppRoute }) {
 			setSelectedPiboSessionId(null);
 			const data = await loadBootstrap(undefined, showArchivedRef.current, roomId);
 			navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
-		} finally {
-			setTraceLoadingSessionId(null);
 		}
 	}, [loadBootstrap, navigateToSelectedSession]);
 
@@ -486,9 +418,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 		setCreatingSession(true);
 		try {
 			const created = await postSession(profile || undefined, selectedRoomId ?? undefined);
-			setTraceLoadingSessionId(created.session.id);
 			setSelectedPiboSessionId(created.session.id);
-			setTraceView(null);
 			const data = await loadBootstrap(created.session.id, showArchivedRef.current, selectedRoomId ?? undefined);
 			navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
 			setError(null);
@@ -505,10 +435,6 @@ export function App({ route }: { route: ChatAppRoute }) {
 		localStorage.setItem("pibo.chat.showArchived", String(next));
 		try {
 			const data = await loadBootstrap(selectedPiboSessionId ?? undefined, next, selectedRoomId ?? undefined);
-			if (area === "sessions" && data.selectedPiboSessionId !== selectedPiboSessionId) {
-				setTraceLoadingSessionId(data.selectedPiboSessionId);
-				setTraceView(null);
-			}
 			if (area === "sessions") navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
 			setError(null);
 		} catch (caught) {
@@ -520,7 +446,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 		try {
 			await patchSession(piboSessionId, { title });
 			const data = await loadBootstrap(selectedPiboSessionId ?? undefined, showArchivedRef.current, selectedRoomId ?? undefined);
-			if (area === "sessions") await loadTrace(data.selectedPiboSessionId);
+			if (area === "sessions") await refreshTrace(data.selectedPiboSessionId);
 			if (area === "sessions") navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
 			setError(null);
 		} catch (caught) {
@@ -537,10 +463,6 @@ export function App({ route }: { route: ChatAppRoute }) {
 				showArchivedRef.current,
 				selectedRoomId ?? undefined,
 			);
-			if (area === "sessions" && data.selectedPiboSessionId !== selectedPiboSessionId) {
-				setTraceLoadingSessionId(data.selectedPiboSessionId);
-				setTraceView(null);
-			}
 			if (area === "sessions") navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
 			setError(null);
 		} catch (caught) {
@@ -561,7 +483,6 @@ export function App({ route }: { route: ChatAppRoute }) {
 			const deletedSelected = selectedPiboSessionId ? deleted.deletedSessionIds.includes(selectedPiboSessionId) : false;
 			if (deletedSelected) {
 				setSelectedPiboSessionId(null);
-				setTraceView(null);
 			}
 			const data = await loadBootstrap(
 				deletedSelected ? undefined : (selectedPiboSessionId ?? undefined),
@@ -569,10 +490,6 @@ export function App({ route }: { route: ChatAppRoute }) {
 				selectedRoomId ?? undefined,
 			);
 			if (area === "sessions") {
-				if (data.selectedPiboSessionId !== selectedPiboSessionId) {
-					setTraceLoadingSessionId(data.selectedPiboSessionId);
-					setTraceView(null);
-				}
 				navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
 			}
 			setDeleteSessionTarget(null);
@@ -638,7 +555,6 @@ export function App({ route }: { route: ChatAppRoute }) {
 			if (selectedRoomId === deleteRoomTarget.id) {
 				setSelectedRoomId(null);
 				setSelectedPiboSessionId(null);
-				setTraceView(null);
 			}
 			const data = await loadBootstrap(undefined, showArchivedRef.current);
 			if (area === "sessions") navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
@@ -652,7 +568,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 		}
 	};
 
-	const runCommand = async (text: string) => {
+	const runCommand = useCallback(async (text: string) => {
 		if (!selectedPiboSessionId || selectedRoomArchived) return false;
 		const commandText = text.trim().split(/\s+/)[0];
 		const command = slashCommands.find((candidate) => candidate.slash === commandText);
@@ -671,10 +587,10 @@ export function App({ route }: { route: ChatAppRoute }) {
 		} else {
 			const data = await loadBootstrap(selectedPiboSessionId, showArchivedRef.current, selectedRoomId ?? undefined);
 			if (area === "sessions") navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
-			await loadTrace(selectedPiboSessionId);
+			await refreshTrace(selectedPiboSessionId);
 		}
 		return true;
-	};
+	}, [area, loadBootstrap, navigateToSelectedSession, refreshTrace, selectSession, selectedPiboSessionId, selectedRoomArchived, selectedRoomId, showThinking, slashCommands]);
 
 	const forkFrom = useCallback(async (entryId: string) => {
 		if (!selectedPiboSessionId || selectedRoomArchived) return;
@@ -717,6 +633,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 	}
 	const roomsSupported = Boolean(bootstrap.selectedRoomId || bootstrap.room || bootstrap.rooms.length);
 	const sessionGroups = splitSessionNodesByArchive(bootstrap.sessions);
+	const selectedSessionNode = selectedPiboSessionId ? findSessionNode(bootstrap.sessions, selectedPiboSessionId) : undefined;
 	const personalRoom = findPersonalRoom(bootstrap.rooms);
 	const roomGroups = splitRoomNodes(bootstrap.rooms);
 	const contextAgentProfiles = [...new Set([...bootstrap.agents.map((agent) => agent.name), ...bootstrap.customAgents.map((agent) => agent.profileName)])];
@@ -784,7 +701,8 @@ export function App({ route }: { route: ChatAppRoute }) {
 								<button
 									type="button"
 									onClick={() =>
-										void loadBootstrap(selectedPiboSessionId ?? undefined, showArchivedRef.current, selectedRoomId ?? undefined).then((data) => {
+										void loadBootstrap(selectedPiboSessionId ?? undefined, showArchivedRef.current, selectedRoomId ?? undefined, { force: true }).then((data) => {
+											if (selectedPiboSessionId) void refreshTrace(selectedPiboSessionId);
 											if (area === "sessions") navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
 										})
 									}
@@ -942,121 +860,61 @@ export function App({ route }: { route: ChatAppRoute }) {
 					)}
 				</aside>
 
+				{area === "sessions" ? (
+					<SessionTracePane
+						bootstrap={bootstrap}
+						selectedPiboSessionId={selectedPiboSessionId}
+						selectedRoomId={selectedRoomId}
+						selectedRoomArchived={selectedRoomArchived}
+						selectedSessionProfile={selectedSessionNode?.profile ?? bootstrap.session.profile}
+						sessionViewId={sessionViewId}
+						sessionViews={sessionViews}
+						currentSessionView={currentSessionView}
+						creatingSession={creatingSession}
+						showRawEvents={showRawEvents}
+						showThinking={showThinking}
+						expandThinking={expandThinking}
+						commands={slashCommands}
+						composerText={composerText}
+						composerFocusSignal={composerFocusSignal}
+						onComposerTextChange={setComposerText}
+						onToggleRawEvents={() => {
+							const next = !showRawEvents;
+							setShowRawEvents(next);
+							localStorage.setItem("pibo.chat.showRawEvents", String(next));
+						}}
+						onToggleThinking={() => {
+							const next = !showThinking;
+							setShowThinking(next);
+							localStorage.setItem("pibo.chat.showThinking", String(next));
+						}}
+						onToggleExpandThinking={() => {
+							const next = !expandThinking;
+							setExpandThinking(next);
+							localStorage.setItem("pibo.chat.expandThinking", String(next));
+						}}
+						onSessionAgentProfileChange={(profile) => void updateSelectedSessionProfile(profile)}
+						onFork={forkFrom}
+						onOpenSession={openSession}
+						onSelectSessionView={selectSessionView}
+						onCommand={runCommand}
+						onRefreshTrace={() => selectedPiboSessionId ? refreshTrace(selectedPiboSessionId) : Promise.resolve()}
+						onRefreshBootstrap={() => loadBootstrap(selectedPiboSessionId ?? undefined, showArchivedRef.current, selectedRoomId ?? undefined, { force: true })}
+						onSend={async (text) => {
+							if (!selectedPiboSessionId || selectedRoomArchived) return;
+							try {
+								await postMessage(selectedPiboSessionId, text, createClientTxnId(), selectedRoomId ?? undefined);
+								await loadBootstrap(selectedPiboSessionId, showArchivedRef.current, selectedRoomId ?? undefined);
+								setError(null);
+							} catch (caught) {
+								setError(caught instanceof Error ? caught.message : String(caught));
+							}
+						}}
+						onError={setError}
+					/>
+				) : (
 				<main className="min-h-0 flex flex-col">
-					{area === "sessions" ? (
-						<>
-							<div className="h-14 px-4 bg-[#151f24] border-b border-slate-800 flex items-center justify-between">
-								<div className="min-w-0">
-									<h1 className="text-base font-semibold truncate">
-										{currentTraceView?.title ?? selectedPiboSessionId ?? bootstrap.room?.name ?? selectedRoomId}
-									</h1>
-									<div className="font-mono text-[11px] text-slate-500 truncate">
-										{bootstrap.room?.name ?? selectedRoomId ?? "Room"} · {currentTraceView?.piboSessionId}{" "}
-										{currentTraceView ? `· ${currentTraceView.piSessionId}` : ""}
-									</div>
-								</div>
-								<div className="flex items-center gap-2">
-									<div className="flex items-center rounded-sm border border-slate-700 bg-[#0e1116] p-0.5">
-										{sessionViews.map((view) => (
-											<button
-												key={view.id}
-												type="button"
-												onClick={() => selectSessionView(view.id)}
-												title={view.description ?? view.label}
-												aria-label={`Switch to ${view.label} view`}
-												className={`min-w-20 px-2.5 py-1 text-[11px] font-bold tracking-wide ${
-													sessionViewId === view.id
-														? "bg-[#11a4d4]/10 text-[#11a4d4]"
-														: "text-slate-400 hover:text-[#11a4d4]"
-												}`}
-											>
-												{view.label}
-											</button>
-										))}
-									</div>
-									<HeaderIconButton
-										onClick={() => {
-											const next = !showRawEvents;
-											showRawEventsRef.current = next;
-											setShowRawEvents(next);
-											localStorage.setItem("pibo.chat.showRawEvents", String(next));
-											if (next && selectedPiboSessionId) {
-												void loadTrace(selectedPiboSessionId);
-											} else {
-												setTraceView((current) => (current ? { ...current, rawEvents: [] } : current));
-											}
-										}}
-										title={showRawEvents ? "Hide Raw Events" : "Show Raw Events"}
-										ariaLabel={showRawEvents ? "Hide Raw Events" : "Show Raw Events"}
-										active={showRawEvents}
-									>
-										<Bug size={14} />
-									</HeaderIconButton>
-									<HeaderIconButton
-										onClick={() => {
-											const next = !showThinking;
-											setShowThinking(next);
-											localStorage.setItem("pibo.chat.showThinking", String(next));
-										}}
-										title={showThinking ? "Hide Thinking" : "Show Thinking"}
-										ariaLabel={showThinking ? "Hide Thinking" : "Show Thinking"}
-										active={showThinking}
-									>
-										{showThinking ? <Brain size={14} /> : <EyeOff size={14} />}
-									</HeaderIconButton>
-									{showThinking ? (
-										<HeaderIconButton
-											onClick={() => {
-												const next = !expandThinking;
-												setExpandThinking(next);
-												localStorage.setItem("pibo.chat.expandThinking", String(next));
-											}}
-											title={expandThinking ? "Collapse Thinking" : "Expand Thinking"}
-											ariaLabel={expandThinking ? "Collapse Thinking" : "Expand Thinking"}
-											active={expandThinking}
-										>
-											{expandThinking ? <ChevronsDown size={14} /> : <ChevronsUp size={14} />}
-										</HeaderIconButton>
-									) : null}
-								</div>
-							</div>
-							{currentSessionView.render({
-								traceView: currentTraceView,
-								selectedTrace,
-								isLoading: Boolean(selectedPiboSessionId && traceLoadingSessionId === selectedPiboSessionId),
-								showThinking,
-								expandThinking,
-								sessionAgentProfile: bootstrap.session.profile,
-								sessionBreadcrumbs,
-								originSession,
-								derivedSessions,
-								agentProfiles: bootstrap.agents,
-								sessionProfileChangeDisabled: creatingSession || selectedRoomArchived,
-								onSessionAgentProfileChange: (profile) => void updateSelectedSessionProfile(profile),
-								onFork: forkFrom,
-								onOpenSession: openSession,
-							})}
-							<Composer
-								disabled={!selectedPiboSessionId || selectedRoomArchived}
-								commands={slashCommands}
-								value={composerText}
-								focusSignal={composerFocusSignal}
-								onValueChange={setComposerText}
-								onCommand={runCommand}
-								onSend={async (text) => {
-									if (!selectedPiboSessionId || selectedRoomArchived) return;
-									try {
-										await postMessage(selectedPiboSessionId, text, createClientTxnId(), selectedRoomId ?? undefined);
-										await loadBootstrap(selectedPiboSessionId, showArchivedRef.current, selectedRoomId ?? undefined);
-										await loadTrace(selectedPiboSessionId);
-										setError(null);
-									} catch (caught) {
-										setError(caught instanceof Error ? caught.message : String(caught));
-									}
-								}}
-							/>
-						</>
-					) : area === "context" ? (
+					{area === "context" ? (
 						contextPanel === "pibo-tools" ? (
 							<PiboToolsView tools={bootstrap.agentCatalog?.piboTools ?? []} />
 						) : (
@@ -1071,23 +929,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 						/>
 					)}
 				</main>
-
-					{area === "sessions" && showRawEvents ? (
-						<aside className="min-h-0 overflow-auto bg-[#0e1116] border-l border-slate-800 max-[980px]:hidden">
-						<div className="h-11 px-3 border-b border-slate-800 flex items-center text-xs font-bold uppercase tracking-wider">Raw Events</div>
-						<div className="p-3 flex flex-col gap-2">
-							{rawEvents.slice(-80).reverse().map((event) => (
-								<div key={event.id} className="border-l-2 border-[#11a4d4] bg-[#151f24] p-2">
-									<div className="flex items-center justify-between gap-2 text-[#11a4d4] font-mono text-[11px] mb-1">
-										<span>{event.type}</span>
-										{event.count > 1 ? <span className="text-slate-500">x{event.count}</span> : null}
-									</div>
-									<JsonRenderer value={event.payload} showControls={false} />
-								</div>
-							))}
-							</div>
-						</aside>
-					) : null}
+				)}
 					{deleteRoomTarget ? (
 						<DeleteRoomModal
 							room={deleteRoomTarget}
@@ -1120,6 +962,309 @@ export function App({ route }: { route: ChatAppRoute }) {
 
 		</div>
 	);
+}
+
+function SessionTracePane({
+	bootstrap,
+	selectedPiboSessionId,
+	selectedRoomId,
+	selectedRoomArchived,
+	selectedSessionProfile,
+	sessionViewId,
+	sessionViews,
+	currentSessionView,
+	creatingSession,
+	showRawEvents,
+	showThinking,
+	expandThinking,
+	commands,
+	composerText,
+	composerFocusSignal,
+	onComposerTextChange,
+	onToggleRawEvents,
+	onToggleThinking,
+	onToggleExpandThinking,
+	onSessionAgentProfileChange,
+	onFork,
+	onOpenSession,
+	onCommand,
+	onRefreshTrace,
+	onRefreshBootstrap,
+	onSend,
+	onError,
+}: {
+	bootstrap: BootstrapData;
+	selectedPiboSessionId: string | null;
+	selectedRoomId: string | null;
+	selectedRoomArchived: boolean;
+	selectedSessionProfile: string;
+	sessionViewId: ChatSessionViewId;
+	sessionViews: readonly ReturnType<typeof listChatSessionViews>;
+	currentSessionView: ReturnType<typeof getChatSessionView>;
+	creatingSession: boolean;
+	showRawEvents: boolean;
+	showThinking: boolean;
+	expandThinking: boolean;
+	commands: Array<{ slash: string; action: string; description: string }>;
+	composerText: string;
+	composerFocusSignal: number;
+	onComposerTextChange: Dispatch<SetStateAction<string>>;
+	onToggleRawEvents: () => void;
+	onToggleThinking: () => void;
+	onToggleExpandThinking: () => void;
+	onSessionAgentProfileChange: (profile: string) => void;
+	onFork: (entryId: string) => void;
+	onOpenSession: (piboSessionId: string) => void;
+	onSelectSessionView: (viewId: ChatSessionViewId) => void;
+	onCommand: (text: string) => Promise<boolean>;
+	onRefreshTrace: () => Promise<void>;
+	onRefreshBootstrap: () => Promise<BootstrapData>;
+	onSend: (text: string) => Promise<void>;
+	onError: (message: string | null) => void;
+}) {
+	const queryClient = useQueryClient();
+	const pendingStreamEventsBySession = useRef(new Map<string, ChatStreamEvent[]>());
+	const pendingStreamFrame = useRef<number | undefined>(undefined);
+	const traceQueryKey = selectedPiboSessionId
+		? chatTraceQueryKey(selectedPiboSessionId, { includeRawEvents: showRawEvents, rawEventsLimit: DEFAULT_RAW_EVENTS_LIMIT })
+		: null;
+	const traceQuery = useQuery({
+		queryKey: traceQueryKey ?? ["chat", "trace", "idle", "compact", DEFAULT_RAW_EVENTS_LIMIT],
+		queryFn: () => {
+			if (!selectedPiboSessionId) throw new Error("Session is required");
+			return loadTraceQueryData(queryClient, selectedPiboSessionId, {
+				includeRawEvents: showRawEvents,
+				rawEventsLimit: DEFAULT_RAW_EVENTS_LIMIT,
+			});
+		},
+		enabled: Boolean(selectedPiboSessionId),
+		gcTime: TRACE_GC_TIME_MS,
+		refetchOnWindowFocus: false,
+		retry: 1,
+	});
+
+	const flushPendingStreamEvents = useCallback((piboSessionId: string) => {
+		if (!traceQueryKey) return;
+		const pending = pendingStreamEventsBySession.current.get(piboSessionId);
+		if (!pending?.length) return;
+		let applied = false;
+		queryClient.setQueryData<PiboSessionTraceView>(traceQueryKey, (current) => {
+			if (!current || current.piboSessionId !== piboSessionId) return current;
+			applied = true;
+			return applyChatStreamEvents(current, pending);
+		});
+		if (applied) pendingStreamEventsBySession.current.delete(piboSessionId);
+	}, [queryClient, traceQueryKey]);
+
+	const schedulePendingStreamFlush = useCallback(() => {
+		if (pendingStreamFrame.current !== undefined || !selectedPiboSessionId) return;
+		pendingStreamFrame.current = requestAnimationFrame(() => {
+			pendingStreamFrame.current = undefined;
+			flushPendingStreamEvents(selectedPiboSessionId);
+		});
+	}, [flushPendingStreamEvents, selectedPiboSessionId]);
+
+	const enqueueStreamEvent = useCallback((piboSessionId: string, event: ChatStreamEvent, flushImmediately = false) => {
+		const pending = pendingStreamEventsBySession.current.get(piboSessionId) ?? [];
+		pending.push(event);
+		pendingStreamEventsBySession.current.set(piboSessionId, pending);
+		if (flushImmediately) {
+			flushPendingStreamEvents(piboSessionId);
+		} else {
+			schedulePendingStreamFlush();
+		}
+	}, [flushPendingStreamEvents, schedulePendingStreamFlush]);
+
+	useEffect(() => {
+		return () => {
+			if (pendingStreamFrame.current !== undefined) {
+				cancelAnimationFrame(pendingStreamFrame.current);
+			}
+		};
+	}, []);
+
+	useEffect(() => {
+		if (!selectedPiboSessionId || !traceQueryKey) return;
+		const params = new URLSearchParams({ piboSessionId: selectedPiboSessionId });
+		if (selectedRoomId) params.set("roomId", selectedRoomId);
+		const events = new EventSource(`/api/chat/events?${params.toString()}`);
+		let traceTimer: ReturnType<typeof setTimeout> | undefined;
+		let bootstrapTimer: ReturnType<typeof setTimeout> | undefined;
+		const scheduleTraceRefresh = (delayMs: number) => {
+			if (traceTimer) return;
+			traceTimer = setTimeout(() => {
+				traceTimer = undefined;
+				onRefreshTrace().catch((caught) => onError(errorMessage(caught)));
+			}, delayMs);
+		};
+		const scheduleBootstrapRefresh = (delayMs: number) => {
+			if (bootstrapTimer) return;
+			bootstrapTimer = setTimeout(() => {
+				bootstrapTimer = undefined;
+				onRefreshBootstrap().catch((caught) => onError(errorMessage(caught)));
+			}, delayMs);
+		};
+		events.addEventListener("pibo", (message) => {
+			const event = chatStreamEvent(message);
+			if (!event) return;
+			const flushImmediately = event.type !== "TEXT_MESSAGE_CONTENT" && event.type !== "REASONING_MESSAGE_CONTENT";
+			enqueueStreamEvent(selectedPiboSessionId, event, flushImmediately);
+			if (event.type === "RUN_FINISHED" || event.type === "RUN_ERROR" || event.type === "TEXT_MESSAGE_END") {
+				scheduleTraceRefresh(0);
+				scheduleBootstrapRefresh(0);
+			} else if (event.type !== "TEXT_MESSAGE_CONTENT" && event.type !== "REASONING_MESSAGE_CONTENT") {
+				scheduleBootstrapRefresh(150);
+			}
+		});
+		return () => {
+			if (traceTimer) clearTimeout(traceTimer);
+			if (bootstrapTimer) clearTimeout(bootstrapTimer);
+			events.close();
+		};
+	}, [enqueueStreamEvent, onError, onRefreshBootstrap, onRefreshTrace, selectedPiboSessionId, selectedRoomId, traceQueryKey]);
+
+	const currentTraceView = traceQuery.data ?? null;
+	const selectedTrace = useMemo(() => {
+		if (!currentTraceView) return null;
+		return adaptTrace(currentTraceView.piboSessionId, currentTraceView.title, currentTraceView.nodes);
+	}, [currentTraceView]);
+	const sessionBreadcrumbs = useMemo(
+		() => selectedPiboSessionId ? createSessionBreadcrumbs(bootstrap.sessions, selectedPiboSessionId) : [],
+		[bootstrap.sessions, selectedPiboSessionId],
+	);
+	const originSession = useMemo(
+		() => selectedPiboSessionId ? createOriginSessionLink(bootstrap.sessions, selectedPiboSessionId) : undefined,
+		[bootstrap.sessions, selectedPiboSessionId],
+	);
+	const derivedSessions = useMemo(
+		() => selectedPiboSessionId ? createDerivedSessionLinks(bootstrap.sessions, selectedPiboSessionId) : [],
+		[bootstrap.sessions, selectedPiboSessionId],
+	);
+	const rawEvents = useMemo(
+		() => (showRawEvents ? compactRawEvents(currentTraceView?.rawEvents ?? []) : []),
+		[showRawEvents, currentTraceView?.rawEvents],
+	);
+	const loadingTrace = Boolean(selectedPiboSessionId) && traceQuery.isFetching && !currentTraceView;
+	const traceError = traceQuery.error ? errorMessage(traceQuery.error) : null;
+
+	useEffect(() => {
+		if (!currentTraceView?.piboSessionId) return;
+		flushPendingStreamEvents(currentTraceView.piboSessionId);
+	}, [currentTraceView?.piboSessionId, flushPendingStreamEvents]);
+
+	return (
+		<>
+			<main className="min-h-0 flex flex-col">
+				<div className="h-14 px-4 bg-[#151f24] border-b border-slate-800 flex items-center justify-between">
+					<div className="min-w-0">
+						<h1 className="text-base font-semibold truncate">
+							{currentTraceView?.title ?? selectedPiboSessionId ?? bootstrap.room?.name ?? selectedRoomId}
+						</h1>
+						<div className="font-mono text-[11px] text-slate-500 truncate">
+							{bootstrap.room?.name ?? selectedRoomId ?? "Room"} · {currentTraceView?.piboSessionId ?? selectedPiboSessionId ?? ""}{" "}
+							{currentTraceView ? `· ${currentTraceView.piSessionId}` : ""}
+						</div>
+					</div>
+					<div className="flex items-center gap-2">
+						<div className="flex items-center rounded-sm border border-slate-700 bg-[#0e1116] p-0.5">
+							{sessionViews.map((view) => (
+								<button
+									key={view.id}
+									type="button"
+									onClick={() => onSelectSessionView(view.id)}
+									title={view.description ?? view.label}
+									aria-label={`Switch to ${view.label} view`}
+									className={`min-w-20 px-2.5 py-1 text-[11px] font-bold tracking-wide ${
+										sessionViewId === view.id
+											? "bg-[#11a4d4]/10 text-[#11a4d4]"
+											: "text-slate-400 hover:text-[#11a4d4]"
+									}`}
+								>
+									{view.label}
+								</button>
+							))}
+						</div>
+						<HeaderIconButton
+							onClick={onToggleRawEvents}
+							title={showRawEvents ? "Hide Raw Events" : "Show Raw Events"}
+							ariaLabel={showRawEvents ? "Hide Raw Events" : "Show Raw Events"}
+							active={showRawEvents}
+						>
+							<Bug size={14} />
+						</HeaderIconButton>
+						<HeaderIconButton
+							onClick={onToggleThinking}
+							title={showThinking ? "Hide Thinking" : "Show Thinking"}
+							ariaLabel={showThinking ? "Hide Thinking" : "Show Thinking"}
+							active={showThinking}
+						>
+							{showThinking ? <Brain size={14} /> : <EyeOff size={14} />}
+						</HeaderIconButton>
+						{showThinking ? (
+							<HeaderIconButton
+								onClick={onToggleExpandThinking}
+								title={expandThinking ? "Collapse Thinking" : "Expand Thinking"}
+								ariaLabel={expandThinking ? "Collapse Thinking" : "Expand Thinking"}
+								active={expandThinking}
+							>
+								{expandThinking ? <ChevronsDown size={14} /> : <ChevronsUp size={14} />}
+							</HeaderIconButton>
+						) : null}
+					</div>
+				</div>
+				{traceError && !currentTraceView ? (
+					<div className="min-h-0 flex-1 p-4 text-sm text-red-200">{traceError}</div>
+				) : (
+					currentSessionView.render({
+						traceView: currentTraceView,
+						selectedTrace,
+						isLoading: loadingTrace,
+						showThinking,
+						expandThinking,
+						sessionAgentProfile: selectedSessionProfile,
+						sessionBreadcrumbs,
+						originSession,
+						derivedSessions,
+						agentProfiles: bootstrap.agents,
+						sessionProfileChangeDisabled: creatingSession || selectedRoomArchived,
+						onSessionAgentProfileChange,
+						onFork,
+						onOpenSession,
+					})
+				)}
+				<Composer
+					disabled={!selectedPiboSessionId || selectedRoomArchived}
+					commands={commands}
+					value={composerText}
+					focusSignal={composerFocusSignal}
+					onValueChange={onComposerTextChange}
+					onCommand={onCommand}
+					onSend={onSend}
+				/>
+			</main>
+
+			{showRawEvents ? (
+				<aside className="min-h-0 overflow-auto bg-[#0e1116] border-l border-slate-800 max-[980px]:hidden">
+					<div className="h-11 px-3 border-b border-slate-800 flex items-center text-xs font-bold uppercase tracking-wider">Raw Events</div>
+					<div className="p-3 flex flex-col gap-2">
+						{rawEvents.slice(-DEFAULT_RAW_EVENTS_LIMIT).reverse().map((event) => (
+							<div key={event.id} className="border-l-2 border-[#11a4d4] bg-[#151f24] p-2">
+								<div className="flex items-center justify-between gap-2 text-[#11a4d4] font-mono text-[11px] mb-1">
+									<span>{event.type}</span>
+									{event.count > 1 ? <span className="text-slate-500">x{event.count}</span> : null}
+								</div>
+								<JsonRenderer value={event.payload} showControls={false} />
+							</div>
+						))}
+					</div>
+				</aside>
+			) : null}
+		</>
+	);
+}
+
+function errorMessage(caught: unknown): string {
+	return caught instanceof Error ? caught.message : String(caught);
 }
 
 function SignedOut({ message }: { message: string }) {
