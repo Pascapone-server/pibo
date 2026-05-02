@@ -68,6 +68,7 @@ function adaptSpanType(type: PiboTraceNode["type"]): SpanType {
 		case "model.reasoning":
 			return "model.reasoning";
 		case "tool.call":
+		case "tool.provider_call":
 			return "tool.call";
 		case "tool.result":
 			return "tool.result";
@@ -108,8 +109,11 @@ function spanAttributes(node: PiboTraceNode): Record<string, unknown> {
 	if (node.error) attributes.error = node.error;
 	if (node.toolCallId) attributes.tool_call_id = node.toolCallId;
 	if (node.runId) attributes.run_id = node.runId;
-	if (node.type === "tool.call" || node.type === "agent.delegation") {
+	if (node.type === "tool.call" || node.type === "tool.provider_call" || node.type === "agent.delegation") {
 		attributes.tool_name = node.title;
+	}
+	if (node.type === "tool.provider_call") {
+		attributes.provider_tool = true;
 	}
 	if (node.type === "assistant.message") {
 		attributes.content = node.output ?? node.summary ?? "";

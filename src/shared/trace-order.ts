@@ -6,6 +6,7 @@ export type TraceNodeKind =
 	| "agent.turn"
 	| "model.reasoning"
 	| "tool.call"
+	| "tool.provider_call"
 	| "tool.result"
 	| "agent.delegation"
 	| "agent.async"
@@ -35,6 +36,7 @@ export const TRACE_PHASE_RANK: Record<TraceNodeKind, number> = {
 	"agent.turn": 1,
 	"model.reasoning": 2,
 	"tool.call": 3,
+	"tool.provider_call": 3,
 	"agent.delegation": 3,
 	"agent.async": 4,
 	"tool.result": 5,

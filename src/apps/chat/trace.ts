@@ -41,6 +41,7 @@ export type PiboTraceNodeType =
 	| "agent.turn"
 	| "model.reasoning"
 	| "tool.call"
+	| "tool.provider_call"
 	| "tool.result"
 	| "agent.delegation"
 	| "agent.async"
@@ -125,6 +126,14 @@ type MessagePart = {
 	toolName?: unknown;
 	result?: unknown;
 	isError?: unknown;
+	provider?: unknown;
+	providerType?: unknown;
+	callId?: unknown;
+	status?: unknown;
+	query?: unknown;
+	action?: unknown;
+	sources?: unknown;
+	raw?: unknown;
 };
 
 type RunNotificationRun = {
@@ -141,6 +150,12 @@ type RunNotificationPayload = {
 	cancelled?: unknown;
 	running?: unknown;
 	instruction?: unknown;
+};
+
+type ProviderToolSource = {
+	title?: string;
+	url?: string;
+	snippet?: string;
 };
 
 
@@ -590,6 +605,8 @@ function createAssistantTurnNodes(piboSessionId: string, entries: IndexedMessage
 				const toolNode = createToolCallNode(piboSessionId, entry, entryIndex, index, typed);
 				orderedNodes.push(toolNode);
 				toolsByCallId.set(typed.id, toolNode);
+			} else if (isProviderToolCallPart(typed)) {
+				orderedNodes.push(createProviderToolCallNode(piboSessionId, entry, entryIndex, index, typed));
 			}
 		}
 
@@ -599,6 +616,10 @@ function createAssistantTurnNodes(piboSessionId: string, entries: IndexedMessage
 		}
 	}
 	return orderedNodes;
+}
+
+function isProviderToolCallPart(part: MessagePart): boolean {
+	return (part.type === "providerToolCall" || part.type === "provider_tool_call") && typeof part.toolName === "string";
 }
 
 function createReasoningNode(
@@ -649,6 +670,86 @@ function createToolCallNode(
 		orderKey: transcriptTraceOrder(entryIndex, contentPartIndex, isSubagentToolName(name) ? "agent.delegation" : "tool.call"),
 		children: [],
 	};
+}
+
+function createProviderToolCallNode(
+	piboSessionId: string,
+	entry: MessageSessionEntry,
+	entryIndex: number,
+	contentPartIndex: number,
+	part: MessagePart,
+): PiboTraceNode {
+	const toolName = typeof part.toolName === "string" ? part.toolName : "Provider Tool";
+	const callId = typeof part.callId === "string" ? part.callId : undefined;
+	const provider = typeof part.provider === "string" ? part.provider : undefined;
+	const status = providerToolStatus(part.status);
+	const sources = normalizeProviderToolSources(part.sources);
+	const output = {
+		...(provider ? { provider } : {}),
+		...(typeof part.providerType === "string" ? { providerType: part.providerType } : {}),
+		...(typeof part.query === "string" ? { query: part.query } : {}),
+		...(part.action !== undefined ? { action: part.action } : {}),
+		...(sources.length > 0 ? { sources } : {}),
+		...(part.raw !== undefined ? { raw: part.raw } : {}),
+	};
+	return {
+		id: `entry:${entry.id}:provider-tool:${callId ?? contentPartIndex}`,
+		entryId: entry.id,
+		piboSessionId,
+		toolCallId: callId,
+		type: "tool.provider_call",
+		title: toolName,
+		status,
+		startedAt: entry.timestamp,
+		completedAt: status === "running" ? undefined : entry.timestamp,
+		summary: providerToolSummary(toolName, provider, part.query, sources),
+		input: providerToolInput(part),
+		output,
+		error: status === "error" ? stringifyPreview(output) : undefined,
+		source: "transcript",
+		stableKey: callId ? `provider-tool:${callId}` : `entry:${entry.id}:provider-tool:${contentPartIndex}`,
+		orderKey: transcriptTraceOrder(entryIndex, contentPartIndex, "tool.provider_call"),
+		children: [],
+	};
+}
+
+function providerToolStatus(status: unknown): PiboTraceNodeStatus {
+	if (status === "running" || status === "in_progress" || status === "searching") return "running";
+	if (status === "failed" || status === "error") return "error";
+	return "done";
+}
+
+function providerToolInput(part: MessagePart): unknown {
+	const input: Record<string, unknown> = {};
+	if (typeof part.query === "string") input.query = part.query;
+	if (part.action !== undefined) input.action = part.action;
+	return Object.keys(input).length > 0 ? input : undefined;
+}
+
+function providerToolSummary(toolName: string, provider: string | undefined, query: unknown, sources: ProviderToolSource[]): string {
+	const parts = [formatProviderName(provider), toolName].filter(Boolean);
+	const prefix = parts.join(" ");
+	const queryText = typeof query === "string" && query.trim() ? `: ${query.trim()}` : "";
+	const sourceText = sources.length > 0 ? ` (${sources.length} source${sources.length === 1 ? "" : "s"})` : "";
+	return `${prefix}${queryText}${sourceText}`;
+}
+
+function normalizeProviderToolSources(value: unknown): ProviderToolSource[] {
+	if (!Array.isArray(value)) return [];
+	return value.flatMap((item): ProviderToolSource[] => {
+		if (!isRecord(item)) return [];
+		const source: ProviderToolSource = {};
+		if (typeof item.title === "string") source.title = item.title;
+		if (typeof item.url === "string") source.url = item.url;
+		if (typeof item.snippet === "string") source.snippet = item.snippet;
+		return Object.keys(source).length > 0 ? [source] : [];
+	});
+}
+
+function formatProviderName(provider: string | undefined): string {
+	if (!provider) return "";
+	if (provider === "openai") return "OpenAI";
+	return provider;
 }
 
 function mergePersistedToolResult(

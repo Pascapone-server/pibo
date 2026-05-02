@@ -60,6 +60,9 @@ export type DebugTraceNodeRow = {
 	order?: string;
 	startedAt?: string;
 	completedAt?: string;
+	input?: unknown;
+	output?: unknown;
+	error?: string;
 	depth: number;
 };
 
@@ -181,6 +184,9 @@ function flattenTraceNodes(nodes: PiboTraceNode[], depth = 0): DebugTraceNodeRow
 			order: formatOrderKey(node),
 			startedAt: node.startedAt,
 			completedAt: node.completedAt,
+			input: node.input,
+			output: node.output,
+			error: node.error,
 			depth,
 		},
 		...flattenTraceNodes(node.children, depth + 1),
