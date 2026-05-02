@@ -2422,8 +2422,8 @@ function AgentsView({
 						<input value={draft.displayName} disabled={readOnly} onChange={(event) => setDraft((current) => ({ ...current, displayName: event.target.value }))} className={`min-w-0 bg-[#0e1116] border rounded-sm px-3 py-2 text-sm outline-none focus:border-[#11a4d4] disabled:opacity-60 ${agentNameError ? "border-[#f59e0b]" : "border-slate-700"}`} placeholder="agent-name" />
 						{agentNameError ? <div className="text-xs text-amber-100">{agentNameError}</div> : null}
 						<textarea value={draft.description} disabled={readOnly} onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))} className="min-h-[72px] bg-[#0e1116] border border-slate-700 rounded-sm px-3 py-2 text-sm outline-none focus:border-[#11a4d4] disabled:opacity-60" placeholder="Description" />
-						<label className="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" disabled={readOnly} checked={draft.autoContextFiles} onChange={(event) => setDraft((current) => ({ ...current, autoContextFiles: event.target.checked }))} />Load AGENTS.md / CLAUDE.md</label>
-						<label className="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" disabled={readOnly} checked={draft.builtinTools === "disabled"} onChange={(event) => setDraft((current) => ({ ...current, builtinTools: event.target.checked ? "disabled" : "default" }))} />Disable Pi built-in tools</label>
+						<InlineCheckboxToggle disabled={readOnly} checked={draft.autoContextFiles} title="Load AGENTS.md / CLAUDE.md" onToggle={() => setDraft((current) => ({ ...current, autoContextFiles: !current.autoContextFiles }))} />
+						<InlineCheckboxToggle disabled={readOnly} checked={draft.builtinTools === "disabled"} title="Disable Pi built-in tools" onToggle={() => setDraft((current) => ({ ...current, builtinTools: current.builtinTools === "disabled" ? "default" : "disabled" }))} />
 					</DesignerPanel>
 					<DesignerPanel title="Tools">
 						<CatalogGroupGrid
@@ -2707,7 +2707,7 @@ function finalizeCatalogGroups<T>(
 	});
 	return sorted.map((group, index) => ({
 		...group,
-		defaultOpen: group.selectedCount > 0 || (index === 0 && sorted.length === 1),
+		defaultOpen: group.kind !== "plugin" && (group.selectedCount > 0 || (index === 0 && sorted.length === 1)),
 	}));
 }
 
@@ -2890,9 +2890,9 @@ function CatalogGroupCard<T>({
 					<span className="block truncate text-sm font-medium text-slate-100">{group.title}</span>
 					<span className="block truncate font-mono text-[10px] text-slate-500">{group.description}</span>
 				</span>
-				<span className="shrink-0 text-right font-mono text-[10px]">
-					<span className="text-[#11a4d4]">{group.selectedCount} selected</span>
-					<span className="text-slate-500"> / {group.totalCount}</span>
+				<span className="shrink-0 text-right font-mono text-sm font-semibold tabular-nums" aria-label={`${group.selectedCount} of ${group.totalCount} selected`}>
+					<span className="text-[#11a4d4]">{group.selectedCount}</span>
+					<span className="text-slate-500">/{group.totalCount}</span>
 				</span>
 			</button>
 			{open ? (
@@ -2940,9 +2940,7 @@ function CatalogToggle({
 				checked ? "border-[#11a4d4] bg-[#11a4d4]/10" : "border-slate-800 bg-[#151f24] hover:border-slate-700"
 			}`}
 		>
-			<span className={`mt-0.5 h-4 w-4 border rounded-sm inline-flex items-center justify-center ${checked ? "border-[#11a4d4] text-[#11a4d4]" : "border-slate-600"}`}>
-				{checked ? <Check size={12} /> : null}
-			</span>
+			<SelectionCheckbox checked={checked} className="mt-0.5" />
 			<span className="min-w-0">
 				<span className="flex items-start justify-between gap-2">
 					<span className="min-w-0 flex-1">
@@ -2981,6 +2979,47 @@ function CatalogToggle({
 				{meta ? <span className={`block font-mono text-[10px] mt-1 ${metaClass ?? "text-slate-600"}`}>{meta}</span> : null}
 			</span>
 		</button>
+	);
+}
+
+function InlineCheckboxToggle({
+	checked,
+	disabled,
+	title,
+	onToggle,
+}: {
+	checked: boolean;
+	disabled?: boolean;
+	title: string;
+	onToggle: () => void;
+}) {
+	return (
+		<button
+			type="button"
+			disabled={disabled}
+			aria-pressed={checked}
+			onClick={onToggle}
+			className="inline-flex w-fit items-center gap-2 text-left text-sm text-slate-300 hover:text-slate-100 disabled:opacity-60"
+		>
+			<SelectionCheckbox checked={checked} disabled={disabled} />
+			<span>{title}</span>
+		</button>
+	);
+}
+
+function SelectionCheckbox({
+	checked,
+	disabled,
+	className = "",
+}: {
+	checked: boolean;
+	disabled?: boolean;
+	className?: string;
+}) {
+	return (
+		<span className={`h-4 w-4 shrink-0 border rounded-sm inline-flex items-center justify-center ${checked ? "border-[#11a4d4] text-[#11a4d4] bg-[#11a4d4]/10" : "border-slate-600 text-transparent"} ${disabled ? "opacity-70" : ""} ${className}`}>
+			{checked ? <Check size={12} /> : null}
+		</span>
 	);
 }
 
@@ -3092,9 +3131,7 @@ function McpServersDesigner({
 								onClick={() => setDraft((current) => ({ ...current, mcpServers: toggleName(current.mcpServers, server.name) }))}
 								className="grid w-full min-w-0 grid-cols-[18px_1fr] gap-2 text-left disabled:opacity-60"
 							>
-								<span className={`mt-0.5 h-4 w-4 border rounded-sm inline-flex items-center justify-center ${draft.mcpServers.includes(server.name) ? "border-[#11a4d4] text-[#11a4d4]" : "border-slate-600"}`}>
-									{draft.mcpServers.includes(server.name) ? <Check size={12} /> : null}
-								</span>
+								<SelectionCheckbox checked={draft.mcpServers.includes(server.name)} disabled={selectionDisabled} className="mt-0.5" />
 								<span className="min-w-0">
 									<span className="flex items-center gap-2">
 										<Server size={13} className="text-[#11a4d4]" />
@@ -3161,29 +3198,25 @@ function SettingsView({
 				General
 			</h1>
 			<DesignerPanel title="General">
-				<label className="flex items-center gap-2 text-sm">
-					<input
-						type="checkbox"
-						checked={showThinking}
-						onChange={(event) => {
-							setShowThinking(event.target.checked);
-							localStorage.setItem("pibo.chat.showThinking", String(event.target.checked));
-						}}
-					/>
-					Show thinking blocks
-				</label>
-				<label className="flex items-center gap-2 text-sm">
-					<input
-						type="checkbox"
-						checked={expandThinking}
-						disabled={!showThinking}
-						onChange={(event) => {
-							setExpandThinking(event.target.checked);
-							localStorage.setItem("pibo.chat.expandThinking", String(event.target.checked));
-						}}
-					/>
-					Expand thinking blocks
-				</label>
+				<InlineCheckboxToggle
+					checked={showThinking}
+					title="Show thinking blocks"
+					onToggle={() => {
+						const next = !showThinking;
+						setShowThinking(next);
+						localStorage.setItem("pibo.chat.showThinking", String(next));
+					}}
+				/>
+				<InlineCheckboxToggle
+					checked={expandThinking}
+					disabled={!showThinking}
+					title="Expand thinking blocks"
+					onToggle={() => {
+						const next = !expandThinking;
+						setExpandThinking(next);
+						localStorage.setItem("pibo.chat.expandThinking", String(next));
+					}}
+				/>
 			</DesignerPanel>
 		</div>
 	);
