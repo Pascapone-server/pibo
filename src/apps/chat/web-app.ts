@@ -96,6 +96,7 @@ type ChatAgentBody = {
 	subagents?: unknown;
 	mcpServers?: unknown;
 	builtinTools?: unknown;
+	builtinToolNames?: unknown;
 	autoContextFiles?: unknown;
 	runControl?: unknown;
 	archived?: unknown;
@@ -347,6 +348,11 @@ function normalizeBuiltinTools(value: unknown): "default" | "disabled" {
 	if (value === undefined) return "default";
 	if (value === "default" || value === "disabled") return value;
 	throw new PiboWebHttpError("builtinTools must be default or disabled", 400);
+}
+
+function normalizeBuiltinToolNames(value: unknown): string[] | undefined {
+	if (value === undefined) return undefined;
+	return normalizeNameArray(value, "builtinToolNames");
 }
 
 function normalizeAutoContextFiles(value: unknown): boolean {
@@ -764,6 +770,7 @@ function createAgentInput(ownerScope: string, body: ChatAgentBody) {
 		subagents: normalizeAgentSubagents(body.subagents),
 		mcpServers: normalizeNameArray(body.mcpServers, "mcpServers"),
 		builtinTools: normalizeBuiltinTools(body.builtinTools),
+		builtinToolNames: normalizeBuiltinToolNames(body.builtinToolNames),
 		autoContextFiles: normalizeAutoContextFiles(body.autoContextFiles),
 		runControl: normalizeRunControl(body.runControl),
 	};
@@ -779,6 +786,7 @@ function createAgentUpdate(body: ChatAgentBody): UpdateCustomAgentInput {
 	if (body.subagents !== undefined) update.subagents = normalizeAgentSubagents(body.subagents);
 	if (body.mcpServers !== undefined) update.mcpServers = normalizeNameArray(body.mcpServers, "mcpServers");
 	if (body.builtinTools !== undefined) update.builtinTools = normalizeBuiltinTools(body.builtinTools);
+	if (body.builtinToolNames !== undefined) update.builtinToolNames = normalizeBuiltinToolNames(body.builtinToolNames);
 	if (body.autoContextFiles !== undefined) update.autoContextFiles = normalizeAutoContextFiles(body.autoContextFiles);
 	if (body.runControl !== undefined) update.runControl = normalizeRunControl(body.runControl);
 	if (Object.keys(update).length === 0 && body.archived === undefined) {

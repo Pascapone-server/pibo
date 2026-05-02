@@ -66,6 +66,7 @@ function profileForSession(
 		subagents: baseProfile.subagents,
 		contextFiles: baseProfile.contextFiles,
 		builtinTools: baseProfile.builtinTools,
+		builtinToolNames: baseProfile.builtinToolNames,
 		autoContextFiles: baseProfile.autoContextFiles,
 		toolPackages: baseProfile.toolPackages,
 	};

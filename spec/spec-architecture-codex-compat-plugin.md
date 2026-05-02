@@ -80,6 +80,9 @@ Assumptions:
 - **REQ-021**: The compatibility profile MUST enable Pibo's native `pibo-run-control` package and expose generated `pibo_run_*` tools for yielded run lifecycle management.
 - **REQ-022**: The compatibility profile MUST expose Pibo generated subagent tools for the `default`, `explorer`, and `worker` roles using `pibo_subagent_*` names.
 - **REQ-023**: The compatibility profile MUST NOT expose Codex-specific agent lifecycle tools `spawn_agent`, `send_input`, `resume_agent`, `wait_agent`, or `close_agent`.
+- **REQ-024**: Pibo run-control completion delivery MUST use Pibo's native mailbox and notification mechanism. The compatibility plugin MUST NOT add a separate Codex mailbox implementation.
+- **REQ-025**: PTY-backed shell execution is out of scope for the first Codex-compat implementation. It MAY be revisited as a future Pibo run-control enhancement.
+- **REQ-026**: Agent Designer MUST allow custom agents to enable or disable each Pi built-in basic tool individually while keeping the controls grouped in the Basics section.
 - **CON-001**: Pibo MUST NOT implement a local browser runtime purely to satisfy `web_search` parity.
 - **CON-002**: Codex compatibility MUST NOT require Plan mode, Codex-specific TUI state, or approval popups.
 - **CON-003**: Compatibility naming MAY use Codex names for coding tools, but agent orchestration MUST use Pibo-native `pibo_subagent_*` and `pibo_run_*` names.
@@ -203,6 +206,7 @@ Recommended environment context shape:
 | `src/subagents/tool.ts` | Reuse or wrap for Codex-compatible subagent tool names and descriptions. |
 | New prompt-builder file under `src/core/` | Assemble Codex-compatible system/developer prompt sections. |
 | New compatibility tool files under `src/plugins/` or `src/tools/` | Implement `apply_patch`, `view_image`, and `web_search` as needed. Shell execution is provided by Pibo run control's `bash` tool. |
+| `src/apps/chat-ui/src/App.tsx` | Agent Designer exposes Pi built-in basic tools as a foldable Basics group with per-tool toggles. |
 
 ## 5. Acceptance Criteria
 
@@ -219,6 +223,7 @@ Recommended environment context shape:
 - **AC-011**: Given `request_user_input` is intentionally out of scope, When the compatibility prompt is assembled, Then the instructions do not imply the tool is available.
 - **AC-012**: Given the compatibility tool surface includes `apply_patch`, When the model edits files manually, Then the visible editing contract matches the patch-based flow expected by Codex-tuned behavior.
 - **AC-013**: Given Codex-specific agent lifecycle tools are intentionally out of scope, When the compatibility profile is inspected, Then `spawn_agent`, `send_input`, `resume_agent`, `wait_agent`, and `close_agent` are not active tools.
+- **AC-014**: Given a custom agent is edited in Agent Designer, When the Basics built-in tools group is expanded, Then `read`, `bash`, `edit`, and `write` can be enabled or disabled individually.
 
 ## 6. Test Automation Strategy
 

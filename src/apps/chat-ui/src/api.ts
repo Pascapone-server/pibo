@@ -248,6 +248,7 @@ export type SaveCustomAgentInput = {
 	subagents: CustomAgent["subagents"];
 	mcpServers: string[];
 	builtinTools: "default" | "disabled";
+	builtinToolNames: string[];
 	autoContextFiles: boolean;
 	runControl: boolean;
 };

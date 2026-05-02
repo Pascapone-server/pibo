@@ -136,7 +136,7 @@ If an agent starts a run and then finishes its current turn before the run compl
 Pibo needs both:
 
 - explicit wait/status/read tools for agent control
-- a lightweight mailbox/notification path so completed runs are surfaced later
+- Pibo's native mailbox/notification callback so completed runs are surfaced later
 - turn-end tracking so unconsumed runs are not silently forgotten
 
 ## Pibo Direction
@@ -221,7 +221,7 @@ The notification should be small. It should not inject full stdout, full browser
 
 This solves the forgetfulness problem without flooding context.
 
-The mailbox should cover two related cases:
+Pibo's native mailbox should cover two related cases:
 
 - completion notification: a run finishes while the agent is still active or before the next turn
 - unconsumed-run reminder: the agent turn ends while one or more runs are still running or already completed but not consumed
@@ -271,14 +271,14 @@ Current Pibo subagents already have:
 - `threadKey`
 - Pibo Session ID based inspectability
 
-The current async mode returns `piboSessionId` and `eventId`, but it does not provide a structured wait handle or mailbox guarantee.
+The current async mode returns `piboSessionId` and `eventId`, but yielded child-agent work should additionally get a structured run handle and use the normal Pibo mailbox callback for completion delivery.
 
 The improved model should:
 
 - register a run before starting the child message
 - associate the run with child `piboSessionId` and `eventId`
 - complete/fail the run when the child produces a correlated assistant result or error
-- put a completion notification into the parent agent mailbox
+- put a completion notification into the parent agent mailbox through the normal Pibo callback
 - allow `pibo_run_wait` to retrieve the child result
 
 ## Process Integration
@@ -305,7 +305,7 @@ Pi Coding Agent's `bash` is the process-style yieldable tool. It covers command 
 - lets the agent decide when to wait again
 - treats timeout as a normal state
 - stores handles for ongoing work
-- has a mailbox path for subagent completion
+- uses Pibo's native mailbox path for subagent completion
 - keeps full results out of automatic notifications
 - supports interactive process sessions
 
@@ -346,7 +346,6 @@ Use:
 
 - Should future yieldable tools expose cancellation hooks beyond marking a run cancelled?
 - Should `pibo_run_wait` return full result content, or only status plus a pointer to `pibo_run_read`?
-- How much mailbox behavior can be implemented cleanly with the current Pi SDK hooks?
 - Should run notifications trigger a follow-up turn automatically, or only become visible on the next user/agent turn?
 - What exact hook should inspect unconsumed runs when an agent turn ends?
 - What are the cleanup rules for abandoned runs?

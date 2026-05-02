@@ -923,6 +923,7 @@ test("chat web app creates custom agents from the native capability catalog", as
 				description: "Uses native catalog entries only.",
 				nativeTools: [],
 				skills: ["pi-agent-harness"],
+				builtinToolNames: ["read", "bash"],
 				autoContextFiles: false,
 				runControl: true,
 				subagents: [{ name: "helper", targetProfile: "pibo-minimal" }],
@@ -933,6 +934,7 @@ test("chat web app creates custom agents from the native capability catalog", as
 		assert.equal(agentPayload.agent.profileName, "research-agent");
 		assert.equal(agentPayload.agent.displayName, "research-agent");
 		assert.deepEqual(agentPayload.agent.nativeTools, []);
+		assert.deepEqual(agentPayload.agent.builtinToolNames, ["read", "bash"]);
 		assert.equal(agentPayload.agent.autoContextFiles, false);
 		assert.equal(agentPayload.agent.runControl, true);
 

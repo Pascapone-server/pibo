@@ -10,6 +10,7 @@ export function createCustomAgentProfileDefinition(agent: CustomAgentDefinition)
 		create(context) {
 			const builder = new InitialSessionContextBuilder(agent.profileName)
 				.withBuiltinTools(agent.builtinTools)
+				.withBuiltinToolNames(agent.builtinToolNames)
 				.withAutoContextFiles(agent.autoContextFiles)
 				.withMcpServers(agent.mcpServers)
 				.withToolPackages({ runControl: agent.runControl });

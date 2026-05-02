@@ -140,6 +140,7 @@ export type AgentProfile = {
 	subagents?: CustomAgentSubagent[];
 	mcpServers?: string[];
 	builtinTools?: "default" | "disabled";
+	builtinToolNames?: string[];
 	autoContextFiles?: boolean;
 	runControl?: boolean;
 };
@@ -196,6 +197,7 @@ export type CustomAgent = {
 	subagents: CustomAgentSubagent[];
 	mcpServers: string[];
 	builtinTools: "default" | "disabled";
+	builtinToolNames: string[];
 	autoContextFiles: boolean;
 	runControl: boolean;
 	createdAt: string;

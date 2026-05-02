@@ -2188,6 +2188,7 @@ function AgentsView({
 				subagents: draft.subagents.filter((item) => item.name.trim() && item.targetProfile.trim()),
 				mcpServers: draft.mcpServers,
 				builtinTools: draft.builtinTools,
+				builtinToolNames: draft.builtinToolNames,
 				autoContextFiles: draft.autoContextFiles,
 				runControl: draft.runControl,
 			};
@@ -2423,7 +2424,7 @@ function AgentsView({
 						{agentNameError ? <div className="text-xs text-amber-100">{agentNameError}</div> : null}
 						<textarea value={draft.description} disabled={readOnly} onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))} className="min-h-[72px] bg-[#0e1116] border border-slate-700 rounded-sm px-3 py-2 text-sm outline-none focus:border-[#11a4d4] disabled:opacity-60" placeholder="Description" />
 						<InlineCheckboxToggle disabled={readOnly} checked={draft.autoContextFiles} title="Load AGENTS.md / CLAUDE.md" onToggle={() => setDraft((current) => ({ ...current, autoContextFiles: !current.autoContextFiles }))} />
-						<InlineCheckboxToggle disabled={readOnly} checked={draft.builtinTools === "disabled"} title="Disable Pi built-in tools" onToggle={() => setDraft((current) => ({ ...current, builtinTools: current.builtinTools === "disabled" ? "default" : "disabled" }))} />
+						<BuiltinToolsDesigner draft={draft} setDraft={setDraft} readOnly={readOnly} />
 					</DesignerPanel>
 					<DesignerPanel title="Tools">
 						<CatalogGroupGrid
@@ -2521,6 +2522,7 @@ function createBlankAgentDraft(catalog?: AgentCatalog): AgentDraft {
 		subagents: [],
 		mcpServers: [],
 		builtinTools: "default",
+		builtinToolNames: [...DEFAULT_BUILTIN_TOOL_NAMES],
 		autoContextFiles: true,
 		runControl: false,
 		source: "custom",
@@ -2539,6 +2541,7 @@ function agentToDraft(agent: CustomAgent): AgentDraft {
 		subagents: agent.subagents,
 		mcpServers: agent.mcpServers,
 		builtinTools: agent.builtinTools,
+		builtinToolNames: normalizeBuiltinToolNames(agent.builtinToolNames, agent.builtinTools),
 		autoContextFiles: agent.autoContextFiles ?? true,
 		runControl: agent.runControl,
 		archivedAt: agent.archivedAt,
@@ -2556,6 +2559,7 @@ function profileToDraft(profile: BootstrapData["agents"][number], catalog?: Agen
 		subagents: profile.subagents ?? [],
 		mcpServers: profile.mcpServers ?? [],
 		builtinTools: profile.builtinTools ?? "default",
+		builtinToolNames: normalizeBuiltinToolNames(profile.builtinToolNames, profile.builtinTools),
 		autoContextFiles: profile.autoContextFiles ?? true,
 		runControl: profile.runControl ?? false,
 		profileName: profile.name,
@@ -2609,6 +2613,12 @@ function toggleName(names: string[], name: string): string[] {
 	return names.includes(name) ? names.filter((item) => item !== name) : [...names, name];
 }
 
+function normalizeBuiltinToolNames(names: string[] | undefined, mode: "default" | "disabled" = "default"): string[] {
+	if (mode === "disabled") return [];
+	const selected = new Set(names ?? DEFAULT_BUILTIN_TOOL_NAMES);
+	return DEFAULT_BUILTIN_TOOL_NAMES.filter((name) => selected.has(name));
+}
+
 type NativeToolCatalogItem = AgentCatalog["nativeTools"][number];
 type ContextFileCatalogItem = AgentCatalog["contextFiles"][number];
 type CatalogGroupKind = "native" | "plugin" | "custom";
@@ -2617,6 +2627,13 @@ const CODEX_COMPAT_TOOL_NAMES = new Set([
 	"web_search",
 	"view_image",
 ]);
+const DEFAULT_BUILTIN_TOOL_NAMES = ["read", "bash", "edit", "write"] as const;
+const BUILTIN_TOOL_DESCRIPTIONS: Record<(typeof DEFAULT_BUILTIN_TOOL_NAMES)[number], string> = {
+	read: "Read workspace files.",
+	bash: "Run shell commands.",
+	edit: "Edit existing files.",
+	write: "Create or overwrite files.",
+};
 type CatalogGroup<T> = {
 	key: string;
 	title: string;
@@ -2972,6 +2989,65 @@ function CatalogToggle({
 				{meta ? <span className={`block font-mono text-[10px] mt-1 ${metaClass ?? "text-slate-600"}`}>{meta}</span> : null}
 			</span>
 		</button>
+	);
+}
+
+function BuiltinToolsDesigner({
+	draft,
+	setDraft,
+	readOnly,
+}: {
+	draft: AgentDraft;
+	setDraft: Dispatch<SetStateAction<AgentDraft>>;
+	readOnly: boolean;
+}) {
+	const selectedTools = normalizeBuiltinToolNames(draft.builtinToolNames, draft.builtinTools);
+	const [open, setOpen] = useState(selectedTools.length !== DEFAULT_BUILTIN_TOOL_NAMES.length);
+	const toggleBuiltinTool = (name: string) => {
+		setDraft((current) => {
+			const currentSelection = normalizeBuiltinToolNames(current.builtinToolNames, current.builtinTools);
+			const nextSelection = toggleName(currentSelection, name);
+			return {
+				...current,
+				builtinTools: nextSelection.length === 0 ? "disabled" : "default",
+				builtinToolNames: nextSelection,
+			};
+		});
+	};
+
+	return (
+		<div className={`border rounded-sm ${open ? "border-slate-700 bg-[#101d22]" : "border-slate-800 bg-[#151f24] hover:border-slate-700"}`}>
+			<button type="button" onClick={() => setOpen((current) => !current)} className="flex w-full items-center gap-2 p-2 text-left">
+				<span className="h-6 w-6 shrink-0 inline-flex items-center justify-center border rounded-sm border-[#11a4d4]/70 text-sky-100 bg-[#11a4d4]/10">
+					{open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+				</span>
+				<span className="min-w-0 flex-1">
+					<span className="block truncate text-sm font-medium text-slate-100">Pi Built-in Tools</span>
+					<span className="block truncate font-mono text-[10px] text-slate-500">basic model tools</span>
+				</span>
+				<span className="shrink-0 text-right font-mono text-sm font-semibold tabular-nums" aria-label={`${selectedTools.length} of ${DEFAULT_BUILTIN_TOOL_NAMES.length} enabled`}>
+					<span className="text-[#11a4d4]">{selectedTools.length}</span>
+					<span className="text-slate-500">/{DEFAULT_BUILTIN_TOOL_NAMES.length}</span>
+				</span>
+			</button>
+			{open ? (
+				<div className="border-t border-slate-800 p-2">
+					<div className="grid grid-cols-2 max-[1100px]:grid-cols-1 gap-2">
+						{DEFAULT_BUILTIN_TOOL_NAMES.map((toolName) => (
+							<CatalogToggle
+								key={toolName}
+								disabled={readOnly}
+								checked={selectedTools.includes(toolName)}
+								title={toolName}
+								description={BUILTIN_TOOL_DESCRIPTIONS[toolName]}
+								meta="built-in"
+								onToggle={() => toggleBuiltinTool(toolName)}
+							/>
+						))}
+					</div>
+				</div>
+			) : null}
+		</div>
 	);
 }
 

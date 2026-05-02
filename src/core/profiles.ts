@@ -39,6 +39,8 @@ export type ContextFileProfile = {
 };
 
 export type BuiltinToolsMode = "default" | "disabled";
+export const DEFAULT_BUILTIN_TOOL_NAMES = ["read", "bash", "edit", "write"] as const;
+export type BuiltinToolName = (typeof DEFAULT_BUILTIN_TOOL_NAMES)[number];
 
 export type ToolPackageProfile = {
 	runControl?: boolean;
@@ -56,6 +58,7 @@ export type InitialSessionContextOptions = {
 	mcpServers?: readonly string[];
 	contextFiles?: readonly ContextFileProfile[];
 	builtinTools?: BuiltinToolsMode;
+	builtinToolNames?: readonly string[];
 	autoContextFiles?: boolean;
 	toolPackages?: ToolPackageProfile;
 };
@@ -70,6 +73,7 @@ export class InitialSessionContext {
 	readonly mcpServers: readonly string[];
 	readonly contextFiles: readonly ContextFileProfile[];
 	readonly builtinTools: BuiltinToolsMode;
+	readonly builtinToolNames: readonly string[];
 	readonly autoContextFiles: boolean;
 	readonly toolPackages: ToolPackageProfile;
 
@@ -83,6 +87,7 @@ export class InitialSessionContext {
 		this.mcpServers = [...(options.mcpServers ?? [])];
 		this.contextFiles = [...(options.contextFiles ?? [])];
 		this.builtinTools = options.builtinTools ?? "default";
+		this.builtinToolNames = [...(options.builtinToolNames ?? DEFAULT_BUILTIN_TOOL_NAMES)];
 		this.autoContextFiles = options.autoContextFiles ?? true;
 		this.toolPackages = { ...(options.toolPackages ?? {}) };
 	}
@@ -98,6 +103,7 @@ export class InitialSessionContextBuilder {
 	private mcpServers: string[] = [];
 	private contextFiles: ContextFileProfile[] = [];
 	private builtinTools: BuiltinToolsMode = "default";
+	private builtinToolNames: string[] = [...DEFAULT_BUILTIN_TOOL_NAMES];
 	private autoContextFiles = true;
 	private toolPackages: ToolPackageProfile = {};
 
@@ -117,6 +123,11 @@ export class InitialSessionContextBuilder {
 
 	withBuiltinTools(mode: BuiltinToolsMode): this {
 		this.builtinTools = mode;
+		return this;
+	}
+
+	withBuiltinToolNames(names: readonly string[]): this {
+		this.builtinToolNames = [...names];
 		return this;
 	}
 
@@ -186,6 +197,7 @@ export class InitialSessionContextBuilder {
 			mcpServers: this.mcpServers,
 			contextFiles: this.contextFiles,
 			builtinTools: this.builtinTools,
+			builtinToolNames: this.builtinToolNames,
 			autoContextFiles: this.autoContextFiles,
 			toolPackages: this.toolPackages,
 		});

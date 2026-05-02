@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { BuiltinToolsMode } from "../../core/profiles.js";
+import { DEFAULT_BUILTIN_TOOL_NAMES, type BuiltinToolsMode } from "../../core/profiles.js";
 
 export type CustomAgentSubagent = {
 	name: string;
@@ -24,6 +24,7 @@ export type CustomAgentDefinition = {
 	subagents: CustomAgentSubagent[];
 	mcpServers: string[];
 	builtinTools: BuiltinToolsMode;
+	builtinToolNames: string[];
 	autoContextFiles: boolean;
 	runControl: boolean;
 	createdAt: string;
@@ -43,6 +44,7 @@ export type CreateCustomAgentInput = {
 	subagents?: CustomAgentSubagent[];
 	mcpServers?: string[];
 	builtinTools?: BuiltinToolsMode;
+	builtinToolNames?: string[];
 	autoContextFiles?: boolean;
 	runControl?: boolean;
 };
@@ -61,6 +63,7 @@ type AgentRow = {
 	subagents_json: string;
 	mcp_servers_json: string;
 	builtin_tools: BuiltinToolsMode;
+	builtin_tool_names_json: string;
 	auto_context_files: 0 | 1;
 	run_control: 0 | 1;
 	created_at: string;
@@ -90,6 +93,7 @@ export class CustomAgentStore {
 				subagents_json TEXT NOT NULL,
 				mcp_servers_json TEXT NOT NULL DEFAULT '[]',
 				builtin_tools TEXT NOT NULL,
+				builtin_tool_names_json TEXT NOT NULL DEFAULT '["read","bash","edit","write"]',
 				auto_context_files INTEGER NOT NULL DEFAULT 1,
 				run_control INTEGER NOT NULL,
 				created_at TEXT NOT NULL,
@@ -103,6 +107,7 @@ export class CustomAgentStore {
 		this.migrateArchivedAtColumn();
 		this.migrateAutoContextFilesColumn();
 		this.migrateMcpServersColumn();
+		this.migrateBuiltinToolNamesColumn();
 		this.migrateLegacyProfileNames();
 	}
 
@@ -139,6 +144,7 @@ export class CustomAgentStore {
 			subagents: sanitizeSubagents(input.subagents ?? []),
 			mcpServers: uniqueStrings(input.mcpServers ?? []),
 			builtinTools: input.builtinTools ?? "default",
+			builtinToolNames: sanitizeBuiltinToolNames(input.builtinToolNames),
 			autoContextFiles: input.autoContextFiles ?? true,
 			runControl: input.runControl ?? false,
 			createdAt: now,
@@ -167,6 +173,7 @@ export class CustomAgentStore {
 			subagents: input.subagents ? sanitizeSubagents(input.subagents) : existing.subagents,
 			mcpServers: input.mcpServers ? uniqueStrings(input.mcpServers) : existing.mcpServers,
 			builtinTools: input.builtinTools ?? existing.builtinTools,
+			builtinToolNames: input.builtinToolNames ? sanitizeBuiltinToolNames(input.builtinToolNames) : existing.builtinToolNames,
 			autoContextFiles: input.autoContextFiles ?? existing.autoContextFiles,
 			runControl: input.runControl ?? existing.runControl,
 			updatedAt: new Date().toISOString(),
@@ -183,6 +190,7 @@ export class CustomAgentStore {
 					subagents_json = ?,
 					mcp_servers_json = ?,
 					builtin_tools = ?,
+					builtin_tool_names_json = ?,
 					auto_context_files = ?,
 					run_control = ?,
 					updated_at = ?
@@ -198,6 +206,7 @@ export class CustomAgentStore {
 				JSON.stringify(sanitizeSubagents(updated.subagents)),
 				JSON.stringify(updated.mcpServers),
 				updated.builtinTools,
+				JSON.stringify(updated.builtinToolNames),
 				updated.autoContextFiles ? 1 : 0,
 				updated.runControl ? 1 : 0,
 				updated.updatedAt,
@@ -241,12 +250,13 @@ export class CustomAgentStore {
 					subagents_json,
 					mcp_servers_json,
 					builtin_tools,
+					builtin_tool_names_json,
 					auto_context_files,
 					run_control,
 					created_at,
 					updated_at,
 					archived_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`)
 			.run(
 				agent.id,
@@ -260,6 +270,7 @@ export class CustomAgentStore {
 				JSON.stringify(sanitizeSubagents(agent.subagents)),
 				JSON.stringify(agent.mcpServers),
 				agent.builtinTools,
+				JSON.stringify(agent.builtinToolNames),
 				agent.autoContextFiles ? 1 : 0,
 				agent.runControl ? 1 : 0,
 				agent.createdAt,
@@ -317,6 +328,15 @@ export class CustomAgentStore {
 			this.db.prepare("ALTER TABLE chat_agents ADD COLUMN mcp_servers_json TEXT NOT NULL DEFAULT '[]'").run();
 		}
 	}
+
+	private migrateBuiltinToolNamesColumn(): void {
+		const columns = new Set(
+			(this.db.prepare("PRAGMA table_info(chat_agents)").all() as Array<{ name: string }>).map((column) => column.name),
+		);
+		if (!columns.has("builtin_tool_names_json")) {
+			this.db.prepare("ALTER TABLE chat_agents ADD COLUMN builtin_tool_names_json TEXT NOT NULL DEFAULT '[\"read\",\"bash\",\"edit\",\"write\"]'").run();
+		}
+	}
 }
 
 export function createDefaultCustomAgentStore(cwd = process.cwd()): CustomAgentStore {
@@ -336,6 +356,7 @@ function agentFromRow(row: AgentRow): CustomAgentDefinition {
 		subagents: parseSubagents(row.subagents_json),
 		mcpServers: parseStringArray(row.mcp_servers_json),
 		builtinTools: row.builtin_tools,
+		builtinToolNames: sanitizeBuiltinToolNames(parseStringArray(row.builtin_tool_names_json)),
 		autoContextFiles: row.auto_context_files !== 0,
 		runControl: row.run_control === 1,
 		createdAt: row.created_at,
@@ -355,6 +376,11 @@ function parseStringArray(value: string): string[] {
 
 function uniqueStrings(value: readonly string[]): string[] {
 	return [...new Set(value.filter((item) => typeof item === "string" && item.trim()).map((item) => item.trim()))];
+}
+
+function sanitizeBuiltinToolNames(value: readonly string[] | undefined): string[] {
+	const selected = new Set(uniqueStrings(value ?? DEFAULT_BUILTIN_TOOL_NAMES));
+	return DEFAULT_BUILTIN_TOOL_NAMES.filter((name) => selected.has(name));
 }
 
 function parseSubagents(value: string): CustomAgentSubagent[] {

@@ -17,6 +17,7 @@ import {
 	type ToolDefinition,
 } from "@mariozechner/pi-coding-agent";
 import {
+	DEFAULT_BUILTIN_TOOL_NAMES,
 	type ContextFileProfile,
 	type InitialSessionContext,
 	type ToolProfile,
@@ -155,6 +156,14 @@ function isGeneratedPiboTool(name: string): boolean {
 	return name.startsWith("pibo_subagent_") || name.startsWith("pibo_run_");
 }
 
+function getBuiltinToolAllowlist(profile: InitialSessionContext, customTools: readonly ToolDefinition[]): string[] | undefined {
+	if (profile.builtinTools === "disabled") return undefined;
+	const defaultBuiltinTools = new Set<string>(DEFAULT_BUILTIN_TOOL_NAMES);
+	const selectedBuiltinTools = profile.builtinToolNames.filter((name) => defaultBuiltinTools.has(name));
+	if (selectedBuiltinTools.length === DEFAULT_BUILTIN_TOOL_NAMES.length) return undefined;
+	return [...selectedBuiltinTools, ...customTools.map((tool) => tool.name)];
+}
+
 function getProfileExtensionFactories(
 	profile: InitialSessionContext,
 	extensionFactories: readonly ExtensionFactory[] | undefined,
@@ -273,6 +282,7 @@ export async function createPiboRuntime(options: PiboRuntimeOptions = {}): Promi
 			thinkingLevel: options.thinkingLevel,
 			customTools,
 			noTools: profile.builtinTools === "disabled" ? "builtin" : undefined,
+			tools: getBuiltinToolAllowlist(profile, customTools),
 		});
 
 		const resourceLoader = services.resourceLoader;

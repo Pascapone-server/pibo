@@ -124,11 +124,15 @@ Codex models cached versus live search through the provider `web_search.external
 
 ### Shell Execution
 
-Shell execution uses Pibo run-control's native `bash` tool, which can also be launched through `pibo_run_start` when shell work should be yielded.
+Shell execution uses Pibo run-control's native `bash` tool, which can also be launched through `pibo_run_start` when shell work should be yielded. PTY-backed terminal behavior is intentionally deferred and remains a future run-control parity item.
 
 ### Agent Orchestration
 
-Agent orchestration is a Pibo-native concern for this plugin. The model-visible workflow should use `pibo_run_start` to launch yieldable work, including `pibo_subagent_*` tools, and then use `pibo_run_wait`, `pibo_run_read`, `pibo_run_status`, `pibo_run_cancel`, and `pibo_run_ack` for lifecycle management. Codex job, mailbox, thread, resume, and close semantics should not be copied into the compatibility plugin unless a future Pibo-wide run-system design explicitly adopts them.
+Agent orchestration is a Pibo-native concern for this plugin. The model-visible workflow should use `pibo_run_start` to launch yieldable work, including `pibo_subagent_*` tools, and then use `pibo_run_wait`, `pibo_run_read`, `pibo_run_status`, `pibo_run_cancel`, and `pibo_run_ack` for lifecycle management. Completion delivery should use Pibo's existing mailbox/notification callback so finished child or frontend work is announced through the same mechanism used by other Pibo agents.
+
+### Agent Designer Built-in Tools
+
+Custom agents can now keep Pi built-in basic tools in the Basics area while enabling or disabling `read`, `bash`, `edit`, and `write` individually. The legacy all-or-nothing `builtinTools` mode remains for compatibility; per-tool selections are stored separately and only affect runtime allowlisting when the selected set differs from the default.
 
 ## 5. Revised Work Tracks
 
@@ -138,10 +142,11 @@ The following tracks replace the old flat gap list.
 | --- | --- | --- |
 | Context cleanup and Codex base prompt | Done | Project-local context files were removed from the plugin and one Codex base-prompt context file was added. |
 | Web-search project | V2 research and implementation | Bundle OpenAI provider-backed search, local search fallback, cached/live behavior, recency, allowed domains, and browser-use boundaries into one design pass. |
-| Shell tool parity | V2 research | Decide whether Pibo's native `bash` tool needs richer terminal behavior for terminal-sensitive or interactive programs. |
+| Shell tool parity | Future | PTY support is intentionally not part of the current implementation; revisit only if terminal-sensitive or interactive programs become important. |
 | Prompt and tool-description tuning | V2 | Align tool descriptions and prompt text with observed Codex-tuned model behavior after the context cleanup. |
 | Prompt snapshot tests | V2 | Update tests so they assert one Codex base-prompt context file and no plugin-owned project-local context files. |
 | Agent orchestration | Done for plugin scope | The plugin uses Pibo generated subagent tools and the native `pibo-run-control` package instead of Codex-specific agent lifecycle tools. Future orchestration changes belong to Pibo's run-system design, not this plugin. |
+| Agent Designer built-in tools | Done | Pi built-in basic tools remain in Basics and can be toggled individually. |
 
 ## 6. Validation Performed
 

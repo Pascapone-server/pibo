@@ -109,3 +109,21 @@ test("custom agent store persists selected MCP servers", () => {
 
 	store.close();
 });
+
+test("custom agent store persists selected built-in tools", () => {
+	const path = join(mkdtempSync(join(tmpdir(), "pibo-agent-store-")), "agents.sqlite");
+	const store = new CustomAgentStore(path);
+	const agent = store.create({
+		ownerScope: "user:test",
+		displayName: "basic-tools",
+		builtinToolNames: ["read", "bash", "bash", "unknown"],
+	});
+
+	assert.deepEqual(agent.builtinToolNames, ["read", "bash"]);
+
+	const updated = store.update(agent.id, { builtinToolNames: ["read"] });
+	assert.deepEqual(updated.builtinToolNames, ["read"]);
+	assert.deepEqual(store.get(agent.id).builtinToolNames, ["read"]);
+
+	store.close();
+});

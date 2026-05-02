@@ -212,6 +212,7 @@ export class PiboPluginRegistry {
 				subagents: sessionContext.subagents.filter((subagent) => subagent.enabled !== false),
 				mcpServers: [...sessionContext.mcpServers],
 				builtinTools: sessionContext.builtinTools,
+				builtinToolNames: [...sessionContext.builtinToolNames],
 				autoContextFiles: sessionContext.autoContextFiles,
 				runControl: sessionContext.toolPackages.runControl === true,
 			};

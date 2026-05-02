@@ -50,6 +50,7 @@ export type PiboProfileInfo = {
 	subagents: SubagentProfile[];
 	mcpServers: string[];
 	builtinTools: BuiltinToolsMode;
+	builtinToolNames: string[];
 	autoContextFiles: boolean;
 	runControl: boolean;
 };
