@@ -64,6 +64,9 @@ The per-profile list of registered Pibo Pi Packages that Pibo asks Pi Coding Age
 **Context File**:
 A profile-selected markdown resource loaded into runtime context alongside project instructions and skills.
 
+**Agents Context File**:
+A repo-level `AGENTS.md` context file that is loaded into the agent context at startup, usually from the repository root.
+
 **Managed Context File**:
 An editable Pibo-owned context file stored with metadata and revisions by the Context Files system.
 
