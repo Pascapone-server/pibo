@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { extname, resolve } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { extname, isAbsolute, resolve } from "node:path";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 import type { PiboJsonObject, PiboJsonValue, PiboOutputEvent } from "../../core/events.js";
 import { PiboWebHttpError, readJsonBody, responseHtml, responseJson } from "../../web/http.js";
@@ -14,8 +14,10 @@ import {
 	isDefaultPiboRoom,
 	isPiboRoomArchived,
 	PiboRoomStore,
+	roomWorkspaceFromMetadata,
 	withChatRoomId,
 	withPiboRoomArchived,
+	withPiboRoomWorkspace,
 	type PiboRoom,
 	type PiboRoomNode,
 } from "./rooms.js";
@@ -45,6 +47,7 @@ import {
 	setPiboCompactionPromptMode,
 	type PiboCompactionPromptMode,
 } from "../../core/compaction-prompt.js";
+import { getDefaultPiboWorkspace } from "../../core/workspace.js";
 import { inspectPiPackageSource } from "../../pi-packages/metadata.js";
 import { findPiPackage, listPiPackages, removePiPackage, setPiPackageEnabled, upsertPiPackage } from "../../pi-packages/store.js";
 
@@ -86,6 +89,7 @@ type ChatSessionDeleteBody = {
 type ChatRoomCreateBody = {
 	name?: unknown;
 	topic?: unknown;
+	workspace?: unknown;
 	type?: unknown;
 	parentRoomId?: unknown;
 };
@@ -93,6 +97,7 @@ type ChatRoomCreateBody = {
 type ChatRoomPatchBody = {
 	name?: unknown;
 	topic?: unknown;
+	workspace?: unknown;
 	parentRoomId?: unknown;
 	archived?: unknown;
 };
@@ -343,6 +348,29 @@ function normalizeRoomArchived(value: unknown): boolean | undefined {
 	if (value === undefined) return undefined;
 	if (typeof value !== "boolean") throw new PiboWebHttpError("Room archived flag must be boolean", 400);
 	return value;
+}
+
+function normalizeRoomWorkspace(value: unknown): string | undefined {
+	if (value === undefined || value === null) return undefined;
+	if (typeof value !== "string") throw new PiboWebHttpError("Room workspace must be a string", 400);
+	const workspace = value.trim();
+	if (!workspace) return undefined;
+	if (!isAbsolute(workspace)) {
+		throw new PiboWebHttpError("Room workspace must be an absolute path", 400);
+	}
+	if (!existsSync(workspace)) {
+		throw new PiboWebHttpError(`Room workspace does not exist: ${workspace}`, 400);
+	}
+	if (!statSync(workspace).isDirectory()) {
+		throw new PiboWebHttpError(`Room workspace is not a directory: ${workspace}`, 400);
+	}
+	return workspace;
+}
+
+function normalizeOptionalRoomWorkspace(value: unknown): string | null | undefined {
+	if (value === undefined) return undefined;
+	if (value === null) return null;
+	return normalizeRoomWorkspace(value) ?? null;
 }
 
 function normalizeRoomDeleteConfirmation(value: unknown): string {
@@ -692,7 +720,7 @@ function ensureDefaultChatSession(
 		if (archivedExisting) return archivedExisting;
 		throw new PiboWebHttpError("Archived room has no sessions", 404);
 	}
-	return createPersonalChatSession(context, webSession, defaultProfile, room.id);
+	return createPersonalChatSession(context, webSession, defaultProfile, room);
 }
 
 function ensureSessionRoom(
@@ -738,14 +766,15 @@ function createPersonalChatSession(
 	context: PiboWebAppContext,
 	webSession: PiboWebSession,
 	profile: string,
-	roomId: string,
+	room: PiboRoom,
 ): PiboSession {
 	return context.channelContext.createSession({
 		channel: CHAT_WEB_CHANNEL,
 		kind: "chat",
 		profile,
 		ownerScope: webSession.ownerScope,
-		metadata: withChatRoomId(undefined, roomId),
+		workspace: roomWorkspaceFromMetadata(room.metadata) ?? getDefaultPiboWorkspace(),
+		metadata: withChatRoomId(undefined, room.id),
 	});
 }
 
@@ -833,7 +862,18 @@ function createRoomUpdate(room: PiboRoom, body: ChatRoomPatchBody): {
 	if (body.topic !== undefined) update.topic = normalizeOptionalRoomTopic(body.topic);
 	if (body.parentRoomId !== undefined) update.parentRoomId = normalizeOptionalParentRoomId(body.parentRoomId);
 	const archived = normalizeRoomArchived(body.archived);
-	if (archived !== undefined) update.metadata = withPiboRoomArchived(room.metadata, archived);
+	const workspace = normalizeOptionalRoomWorkspace(body.workspace);
+	let metadata = room.metadata;
+	let metadataChanged = false;
+	if (archived !== undefined) {
+		metadata = withPiboRoomArchived(metadata, archived);
+		metadataChanged = true;
+	}
+	if (workspace !== undefined) {
+		metadata = withPiboRoomWorkspace(metadata, workspace ?? undefined);
+		metadataChanged = true;
+	}
+	if (metadataChanged) update.metadata = metadata;
 	if (Object.keys(update).length === 0) {
 		throw new PiboWebHttpError("No room update fields provided", 400);
 	}
@@ -2574,7 +2614,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 								ownerScope: webSession.ownerScope,
 								principalId: principalIdFor(webSession),
 							});
-				const created = createPersonalChatSession(context, webSession, profile, room.id);
+				const created = createPersonalChatSession(context, webSession, profile, room);
 				state.readModel.upsertSession(created);
 				return responseJson({ session: created }, { status: 201 });
 			}
@@ -2598,6 +2638,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 					ownerScope: webSession.ownerScope,
 					name: normalizeRoomName(body.name),
 					topic: normalizeRoomTopic(body.topic),
+					metadata: withPiboRoomWorkspace(undefined, normalizeRoomWorkspace(body.workspace)),
 					type: normalizeRoomType(body.type),
 					parentRoomId,
 				});

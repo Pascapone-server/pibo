@@ -39,6 +39,7 @@ import { createPiboSystemPromptTemplateExtension } from "./system-prompt-templat
 import { getActivePiboBasePromptPath } from "./base-prompt.js";
 import { createPiboCompactionPromptExtension } from "./compaction-prompt.js";
 import { getPiPackageRuntimeOptions } from "../pi-packages/runtime.js";
+import { getDefaultPiboWorkspace } from "./workspace.js";
 
 export type PiboRuntimeOptions = {
 	cwd?: string;
@@ -242,7 +243,7 @@ async function createSessionManager(
 }
 
 export async function createPiboRuntime(options: PiboRuntimeOptions = {}): Promise<AgentSessionRuntime> {
-	const cwd = options.cwd ?? process.cwd();
+	const cwd = options.cwd ?? getDefaultPiboWorkspace();
 	const profile = options.profile ?? createDefaultPiboProfile();
 	const agentDir = getAgentDir();
 	const sessionManager = await createSessionManager(cwd, profile, options.persistSession !== false);

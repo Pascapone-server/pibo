@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { createChatWebApp } from "../dist/apps/chat/web-app.js";
@@ -363,6 +363,7 @@ test("chat web app creates user-owned sessions", async () => {
 		assert.match(payload.session.id, /^ps_[0-9a-f-]{36}$/);
 		assert.equal(payload.session.ownerScope, "user:user-1");
 		assert.equal(payload.session.parentId, undefined);
+		assert.equal(payload.session.workspace, homedir());
 
 		const bootstrap = await fetch(`${baseURL}/api/chat/bootstrap?piboSessionId=${encodeURIComponent(payload.session.id)}`, {
 			headers: { "x-test-user": "user-1" },
@@ -387,6 +388,43 @@ test("chat web app creates user-owned sessions", async () => {
 		assert.equal(emitted.length, 1);
 		assert.equal(emitted[0].piboSessionId, payload.session.id);
 		assert.equal(emitted[0].text, "hello new session");
+	} finally {
+		await channel.stop?.();
+	}
+});
+
+test("chat web app starts new room sessions in the room workspace", async () => {
+	const { channel, baseURL } = await startWebHostChannel({
+		auth: createFakeAuthService(),
+	});
+
+	try {
+		const roomWorkspace = mkdtempSync(join(tmpdir(), "pibo-room-workspace-"));
+		const roomResponse = await fetch(`${baseURL}/api/chat/rooms`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({ name: "Workspace Room", workspace: roomWorkspace }),
+		});
+		assert.equal(roomResponse.status, 201);
+		const roomPayload = await roomResponse.json();
+		assert.equal(roomPayload.room.workspace, roomWorkspace);
+
+		const sessionResponse = await fetch(`${baseURL}/api/chat/sessions`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({ roomId: roomPayload.room.id }),
+		});
+		assert.equal(sessionResponse.status, 201);
+		const sessionPayload = await sessionResponse.json();
+		assert.equal(sessionPayload.session.workspace, roomWorkspace);
 	} finally {
 		await channel.stop?.();
 	}

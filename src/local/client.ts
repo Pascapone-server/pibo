@@ -10,6 +10,7 @@ import { PiboSessionRouter } from "../core/session-router.js";
 import { createDefaultPiboPluginRegistry } from "../plugins/builtin.js";
 import type { PiboPluginRegistry } from "../plugins/registry.js";
 import type { PiboGatewayActionInfo } from "../plugins/types.js";
+import { getDefaultPiboWorkspace } from "../core/workspace.js";
 import {
 	InMemoryPiboSessionStore,
 	type PiboSession,
@@ -100,16 +101,17 @@ export function createLocalRoutedTuiClient(options: LocalRoutedTuiOptions = {}):
 	const profileName = registry.resolveProfileName(options.profile ?? "pibo-minimal");
 	const profile = registry.createProfile(profileName);
 	const sessionName = options.sessionName ?? "default";
+	const workspace = options.cwd ?? getDefaultPiboWorkspace();
 	const sessionStore = new InMemoryPiboSessionStore();
 	const piboSession = sessionStore.create({
 		channel: LOCAL_TUI_CHANNEL_NAME,
 		kind: "local",
 		profile: profileName,
 		title: sessionName,
-		workspace: options.cwd,
+		workspace,
 	});
 	const router = new PiboSessionRouter({
-		cwd: options.cwd,
+		cwd: workspace,
 		persistSession: options.persistSession,
 		thinkingLevel: options.thinkingLevel,
 		pluginRegistry: registry,

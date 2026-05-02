@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import test from "node:test";
 import { InitialSessionContextBuilder } from "../dist/core/profiles.js";
 import { createPiboRuntime } from "../dist/core/runtime.js";
@@ -75,6 +75,34 @@ test("session router uses the Pibo session profile when creating a runtime", asy
 		});
 		assert.equal(current.type, "execution_result");
 		assert.equal(current.result.piSessionId, "11111111-1111-4111-8111-111111111111");
+	} finally {
+		await router.disposeAll();
+	}
+});
+
+test("session router defaults runtimes to the user home workspace", async () => {
+	const store = new InMemoryPiboSessionStore();
+	store.create({
+		id: "ps_home",
+		piSessionId: "21111111-1111-4111-8111-111111111111",
+		channel: "pibo.test",
+		kind: "chat",
+		profile: "pibo-minimal",
+		ownerScope: "user:test",
+	});
+	const router = new PiboSessionRouter({
+		persistSession: false,
+		sessionStore: store,
+	});
+
+	try {
+		const current = await router.emit({
+			type: "execution",
+			piboSessionId: "ps_home",
+			action: "session.current",
+		});
+		assert.equal(current.type, "execution_result");
+		assert.equal(current.result.cwd, homedir());
 	} finally {
 		await router.disposeAll();
 	}

@@ -392,7 +392,7 @@ export async function deletePiPackage(id: string): Promise<AgentCatalog["piPacka
 	})).removedPackage;
 }
 
-export async function postRoom(input: { name: string; topic?: string }): Promise<{ room: PiboRoom }> {
+export async function postRoom(input: { name: string; topic?: string; workspace?: string | null }): Promise<{ room: PiboRoom }> {
 	return requestJson<{ room: PiboRoom }>("/api/chat/rooms", {
 		method: "POST",
 		headers: { "content-type": "application/json" },
@@ -400,7 +400,7 @@ export async function postRoom(input: { name: string; topic?: string }): Promise
 	});
 }
 
-export async function patchRoom(roomId: string, input: { name?: string; topic?: string | null; archived?: boolean }): Promise<{ room: PiboRoom }> {
+export async function patchRoom(roomId: string, input: { name?: string; topic?: string | null; workspace?: string | null; archived?: boolean }): Promise<{ room: PiboRoom }> {
 	return requestJson<{ room: PiboRoom }>(`/api/chat/rooms/${encodeURIComponent(roomId)}`, {
 		method: "PATCH",
 		headers: { "content-type": "application/json" },

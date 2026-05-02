@@ -27,6 +27,7 @@ import {
 	type PiboSession,
 	type PiboSessionStore,
 } from "../sessions/store.js";
+import { getDefaultPiboWorkspace } from "./workspace.js";
 
 export type {
 	PiboEventListener,
@@ -322,7 +323,7 @@ export class PiboSessionRouter {
 			channel: "pibo.runtime",
 			kind: "runtime",
 			profile: this.baseProfile.profileName,
-			workspace: this.options.cwd,
+			workspace: this.options.cwd ?? getDefaultPiboWorkspace(),
 		});
 	}
 

@@ -82,6 +82,7 @@ export type PiboRoom = {
 	ownerScope: string;
 	name: string;
 	topic?: string;
+	workspace?: string;
 	type: "space" | "chat" | "agent";
 	parentRoomId?: string;
 	createdAt: string;

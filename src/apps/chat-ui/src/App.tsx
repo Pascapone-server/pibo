@@ -576,7 +576,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 		}
 	};
 
-	const updateRoom = async (roomId: string, input: { name?: string; topic?: string | null }) => {
+	const updateRoom = async (roomId: string, input: { name?: string; topic?: string | null; workspace?: string | null }) => {
 		try {
 			await patchRoom(roomId, input);
 			const data = await loadBootstrap(selectedPiboSessionId ?? undefined, showArchivedRef.current, roomId);
@@ -1581,7 +1581,7 @@ function RoomNode({
 	room: PiboRoom;
 	selectedRoomId: string | null;
 	onSelect: (roomId: string) => void;
-	onUpdate: (roomId: string, input: { name?: string; topic?: string | null }) => void;
+	onUpdate: (roomId: string, input: { name?: string; topic?: string | null; workspace?: string | null }) => void;
 	onArchive: (roomId: string, archived: boolean) => void;
 	onDelete: (room: PiboRoom) => void;
 	depth?: number;
@@ -1589,6 +1589,7 @@ function RoomNode({
 	const [editing, setEditing] = useState(false);
 	const [draftName, setDraftName] = useState(room.name);
 	const [draftTopic, setDraftTopic] = useState(room.topic ?? "");
+	const [draftWorkspace, setDraftWorkspace] = useState(room.workspace ?? "");
 	const personal = isPersonalRoom(room);
 	const archived = isArchivedRoom(room);
 
@@ -1596,13 +1597,14 @@ function RoomNode({
 		if (!editing) {
 			setDraftName(room.name);
 			setDraftTopic(room.topic ?? "");
+			setDraftWorkspace(room.workspace ?? "");
 		}
-	}, [editing, room.name, room.topic]);
+	}, [editing, room.name, room.topic, room.workspace]);
 
 	const submit = () => {
 		const name = draftName.trim();
 		if (!name) return;
-		onUpdate(room.id, { name, topic: draftTopic.trim() || null });
+		onUpdate(room.id, { name, topic: draftTopic.trim() || null, workspace: draftWorkspace.trim() || null });
 		setEditing(false);
 	};
 
@@ -1643,6 +1645,12 @@ function RoomNode({
 							placeholder="Topic"
 							className="min-w-0 bg-[#0e1116] border border-slate-700 rounded-sm px-2 py-1 text-xs outline-none focus:border-[#11a4d4]"
 						/>
+						<input
+							value={draftWorkspace}
+							onChange={(event) => setDraftWorkspace(event.target.value)}
+							placeholder="Workspace (/absolute/path)"
+							className="min-w-0 bg-[#0e1116] border border-slate-700 rounded-sm px-2 py-1 text-xs font-mono outline-none focus:border-[#11a4d4]"
+						/>
 						<div className="flex justify-end gap-1">
 							<button type="submit" className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]">
 								<Check size={13} />
@@ -1668,7 +1676,7 @@ function RoomNode({
 							</span>
 							<span className="min-w-0">
 								<span className={`block text-sm truncate ${archived ? "text-slate-500" : "text-slate-200"}`}>{room.name}</span>
-								<span className="block text-[10px] font-mono truncate text-slate-500">{personal ? "locked personal room" : archived ? "archived" : room.topic || room.type}</span>
+								<span className="block text-[10px] font-mono truncate text-slate-500">{personal ? "locked personal room" : archived ? "archived" : formatRoomSummary(room)}</span>
 							</span>
 							<UnreadBadge count={room.unreadCount} />
 						</button>
@@ -2050,6 +2058,13 @@ function isPersonalRoom(room: PiboRoom): boolean {
 
 function isArchivedRoom(room: PiboRoom): boolean {
 	return typeof room.metadata.chatRoomArchivedAt === "string";
+}
+
+function formatRoomSummary(room: PiboRoom): string {
+	if (room.topic && room.workspace) return `${room.topic} | ${room.workspace}`;
+	if (room.topic) return room.topic;
+	if (room.workspace) return room.workspace;
+	return room.type;
 }
 
 function Composer({

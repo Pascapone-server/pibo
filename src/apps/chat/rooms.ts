@@ -6,6 +6,7 @@ import type { PiboJsonObject } from "../../core/events.js";
 
 export const CHAT_ROOM_ID_METADATA_KEY = "chatRoomId";
 const CHAT_ROOM_ARCHIVED_AT_METADATA_KEY = "chatRoomArchivedAt";
+const CHAT_ROOM_WORKSPACE_METADATA_KEY = "workspace";
 
 export type PiboRoomType = "space" | "chat" | "agent";
 export type PiboRoomRole = "owner" | "admin" | "member" | "viewer";
@@ -15,6 +16,7 @@ export type PiboRoom = {
 	ownerScope: string;
 	name: string;
 	topic?: string;
+	workspace?: string;
 	type: PiboRoomType;
 	parentRoomId?: string;
 	createdAt: string;
@@ -128,6 +130,7 @@ export class PiboRoomStore {
 			ownerScope: input.ownerScope,
 			name: input.name,
 			topic: input.topic,
+			workspace: roomWorkspaceFromMetadata(input.metadata),
 			type: input.type ?? "chat",
 			parentRoomId: input.parentRoomId,
 			createdAt: now,
@@ -172,6 +175,7 @@ export class PiboRoomStore {
 			...existing,
 			name: input.name ?? existing.name,
 			topic: input.topic === null ? undefined : input.topic ?? existing.topic,
+			workspace: roomWorkspaceFromMetadata(input.metadata ?? existing.metadata),
 			parentRoomId: input.parentRoomId === null ? undefined : input.parentRoomId ?? existing.parentRoomId,
 			retentionPolicyId:
 				input.retentionPolicyId === null ? undefined : input.retentionPolicyId ?? existing.retentionPolicyId,
@@ -350,6 +354,11 @@ export function isPiboRoomArchived(room: Pick<PiboRoom, "metadata">): boolean {
 	return typeof room.metadata[CHAT_ROOM_ARCHIVED_AT_METADATA_KEY] === "string";
 }
 
+export function roomWorkspaceFromMetadata(metadata: PiboJsonObject | undefined): string | undefined {
+	const value = metadata?.[CHAT_ROOM_WORKSPACE_METADATA_KEY];
+	return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
 export function withPiboRoomArchived(metadata: PiboJsonObject | undefined, archived: boolean): PiboJsonObject {
 	const next: PiboJsonObject = { ...(metadata ?? {}) };
 	if (archived) {
@@ -360,18 +369,30 @@ export function withPiboRoomArchived(metadata: PiboJsonObject | undefined, archi
 	return next;
 }
 
+export function withPiboRoomWorkspace(metadata: PiboJsonObject | undefined, workspace?: string): PiboJsonObject {
+	const next: PiboJsonObject = { ...(metadata ?? {}) };
+	if (workspace) {
+		next[CHAT_ROOM_WORKSPACE_METADATA_KEY] = workspace;
+	} else {
+		delete next[CHAT_ROOM_WORKSPACE_METADATA_KEY];
+	}
+	return next;
+}
+
 function roomFromRow(row: RoomRow): PiboRoom {
+	const metadata = parseMetadata(row.metadata_json);
 	return {
 		id: row.id,
 		ownerScope: row.owner_scope,
 		name: row.name,
 		topic: row.topic ?? undefined,
+		workspace: roomWorkspaceFromMetadata(metadata),
 		type: row.type,
 		parentRoomId: row.parent_room_id ?? undefined,
 		createdAt: row.created_at,
 		updatedAt: row.updated_at,
 		retentionPolicyId: row.retention_policy_id ?? undefined,
-		metadata: parseMetadata(row.metadata_json),
+		metadata,
 	};
 }
 
