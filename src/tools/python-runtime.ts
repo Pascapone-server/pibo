@@ -94,6 +94,33 @@ function runBuffered(
   });
 }
 
+function isRootUser(): boolean {
+  return typeof process.getuid === 'function' && process.getuid() === 0;
+}
+
+async function resolveUvCommand(): Promise<string | undefined> {
+  const uv = await runBuffered('uv', ['--version']);
+  if (uv.ok) return 'uv';
+
+  const localUv = join(homedir(), '.local', 'bin', 'uv');
+  if (existsSync(localUv)) {
+    const local = await runBuffered(localUv, ['--version']);
+    if (local.ok) return localUv;
+  }
+
+  if (process.platform === 'linux' && isRootUser()) {
+    console.log('uv was not found on PATH. Installing uv automatically.');
+    await runInheritedCommand('sh', ['-c', 'curl -LsSf https://astral.sh/uv/install.sh | sh']);
+    const installed = await runBuffered(localUv, ['--version'], {
+      ...process.env,
+      PATH: `${join(homedir(), '.local', 'bin')}:${process.env.PATH ?? ''}`,
+    });
+    if (installed.ok) return localUv;
+  }
+
+  return undefined;
+}
+
 export function runInheritedCommand(
   command: string,
   args: string[],
@@ -146,9 +173,10 @@ export async function printToolPythonRuntimeDoctor(
   spec: ToolPythonRuntimeSpec,
 ): Promise<void> {
   const paths = getToolPythonRuntimePaths(name, spec);
-  const uv = await runBuffered('uv', ['--version']);
+  const uvCommand = await resolveUvCommand();
+  const uv = uvCommand ? await runBuffered(uvCommand, ['--version']) : { ok: false, output: 'missing' };
   const python = uv.ok
-    ? await runBuffered('uv', ['python', 'find', spec.pythonVersion])
+    ? await runBuffered(uvCommand!, ['python', 'find', spec.pythonVersion])
     : { ok: false, output: 'skipped because uv is missing' };
 
   console.log(`${name}`);
@@ -196,14 +224,14 @@ export async function installToolPythonRuntime(
   name: string,
   spec: ToolPythonRuntimeSpec,
 ): Promise<ToolPythonRuntimePaths> {
-  const uv = await runBuffered('uv', ['--version']);
-  if (!uv.ok) {
+  const uvCommand = await resolveUvCommand();
+  if (!uvCommand) {
     throw new Error(
       formatCliError({
         code: ErrorCode.CLIENT_ERROR,
         type: 'CLI_TOOL_UV_MISSING',
         message: 'uv was not found on PATH',
-        details: uv.output,
+        details: 'spawn uv ENOENT',
         suggestion:
           'Install uv first. macOS/Linux: curl -LsSf https://astral.sh/uv/install.sh | sh. Windows PowerShell: irm https://astral.sh/uv/install.ps1 | iex.',
       }),
@@ -215,9 +243,9 @@ export async function installToolPythonRuntime(
   await mkdir(paths.homeDir, { recursive: true });
 
   if (!existsSync(paths.venvDir)) {
-    await runInheritedCommand('uv', ['venv', paths.venvDir, '--python', spec.pythonVersion]);
+    await runInheritedCommand(uvCommand, ['venv', paths.venvDir, '--python', spec.pythonVersion]);
   }
-  await runInheritedCommand('uv', [
+  await runInheritedCommand(uvCommand, [
     'pip',
     'install',
     '--python',
