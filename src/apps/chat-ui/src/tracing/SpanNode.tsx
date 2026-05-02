@@ -146,6 +146,7 @@ export const SpanNode = memo(function SpanNode({
 	const config = spanTypeConfigs[span.spanType] || spanTypeConfigs["agent.run"];
 	const isActive = span.status === "UNSET";
 	const statusStyles = getStatusStyles(span.status, isActive);
+	const isUserMessage = span.spanType === "user.prompt" || span.spanType === "user_input";
 	const hasChildren = Boolean(span.children?.length);
 	const relativeTime = formatRelativeTime(span.startTime, startTime);
 	const duration = span.durationUs
@@ -169,7 +170,7 @@ export const SpanNode = memo(function SpanNode({
 			}}
 		>
 			<div
-				className={`min-w-0 bg-white dark:bg-[#1a262b] border ${statusStyles.cardClass} rounded-sm shadow-sm transition-all hover:border-opacity-70 ${
+				className={`min-w-0 ${isUserMessage ? "bg-[#11a4d4]/10" : "bg-white dark:bg-[#1a262b]"} border ${statusStyles.cardClass} rounded-sm shadow-sm transition-all hover:border-opacity-70 ${
 					isActive ? statusStyles.glowClass : ""
 				}`}
 			>
@@ -233,7 +234,8 @@ function SpanHeader({
 	onFork?: (entryId: string) => void;
 	onOpenSession?: (piboSessionId: string) => void;
 }) {
-	const headerClassName = `${contentExpanded ? `border-b ${config.borderColor}/20` : ""} ${statusStyles.headerClass}`;
+	const userMessageHeaderClass = span.spanType === "user.prompt" || span.spanType === "user_input" ? "bg-[#11a4d4]/10" : statusStyles.headerClass;
+	const headerClassName = `${contentExpanded ? `border-b ${config.borderColor}/20` : ""} ${userMessageHeaderClass}`;
 
 	return (
 		<div className={headerClassName}>

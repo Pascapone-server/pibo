@@ -131,8 +131,12 @@ export function CompactTerminalSessionView({
 					<div className="px-4 py-3 font-mono text-[12px] leading-[1.45]">
 						{rows.map((row) => {
 							const expanded = expandedRows.has(row.id);
+							const rowClassName =
+								row.kind === "message.user"
+									? "group border-b border-[#141414] bg-[#11a4d4]/10 py-2 last:border-b-0 hover:bg-[#11a4d4]/15"
+									: "group border-b border-[#141414] py-2 last:border-b-0 hover:bg-[#161616]";
 							return (
-								<div key={row.id} className="group border-b border-[#141414] py-2 last:border-b-0 hover:bg-[#161616]">
+								<div key={row.id} className={rowClassName}>
 									<div className="flex gap-3">
 										<div className="min-w-0 flex-1">
 											{row.kind === "message.assistant" ? (
