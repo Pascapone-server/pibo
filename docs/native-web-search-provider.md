@@ -8,6 +8,12 @@ The core plugin registers `web_search` in the capability catalog with an OpenAI 
 
 For the OpenAI adapter, the extension injects the Responses hosted `web_search` tool into the provider request during `before_provider_request`. If source inclusion is enabled, it also asks for `web_search_call.action.sources`.
 
+## Trace Visibility
+
+Provider-backed search calls are currently not emitted as normal Pibo local tool execution events. That is expected for the runtime path, but it also means Chat Web traces and `pibo debug trace` need explicit provider-tool normalization before they can show hosted `web_search_call` activity.
+
+Current validation showed a successful provider-backed search answer with external sources and no local DuckDuckGo tool result details, but no separate `web_search_call` trace node. The follow-up work is documented in `docs/provider-web-search-trace-visibility.md` and planned in `plans/implement-provider-web-search-trace-visibility.md`.
+
 ## Profile Contract
 
 Profiles keep using the same native tool name:

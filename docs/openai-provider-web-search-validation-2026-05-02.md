@@ -29,3 +29,14 @@ That follow-up was then generalized: `web_search` is now registered by the core 
 - `npm run dev -- profile codex`
 
 `npm run dev -- profile codex` now reports `profileName: "codex-compat-openai-web"` with an active provider-backed native `web_search` tool.
+
+## Follow-Up Validation Session
+
+- Pibo Session: `ps_5ee14c39-b987-4b67-b5ff-75f5a97cb711`
+- Pi Session: `380ca3ac-a716-4599-aa7d-33d48aa6b3a1`
+- Profile: `codex-compat-openai-web`
+- Provider/model: `openai-codex` / `gpt-5.4`
+
+This later session looked functionally correct: the assistant answer included external sources, no local DuckDuckGo `result.details.searches` were present, and no local Pibo `web_search` tool execution events were emitted.
+
+The remaining gap is observability. The persisted trace did not contain a first-class provider-hosted `web_search_call` node, so Chat Web and `pibo debug trace` cannot yet show the hosted search step. That follow-up is documented in `docs/provider-web-search-trace-visibility.md`.
