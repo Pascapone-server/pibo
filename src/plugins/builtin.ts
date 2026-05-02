@@ -9,13 +9,12 @@ import type {
 } from "../core/events.js";
 import { InitialSessionContextBuilder, type InitialSessionContext } from "../core/profiles.js";
 import { parsePiboThinkingLevel } from "../core/thinking.js";
-import { createPiboTestToolProfiles } from "./core-tools.js";
+import { createPiboCoreToolProfiles } from "./core-tools.js";
 import { piboCodexCompatPlugin } from "./codex-compat.js";
-import { piboExamplePlugin } from "./example.js";
 import { definePiboPlugin, PiboPluginRegistry } from "./registry.js";
 import type { PiboPlugin, PiboProfileBuildContext } from "./types.js";
 
-const CORE_PROFILE_TOOLS = ["pibo_echo", "pibo_workspace_info", "pibo_exec"] as const;
+const CORE_PROFILE_TOOLS = ["pibo_exec"] as const;
 const GATEWAY_PROFILE_TOOLS = [...CORE_PROFILE_TOOLS, "pibo_gateway_send"] as const;
 const RUN_YIELD_QA_SUBAGENTS = ["qa-researcher", "qa-reviewer"] as const;
 
@@ -70,9 +69,7 @@ function createBaseProfileBuilder(
 	context: PiboProfileBuildContext,
 ): InitialSessionContextBuilder {
 	return new InitialSessionContextBuilder(profileName)
-		.addSkill(context.getSkill("pi-agent-harness"))
-		.addContextFile(context.getContextFile("V1 wrapper notes"))
-		.addContextFile(context.getContextFile("Example workspace policy"));
+		.addSkill(context.getSkill("pi-agent-harness"));
 }
 
 export const piboCorePlugin = definePiboPlugin({
@@ -83,15 +80,7 @@ export const piboCorePlugin = definePiboPlugin({
 			name: "pi-agent-harness",
 			path: ".codex/skills/pi-agent-harness/SKILL.md",
 		});
-		api.registerContextFile({
-			label: "V1 wrapper notes",
-			path: "examples/context/pibo-wrapper.md",
-		});
-		api.registerContextFile({
-			label: "Example workspace policy",
-			path: "examples/context/workspace-policy.md",
-		});
-		api.registerTools(createPiboTestToolProfiles());
+		api.registerTools(createPiboCoreToolProfiles());
 		api.registerSubagents([
 			{
 				name: "qa-researcher",
@@ -262,7 +251,13 @@ export const piboGatewayProducerPlugin = definePiboPlugin({
 });
 
 export function createDefaultPiboPlugins(): PiboPlugin[] {
-	return [piboCorePlugin, piboGatewayProducerPlugin, piboCodexCompatPlugin, piboExamplePlugin];
+	return [piboCorePlugin, piboCodexCompatPlugin];
+}
+
+export function createGatewayProducerPiboPluginRegistry(): PiboPluginRegistry {
+	return PiboPluginRegistry.create({
+		plugins: [piboCorePlugin, piboGatewayProducerPlugin, piboCodexCompatPlugin],
+	});
 }
 
 export function createDefaultPiboPluginRegistry(): PiboPluginRegistry {
@@ -274,5 +269,5 @@ export function createDefaultPiboProfile(): InitialSessionContext {
 }
 
 export function createGatewayProducerPiboProfile(): InitialSessionContext {
-	return createDefaultPiboPluginRegistry().createProfile("pibo-gateway-producer");
+	return createGatewayProducerPiboPluginRegistry().createProfile("pibo-gateway-producer");
 }

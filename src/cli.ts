@@ -13,7 +13,10 @@ import type { PiboRuntimeOptions } from "./core/runtime.js";
 import { parsePiboThinkingLevel } from "./core/thinking.js";
 
 async function createCliProfile(profileName?: string) {
-	const { createDefaultPiboPluginRegistry } = await import("./plugins/builtin.js");
+	const { createDefaultPiboPluginRegistry, createGatewayProducerPiboProfile } = await import("./plugins/builtin.js");
+	if (profileName === "gateway-producer" || profileName === "pibo-gateway-producer") {
+		return createGatewayProducerPiboProfile();
+	}
 	return createDefaultPiboPluginRegistry().createProfile(profileName ?? "pibo-minimal");
 }
 

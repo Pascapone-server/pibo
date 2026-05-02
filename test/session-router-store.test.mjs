@@ -49,7 +49,7 @@ test("session router uses the Pibo session profile when creating a runtime", asy
 		piSessionId: "11111111-1111-4111-8111-111111111111",
 		channel: "pibo.test",
 		kind: "chat",
-		profile: "pibo-example-plugin",
+		profile: "pibo-minimal",
 		ownerScope: "user:test",
 	});
 	const router = new PiboSessionRouter({
@@ -65,7 +65,7 @@ test("session router uses the Pibo session profile when creating a runtime", asy
 		});
 
 		assert.equal(output.type, "execution_result");
-		assert.equal(output.result.activeTools.includes("pibo_example_plugin_note"), true);
+		assert.equal(output.result.activeTools.includes("pibo_exec"), true);
 
 		const current = await router.emit({
 			type: "execution",

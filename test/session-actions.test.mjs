@@ -296,27 +296,27 @@ test("routed session normalizes tool call events", async () => {
 	};
 	listener({
 		type: "message_update",
-		message: { role: "assistant", content: [{ type: "toolCall", id: "tool-1", name: "pibo_echo", arguments: {} }] },
+		message: { role: "assistant", content: [{ type: "toolCall", id: "tool-1", name: "pibo_exec", arguments: {} }] },
 		assistantMessageEvent: { type: "toolcall_start", contentIndex: 0 },
 	});
 	listener({
 		type: "message_update",
 		message: {
 			role: "assistant",
-			content: [{ type: "toolCall", id: "tool-1", name: "pibo_echo", arguments: { text: "hi" } }],
+			content: [{ type: "toolCall", id: "tool-1", name: "pibo_exec", arguments: { command: "echo hi" } }],
 		},
 		assistantMessageEvent: { type: "toolcall_delta", contentIndex: 0 },
 	});
 	listener({
 		type: "tool_execution_start",
 		toolCallId: "tool-1",
-		toolName: "pibo_echo",
-		args: { text: "hi" },
+		toolName: "pibo_exec",
+		args: { command: "echo hi" },
 	});
 	listener({
 		type: "tool_execution_end",
 		toolCallId: "tool-1",
-		toolName: "pibo_echo",
+		toolName: "pibo_exec",
 		result: { content: [{ type: "text", text: "ok" }] },
 		isError: false,
 	});
@@ -326,7 +326,7 @@ test("routed session normalizes tool call events", async () => {
 		["tool_call", "tool_call", "tool_execution_started", "tool_execution_finished"],
 	);
 	assert.equal(events[1].toolCallId, "tool-1");
-	assert.deepEqual(events[1].args, { text: "hi" });
+	assert.deepEqual(events[1].args, { command: "echo hi" });
 	assert.equal(events[1].eventId, "event-1");
 	assert.equal(events[3].eventId, "event-1");
 

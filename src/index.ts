@@ -2,11 +2,11 @@ export {
 	createDefaultPiboProfile,
 	createDefaultPiboPluginRegistry,
 	createDefaultPiboPlugins,
+	createGatewayProducerPiboPluginRegistry,
 	createGatewayProducerPiboProfile,
 	piboCorePlugin,
 	piboGatewayProducerPlugin,
 } from "./plugins/builtin.js";
-export { piboExamplePlugin } from "./plugins/example.js";
 export { createPiboBetterAuthPlugin } from "./plugins/better-auth.js";
 export { createPiboChatWebPlugin } from "./plugins/chat-web.js";
 export { createPiboContextFilesPlugin } from "./plugins/context-files.js";
@@ -61,7 +61,7 @@ export type {
 	PiboSubagentInfo,
 } from "./plugins/types.js";
 export { createPiboGatewayToolProfiles } from "./gateway/tool.js";
-export { createPiboTestToolProfiles } from "./plugins/core-tools.js";
+export { createPiboCoreToolProfiles } from "./plugins/core-tools.js";
 export { createPiboRuntime, inspectPiboProfile, runPiboTui } from "./core/runtime.js";
 export type { PiboProfileInspection, PiboRuntimeOptions } from "./core/runtime.js";
 export { PiboSessionRouter } from "./core/session-router.js";

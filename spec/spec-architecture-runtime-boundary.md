@@ -165,9 +165,9 @@ type PiboChannelContext = {
 
 | Profile | Aliases | Capabilities |
 | --- | --- | --- |
-| `pibo-minimal` | `minimal` | Harness skill, example context, `pibo_echo`, `pibo_workspace_info`, `pibo_exec` |
+| `pibo-minimal` | `minimal` | Harness skill, `pibo_exec` |
 | `pibo-run-yield-qa` | `run-yield-qa`, `yield-qa` | Minimal tools plus QA subagents |
-| `pibo-gateway-producer` | `gateway-producer` | Minimal tools plus `pibo_gateway_send` |
+| `pibo-gateway-producer` | `gateway-producer` | Parked opt-in profile with minimal tools plus `pibo_gateway_send` |
 
 ## 5. Acceptance Criteria
 

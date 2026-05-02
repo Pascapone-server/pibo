@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { InitialSessionContextBuilder } from "../dist/core/profiles.js";
-import { createDefaultPiboPluginRegistry } from "../dist/plugins/builtin.js";
+import { createDefaultPiboPluginRegistry, createGatewayProducerPiboPluginRegistry } from "../dist/plugins/builtin.js";
 import { definePiboPlugin, PiboPluginRegistry } from "../dist/plugins/registry.js";
 import { findCliToolEntry } from "../dist/tools/registry.js";
 import { getToolPythonRuntimePaths } from "../dist/tools/python-runtime.js";
@@ -25,37 +25,18 @@ test("default plugin registry builds profiles from registered resources", () => 
 
 	const minimal = registry.createProfile("minimal");
 	const runYieldQa = registry.createProfile("run-yield-qa");
-	const gatewayProducer = registry.createProfile("gateway-producer");
-	const example = registry.createProfile("example-plugin");
 
 	assert.equal(minimal.profileName, "pibo-minimal");
 	assert.deepEqual(
 		minimal.tools.map((tool) => tool.name),
-		["pibo_echo", "pibo_workspace_info", "pibo_exec"],
-	);
-	assert.equal(gatewayProducer.profileName, "pibo-gateway-producer");
-	assert.deepEqual(
-		gatewayProducer.tools.map((tool) => tool.name),
-		["pibo_echo", "pibo_workspace_info", "pibo_exec", "pibo_gateway_send"],
+		["pibo_exec"],
 	);
 	assert.equal(runYieldQa.profileName, "pibo-run-yield-qa");
 	assert.deepEqual(
 		runYieldQa.subagents.map((subagent) => subagent.name),
 		["qa-researcher", "qa-reviewer"],
 	);
-	assert.equal(example.profileName, "pibo-example-plugin");
-	assert.deepEqual(
-		example.skills.map((skill) => skill.name),
-		["pibo-example-plugin"],
-	);
-	assert.deepEqual(
-		example.tools.map((tool) => tool.name),
-		["pibo_example_plugin_note"],
-	);
-	assert.deepEqual(
-		registry.getChannels().map((channel) => channel.name),
-		["pibo-example-channel"],
-	);
+	assert.deepEqual(registry.getChannels().map((channel) => channel.name), []);
 	assert.deepEqual(registry.getGatewayActionInfos(), [
 		{
 			name: "status",
@@ -123,6 +104,17 @@ test("default plugin registry builds profiles from registered resources", () => 
 			slashCommands: [],
 		},
 	]);
+});
+
+test("gateway producer profile is available only through its parked registry", () => {
+	const registry = createGatewayProducerPiboPluginRegistry();
+	const gatewayProducer = registry.createProfile("gateway-producer");
+
+	assert.equal(gatewayProducer.profileName, "pibo-gateway-producer");
+	assert.deepEqual(
+		gatewayProducer.tools.map((tool) => tool.name),
+		["pibo_exec", "pibo_gateway_send"],
+	);
 });
 
 test("capability catalog exposes installed pibo tool context hints", async () => {

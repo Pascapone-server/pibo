@@ -6,8 +6,7 @@ Pibo is a minimal TypeScript wrapper around Pi Coding Agent. This file is a shor
 
 - V1 profile builder exists in `src/core/profiles.ts`.
 - The default profile loads the local `pi-agent-harness` skill.
-- Core tools are registered: `pibo_echo`, `pibo_workspace_info`, and `pibo_exec`.
-- Example context files are appended from `examples/context/`.
+- Core tools are registered: `pibo_exec`.
 - The Pi TUI can be started through `npm run tui`.
 - The explicit local routed TUI can be started through `npm run tui:routed -- <profile>` and renders routed assistant deltas as a live streaming widget.
 - Routed thinking events are normalized separately from assistant text and can be displayed by opt-in channel UI toggles such as local `/thinking-show`, `--show-thinking`, the chat web toggle, or gateway client `/thinking-show`. Routed `/thinking` keeps the Pi meaning and controls model effort.
@@ -16,15 +15,14 @@ Pibo is a minimal TypeScript wrapper around Pi Coding Agent. This file is a shor
 - Session routing exists in `src/core/session-router.ts`.
 - Gateway transport exists in `src/gateway/` and can be started with `npm run gateway`.
 - A console gateway client exists through `npm run client -- <piboSessionId>`.
-- A gateway producer profile exists through `npm run tui:gateway`.
+- A parked gateway producer profile exists through `npm run tui:gateway`; it is not part of the default plugin registry.
 - A `run-yield-qa` profile exists for manual QA of yielded runs through the routed runtime.
 - Core event contracts live in `src/core/events.ts`.
 - Execution events now include typed Pi session controls for current session metadata, session listing, fork candidates, fork, clone, tree navigation, and session switching.
 - Gateway transport examples live in `examples/gateway/`.
 - Gateway request/reply behavior is covered by `npm test`.
 - A minimal static plugin layer exists in `src/plugins/`.
-- Built-in plugins now register core tools, profiles, context files, skills, gateway actions, and event listeners through `PiboPluginRegistry`.
-- `src/plugins/example.ts` demonstrates adding a plugin-provided skill, tool, and profile.
+- Built-in plugins now register core tools, profiles, skills, gateway actions, and event listeners through `PiboPluginRegistry`.
 - The plugin registry supports subagent registration through `api.registerSubagent(...)`.
 - Profiles can expose subagents through the same builder pattern as tools, skills, and context files.
 - Profiles with yieldable tools expose yielded-run tools for tracked or detached tool runs.
@@ -74,7 +72,7 @@ Fork and clone call Pi Coding Agent's underlying operations but surface as new v
 
 Slash commands are independent from this event naming. A slash command such as `/compact` can still be sent as a normal message event when it should wait behind queued messages.
 
-The gateway daemon is the local transport boundary for now. It owns one session router, accepts newline-delimited JSON frames over TCP, and broadcasts normalized router events to connected clients. Execution frames may include typed JSON params for parameterized actions such as `session.fork`, `session.tree_navigate`, and `session.switch`. The current gateway tool, `pibo_gateway_send`, sends a message into a target session and waits for the correlated assistant reply.
+The gateway daemon is the local transport boundary for now. It owns one session router, accepts newline-delimited JSON frames over TCP, and broadcasts normalized router events to connected clients. Execution frames may include typed JSON params for parameterized actions such as `session.fork`, `session.tree_navigate`, and `session.switch`. The parked gateway producer tool, `pibo_gateway_send`, sends a message into a target session and waits for the correlated assistant reply.
 
 ## Plugin Layer
 
@@ -93,7 +91,7 @@ Plugins can currently register:
 
 The registry is a catalog only. It does not run Pi sessions and does not own transport. The session router and gateway consume registered profiles and gateway actions while Pi Coding Agent remains the inner execution engine.
 
-The current example plugin registers the skill at `examples/skills/pibo-example-plugin/SKILL.md`, the tool `pibo_example_plugin_note`, the no-op channel `pibo-example-channel`, and the profile alias `example-plugin`. It is wired into the default static plugin list in `src/plugins/builtin.ts`.
+The gateway producer plugin is intentionally parked outside the default static plugin list. It can be loaded explicitly for local gateway producer experiments.
 
 ## Subagents
 

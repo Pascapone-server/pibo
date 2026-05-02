@@ -266,8 +266,6 @@ test("default run-yield QA profile exposes run control tools", async () => {
 		inspection.subagents.map((subagent) => subagent.name),
 		["qa-researcher", "qa-reviewer"],
 	);
-	assert.equal(activeTools.has("pibo_echo"), true);
-	assert.equal(activeTools.has("pibo_workspace_info"), true);
 	assert.equal(activeTools.has("pibo_exec"), true);
 	assert.equal(activeTools.has("pibo_subagent_qa_researcher"), true);
 	assert.equal(activeTools.has("pibo_subagent_qa_reviewer"), true);

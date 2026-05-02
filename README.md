@@ -18,7 +18,7 @@ Pi remains the inner engine for model turns, tools, streaming, sessions, and com
 
 - `npm run dev` runs the TypeScript entrypoint with `tsx`.
 - `npm run profile` prints the selected profile with loaded skills, tools, and context files.
-- `npm run profile -- gateway-producer` prints the gateway producer profile.
+- `npm run profile -- gateway-producer` prints the parked gateway producer profile.
 - `npm run profile -- run-yield-qa` prints the yielded-run QA profile with subagents.
 - `npm run tui` starts the Pi TUI through the pibo wrapper.
 - `npm run tui:gateway` starts the Pi TUI with the gateway producer profile.
@@ -47,20 +47,7 @@ Optional integrations stay outside the core package until the user installs them
 
 This is an extension boundary, not a marketplace. Plugins are internal and statically loaded for now, which keeps the runtime simple while supporting web auth, web apps, new tools, new skills, subagents, and future transports.
 
-`src/plugins/example.ts` shows the smallest plugin workflow:
-
-- register a skill from `examples/skills/pibo-example-plugin/SKILL.md`
-- register the tool `pibo_example_plugin_note`
-- register the channel `pibo-example-channel`
-- register the profile `pibo-example-plugin`
-- add the plugin to `createDefaultPiboPlugins()` in `src/plugins/builtin.ts`
-
-Try it with:
-
-```bash
-npm run profile -- example-plugin
-npm run tui -- example-plugin
-```
+The gateway producer plugin is parked outside the default plugin registry. It remains available for explicit local gateway experiments through the `gateway-producer` profile.
 
 ## Channels And Pibo Sessions
 
@@ -109,7 +96,7 @@ The Chat Web App now also has a dedicated Context area at `/apps/chat/context`. 
 
 ## Profiles
 
-The default profile is registered by the core plugin. It loads the local `pi-agent-harness` skill, registers the core tools `pibo_echo`, `pibo_workspace_info`, and `pibo_exec`, and appends the example context files from `examples/context/`.
+The default profile is registered by the core plugin. It loads the local `pi-agent-harness` skill and registers `pibo_exec`.
 
 Profiles can opt into registered subagents. Pibo exposes enabled subagents to Pi as generated tools named `pibo_subagent_<name>`, routed through normal pibo sessions. Generated subagent tools are always parallel-capable; agents sequence subagent work by waiting for a direct result before issuing a later call or by using `pibo_run_start` for yielded work.
 
@@ -140,7 +127,7 @@ Subagent profiles require the routed runtime. Do not use direct `npm run tui -- 
 
 The gateway is the current local transport boundary. It owns the session router, accepts newline-delimited JSON frames over TCP, routes messages by Pibo Session ID, and broadcasts normalized session events back to connected clients.
 
-The gateway producer profile adds `pibo_gateway_send`, a tool that sends a message into a target gateway session and returns the correlated assistant reply. See `examples/gateway/README.md` for the two supported manual flows.
+The parked gateway producer profile adds `pibo_gateway_send`, a tool that sends a message into a target gateway session and returns the correlated assistant reply. See `examples/gateway/README.md` for the two supported manual flows.
 
 ## MCP CLI
 
