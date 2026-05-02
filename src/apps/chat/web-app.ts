@@ -39,6 +39,8 @@ import {
 	setPiboBasePromptMode,
 	type PiboBasePromptMode,
 } from "../../core/base-prompt.js";
+import { inspectPiPackageSource } from "../../pi-packages/metadata.js";
+import { findPiPackage, listPiPackages, removePiPackage, upsertPiPackage } from "../../pi-packages/store.js";
 
 export const CHAT_WEB_APP_NAME = "pibo.chat-web";
 export const CHAT_WEB_CHANNEL = "pibo.chat-web";
@@ -101,6 +103,7 @@ type ChatAgentBody = {
 	contextFiles?: unknown;
 	subagents?: unknown;
 	mcpServers?: unknown;
+	piPackages?: unknown;
 	builtinTools?: unknown;
 	builtinToolNames?: unknown;
 	autoContextFiles?: unknown;
@@ -116,6 +119,10 @@ type ChatMcpServerDescriptionBody = {
 type ChatBasePromptBody = {
 	mode?: unknown;
 	markdown?: unknown;
+};
+
+type ChatPiPackageBody = {
+	source?: unknown;
 };
 
 type ChatMessageBody = {
@@ -223,6 +230,18 @@ function agentResourceId(pathname: string): string | undefined {
 		return decodeURIComponent(encodedId);
 	} catch {
 		throw new PiboWebHttpError("Invalid agent id", 400);
+	}
+}
+
+function piPackageResourceId(pathname: string): string | undefined {
+	const prefix = `${CHAT_WEB_API_PREFIX}/pi-packages/`;
+	if (!pathname.startsWith(prefix)) return undefined;
+	const encodedId = pathname.slice(prefix.length);
+	if (!encodedId || encodedId.includes("/")) return undefined;
+	try {
+		return decodeURIComponent(encodedId);
+	} catch {
+		throw new PiboWebHttpError("Invalid Pi package id", 400);
 	}
 }
 
@@ -353,6 +372,15 @@ function normalizeNameArray(value: unknown, label: string): string[] {
 		return item.trim();
 	});
 	return [...new Set(names)];
+}
+
+function normalizeRegisteredPiPackages(value: unknown): string[] {
+	const names = normalizeNameArray(value, "piPackages");
+	const registered = new Set(listPiPackages().flatMap((pkg) => [pkg.id, pkg.name]));
+	for (const name of names) {
+		if (!registered.has(name)) throw new PiboWebHttpError(`Unknown Pi package "${name}"`, 400);
+	}
+	return names;
 }
 
 function normalizeBuiltinTools(value: unknown): "default" | "disabled" {
@@ -790,6 +818,7 @@ function createAgentInput(ownerScope: string, body: ChatAgentBody) {
 		contextFiles: normalizeNameArray(body.contextFiles, "contextFiles"),
 		subagents: normalizeAgentSubagents(body.subagents),
 		mcpServers: normalizeNameArray(body.mcpServers, "mcpServers"),
+		piPackages: normalizeRegisteredPiPackages(body.piPackages),
 		builtinTools: normalizeBuiltinTools(body.builtinTools),
 		builtinToolNames: normalizeBuiltinToolNames(body.builtinToolNames),
 		autoContextFiles: normalizeAutoContextFiles(body.autoContextFiles),
@@ -806,6 +835,7 @@ function createAgentUpdate(body: ChatAgentBody): UpdateCustomAgentInput {
 	if (body.contextFiles !== undefined) update.contextFiles = normalizeNameArray(body.contextFiles, "contextFiles");
 	if (body.subagents !== undefined) update.subagents = normalizeAgentSubagents(body.subagents);
 	if (body.mcpServers !== undefined) update.mcpServers = normalizeNameArray(body.mcpServers, "mcpServers");
+	if (body.piPackages !== undefined) update.piPackages = normalizeRegisteredPiPackages(body.piPackages);
 	if (body.builtinTools !== undefined) update.builtinTools = normalizeBuiltinTools(body.builtinTools);
 	if (body.builtinToolNames !== undefined) update.builtinToolNames = normalizeBuiltinToolNames(body.builtinToolNames);
 	if (body.autoContextFiles !== undefined) update.autoContextFiles = normalizeAutoContextFiles(body.autoContextFiles);
@@ -852,8 +882,10 @@ async function buildAgentCatalog(context: PiboWebAppContext) {
 			packages: [],
 			piboTools: [],
 			mcpServers: [],
+			piPackages: [],
 		}),
 		mcpServers: await listMcpServerInfos(),
+		piPackages: listPiPackages(),
 	};
 }
 
@@ -2275,6 +2307,38 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 					catalog: await buildAgentCatalog(context),
 					profiles: context.channelContext.getProfiles?.() ?? [],
 				});
+			}
+
+			if (url.pathname === `${CHAT_WEB_API_PREFIX}/pi-packages` && request.method === "GET") {
+				await requireSession(request, context);
+				return responseJson({ packages: listPiPackages() });
+			}
+
+			if (url.pathname === `${CHAT_WEB_API_PREFIX}/pi-packages` && request.method === "POST") {
+				requireSameOriginJsonRequest(request);
+				await requireSession(request, context);
+				const body = await readJsonBody<ChatPiPackageBody>(request);
+				if (typeof body.source !== "string" || body.source.trim().length === 0) {
+					throw new PiboWebHttpError("Pi package source is required", 400);
+				}
+				const pkg = upsertPiPackage(await inspectPiPackageSource(body.source, process.cwd()), process.cwd());
+				return responseJson({ package: pkg }, { status: 201 });
+			}
+
+			const piPackageId = piPackageResourceId(url.pathname);
+			if (piPackageId && request.method === "GET") {
+				await requireSession(request, context);
+				const pkg = findPiPackage(piPackageId);
+				if (!pkg) throw new PiboWebHttpError("Pi package is not registered", 404);
+				return responseJson({ package: pkg });
+			}
+
+			if (piPackageId && request.method === "DELETE") {
+				requireSameOriginJsonRequest(request);
+				await requireSession(request, context);
+				const removed = removePiPackage(piPackageId);
+				if (!removed) throw new PiboWebHttpError("Pi package is not registered", 404);
+				return responseJson({ removedPackage: removed });
 			}
 
 			if (url.pathname === `${CHAT_WEB_API_PREFIX}/base-prompt` && request.method === "GET") {

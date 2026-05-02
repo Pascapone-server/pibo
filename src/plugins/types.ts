@@ -24,6 +24,7 @@ import type {
 	SubagentProfile,
 	ToolProfile,
 } from "../core/profiles.js";
+import type { PiboPiPackageInfo } from "../pi-packages/types.js";
 
 export type PiboProfileBuildContext = {
 	getTool(name: string): ToolProfile;
@@ -50,6 +51,7 @@ export type PiboProfileInfo = {
 	contextFiles: string[];
 	subagents: SubagentProfile[];
 	mcpServers: string[];
+	piPackages: string[];
 	builtinTools: BuiltinToolsMode;
 	builtinToolNames: string[];
 	autoContextFiles: boolean;
@@ -119,6 +121,7 @@ export type PiboCapabilityCatalog = {
 	packages: PiboCapabilityPackageInfo[];
 	piboTools: PiboCliToolContextInfo[];
 	mcpServers: PiboMcpServerInfo[];
+	piPackages: PiboPiPackageInfo[];
 };
 
 export type PiboProductEventSource = "core" | "plugin" | "web" | "filesystem" | "agent";

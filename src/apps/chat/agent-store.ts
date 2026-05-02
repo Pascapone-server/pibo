@@ -23,6 +23,7 @@ export type CustomAgentDefinition = {
 	contextFiles: string[];
 	subagents: CustomAgentSubagent[];
 	mcpServers: string[];
+	piPackages: string[];
 	builtinTools: BuiltinToolsMode;
 	builtinToolNames: string[];
 	autoContextFiles: boolean;
@@ -43,6 +44,7 @@ export type CreateCustomAgentInput = {
 	contextFiles?: string[];
 	subagents?: CustomAgentSubagent[];
 	mcpServers?: string[];
+	piPackages?: string[];
 	builtinTools?: BuiltinToolsMode;
 	builtinToolNames?: string[];
 	autoContextFiles?: boolean;
@@ -62,6 +64,7 @@ type AgentRow = {
 	context_files_json: string;
 	subagents_json: string;
 	mcp_servers_json: string;
+	pi_packages_json: string;
 	builtin_tools: BuiltinToolsMode;
 	builtin_tool_names_json: string;
 	auto_context_files: 0 | 1;
@@ -92,6 +95,7 @@ export class CustomAgentStore {
 				context_files_json TEXT NOT NULL,
 				subagents_json TEXT NOT NULL,
 				mcp_servers_json TEXT NOT NULL DEFAULT '[]',
+				pi_packages_json TEXT NOT NULL DEFAULT '[]',
 				builtin_tools TEXT NOT NULL,
 				builtin_tool_names_json TEXT NOT NULL DEFAULT '["read","bash","edit","write"]',
 				auto_context_files INTEGER NOT NULL DEFAULT 1,
@@ -107,6 +111,7 @@ export class CustomAgentStore {
 		this.migrateArchivedAtColumn();
 		this.migrateAutoContextFilesColumn();
 		this.migrateMcpServersColumn();
+		this.migratePiPackagesColumn();
 		this.migrateBuiltinToolNamesColumn();
 		this.migrateLegacyProfileNames();
 	}
@@ -143,6 +148,7 @@ export class CustomAgentStore {
 			contextFiles: [...(input.contextFiles ?? [])],
 			subagents: sanitizeSubagents(input.subagents ?? []),
 			mcpServers: uniqueStrings(input.mcpServers ?? []),
+			piPackages: uniqueStrings(input.piPackages ?? []),
 			builtinTools: input.builtinTools ?? "default",
 			builtinToolNames: sanitizeBuiltinToolNames(input.builtinToolNames),
 			autoContextFiles: input.autoContextFiles ?? true,
@@ -172,6 +178,7 @@ export class CustomAgentStore {
 			contextFiles: input.contextFiles ? [...input.contextFiles] : existing.contextFiles,
 			subagents: input.subagents ? sanitizeSubagents(input.subagents) : existing.subagents,
 			mcpServers: input.mcpServers ? uniqueStrings(input.mcpServers) : existing.mcpServers,
+			piPackages: input.piPackages ? uniqueStrings(input.piPackages) : existing.piPackages,
 			builtinTools: input.builtinTools ?? existing.builtinTools,
 			builtinToolNames: input.builtinToolNames ? sanitizeBuiltinToolNames(input.builtinToolNames) : existing.builtinToolNames,
 			autoContextFiles: input.autoContextFiles ?? existing.autoContextFiles,
@@ -189,6 +196,7 @@ export class CustomAgentStore {
 					context_files_json = ?,
 					subagents_json = ?,
 					mcp_servers_json = ?,
+					pi_packages_json = ?,
 					builtin_tools = ?,
 					builtin_tool_names_json = ?,
 					auto_context_files = ?,
@@ -205,6 +213,7 @@ export class CustomAgentStore {
 				JSON.stringify(updated.contextFiles),
 				JSON.stringify(sanitizeSubagents(updated.subagents)),
 				JSON.stringify(updated.mcpServers),
+				JSON.stringify(updated.piPackages),
 				updated.builtinTools,
 				JSON.stringify(updated.builtinToolNames),
 				updated.autoContextFiles ? 1 : 0,
@@ -249,6 +258,7 @@ export class CustomAgentStore {
 					context_files_json,
 					subagents_json,
 					mcp_servers_json,
+					pi_packages_json,
 					builtin_tools,
 					builtin_tool_names_json,
 					auto_context_files,
@@ -256,7 +266,7 @@ export class CustomAgentStore {
 					created_at,
 					updated_at,
 					archived_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`)
 			.run(
 				agent.id,
@@ -269,6 +279,7 @@ export class CustomAgentStore {
 				JSON.stringify(agent.contextFiles),
 				JSON.stringify(sanitizeSubagents(agent.subagents)),
 				JSON.stringify(agent.mcpServers),
+				JSON.stringify(agent.piPackages),
 				agent.builtinTools,
 				JSON.stringify(agent.builtinToolNames),
 				agent.autoContextFiles ? 1 : 0,
@@ -329,6 +340,15 @@ export class CustomAgentStore {
 		}
 	}
 
+	private migratePiPackagesColumn(): void {
+		const columns = new Set(
+			(this.db.prepare("PRAGMA table_info(chat_agents)").all() as Array<{ name: string }>).map((column) => column.name),
+		);
+		if (!columns.has("pi_packages_json")) {
+			this.db.prepare("ALTER TABLE chat_agents ADD COLUMN pi_packages_json TEXT NOT NULL DEFAULT '[]'").run();
+		}
+	}
+
 	private migrateBuiltinToolNamesColumn(): void {
 		const columns = new Set(
 			(this.db.prepare("PRAGMA table_info(chat_agents)").all() as Array<{ name: string }>).map((column) => column.name),
@@ -355,6 +375,7 @@ function agentFromRow(row: AgentRow): CustomAgentDefinition {
 		contextFiles: parseStringArray(row.context_files_json),
 		subagents: parseSubagents(row.subagents_json),
 		mcpServers: parseStringArray(row.mcp_servers_json),
+		piPackages: parseStringArray(row.pi_packages_json),
 		builtinTools: row.builtin_tools,
 		builtinToolNames: sanitizeBuiltinToolNames(parseStringArray(row.builtin_tool_names_json)),
 		autoContextFiles: row.auto_context_files !== 0,

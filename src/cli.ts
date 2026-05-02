@@ -65,6 +65,12 @@ export async function runPiboCli(argv = process.argv): Promise<void> {
 		return;
 	}
 
+	if (argv[2] === "pi-packages") {
+		const { runPiPackagesCli } = await import("./pi-packages/cli.js");
+		await runPiPackagesCli([argv[0] ?? "node", "pibo pi-packages", ...argv.slice(3)]);
+		return;
+	}
+
 	if (argv[2] === "debug") {
 		const { runDebugCli } = await import("./debug/index.js");
 		await runDebugCli([argv[0] ?? "node", "pibo debug", ...argv.slice(3)]);
@@ -101,6 +107,18 @@ export async function runPiboCli(argv = process.argv): Promise<void> {
 		.action(async (args: string[]) => {
 			const { runToolsCli } = await import("./tools/index.js");
 			await runToolsCli([argv[0] ?? "node", "pibo tools", ...args]);
+		});
+
+	program
+		.command("pi-packages")
+		.description("Register Pi Coding Agent packages")
+		.helpOption(false)
+		.allowUnknownOption(true)
+		.allowExcessArguments(true)
+		.argument("[args...]")
+		.action(async (args: string[]) => {
+			const { runPiPackagesCli } = await import("./pi-packages/cli.js");
+			await runPiPackagesCli([argv[0] ?? "node", "pibo pi-packages", ...args]);
 		});
 
 	program
@@ -252,6 +270,7 @@ Commands:
   config       Manage local pibo config
   mcp          Discover and call configured MCP servers
   tools        Install and inspect curated external CLI tools
+  pi-packages  Register Pi Coding Agent packages
   debug        Inspect local Pibo data
   profile      Inspect a pibo profile
   tui          Start the direct Pi TUI

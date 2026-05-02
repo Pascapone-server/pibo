@@ -37,6 +37,7 @@ import { createWebSearchProviderExtension, isWebSearchProviderTool } from "../to
 import { getMcpAgentContextFile } from "../mcp/agent-context.js";
 import { createPiboSystemPromptTemplateExtension } from "./system-prompt-template.js";
 import { getActivePiboBasePromptPath } from "./base-prompt.js";
+import { getPiPackageRuntimeOptions } from "../pi-packages/runtime.js";
 
 export type PiboRuntimeOptions = {
 	cwd?: string;
@@ -53,6 +54,7 @@ export type PiboProfileInspection = {
 	skills: Array<{ name: string; path: string }>;
 	tools: Array<{ name: string; hasDefinition: boolean; registered: boolean; active: boolean }>;
 	subagents: Array<{ name: string; targetProfile: string; active: boolean }>;
+	piPackages: Array<{ name: string; source: string; active: boolean }>;
 	contextFiles: Array<{ path: string; bytes: number }>;
 	diagnostics: AgentSessionRuntimeDiagnostic[];
 };
@@ -252,13 +254,19 @@ export async function createPiboRuntime(options: PiboRuntimeOptions = {}): Promi
 		const installedToolContextFile = getInstalledCliToolContextFile();
 		const mcpAgentContextFile = await getMcpAgentContextFile(profile.mcpServers);
 		const skillPaths = getEnabledSkillPaths(runtimeCwd, profile);
+		const piPackageOptions = getPiPackageRuntimeOptions(runtimeCwd, profile);
 		const services = await createAgentSessionServices({
 			cwd: runtimeCwd,
 			agentDir: runtimeAgentDir,
 			authStorage,
 			resourceLoaderOptions: {
+				additionalExtensionPaths: piPackageOptions.additionalExtensionPaths,
 				additionalSkillPaths: skillPaths,
 				extensionFactories: getProfileExtensionFactories(profile, options.extensionFactories),
+				noExtensions: true,
+				noSkills: true,
+				noPromptTemplates: true,
+				noThemes: true,
 				noContextFiles: profile.autoContextFiles === false,
 				systemPrompt: getActivePiboBasePromptPath(runtimeCwd),
 				agentsFilesOverride: (base) => ({
@@ -296,6 +304,7 @@ export async function createPiboRuntime(options: PiboRuntimeOptions = {}): Promi
 
 		const resourceLoader = services.resourceLoader;
 		const diagnostics: AgentSessionRuntimeDiagnostic[] = [
+			...piPackageOptions.diagnostics,
 			...services.diagnostics,
 			...collectResourceDiagnostics(resourceLoader.getSkills().diagnostics),
 			...resourceLoader.getExtensions().errors.map(({ path, error }) => ({
@@ -370,6 +379,11 @@ export async function inspectPiboProfile(options: PiboRuntimeOptions = {}): Prom
 					active: activeToolNames.has(toolName),
 				};
 			}),
+			piPackages: profile.piPackages.map((pkg) => ({
+				name: pkg.name,
+				source: pkg.source,
+				active: pkg.enabled !== false,
+			})),
 			contextFiles: resourceLoader.getAgentsFiles().agentsFiles.map((contextFile) => ({
 				path: contextFile.path,
 				bytes: Buffer.byteLength(contextFile.content, "utf-8"),

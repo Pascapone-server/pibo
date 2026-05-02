@@ -9,6 +9,7 @@ Pi remains the inner engine for model turns, tools, streaming, sessions, and com
 - `docs/architecture.md` describes the current runtime architecture and boundaries.
 - `docs/mcp.md` documents the MCP CLI and registry.
 - `docs/tools.md` documents curated external CLI tools.
+- `docs/pi-packages.md` documents registered Pi Coding Agent packages and per-agent selection.
 - `docs/agent-run-yield-spec.md` documents yielded agent runs and run-control tools.
 - `docs/chat-rooms-event-log.md` documents Chat Web rooms, default-room startup, durable chat events, unread cursors, SSE cursors, and idempotent sends.
 - `docs/codex-compact-terminal-design.md` documents the compact Codex-style Chat session view.
@@ -27,6 +28,7 @@ Pi remains the inner engine for model turns, tools, streaming, sessions, and com
 - `npm run client -- <piboSessionId>` starts a console client connected to the gateway.
 - `npm run dev -- mcp` lists configured MCP servers and tools.
 - `npm run dev -- tools` lists curated external CLI tools.
+- `npm run dev -- pi-packages` lists registered Pi Coding Agent packages.
 - `npm run dev -- debug` inspects local Pibo SQLite stores.
 - `npm run dev -- config keys` lists supported local config keys.
 - `npm run build` compiles to `dist/`.

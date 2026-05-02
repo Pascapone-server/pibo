@@ -284,6 +284,7 @@ export type SaveCustomAgentInput = {
 	contextFiles: string[];
 	subagents: CustomAgent["subagents"];
 	mcpServers: string[];
+	piPackages: string[];
 	builtinTools: "default" | "disabled";
 	builtinToolNames: string[];
 	autoContextFiles: boolean;
@@ -444,6 +445,7 @@ function normalizeBootstrap(payload: Partial<BootstrapData>): BootstrapData {
 			? {
 				...payload.agentCatalog,
 				piboTools: payload.agentCatalog.piboTools ?? [],
+				piPackages: payload.agentCatalog.piPackages ?? [],
 			}
 			: payload.agentCatalog,
 		capabilities: {

@@ -2240,6 +2240,7 @@ function AgentsView({
 				contextFiles: draft.contextFiles,
 				subagents: draft.subagents.filter((item) => item.name.trim() && item.targetProfile.trim()),
 				mcpServers: draft.mcpServers,
+				piPackages: draft.piPackages,
 				builtinTools: draft.builtinTools,
 				builtinToolNames: draft.builtinToolNames,
 				autoContextFiles: draft.autoContextFiles,
@@ -2471,6 +2472,20 @@ function AgentsView({
 					</DesignerPanel>
 					<CatalogSection title="Skills">{catalog?.skills.map((skill) => <CatalogToggle key={skill.name} disabled={readOnly} checked={draft.skills.includes(skill.name)} title={skill.name} description={skill.path} onToggle={() => setDraft((current) => ({ ...current, skills: toggleName(current.skills, skill.name) }))} />) ?? <EmptyCatalog />}</CatalogSection>
 					<CatalogSection title="Packages"><CatalogToggle disabled={readOnly} checked={draft.runControl} title="pibo-run-control" description="Expose pibo_run_* as one package for yielded native tools and subagents." meta="package" onToggle={() => setDraft((current) => ({ ...current, runControl: !current.runControl }))} /></CatalogSection>
+					<CatalogSection title="Pi Packages">
+						{catalog?.piPackages.map((pkg) => (
+							<CatalogToggle
+								key={pkg.id}
+								disabled={readOnly}
+								checked={draft.piPackages.includes(pkg.id) || draft.piPackages.includes(pkg.name)}
+								title={pkg.name}
+								description={pkg.description ?? pkg.source}
+								meta={piPackageMeta(pkg)}
+								metaClass={pkg.diagnostics.some((diagnostic) => diagnostic.type === "error") ? "text-[#f59e0b]" : "text-[#11a4d4]"}
+								onToggle={() => setDraft((current) => ({ ...current, piPackages: toggleName(current.piPackages, pkg.id) }))}
+							/>
+						)) ?? <EmptyCatalog />}
+					</CatalogSection>
 					<DesignerPanel title="Context Files">
 						<div className="grid grid-cols-[1fr_auto] gap-2">
 							<input value={newContextFileName} disabled={readOnly} onChange={(event) => setNewContextFileName(event.target.value)} className="min-w-0 bg-[#0e1116] border border-slate-700 rounded-sm px-3 py-2 text-sm outline-none focus:border-[#11a4d4] disabled:opacity-60" placeholder="New context file" />
@@ -2544,6 +2559,7 @@ function createBlankAgentDraft(catalog?: AgentCatalog): AgentDraft {
 		contextFiles: [],
 		subagents: [],
 		mcpServers: [],
+		piPackages: [],
 		builtinTools: "default",
 		builtinToolNames: [...DEFAULT_BUILTIN_TOOL_NAMES],
 		autoContextFiles: true,
@@ -2563,6 +2579,7 @@ function agentToDraft(agent: CustomAgent): AgentDraft {
 		contextFiles: agent.contextFiles,
 		subagents: agent.subagents,
 		mcpServers: agent.mcpServers,
+		piPackages: agent.piPackages ?? [],
 		builtinTools: agent.builtinTools,
 		builtinToolNames: normalizeBuiltinToolNames(agent.builtinToolNames, agent.builtinTools),
 		autoContextFiles: agent.autoContextFiles ?? true,
@@ -2581,6 +2598,7 @@ function profileToDraft(profile: BootstrapData["agents"][number], catalog?: Agen
 		contextFiles: profile.contextFiles ?? [],
 		subagents: profile.subagents ?? [],
 		mcpServers: profile.mcpServers ?? [],
+		piPackages: profile.piPackages ?? [],
 		builtinTools: profile.builtinTools ?? "default",
 		builtinToolNames: normalizeBuiltinToolNames(profile.builtinToolNames, profile.builtinTools),
 		autoContextFiles: profile.autoContextFiles ?? true,
@@ -3156,6 +3174,13 @@ function contextFileMeta(contextFile: AgentCatalog["contextFiles"][number]): str
 	if (source === "plugin") return "plugin global";
 	if (scope === "agent") return contextFile.agentProfileName ? `agent ${contextFile.agentProfileName}` : "agent local";
 	return "managed global";
+}
+
+function piPackageMeta(pkg: AgentCatalog["piPackages"][number]): string {
+	const resources = pkg.resourceTypes.length ? pkg.resourceTypes.join(" + ") : "resources pending";
+	const version = pkg.version ? `v${pkg.version}` : pkg.installed ? "installed" : "not installed";
+	const diagnostics = pkg.diagnostics.some((diagnostic) => diagnostic.type === "error") ? " / needs attention" : "";
+	return `${resources} / ${version}${diagnostics}`;
 }
 
 function EmptyCatalog({ message = "Agent Designer API unavailable" }: { message?: string }) {

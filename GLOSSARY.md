@@ -52,6 +52,15 @@ The product-facing catalog of registered native tools, skills, subagents, contex
 **Capability Package**:
 A named profile option that enables a group of generated capabilities, such as the `pibo-run-control` tools.
 
+**Pi Package**:
+A Pi Coding Agent package that can provide Pi-owned extensions, skills, prompt templates, or themes through npm, git, a `pi.dev/packages` listing, or a local path.
+
+**Pibo Pi Package**:
+A Pi Package registered in Pibo's local package store with source, install spec, metadata, discovered resources, install status, and diagnostics.
+
+**Pi Package Selection**:
+The per-profile list of registered Pibo Pi Packages that Pibo asks Pi Coding Agent to load for a runtime.
+
 **Context File**:
 A profile-selected markdown resource loaded into runtime context alongside project instructions and skills.
 

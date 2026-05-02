@@ -6,8 +6,8 @@ Pibo is a thin TypeScript harness around Pi Coding Agent. Pi remains the inner e
 
 - Keep Pi Coding Agent embedded as the execution engine, not expanded into the whole product.
 - Keep pibo responsible for product boundaries: profiles, plugins, channels, auth, policy, and routing.
-- Keep optional integrations opt-in. External MCP servers, Python runtimes, and third-party CLIs are installed only when a user asks for them.
-- Keep runtime configuration explicit and local. Project config lives in `.pibo/config.json`; MCP server definitions live in `mcp_servers.json`; installed external CLI tools live under `~/.pibo/tools`.
+- Keep optional integrations opt-in. External MCP servers, Python runtimes, third-party CLIs, and Pi Packages are installed or registered only when a user asks for them.
+- Keep runtime configuration explicit and local. Project config lives in `.pibo/config.json`; MCP server definitions live in `mcp_servers.json`; registered Pi Packages live in `.pibo/pi-packages.json`; installed external CLI tools live under `~/.pibo/tools`.
 - Prefer ordinary, inspectable boundaries over hidden coupling: plugins register capabilities, channels translate transports, and MCP servers remain external processes.
 
 ## Core Boundary
@@ -24,7 +24,7 @@ Channel / Tool / Client
 The core contracts live in:
 
 - `src/core/events.ts` for message, execution, and output events.
-- `src/core/profiles.ts` for profile, tool, skill, and context-file selection.
+- `src/core/profiles.ts` for profile, tool, skill, Pi Package, and context-file selection.
 - `src/core/runtime.ts` for creating a Pi Coding Agent runtime from a profile.
 - `src/core/session-router.ts` and `src/core/routed-session.ts` for per-session queues and execution actions.
 
@@ -78,6 +78,14 @@ The registry is a catalog. It does not run sessions and does not own transport. 
 
 Context file registration is no longer static-only at process start. Plugins can upsert and remove context-file catalog entries later, which allows product-managed context files to appear in the same capability catalog as plugin-shipped files. Product-level changes that are not routed agent output, such as context-file lifecycle events, are emitted as separate product events so UIs can refresh catalog state without pretending those changes are model turns.
 
+## Pi Packages
+
+Pibo can register Pi Coding Agent packages from `https://pi.dev/packages/...` URLs or local paths without making them globally active. The Pibo store at `.pibo/pi-packages.json` is the product source of truth for package source, install spec, metadata, discovered resource types, install status, and diagnostics.
+
+Registered does not mean loaded. A profile or custom agent must select a registered Pi Package before a runtime receives it. Runtime creation resolves the selected package ids through the Pibo store and passes only those install specs into Pi's package resource loading path. Global packages configured directly in Pi settings are not automatically injected into Pibo profiles.
+
+Pi Packages remain Pi-owned resources. Pibo does not rewrite package extensions, skills, prompts, or themes into native Pibo tools. Pibo's product boundary still owns MCP selection, subagents, routed sessions, run-control tools, Chat Web, auth, and policy. Package diagnostics are surfaced through profile inspection and runtime diagnostics so operators can see which packages were loaded and why a package failed.
+
 ## Subagents
 
 Subagents are profile-scoped capabilities, exposed to Pi as generated tools. A plugin registers a subagent definition, and a profile chooses which subagents are visible in the same builder pattern used for tools, skills, and context files.
@@ -87,6 +95,7 @@ Profile
   -> tools
   -> subagents
   -> skills
+  -> Pi Packages
   -> context files
 ```
 
@@ -178,17 +187,18 @@ Custom agent names are canonical profile names. They use lowercase kebab-case, s
 
 Custom agents have an archive-first lifecycle. Active custom agents are registered as dynamic profiles; archived custom agents remain inspectable but are removed from the active profile catalog, disabled for new sessions, and treated as read-only until restored. Permanent deletion is allowed only for archived custom agents, requires confirming the exact profile name, removes the dynamic profile, and deletes Chat Web sessions using that profile plus their child sessions from the Pibo Session store, Chat Web read model, and durable chat event log.
 
-The designer configures native Pibo agent capabilities only:
+The designer configures profile-scoped agent capabilities:
 
 - plugin-registered native tools
 - skills
+- Pi Packages
 - context files
 - subagents
 - automatic local context-file loading for files such as `AGENTS.md` and `CLAUDE.md`
 - built-in Pi tool visibility
 - capability packages such as `pibo-run-control`
 
-Curated external CLI tools managed by `pibo tools` are deliberately not part of the per-agent native tool selection. They are global operator tooling available through the agent environment, while native plugin tools remain the profile-specific capability surface.
+Curated external CLI tools managed by `pibo tools` are deliberately not part of the per-agent selection. They are global operator tooling available through the agent environment, while native plugin tools and registered Pi Packages remain profile-specific capability surfaces.
 
 Managed context files are now a product-owned extension of that capability surface. Pibo ships a `pibo.context-files` plugin that:
 

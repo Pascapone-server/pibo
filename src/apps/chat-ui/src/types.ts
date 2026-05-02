@@ -141,6 +141,7 @@ export type AgentProfile = {
 	contextFiles?: string[];
 	subagents?: CustomAgentSubagent[];
 	mcpServers?: string[];
+	piPackages?: string[];
 	builtinTools?: "default" | "disabled";
 	builtinToolNames?: string[];
 	autoContextFiles?: boolean;
@@ -177,6 +178,23 @@ export type AgentCatalog = {
 		hasDescription: boolean;
 		editable: boolean;
 	}>;
+	piPackages: Array<{
+		id: string;
+		name: string;
+		description?: string;
+		source: string;
+		installSpec: string;
+		version?: string;
+		repositoryUrl?: string;
+		resourceTypes: Array<"extension" | "skill" | "prompt" | "theme">;
+		extensionPaths?: string[];
+		skillNames?: string[];
+		promptNames?: string[];
+		themeNames?: string[];
+		discoveredToolNames?: string[];
+		installed: boolean;
+		diagnostics: Array<{ type: "info" | "warning" | "error"; message: string }>;
+	}>;
 };
 
 export type CustomAgentSubagent = {
@@ -198,6 +216,7 @@ export type CustomAgent = {
 	contextFiles: string[];
 	subagents: CustomAgentSubagent[];
 	mcpServers: string[];
+	piPackages: string[];
 	builtinTools: "default" | "disabled";
 	builtinToolNames: string[];
 	autoContextFiles: boolean;

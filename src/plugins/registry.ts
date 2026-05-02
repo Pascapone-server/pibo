@@ -25,6 +25,7 @@ import type {
 	PiboProfileDefinition,
 } from "./types.js";
 import { listInstalledCliToolAgentContexts } from "../tools/registry.js";
+import { listPiPackages } from "../pi-packages/store.js";
 
 export type PiboPluginRegistryOptions = {
 	plugins?: readonly PiboPlugin[];
@@ -211,6 +212,7 @@ export class PiboPluginRegistry {
 				contextFiles: sessionContext.contextFiles.filter((contextFile) => contextFile.enabled !== false).map(contextFileKey),
 				subagents: sessionContext.subagents.filter((subagent) => subagent.enabled !== false),
 				mcpServers: [...sessionContext.mcpServers],
+				piPackages: sessionContext.piPackages.filter((pkg) => pkg.enabled !== false).map((pkg) => pkg.name),
 				builtinTools: sessionContext.builtinTools,
 				builtinToolNames: [...sessionContext.builtinToolNames],
 				autoContextFiles: sessionContext.autoContextFiles,
@@ -268,6 +270,7 @@ export class PiboPluginRegistry {
 			],
 			piboTools: listInstalledCliToolAgentContexts(),
 			mcpServers: [],
+			piPackages: listPiPackages(),
 		};
 	}
 

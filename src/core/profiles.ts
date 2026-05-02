@@ -33,6 +33,12 @@ export type SkillProfile = {
 	enabled?: boolean;
 };
 
+export type PiPackageProfile = {
+	name: string;
+	source: string;
+	enabled?: boolean;
+};
+
 export type ContextFileScope = "global" | "agent";
 export type ContextFileSource = "plugin" | "managed";
 
@@ -80,6 +86,7 @@ export type InitialSessionContextOptions = {
 	tools?: readonly ToolProfile[];
 	subagents?: readonly SubagentProfile[];
 	mcpServers?: readonly string[];
+	piPackages?: readonly PiPackageProfile[];
 	contextFiles?: readonly ContextFileProfile[];
 	builtinTools?: BuiltinToolsMode;
 	builtinToolNames?: readonly string[];
@@ -95,6 +102,7 @@ export class InitialSessionContext {
 	readonly tools: readonly ToolProfile[];
 	readonly subagents: readonly SubagentProfile[];
 	readonly mcpServers: readonly string[];
+	readonly piPackages: readonly PiPackageProfile[];
 	readonly contextFiles: readonly ContextFileProfile[];
 	readonly builtinTools: BuiltinToolsMode;
 	readonly builtinToolNames: readonly string[];
@@ -109,6 +117,7 @@ export class InitialSessionContext {
 		this.tools = [...(options.tools ?? [])];
 		this.subagents = [...(options.subagents ?? [])];
 		this.mcpServers = [...(options.mcpServers ?? [])];
+		this.piPackages = [...(options.piPackages ?? [])];
 		this.contextFiles = [...(options.contextFiles ?? [])];
 		this.builtinTools = options.builtinTools ?? "default";
 		this.builtinToolNames = [...(options.builtinToolNames ?? DEFAULT_BUILTIN_TOOL_NAMES)];
@@ -125,6 +134,7 @@ export class InitialSessionContextBuilder {
 	private tools: ToolProfile[] = [];
 	private subagents: SubagentProfile[] = [];
 	private mcpServers: string[] = [];
+	private piPackages: PiPackageProfile[] = [];
 	private contextFiles: ContextFileProfile[] = [];
 	private builtinTools: BuiltinToolsMode = "default";
 	private builtinToolNames: string[] = [...DEFAULT_BUILTIN_TOOL_NAMES];
@@ -200,6 +210,21 @@ export class InitialSessionContextBuilder {
 		return this;
 	}
 
+	withPiPackages(packages: readonly PiPackageProfile[]): this {
+		this.piPackages = [...packages];
+		return this;
+	}
+
+	addPiPackage(pkg: PiPackageProfile): this {
+		this.piPackages.push(pkg);
+		return this;
+	}
+
+	addPiPackages(packages: readonly PiPackageProfile[]): this {
+		this.piPackages.push(...packages);
+		return this;
+	}
+
 	addContextFile(contextFile: ContextFileProfile): this {
 		this.contextFiles.push(contextFile);
 		return this;
@@ -219,6 +244,7 @@ export class InitialSessionContextBuilder {
 			tools: this.tools,
 			subagents: this.subagents,
 			mcpServers: this.mcpServers,
+			piPackages: this.piPackages,
 			contextFiles: this.contextFiles,
 			builtinTools: this.builtinTools,
 			builtinToolNames: this.builtinToolNames,
