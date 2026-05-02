@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 import { formatBrowserUseTargets, selectBestChatTarget } from "../dist/tools/browser-use-cdp.js";
+import { createPiboXvfbServiceUnit, PIBO_XVFB_SERVICE_PATH, PIBO_XVFB_SERVICE_NAME } from "../dist/tools/linux-virtual-display.js";
 
 const execFileAsync = promisify(execFile);
 const cliPath = resolve("dist/bin/pibo.js");
@@ -93,6 +94,16 @@ test("pibo tools install supports a no-setup dry target", async () => {
 	} finally {
 		await rm(cwd, { recursive: true, force: true });
 	}
+});
+
+test("pibo browser-use virtual display service unit uses a stable Linux xvfb setup", () => {
+	const unit = createPiboXvfbServiceUnit();
+	assert.match(unit, /\[Unit\]/);
+	assert.match(unit, /Description=Virtual X display for Pibo browser automation/);
+	assert.match(unit, /ExecStart=\/usr\/bin\/Xvfb :0 -screen 0 1920x1080x24 -ac -nolisten tcp/);
+	assert.match(unit, /WantedBy=multi-user.target/);
+	assert.equal(PIBO_XVFB_SERVICE_NAME, "pibo-xvfb.service");
+	assert.equal(PIBO_XVFB_SERVICE_PATH, "/etc/systemd/system/pibo-xvfb.service");
 });
 
 test("pibo tools env wraps browser-use with the PIBo default profile", async () => {

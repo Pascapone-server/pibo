@@ -1,10 +1,12 @@
 import { existsSync } from 'node:fs';
 import { detectDesktopEnv, hasDesktopDisplay, printDesktopEnvStatus, printLinuxVirtualDisplayHint } from './desktop-env.js';
 import { type ToolGuide, BROWSER_USE_GUIDE, REMOTE_BROWSER_GUIDE } from './guides.js';
+import { ensureLinuxVirtualDisplay } from './linux-virtual-display.js';
 import {
   type ToolPythonRuntimeSpec,
   getToolPythonRuntimePaths,
   installToolPythonRuntime,
+  runInheritedCommand,
   printToolPythonRuntimeDoctor,
   removeToolPythonRuntime,
 } from './python-runtime.js';
@@ -132,6 +134,9 @@ export function getInstalledCliToolContextFile(): { path: string; content: strin
 
 export async function installCliTool(entry: CliToolEntry, runSetup: boolean): Promise<void> {
   if (runSetup) {
+    if (entry.name === 'browser-use') {
+      await ensureLinuxVirtualDisplay({ runInherited: runInheritedCommand });
+    }
     await installToolPythonRuntime(entry.name, entry.runtime);
   }
   const status = getCliToolStatus(entry);

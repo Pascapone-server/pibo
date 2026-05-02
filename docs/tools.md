@@ -97,7 +97,7 @@ curl -s http://127.0.0.1:56663/json/list
 
 Inspect Chat Web targets before interacting with them. The usable target is the one that is authenticated and has the composer textarea; the first target may be unauthenticated, stale, or attached to a different gateway. `attach-chat` prints shell exports for the best existing authenticated Chat target. If Browser Use cannot attach cleanly or MCP resources are not visible, connect directly to the target WebSocket from `targets`, `attach-chat`, or `/json/list` and use CDP `Runtime.evaluate`, `Network`, and DOM inspection.
 
-The installer uses `uv` to create the virtual environment and install the pinned package `browser-use[cli]==0.12.6`. The version is pinned so the Browser Use CLI surface stays aligned with the bundled guides. Browser Use system setup stays visible through `pibo tools doctor browser-use`; if Browser Use reports missing optional components, install them explicitly for the workflow that needs them.
+The installer uses `uv` to create the virtual environment and install the pinned package `browser-use[cli]==0.12.6`. The version is pinned so the Browser Use CLI surface stays aligned with the bundled guides. On Linux hosts without a detected desktop display, `pibo tools install browser-use` now provisions `xvfb`, `xauth`, `x11-xserver-utils`, and a `pibo-xvfb.service` virtual display automatically when run as root. Browser Use system setup remains visible through `pibo tools doctor browser-use`; if Browser Use reports missing optional components, install them explicitly for the workflow that needs them.
 
 ## Requirements
 
@@ -190,7 +190,7 @@ browser-use --headed --session debug open https://example.com
 
 If you start a new shell, apply the exports once again before running Browser Use. The exports are shell-local and are not written system-wide.
 
-If no desktop display is detected, `pibo tools install browser-use` and `pibo tools doctor browser-use` warn that headed mode is unavailable. Headless Browser Use still works:
+If no desktop display is detected and the install command is not able to provision one automatically, `pibo tools install browser-use` and `pibo tools doctor browser-use` warn that headed mode is unavailable. Headless Browser Use still works:
 
 ```bash
 browser-use --session debug open https://example.com

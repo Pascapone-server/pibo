@@ -94,7 +94,7 @@ function runBuffered(
   });
 }
 
-function runInherited(
+export function runInheritedCommand(
   command: string,
   args: string[],
   env: NodeJS.ProcessEnv = process.env,
@@ -215,9 +215,9 @@ export async function installToolPythonRuntime(
   await mkdir(paths.homeDir, { recursive: true });
 
   if (!existsSync(paths.venvDir)) {
-    await runInherited('uv', ['venv', paths.venvDir, '--python', spec.pythonVersion]);
+    await runInheritedCommand('uv', ['venv', paths.venvDir, '--python', spec.pythonVersion]);
   }
-  await runInherited('uv', [
+  await runInheritedCommand('uv', [
     'pip',
     'install',
     '--python',
@@ -226,7 +226,7 @@ export async function installToolPythonRuntime(
   ]);
 
   if (spec.postInstallArgs?.length) {
-    await runInherited(paths.executablePath, spec.postInstallArgs, getToolPythonRuntimeEnv(paths, spec));
+    await runInheritedCommand(paths.executablePath, spec.postInstallArgs, getToolPythonRuntimeEnv(paths, spec));
   }
 
   return paths;
