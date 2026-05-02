@@ -4,7 +4,6 @@ export type PiboTraceNodeType =
 	| "agent.turn"
 	| "model.reasoning"
 	| "tool.call"
-	| "tool.provider_call"
 	| "tool.result"
 	| "agent.delegation"
 	| "agent.async"

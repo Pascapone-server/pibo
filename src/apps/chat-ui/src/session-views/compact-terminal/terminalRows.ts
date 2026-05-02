@@ -8,7 +8,6 @@ export type CompactTerminalRowKind =
 	| "message.assistant"
 	| "reasoning"
 	| "tool.call"
-	| "tool.provider_call"
 	| "tool.group.exploring"
 	| "agent.delegation"
 	| "agent.async"
@@ -117,9 +116,6 @@ function createRowCandidate(node: PiboTraceNode, turnId?: string): RowCandidate 
 		case "tool.call":
 			candidate = createToolRowCandidate(node, turnId);
 			break;
-		case "tool.provider_call":
-			candidate = { row: createProviderToolRow(node), turnId };
-			break;
 		case "tool.result":
 			candidate = { row: createToolResultRow(node), turnId };
 			break;
@@ -152,31 +148,6 @@ function createRowCandidate(node: PiboTraceNode, turnId?: string): RowCandidate 
 			break;
 	}
 	return { ...candidate, row: { ...candidate.row, ...debugFields(node) } };
-}
-
-function createProviderToolRow(node: PiboTraceNode): CompactTerminalRow {
-	const preview = previewLines(providerToolPreviewValue(node), 4, node.status === "error" ? "red" : "dim");
-	return {
-		id: node.id,
-		kind: "tool.provider_call",
-		status: mapStatus(node.status),
-		lines: [
-			{
-				prefix: "bullet",
-				tokens: [
-					token(node.status === "running" ? "Searching" : node.status === "error" ? "Search failed" : "Searched", toneForStatus(node.status), "semibold"),
-					token(" "),
-				],
-				functionCall: { name: node.title, input: node.input },
-			},
-			...preview.lines,
-		],
-		sourceNodeIds: [node.id],
-		input: node.input,
-		output: node.output,
-		error: node.error,
-		expandable: node.input !== undefined || node.output !== undefined || Boolean(node.error),
-	};
 }
 
 function debugFields(node: PiboTraceNode): Pick<
@@ -578,23 +549,6 @@ function previewText(value: unknown): string {
 	} catch {
 		return String(value);
 	}
-}
-
-function providerToolPreviewValue(node: PiboTraceNode): unknown {
-	if (!isRecord(node.output)) return node.error ?? node.output ?? node.summary;
-	const lines: string[] = [];
-	const provider = stringValue(node.output.provider);
-	const query = stringValue(node.output.query);
-	if (provider) lines.push(`Provider: ${provider}`);
-	if (query) lines.push(`Query: ${query}`);
-	const sources = Array.isArray(node.output.sources) ? node.output.sources : [];
-	for (const source of sources) {
-		if (!isRecord(source)) continue;
-		const url = stringValue(source.url);
-		const title = stringValue(source.title);
-		if (url || title) lines.push(title && url ? `${title} - ${url}` : (title ?? url ?? ""));
-	}
-	return lines.length > 0 ? lines.join("\n") : (node.error ?? node.output ?? node.summary);
 }
 
 function compactInlinePreview(value: unknown): string {

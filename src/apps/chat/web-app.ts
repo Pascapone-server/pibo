@@ -1458,7 +1458,6 @@ function createChatHtml(): string {
 		.trace-node[data-type="assistant.message"] { border-color: rgba(34,197,94,.35); }
 		.trace-node[data-type="model.reasoning"] { border-color: rgba(245,158,11,.45); }
 		.trace-node[data-type="tool.call"] { border-color: rgba(168,85,247,.45); }
-		.trace-node[data-type="tool.provider_call"] { border-color: rgba(168,85,247,.45); }
 		.trace-node[data-type="agent.delegation"] { border-color: rgba(249,115,22,.55); }
 		.trace-node[data-type="agent.async"] { border-color: rgba(249,115,22,.55); }
 		.trace-node[data-type="execution.command"] { border-color: rgba(17,164,212,.42); }
@@ -1617,7 +1616,6 @@ function createChatHtml(): string {
 				"agent.turn": "Agent Turn",
 				"model.reasoning": "Reasoning",
 				"tool.call": "Tool Call",
-				"tool.provider_call": "Provider Tool Call",
 				"tool.result": "Tool Result",
 				"agent.delegation": "Agent Delegation",
 				"agent.async": "Async Agent",
@@ -1633,7 +1631,6 @@ function createChatHtml(): string {
 				"agent.turn": "R",
 				"model.reasoning": "?",
 				"tool.call": "T",
-				"tool.provider_call": "W",
 				"tool.result": "O",
 				"agent.delegation": "D",
 				"agent.async": "A",
@@ -1649,7 +1646,6 @@ function createChatHtml(): string {
 				"agent.turn": "agent.run",
 				"model.reasoning": "model.reasoning",
 				"tool.call": "tool.call",
-				"tool.provider_call": "tool.call",
 				"tool.result": "tool.result",
 				"agent.delegation": "agent.delegation",
 				"agent.async": "agent.async",
@@ -1704,7 +1700,7 @@ function createChatHtml(): string {
 			if (node.type === "model.reasoning") {
 				return actions + '<div class="reasoning-block"><span class="reasoning-comment">// Model reasoning</span>\\n' + escapeText(node.output || node.summary || "") + '</div>';
 			}
-			if (node.type === "tool.call" || node.type === "tool.provider_call" || node.type === "yielded.run") {
+			if (node.type === "tool.call" || node.type === "yielded.run") {
 				return actions +
 					'<div class="span-code-well">' + functionSignature(node.title, node.input || {}) + '</div>' +
 					(node.output !== undefined ? '<div class="span-output-summary"><span>Output:</span><code>' + escapeText(short(pretty(node.output), 120)) + '</code></div>' : "") +

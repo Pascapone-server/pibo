@@ -1649,65 +1649,6 @@ test("chat trace groups tool calls with the final assistant response", () => {
 	assert.equal(response.children.length, 0);
 });
 
-test("chat trace projects provider-hosted web search calls from transcript parts", () => {
-	const nodes = traceNodesFromEntries("chat:test", [
-		{
-			type: "message",
-			id: "user-1",
-			parentId: "root",
-			timestamp: "2026-04-29T08:00:00.000Z",
-			message: {
-				role: "user",
-				content: [{ type: "text", text: "search honker SQL event system" }],
-			},
-		},
-		{
-			type: "message",
-			id: "assistant-1",
-			parentId: "user-1",
-			timestamp: "2026-04-29T08:00:01.000Z",
-			message: {
-				role: "assistant",
-				content: [
-					{ type: "thinking", thinking: "Need current sources." },
-					{
-						type: "providerToolCall",
-						provider: "openai",
-						toolName: "web_search",
-						providerType: "web_search_call",
-						callId: "ws_123",
-						status: "completed",
-						query: "honker SQL event system",
-						action: { type: "search", queries: ["honker SQL event system"] },
-						sources: [
-							{ title: "Honker", url: "https://example.com/honker", snippet: "SQL event system" },
-						],
-					},
-					{ type: "text", text: "Honker is documented at example.com." },
-				],
-				stopReason: "stop",
-			},
-		},
-	]);
-
-	assert.deepEqual(
-		nodes.map((node) => [node.type, node.title, node.status, node.source, node.stableKey]),
-		[
-			["user.message", "User Message", "done", "transcript", "entry:user-1"],
-			["model.reasoning", "Thinking", "done", "transcript", "entry:assistant-1:thinking:0"],
-			["tool.provider_call", "web_search", "done", "transcript", "provider-tool:ws_123"],
-			["assistant.message", "Agent Message", "done", "transcript", "entry:assistant-1:response:2"],
-		],
-	);
-	const search = nodes[2];
-	assert.equal(search.toolCallId, "ws_123");
-	assert.equal(search.output.provider, "openai");
-	assert.equal(search.output.providerType, "web_search_call");
-	assert.equal(search.output.sources[0].url, "https://example.com/honker");
-	assert.match(search.summary, /OpenAI web_search: honker SQL event system \(1 source\)/);
-	assert.equal(search.orderKey.contentPartIndex, 1);
-});
-
 test("chat trace keeps final assistant response after intermediate assistant text and tools", () => {
 	const nodes = traceNodesFromEntries("chat:test", [
 		{

@@ -2,7 +2,7 @@
 
 ## Status
 
-Provider-backed `web_search` works as a native Pibo tool, and new provider-hosted search calls are visible as first-class trace nodes when Pi persists the provider tool call transcript part.
+Provider-backed `web_search` works as a native Pibo tool, but provider-hosted search calls are not yet visible as first-class trace nodes.
 
 The current implementation selects `web_search` through the Pibo profile and exposes the capability through the OpenAI Responses hosted `web_search` provider tool. This means no local Pibo `tool_execution_started` / `tool_execution_finished` events are expected for a successful search call.
 
@@ -16,8 +16,6 @@ The current implementation selects `web_search` through the Pibo profile and exp
 
 The final assistant answer contained external sources and no DuckDuckGo-backed local tool result details. That matches the provider-backed runtime path. The trace and persisted Pi JSONL did not expose a separate `web_search_call` item, so Chat Web and `pibo debug trace` had no provider search node to render.
 
-This historical session cannot be reconstructed into provider tool nodes after the fact because the provider-hosted call data was not persisted. New sessions can show provider-hosted search nodes once Pi's OpenAI Responses stream normalization writes `providerToolCall` content parts.
-
 ## Desired Trace Shape
 
 Provider-hosted tool calls should be normalized into trace-readable content without changing the model-facing tool name.
@@ -26,7 +24,7 @@ Minimal provider tool call data:
 
 ```ts
 {
-  type: "providerToolCall",
+  type: "provider_tool_call",
   provider: "openai",
   toolName: "web_search",
   providerType: "web_search_call",
@@ -54,31 +52,14 @@ The visible node should identify `web_search`, the provider, status, and any ret
 
 ## Implementation Notes
 
-OpenAI Responses emits `web_search_call` output items. Pi normalizes those items into a generic assistant content part:
-
-```ts
-{
-  type: "providerToolCall",
-  provider: "openai",
-  toolName: "web_search",
-  providerType: "web_search_call",
-  callId,
-  status,
-  query,
-  action,
-  sources,
-  raw
-}
-```
-
-Pibo projects those transcript parts into `tool.provider_call` trace nodes. The node source is `transcript`, its stable key is based on the provider call id when available, and it uses the same trace ordering phase as normal tool calls.
+Start by checking whether OpenAI Responses emits `web_search_call` data that Pi Coding Agent currently drops during stream normalization or session persistence.
 
 Relevant paths:
 
-- `/home/pibo/code/pi-mono/packages/ai/src/providers/openai-responses-shared.ts`
-- `/home/pibo/code/pi-mono/packages/ai/src/types.ts`
+- `/home/pibo/code/pi-mono/packages/ai/src/stream.ts`
+- `/home/pibo/code/pi-mono/packages/coding-agent/src/core/agent-session.ts`
 - `src/apps/chat/trace.ts`
-- `src/apps/chat-ui/src/session-views/compact-terminal/terminalRows.ts`
-- `src/debug/trace.ts`
 
-Pibo intentionally does not reconstruct provider-hosted tool calls from logs. The durable source of truth is the normalized Pi transcript part.
+If Pi does not persist provider-hosted tool calls, add a small Pi-side transcript part instead of reconstructing calls from logs in Pibo.
+
+The implementation plan is tracked in `plans/implement-provider-web-search-trace-visibility.md`.

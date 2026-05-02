@@ -6,7 +6,6 @@ import { DatabaseSync } from "node:sqlite";
 import { promisify } from "node:util";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { SessionManager } from "@mariozechner/pi-coding-agent";
 import { PiboReliabilityStore } from "../dist/reliability/store.js";
 
 const execFileAsync = promisify(execFile);
@@ -140,24 +139,6 @@ test("pibo debug trace prints rebuilt Chat Web trace nodes", async () => {
 		const checkedParsed = JSON.parse(checked.stdout);
 		assert.equal(typeof checkedParsed.checks.status, "string");
 		assert.ok(Array.isArray(checkedParsed.checks.issues));
-	} finally {
-		await rm(cwd, { recursive: true, force: true });
-	}
-});
-
-test("pibo debug trace shows provider-hosted web search transcript nodes", async () => {
-	const cwd = await makeDebugFixture();
-	try {
-		const trace = await execFileAsync("node", [cliPath, "debug", "trace", "ps_provider"], { cwd });
-		assert.match(trace.stdout, /done\ttool.provider_call\tweb_search\tentry:/);
-
-		const json = await execFileAsync("node", [cliPath, "debug", "trace", "ps_provider", "--json"], { cwd });
-		const parsed = JSON.parse(json.stdout);
-		const search = parsed.nodes.find((node) => node.type === "tool.provider_call");
-		assert.equal(search?.title, "web_search");
-		assert.equal(search?.toolCallId, "ws_debug");
-		assert.equal(search?.output.provider, "openai");
-		assert.equal(search?.output.sources[0].url, "https://example.com/honker");
 	} finally {
 		await rm(cwd, { recursive: true, force: true });
 	}
@@ -308,30 +289,6 @@ async function makeDebugFixture() {
 	const cwd = await makeEmptyCwd();
 	const piboDir = join(cwd, ".pibo");
 	await mkdir(piboDir, { recursive: true });
-	const providerSession = SessionManager.create(cwd);
-	providerSession.appendMessage({
-		role: "user",
-		content: [{ type: "text", text: "search honker SQL event system" }],
-	});
-	providerSession.appendMessage({
-		role: "assistant",
-		content: [
-			{
-				type: "providerToolCall",
-				provider: "openai",
-				toolName: "web_search",
-				providerType: "web_search_call",
-				callId: "ws_debug",
-				status: "completed",
-				query: "honker SQL event system",
-				action: { type: "search", queries: ["honker SQL event system"] },
-				sources: [{ url: "https://example.com/honker" }],
-			},
-			{ type: "text", text: "done" },
-		],
-		stopReason: "stop",
-	});
-	const providerPiSessionId = providerSession.getSessionId();
 	const sessions = new DatabaseSync(join(piboDir, "pibo-sessions.sqlite"));
 	sessions.exec(`
 		CREATE TABLE pibo_sessions (
@@ -442,28 +399,6 @@ async function makeDebugFixture() {
 			"{}",
 			"2026-05-01T10:04:00.000Z",
 			"2026-05-01T10:04:00.000Z",
-		);
-	sessions
-		.prepare(
-			`INSERT INTO pibo_sessions (
-				id, pi_session_id, channel, kind, profile, owner_scope, parent_id, origin_id,
-				workspace, title, metadata_json, created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		)
-		.run(
-			"ps_provider",
-			providerPiSessionId,
-			"pibo.chat-web",
-			"chat",
-			"codex-compat-openai-web",
-			"user:one",
-			null,
-			null,
-			cwd,
-			"Provider Search",
-			"{}",
-			"2026-05-01T10:05:00.000Z",
-			"2026-05-01T10:05:00.000Z",
 		);
 	sessions.close();
 
