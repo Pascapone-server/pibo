@@ -208,6 +208,7 @@ export class PiboPluginRegistry {
 				skills: sessionContext.skills.filter((skill) => skill.enabled !== false).map((skill) => skill.name),
 				contextFiles: sessionContext.contextFiles.filter((contextFile) => contextFile.enabled !== false).map(contextFileKey),
 				subagents: sessionContext.subagents.filter((subagent) => subagent.enabled !== false),
+				mcpServers: [...sessionContext.mcpServers],
 				builtinTools: sessionContext.builtinTools,
 				autoContextFiles: sessionContext.autoContextFiles,
 				runControl: sessionContext.toolPackages.runControl === true,
@@ -259,6 +260,7 @@ export class PiboPluginRegistry {
 				},
 			],
 			piboTools: listInstalledCliToolAgentContexts(),
+			mcpServers: [],
 		};
 	}
 

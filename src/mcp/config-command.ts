@@ -7,13 +7,15 @@ import {
   getPreferredConfigPath,
 } from './config.js';
 import { ErrorCode, formatCliError } from './errors.js';
+import { setMcpServerDescription } from './agent-context.js';
 
-export type ConfigAction = 'help' | 'schema' | 'paths' | 'init' | 'path' | 'show' | 'add' | 'remove';
+export type ConfigAction = 'help' | 'schema' | 'paths' | 'init' | 'path' | 'show' | 'add' | 'remove' | 'describe';
 
 export interface ConfigCommandOptions {
   action: ConfigAction;
   name?: string;
   serverJson?: string;
+  description?: string;
   configPath?: string;
 }
 
@@ -39,6 +41,7 @@ Commands:
   pibo mcp config paths                        Show config path lookup order
   pibo mcp config show                         Print the current config JSON
   pibo mcp config add <name> <json>            Add or replace one server
+  pibo mcp config describe <name> "<text>"     Add or update an agent-facing description
   pibo mcp config remove <name>                Remove one server
   pibo mcp config schema                       Show server JSON schema and examples
   pibo mcp config help                         Show this help
@@ -66,7 +69,11 @@ Server schema:
       "env": { "TOKEN": "\${TOKEN}" },
       "cwd": ".",
       "allowedTools": ["read_*"],
-      "disabledTools": ["write_*"]
+      "disabledTools": ["write_*"],
+      "pibo": {
+        "description": "Access project files through the configured filesystem MCP server.",
+        "descriptionSource": "user"
+      }
     }
 
   HTTP server:
@@ -84,6 +91,7 @@ Examples:
   pibo mcp config init
   pibo mcp config add filesystem '{"command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","."]}'
   pibo mcp config add deepwiki '{"url":"https://mcp.deepwiki.com/mcp"}'
+  pibo mcp config describe filesystem "Access project files through the configured filesystem MCP server."
   pibo mcp config remove filesystem
 `);
 }
@@ -203,6 +211,23 @@ export async function configCommand(
     const existingPath = findConfigPath(options.configPath);
     const path = await ensureConfigExists(options.configPath);
     console.log(existingPath ? `MCP config ready: ${path}` : `Created MCP config: ${path}`);
+    return;
+  }
+
+  if (options.action === 'describe') {
+    if (!options.name || !options.description) {
+      throw new Error(
+        formatCliError({
+          code: ErrorCode.CLIENT_ERROR,
+          type: 'MISSING_ARGUMENT',
+          message: 'config describe requires <name> and <description>',
+          suggestion: 'Example: pibo mcp config describe filesystem "Access project files through MCP."',
+        }),
+      );
+    }
+
+    await setMcpServerDescription(options.name, options.description, options.configPath);
+    console.log(`Updated MCP server "${options.name}" description`);
     return;
   }
 

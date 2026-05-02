@@ -138,6 +138,7 @@ export type AgentProfile = {
 	skills?: string[];
 	contextFiles?: string[];
 	subagents?: CustomAgentSubagent[];
+	mcpServers?: string[];
 	builtinTools?: "default" | "disabled";
 	autoContextFiles?: boolean;
 	runControl?: boolean;
@@ -164,6 +165,14 @@ export type AgentCatalog = {
 	}>;
 	packages: Array<{ name: string; description: string; toolNames: string[] }>;
 	piboTools: Array<{ name: string; description: string; snippet: string }>;
+	mcpServers: Array<{
+		name: string;
+		transport: "stdio" | "http";
+		description?: string;
+		descriptionSource?: "user" | "registry";
+		hasDescription: boolean;
+		editable: boolean;
+	}>;
 };
 
 export type CustomAgentSubagent = {
@@ -184,6 +193,7 @@ export type CustomAgent = {
 	skills: string[];
 	contextFiles: string[];
 	subagents: CustomAgentSubagent[];
+	mcpServers: string[];
 	builtinTools: "default" | "disabled";
 	autoContextFiles: boolean;
 	runControl: boolean;

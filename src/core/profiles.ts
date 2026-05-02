@@ -52,6 +52,7 @@ export type InitialSessionContextOptions = {
 	skills?: readonly SkillProfile[];
 	tools?: readonly ToolProfile[];
 	subagents?: readonly SubagentProfile[];
+	mcpServers?: readonly string[];
 	contextFiles?: readonly ContextFileProfile[];
 	builtinTools?: BuiltinToolsMode;
 	autoContextFiles?: boolean;
@@ -65,6 +66,7 @@ export class InitialSessionContext {
 	readonly skills: readonly SkillProfile[];
 	readonly tools: readonly ToolProfile[];
 	readonly subagents: readonly SubagentProfile[];
+	readonly mcpServers: readonly string[];
 	readonly contextFiles: readonly ContextFileProfile[];
 	readonly builtinTools: BuiltinToolsMode;
 	readonly autoContextFiles: boolean;
@@ -77,6 +79,7 @@ export class InitialSessionContext {
 		this.skills = [...(options.skills ?? [])];
 		this.tools = [...(options.tools ?? [])];
 		this.subagents = [...(options.subagents ?? [])];
+		this.mcpServers = [...(options.mcpServers ?? [])];
 		this.contextFiles = [...(options.contextFiles ?? [])];
 		this.builtinTools = options.builtinTools ?? "default";
 		this.autoContextFiles = options.autoContextFiles ?? true;
@@ -91,6 +94,7 @@ export class InitialSessionContextBuilder {
 	private skills: SkillProfile[] = [];
 	private tools: ToolProfile[] = [];
 	private subagents: SubagentProfile[] = [];
+	private mcpServers: string[] = [];
 	private contextFiles: ContextFileProfile[] = [];
 	private builtinTools: BuiltinToolsMode = "default";
 	private autoContextFiles = true;
@@ -155,6 +159,11 @@ export class InitialSessionContextBuilder {
 		return this;
 	}
 
+	withMcpServers(mcpServers: readonly string[]): this {
+		this.mcpServers = [...mcpServers];
+		return this;
+	}
+
 	addContextFile(contextFile: ContextFileProfile): this {
 		this.contextFiles.push(contextFile);
 		return this;
@@ -173,6 +182,7 @@ export class InitialSessionContextBuilder {
 			skills: this.skills,
 			tools: this.tools,
 			subagents: this.subagents,
+			mcpServers: this.mcpServers,
 			contextFiles: this.contextFiles,
 			builtinTools: this.builtinTools,
 			autoContextFiles: this.autoContextFiles,

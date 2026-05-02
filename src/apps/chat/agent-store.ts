@@ -22,6 +22,7 @@ export type CustomAgentDefinition = {
 	skills: string[];
 	contextFiles: string[];
 	subagents: CustomAgentSubagent[];
+	mcpServers: string[];
 	builtinTools: BuiltinToolsMode;
 	autoContextFiles: boolean;
 	runControl: boolean;
@@ -40,6 +41,7 @@ export type CreateCustomAgentInput = {
 	skills?: string[];
 	contextFiles?: string[];
 	subagents?: CustomAgentSubagent[];
+	mcpServers?: string[];
 	builtinTools?: BuiltinToolsMode;
 	autoContextFiles?: boolean;
 	runControl?: boolean;
@@ -57,6 +59,7 @@ type AgentRow = {
 	skills_json: string;
 	context_files_json: string;
 	subagents_json: string;
+	mcp_servers_json: string;
 	builtin_tools: BuiltinToolsMode;
 	auto_context_files: 0 | 1;
 	run_control: 0 | 1;
@@ -85,6 +88,7 @@ export class CustomAgentStore {
 				skills_json TEXT NOT NULL,
 				context_files_json TEXT NOT NULL,
 				subagents_json TEXT NOT NULL,
+				mcp_servers_json TEXT NOT NULL DEFAULT '[]',
 				builtin_tools TEXT NOT NULL,
 				auto_context_files INTEGER NOT NULL DEFAULT 1,
 				run_control INTEGER NOT NULL,
@@ -98,6 +102,7 @@ export class CustomAgentStore {
 		`);
 		this.migrateArchivedAtColumn();
 		this.migrateAutoContextFilesColumn();
+		this.migrateMcpServersColumn();
 		this.migrateLegacyProfileNames();
 	}
 
@@ -132,6 +137,7 @@ export class CustomAgentStore {
 			skills: [...(input.skills ?? [])],
 			contextFiles: [...(input.contextFiles ?? [])],
 			subagents: sanitizeSubagents(input.subagents ?? []),
+			mcpServers: uniqueStrings(input.mcpServers ?? []),
 			builtinTools: input.builtinTools ?? "default",
 			autoContextFiles: input.autoContextFiles ?? true,
 			runControl: input.runControl ?? false,
@@ -159,6 +165,7 @@ export class CustomAgentStore {
 			skills: input.skills ? [...input.skills] : existing.skills,
 			contextFiles: input.contextFiles ? [...input.contextFiles] : existing.contextFiles,
 			subagents: input.subagents ? sanitizeSubagents(input.subagents) : existing.subagents,
+			mcpServers: input.mcpServers ? uniqueStrings(input.mcpServers) : existing.mcpServers,
 			builtinTools: input.builtinTools ?? existing.builtinTools,
 			autoContextFiles: input.autoContextFiles ?? existing.autoContextFiles,
 			runControl: input.runControl ?? existing.runControl,
@@ -174,6 +181,7 @@ export class CustomAgentStore {
 					skills_json = ?,
 					context_files_json = ?,
 					subagents_json = ?,
+					mcp_servers_json = ?,
 					builtin_tools = ?,
 					auto_context_files = ?,
 					run_control = ?,
@@ -188,6 +196,7 @@ export class CustomAgentStore {
 				JSON.stringify(updated.skills),
 				JSON.stringify(updated.contextFiles),
 				JSON.stringify(sanitizeSubagents(updated.subagents)),
+				JSON.stringify(updated.mcpServers),
 				updated.builtinTools,
 				updated.autoContextFiles ? 1 : 0,
 				updated.runControl ? 1 : 0,
@@ -230,13 +239,14 @@ export class CustomAgentStore {
 					skills_json,
 					context_files_json,
 					subagents_json,
+					mcp_servers_json,
 					builtin_tools,
 					auto_context_files,
 					run_control,
 					created_at,
 					updated_at,
 					archived_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			`)
 			.run(
 				agent.id,
@@ -248,6 +258,7 @@ export class CustomAgentStore {
 				JSON.stringify(agent.skills),
 				JSON.stringify(agent.contextFiles),
 				JSON.stringify(sanitizeSubagents(agent.subagents)),
+				JSON.stringify(agent.mcpServers),
 				agent.builtinTools,
 				agent.autoContextFiles ? 1 : 0,
 				agent.runControl ? 1 : 0,
@@ -297,6 +308,15 @@ export class CustomAgentStore {
 			this.db.prepare("ALTER TABLE chat_agents ADD COLUMN auto_context_files INTEGER NOT NULL DEFAULT 1").run();
 		}
 	}
+
+	private migrateMcpServersColumn(): void {
+		const columns = new Set(
+			(this.db.prepare("PRAGMA table_info(chat_agents)").all() as Array<{ name: string }>).map((column) => column.name),
+		);
+		if (!columns.has("mcp_servers_json")) {
+			this.db.prepare("ALTER TABLE chat_agents ADD COLUMN mcp_servers_json TEXT NOT NULL DEFAULT '[]'").run();
+		}
+	}
 }
 
 export function createDefaultCustomAgentStore(cwd = process.cwd()): CustomAgentStore {
@@ -314,6 +334,7 @@ function agentFromRow(row: AgentRow): CustomAgentDefinition {
 		skills: parseStringArray(row.skills_json),
 		contextFiles: parseStringArray(row.context_files_json),
 		subagents: parseSubagents(row.subagents_json),
+		mcpServers: parseStringArray(row.mcp_servers_json),
 		builtinTools: row.builtin_tools,
 		autoContextFiles: row.auto_context_files !== 0,
 		runControl: row.run_control === 1,
@@ -330,6 +351,10 @@ function parseStringArray(value: string): string[] {
 	} catch {
 		return [];
 	}
+}
+
+function uniqueStrings(value: readonly string[]): string[] {
+	return [...new Set(value.filter((item) => typeof item === "string" && item.trim()).map((item) => item.trim()))];
 }
 
 function parseSubagents(value: string): CustomAgentSubagent[] {

@@ -11,6 +11,7 @@ export function createCustomAgentProfileDefinition(agent: CustomAgentDefinition)
 			const builder = new InitialSessionContextBuilder(agent.profileName)
 				.withBuiltinTools(agent.builtinTools)
 				.withAutoContextFiles(agent.autoContextFiles)
+				.withMcpServers(agent.mcpServers)
 				.withToolPackages({ runControl: agent.runControl });
 
 			for (const skillName of agent.skills) builder.addSkill(context.getSkill(skillName));

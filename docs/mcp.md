@@ -50,8 +50,60 @@ npm run dev -- mcp config paths
 npm run dev -- mcp config show
 npm run dev -- mcp config schema
 npm run dev -- mcp config add filesystem '{"command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","."]}'
+npm run dev -- mcp config describe filesystem "Access project files through the configured filesystem MCP server."
 npm run dev -- mcp config remove filesystem
 ```
+
+### Agent-facing descriptions
+
+Custom agents can opt into MCP server hints, but only described servers produce useful model-visible context. Add a short description with:
+
+```bash
+npm run dev -- mcp config describe <server> "<description>"
+```
+
+This preserves the existing server entry and writes only Pibo-owned metadata:
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."],
+      "pibo": {
+        "description": "Access project files through the configured filesystem MCP server.",
+        "descriptionSource": "user"
+      }
+    }
+  }
+}
+```
+
+Descriptions are capped at 480 characters. Registry-provided descriptions use `descriptionSource: "registry"` and are read-only in the Agent Designer.
+
+## Agent Designer Context
+
+The Chat Web Agent Designer lists configured MCP servers in the `MCP Servers` section below `Subagents`.
+
+- Servers without `pibo.description` are visible with a missing-description state and cannot be selected.
+- User-owned descriptions can be edited from the Agent Designer or the CLI.
+- Registry descriptions are visible but not editable.
+- Selected MCP server names are stored on custom agents separately from native tools, skills, context files, packages, and subagents.
+
+At runtime, selected described servers are injected as a generated context document:
+
+```text
+.pibo/context/enabled-mcp-servers.md
+```
+
+The generated document contains only the server name, short description, and compact discovery commands such as:
+
+```bash
+npm run dev -- mcp info <server>
+npm run dev -- mcp call <server> <tool> '<json>'
+```
+
+Pibo does not inject MCP tool schemas, headers, environment variables, command paths, or full config JSON into model context. The Agent Designer catalog is built from local config metadata and does not start stdio MCP servers or make HTTP MCP requests.
 
 ## Registry
 

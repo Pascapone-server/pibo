@@ -91,3 +91,21 @@ test("custom agent store persists automatic context file setting", () => {
 
 	store.close();
 });
+
+test("custom agent store persists selected MCP servers", () => {
+	const path = join(mkdtempSync(join(tmpdir(), "pibo-agent-store-")), "agents.sqlite");
+	const store = new CustomAgentStore(path);
+	const agent = store.create({
+		ownerScope: "user:test",
+		displayName: "mcp-context",
+		mcpServers: ["filesystem", "filesystem", "deepwiki"],
+	});
+
+	assert.deepEqual(agent.mcpServers, ["filesystem", "deepwiki"]);
+
+	const updated = store.update(agent.id, { mcpServers: ["deepwiki"] });
+	assert.deepEqual(updated.mcpServers, ["deepwiki"]);
+	assert.deepEqual(store.get(agent.id).mcpServers, ["deepwiki"]);
+
+	store.close();
+});

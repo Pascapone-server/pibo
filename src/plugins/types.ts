@@ -48,6 +48,7 @@ export type PiboProfileInfo = {
 	skills: string[];
 	contextFiles: string[];
 	subagents: SubagentProfile[];
+	mcpServers: string[];
 	builtinTools: BuiltinToolsMode;
 	autoContextFiles: boolean;
 	runControl: boolean;
@@ -95,6 +96,15 @@ export type PiboCliToolContextInfo = {
 	snippet: string;
 };
 
+export type PiboMcpServerInfo = {
+	name: string;
+	transport: "stdio" | "http";
+	description?: string;
+	descriptionSource?: "user" | "registry";
+	hasDescription: boolean;
+	editable: boolean;
+};
+
 export type PiboCapabilityCatalog = {
 	nativeTools: PiboNativeToolInfo[];
 	skills: PiboSkillInfo[];
@@ -102,6 +112,7 @@ export type PiboCapabilityCatalog = {
 	contextFiles: PiboContextFileInfo[];
 	packages: PiboCapabilityPackageInfo[];
 	piboTools: PiboCliToolContextInfo[];
+	mcpServers: PiboMcpServerInfo[];
 };
 
 export type PiboProductEventSource = "core" | "plugin" | "web" | "filesystem" | "agent";

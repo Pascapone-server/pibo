@@ -262,6 +262,12 @@ function parseArgs(args: string[]): ParsedArgs {
         result.configName = positional[2];
         return result;
 
+      case 'describe':
+        result.configAction = 'describe';
+        result.configName = positional[2];
+        result.configJson = positional.slice(3).join(' ') || undefined;
+        return result;
+
       default:
         console.error(formatCliError(unknownSubcommandError(`config ${action}`)));
         process.exit(ErrorCode.CLIENT_ERROR);
@@ -522,6 +528,7 @@ export async function runMcpCli(argv = process.argv): Promise<void> {
           action: args.configAction ?? 'help',
           name: args.configName,
           serverJson: args.configJson,
+          description: args.configJson,
           configPath: args.configPath,
         });
         break;

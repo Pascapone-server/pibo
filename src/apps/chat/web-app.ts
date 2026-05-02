@@ -32,6 +32,7 @@ import {
 } from "./agent-store.js";
 import { createCustomAgentProfileDefinition } from "./agent-profiles.js";
 import { createDefaultPiboReliabilityStore, PiboReliabilityStore } from "../../reliability/store.js";
+import { listMcpServerInfos, setMcpServerDescription } from "../../mcp/agent-context.js";
 
 export const CHAT_WEB_APP_NAME = "pibo.chat-web";
 export const CHAT_WEB_CHANNEL = "pibo.chat-web";
@@ -93,11 +94,16 @@ type ChatAgentBody = {
 	skills?: unknown;
 	contextFiles?: unknown;
 	subagents?: unknown;
+	mcpServers?: unknown;
 	builtinTools?: unknown;
 	autoContextFiles?: unknown;
 	runControl?: unknown;
 	archived?: unknown;
 	confirmName?: unknown;
+};
+
+type ChatMcpServerDescriptionBody = {
+	description?: unknown;
 };
 
 type ChatMessageBody = {
@@ -205,6 +211,19 @@ function agentResourceId(pathname: string): string | undefined {
 		return decodeURIComponent(encodedId);
 	} catch {
 		throw new PiboWebHttpError("Invalid agent id", 400);
+	}
+}
+
+function mcpServerResourceName(pathname: string): string | undefined {
+	const prefix = `${CHAT_WEB_API_PREFIX}/mcp-servers/`;
+	const suffix = "/description";
+	if (!pathname.startsWith(prefix) || !pathname.endsWith(suffix)) return undefined;
+	const encodedName = pathname.slice(prefix.length, -suffix.length);
+	if (!encodedName || encodedName.includes("/")) return undefined;
+	try {
+		return decodeURIComponent(encodedName);
+	} catch {
+		throw new PiboWebHttpError("Invalid MCP server name", 400);
 	}
 }
 
@@ -340,6 +359,14 @@ function normalizeRunControl(value: unknown): boolean {
 	if (value === undefined) return false;
 	if (typeof value !== "boolean") throw new PiboWebHttpError("runControl must be a boolean", 400);
 	return value;
+}
+
+function normalizeMcpServerDescriptionBody(value: unknown): string {
+	if (typeof value !== "string") throw new PiboWebHttpError("MCP server description must be a string", 400);
+	const description = value.replace(/\s+/g, " ").trim();
+	if (!description) throw new PiboWebHttpError("MCP server description is required", 400);
+	if (description.length > 480) throw new PiboWebHttpError("MCP server description is too long", 400);
+	return description;
 }
 
 function normalizeAgentArchived(value: unknown): boolean | undefined {
@@ -735,6 +762,7 @@ function createAgentInput(ownerScope: string, body: ChatAgentBody) {
 		skills: normalizeNameArray(body.skills, "skills"),
 		contextFiles: normalizeNameArray(body.contextFiles, "contextFiles"),
 		subagents: normalizeAgentSubagents(body.subagents),
+		mcpServers: normalizeNameArray(body.mcpServers, "mcpServers"),
 		builtinTools: normalizeBuiltinTools(body.builtinTools),
 		autoContextFiles: normalizeAutoContextFiles(body.autoContextFiles),
 		runControl: normalizeRunControl(body.runControl),
@@ -749,6 +777,7 @@ function createAgentUpdate(body: ChatAgentBody): UpdateCustomAgentInput {
 	if (body.skills !== undefined) update.skills = normalizeNameArray(body.skills, "skills");
 	if (body.contextFiles !== undefined) update.contextFiles = normalizeNameArray(body.contextFiles, "contextFiles");
 	if (body.subagents !== undefined) update.subagents = normalizeAgentSubagents(body.subagents);
+	if (body.mcpServers !== undefined) update.mcpServers = normalizeNameArray(body.mcpServers, "mcpServers");
 	if (body.builtinTools !== undefined) update.builtinTools = normalizeBuiltinTools(body.builtinTools);
 	if (body.autoContextFiles !== undefined) update.autoContextFiles = normalizeAutoContextFiles(body.autoContextFiles);
 	if (body.runControl !== undefined) update.runControl = normalizeRunControl(body.runControl);
@@ -782,6 +811,21 @@ function requireOwnedAgent(agent: CustomAgentDefinition | undefined, webSession:
 		throw new PiboWebHttpError("Agent is not available for this user", 404);
 	}
 	return agent;
+}
+
+async function buildAgentCatalog(context: PiboWebAppContext) {
+	return {
+		...(context.channelContext.getCapabilityCatalog?.() ?? {
+			nativeTools: [],
+			skills: [],
+			subagents: [],
+			contextFiles: [],
+			packages: [],
+			piboTools: [],
+			mcpServers: [],
+		}),
+		mcpServers: await listMcpServerInfos(),
+	};
 }
 
 function normalizeAgentDeleteConfirmation(value: unknown): string {
@@ -2189,7 +2233,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 					sessions,
 					agents: context.channelContext.getProfiles?.() ?? [],
 					customAgents: state.agentStore.list(webSession.ownerScope, { includeArchived: true }),
-					agentCatalog: context.channelContext.getCapabilityCatalog?.(),
+					agentCatalog: await buildAgentCatalog(context),
 					capabilities: {
 						actions: context.channelContext.getGatewayActions(),
 					},
@@ -2199,16 +2243,21 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 			if (url.pathname === `${CHAT_WEB_API_PREFIX}/agent-catalog` && request.method === "GET") {
 				await requireSession(request, context);
 				return responseJson({
-					catalog: context.channelContext.getCapabilityCatalog?.() ?? {
-						nativeTools: [],
-						skills: [],
-						subagents: [],
-						contextFiles: [],
-						packages: [],
-						piboTools: [],
-					},
+					catalog: await buildAgentCatalog(context),
 					profiles: context.channelContext.getProfiles?.() ?? [],
 				});
+			}
+
+			const mcpServerName = mcpServerResourceName(url.pathname);
+			if (mcpServerName && request.method === "PATCH") {
+				requireSameOriginJsonRequest(request);
+				await requireSession(request, context);
+				const body = await readJsonBody<ChatMcpServerDescriptionBody>(request);
+				const server = await setMcpServerDescription(
+					mcpServerName,
+					normalizeMcpServerDescriptionBody(body.description),
+				);
+				return responseJson({ server });
 			}
 
 			if (url.pathname === `${CHAT_WEB_API_PREFIX}/agents` && request.method === "GET") {

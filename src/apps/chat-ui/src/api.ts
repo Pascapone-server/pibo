@@ -246,6 +246,7 @@ export type SaveCustomAgentInput = {
 	skills: string[];
 	contextFiles: string[];
 	subagents: CustomAgent["subagents"];
+	mcpServers: string[];
 	builtinTools: "default" | "disabled";
 	autoContextFiles: boolean;
 	runControl: boolean;
@@ -275,6 +276,16 @@ export async function deleteCustomAgent(id: string, confirmName: string): Promis
 		method: "DELETE",
 		headers: { "content-type": "application/json" },
 		body: JSON.stringify({ confirmName }),
+	});
+}
+
+export async function patchMcpServerDescription(name: string, description: string): Promise<{
+	server: AgentCatalog["mcpServers"][number];
+}> {
+	return requestJson(`/api/chat/mcp-servers/${encodeURIComponent(name)}/description`, {
+		method: "PATCH",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ description }),
 	});
 }
 

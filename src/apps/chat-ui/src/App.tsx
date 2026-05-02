@@ -4,6 +4,7 @@ import { useNavigate } from "@tanstack/react-router";
 import {
 	Archive,
 	ArchiveRestore,
+	AlertTriangle,
 	Brain,
 	Bug,
 	Check,
@@ -20,6 +21,7 @@ import {
 	Plus,
 	RefreshCw,
 	Save,
+	Server,
 	Settings,
 	SendHorizontal,
 	Trash2,
@@ -27,7 +29,7 @@ import {
 	Wrench,
 	X,
 } from "lucide-react";
-import { deleteCustomAgent, deleteRoom, deleteSession, getBootstrap, getTrace, patchCustomAgent, patchRoom, patchSession, postAction, postContextFile, postCustomAgent, postMessage, postRoom, postSession, signInWithGoogle, signOut, type SaveCustomAgentInput } from "./api";
+import { deleteCustomAgent, deleteRoom, deleteSession, getBootstrap, getTrace, patchCustomAgent, patchMcpServerDescription, patchRoom, patchSession, postAction, postContextFile, postCustomAgent, postMessage, postRoom, postSession, signInWithGoogle, signOut, type SaveCustomAgentInput } from "./api";
 import type { AgentCatalog, BootstrapData, CustomAgent, CustomAgentSubagent, PiboRoom, PiboSessionTraceView, PiboTraceNode, PiboTraceOrderKey, PiboWebSessionNode } from "./types";
 import { adaptTrace } from "./tracing/adapt";
 import { type SessionBreadcrumbItem, type SessionDerivationLink, type SessionOriginLink } from "./tracing/TraceTimeline";
@@ -2123,6 +2125,7 @@ function AgentsView({
 	const [showArchivedAgents, setShowArchivedAgents] = useState(() => localStorage.getItem("pibo.chat.showArchivedAgents") === "true");
 	const [deleteConfirmName, setDeleteConfirmName] = useState("");
 	const [localError, setLocalError] = useState<string | null>(null);
+	const [mcpDescriptionDrafts, setMcpDescriptionDrafts] = useState<Record<string, string>>({});
 	const [newContextFileName, setNewContextFileName] = useState("");
 	const [newContextFileScope, setNewContextFileScope] = useState<"global" | "agent">("agent");
 	const designerAvailable = Boolean(catalog);
@@ -2173,6 +2176,7 @@ function AgentsView({
 				skills: draft.skills,
 				contextFiles: draft.contextFiles,
 				subagents: draft.subagents.filter((item) => item.name.trim() && item.targetProfile.trim()),
+				mcpServers: draft.mcpServers,
 				builtinTools: draft.builtinTools,
 				autoContextFiles: draft.autoContextFiles,
 				runControl: draft.runControl,
@@ -2236,6 +2240,33 @@ function AgentsView({
 				contextFiles: current.contextFiles.includes(file.key) ? current.contextFiles : [...current.contextFiles, file.key],
 			}));
 			setNewContextFileName("");
+			setLocalError(null);
+		} catch (caught) {
+			setLocalError(caught instanceof Error ? caught.message : String(caught));
+		} finally {
+			setSaving(false);
+		}
+	};
+
+	const saveMcpDescription = async (serverName: string) => {
+		if (!designerAvailable || readOnly) return;
+		const description = (mcpDescriptionDrafts[serverName] ?? "").trim();
+		if (!description) {
+			setLocalError("MCP server description is required.");
+			return;
+		}
+		setSaving(true);
+		try {
+			const response = await patchMcpServerDescription(serverName, description);
+			setCatalog((current) => current ? {
+				...current,
+				mcpServers: current.mcpServers.map((server) => server.name === response.server.name ? response.server : server),
+			} : current);
+			setMcpDescriptionDrafts((current) => {
+				const next = { ...current };
+				delete next[serverName];
+				return next;
+			});
 			setLocalError(null);
 		} catch (caught) {
 			setLocalError(caught instanceof Error ? caught.message : String(caught));
@@ -2403,6 +2434,16 @@ function AgentsView({
 						</div>
 					</DesignerPanel>
 					<SubagentDesigner draft={draft} setDraft={setDraft} profileOptions={profileOptions} readOnly={readOnly} />
+					<McpServersDesigner
+						servers={catalog?.mcpServers}
+						draft={draft}
+						setDraft={setDraft}
+						readOnly={readOnly}
+						saving={saving}
+						descriptionDrafts={mcpDescriptionDrafts}
+						setDescriptionDrafts={setMcpDescriptionDrafts}
+						onSaveDescription={saveMcpDescription}
+					/>
 					{archivedDraft && draft.profileName ? (
 						<DesignerPanel title="Delete Agent">
 							<div className="border border-red-500/60 bg-red-500/10 text-red-100 rounded-sm p-3 text-sm">
@@ -2436,6 +2477,7 @@ function createBlankAgentDraft(catalog?: AgentCatalog): AgentDraft {
 		skills: catalog?.skills.some((skill) => skill.name === "pi-agent-harness") ? ["pi-agent-harness"] : [],
 		contextFiles: [],
 		subagents: [],
+		mcpServers: [],
 		builtinTools: "default",
 		autoContextFiles: true,
 		runControl: false,
@@ -2453,6 +2495,7 @@ function agentToDraft(agent: CustomAgent): AgentDraft {
 		skills: agent.skills,
 		contextFiles: agent.contextFiles,
 		subagents: agent.subagents,
+		mcpServers: agent.mcpServers,
 		builtinTools: agent.builtinTools,
 		autoContextFiles: agent.autoContextFiles ?? true,
 		runControl: agent.runControl,
@@ -2469,6 +2512,7 @@ function profileToDraft(profile: BootstrapData["agents"][number], catalog?: Agen
 		skills: profile.skills ?? (catalog?.skills.some((skill) => skill.name === "pi-agent-harness") ? ["pi-agent-harness"] : []),
 		contextFiles: profile.contextFiles ?? [],
 		subagents: profile.subagents ?? [],
+		mcpServers: profile.mcpServers ?? [],
 		builtinTools: profile.builtinTools ?? "default",
 		autoContextFiles: profile.autoContextFiles ?? true,
 		runControl: profile.runControl ?? false,
@@ -2805,6 +2849,91 @@ function SubagentDesigner({
 					</div>
 				))}
 				{draft.subagents.length === 0 ? <div className="text-xs text-slate-500 border border-dashed border-slate-700 rounded-sm p-3">No subagents configured</div> : null}
+			</div>
+		</DesignerPanel>
+	);
+}
+
+function McpServersDesigner({
+	servers,
+	draft,
+	setDraft,
+	readOnly,
+	saving,
+	descriptionDrafts,
+	setDescriptionDrafts,
+	onSaveDescription,
+}: {
+	servers?: AgentCatalog["mcpServers"];
+	draft: AgentDraft;
+	setDraft: Dispatch<SetStateAction<AgentDraft>>;
+	readOnly: boolean;
+	saving: boolean;
+	descriptionDrafts: Record<string, string>;
+	setDescriptionDrafts: Dispatch<SetStateAction<Record<string, string>>>;
+	onSaveDescription: (serverName: string) => Promise<void>;
+}) {
+	return (
+		<DesignerPanel title="MCP Servers">
+			<div className="grid grid-cols-2 max-[1100px]:grid-cols-1 gap-2">
+				{servers ? servers.map((server) => {
+					const descriptionValue = descriptionDrafts[server.name] ?? server.description ?? "";
+					const selectionDisabled = readOnly || !server.hasDescription;
+					const descriptionChanged = descriptionValue.trim() !== (server.description ?? "");
+					return (
+						<div key={server.name} className={`border rounded-sm bg-[#151f24] p-2 ${draft.mcpServers.includes(server.name) ? "border-[#11a4d4]" : server.hasDescription ? "border-slate-800" : "border-[#f59e0b]/60"}`}>
+							<button
+								type="button"
+								disabled={selectionDisabled}
+								onClick={() => setDraft((current) => ({ ...current, mcpServers: toggleName(current.mcpServers, server.name) }))}
+								className="grid w-full min-w-0 grid-cols-[18px_1fr] gap-2 text-left disabled:opacity-60"
+							>
+								<span className={`mt-0.5 h-4 w-4 border rounded-sm inline-flex items-center justify-center ${draft.mcpServers.includes(server.name) ? "border-[#11a4d4] text-[#11a4d4]" : "border-slate-600"}`}>
+									{draft.mcpServers.includes(server.name) ? <Check size={12} /> : null}
+								</span>
+								<span className="min-w-0">
+									<span className="flex items-center gap-2">
+										<Server size={13} className="text-[#11a4d4]" />
+										<span className="block text-sm truncate text-slate-200">{server.name}</span>
+									</span>
+									<span className="block font-mono text-[10px] mt-1 text-slate-600">
+										{server.transport}{server.descriptionSource ? ` / ${server.descriptionSource}` : ""}
+									</span>
+								</span>
+							</button>
+							{server.hasDescription ? (
+								<div className="mt-2 text-xs text-slate-400">{server.description}</div>
+							) : (
+								<div className="mt-2 flex items-center gap-2 text-xs text-amber-100">
+									<AlertTriangle size={13} />
+									Missing agent description
+								</div>
+							)}
+							{server.editable && !readOnly ? (
+								<div className="mt-2 grid grid-cols-[1fr_auto] gap-2">
+									<textarea
+										value={descriptionValue}
+										maxLength={480}
+										onChange={(event) => setDescriptionDrafts((current) => ({ ...current, [server.name]: event.target.value }))}
+										className="min-h-[58px] min-w-0 resize-y bg-[#0e1116] border border-slate-700 rounded-sm px-2 py-1 text-xs outline-none focus:border-[#11a4d4]"
+										placeholder="Agent-facing MCP description"
+									/>
+									<button
+										type="button"
+										disabled={saving || !descriptionChanged || !descriptionValue.trim()}
+										onClick={() => void onSaveDescription(server.name)}
+										title="Save MCP Description"
+										aria-label="Save MCP Description"
+										className="h-8 w-8 inline-flex items-center justify-center border border-[#11a4d4] rounded-sm text-[#11a4d4] bg-[#11a4d4]/10 disabled:opacity-50"
+									>
+										<Save size={13} />
+									</button>
+								</div>
+							) : null}
+						</div>
+					);
+				}) : <EmptyCatalog />}
+				{servers && servers.length === 0 ? <div className="text-xs text-slate-500 border border-dashed border-slate-700 rounded-sm p-3">No MCP servers configured</div> : null}
 			</div>
 		</DesignerPanel>
 	);

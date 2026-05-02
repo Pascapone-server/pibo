@@ -31,6 +31,7 @@ import type { PiboThinkingLevel } from "./thinking.js";
 import { getInstalledCliToolContextFile } from "../tools/registry.js";
 import { createCodexCompatToolDefinitions } from "../tools/codex-compat.js";
 import { createCodexCompatExtension } from "./codex-compat.js";
+import { getMcpAgentContextFile } from "../mcp/agent-context.js";
 
 export type PiboRuntimeOptions = {
 	cwd?: string;
@@ -218,6 +219,7 @@ export async function createPiboRuntime(options: PiboRuntimeOptions = {}): Promi
 	}) => {
 		const contextFiles = await loadContextFiles(runtimeCwd, profile.contextFiles);
 		const installedToolContextFile = getInstalledCliToolContextFile();
+		const mcpAgentContextFile = await getMcpAgentContextFile(profile.mcpServers);
 		const skillPaths = getEnabledSkillPaths(runtimeCwd, profile);
 		const customTools = getEnabledToolDefinitions(profile, options.subagentRunner, options.runToolController);
 		const services = await createAgentSessionServices({
@@ -231,7 +233,11 @@ export async function createPiboRuntime(options: PiboRuntimeOptions = {}): Promi
 				agentsFilesOverride: (base) => ({
 					agentsFiles: mergeContextFiles(
 						base.agentsFiles,
-						installedToolContextFile ? [...contextFiles, installedToolContextFile] : contextFiles,
+						[
+							...contextFiles,
+							...(installedToolContextFile ? [installedToolContextFile] : []),
+							...(mcpAgentContextFile ? [mcpAgentContextFile] : []),
+						],
 					),
 				}),
 			},

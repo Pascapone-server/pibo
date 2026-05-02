@@ -31,6 +31,15 @@ export interface BaseServerConfig {
   allowedTools?: string[];
   /** Glob patterns for tools to exclude (takes precedence over allowedTools) */
   disabledTools?: string[];
+  /** Pibo-owned metadata for agent-facing MCP discovery hints */
+  pibo?: McpServerMetadata;
+}
+
+export type McpDescriptionSource = 'user' | 'registry';
+
+export interface McpServerMetadata {
+  description?: string;
+  descriptionSource?: McpDescriptionSource;
 }
 
 /**

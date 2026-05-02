@@ -89,6 +89,17 @@ test("pibo mcp config can create, add, show, and remove servers", async () => {
 			args: ["server.js"],
 		});
 
+		await execFileAsync("node", [cliPath, "mcp", "config", "describe", "demo", "Run demo MCP tools."], { cwd });
+		const describedConfig = JSON.parse(await readFile(configPath, "utf-8"));
+		assert.deepEqual(describedConfig.mcpServers.demo, {
+			command: "node",
+			args: ["server.js"],
+			pibo: {
+				description: "Run demo MCP tools.",
+				descriptionSource: "user",
+			},
+		});
+
 		await execFileAsync("node", [cliPath, "mcp", "config", "remove", "demo"], { cwd });
 		const finalConfig = JSON.parse(await readFile(configPath, "utf-8"));
 		assert.deepEqual(finalConfig, { mcpServers: {} });

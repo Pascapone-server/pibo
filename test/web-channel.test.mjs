@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -92,6 +92,7 @@ async function startWebHostChannel(options = {}) {
 				contextFiles: [],
 				packages: [{ name: "pibo-run-control", description: "Run control", toolNames: ["pibo_run_start"] }],
 				piboTools: [],
+				mcpServers: [],
 			};
 		},
 		upsertProfile(profile) {
@@ -957,6 +958,88 @@ test("chat web app creates custom agents from the native capability catalog", as
 		assert.equal(listedPayload.agents[0].autoContextFiles, false);
 	} finally {
 		await channel.stop?.();
+	}
+});
+
+test("chat web app exposes and updates MCP server descriptions", async () => {
+	const cwd = mkdtempSync(join(tmpdir(), "pibo-web-mcp-"));
+	const configPath = join(cwd, "mcp_servers.json");
+	writeFileSync(configPath, `${JSON.stringify({
+		mcpServers: {
+			filesystem: {
+				command: "node",
+				args: ["server.js"],
+			},
+		},
+	}, null, 2)}\n`);
+	const previousConfigPath = process.env.MCP_CONFIG_PATH;
+	process.env.MCP_CONFIG_PATH = configPath;
+
+	const { channel, baseURL } = await startWebHostChannel({
+		auth: createFakeAuthService(),
+		profiles: [{ name: "pibo-minimal", aliases: ["minimal"] }],
+	});
+
+	try {
+		const catalog = await fetch(`${baseURL}/api/chat/agent-catalog`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(catalog.status, 200);
+		const catalogPayload = await catalog.json();
+		assert.deepEqual(catalogPayload.catalog.mcpServers, [
+			{
+				name: "filesystem",
+				transport: "stdio",
+				hasDescription: false,
+				editable: true,
+			},
+		]);
+
+		const patched = await fetch(`${baseURL}/api/chat/mcp-servers/filesystem/description`, {
+			method: "PATCH",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({ description: "Access project files through MCP." }),
+		});
+		assert.equal(patched.status, 200);
+		const patchedPayload = await patched.json();
+		assert.equal(patchedPayload.server.descriptionSource, "user");
+
+		const config = JSON.parse(readFileSync(configPath, "utf-8"));
+		assert.deepEqual(config.mcpServers.filesystem, {
+			command: "node",
+			args: ["server.js"],
+			pibo: {
+				description: "Access project files through MCP.",
+				descriptionSource: "user",
+			},
+		});
+
+		const createdAgent = await fetch(`${baseURL}/api/chat/agents`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({
+				displayName: "mcp-agent",
+				mcpServers: ["filesystem"],
+			}),
+		});
+		assert.equal(createdAgent.status, 201);
+		const agentPayload = await createdAgent.json();
+		assert.deepEqual(agentPayload.agent.mcpServers, ["filesystem"]);
+	} finally {
+		await channel.stop?.();
+		if (previousConfigPath === undefined) {
+			delete process.env.MCP_CONFIG_PATH;
+		} else {
+			process.env.MCP_CONFIG_PATH = previousConfigPath;
+		}
 	}
 });
 

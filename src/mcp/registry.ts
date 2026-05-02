@@ -21,6 +21,7 @@ export interface RegistryCommandOptions {
 interface RegistryEntry {
   name: string;
   description: string;
+  agentDescription?: string;
   runtime: PythonRuntimeSpec;
   serverArgs: string[];
   serverEnv?: Record<string, string>;
@@ -40,6 +41,9 @@ function buildServerConfig(entry: RegistryEntry): ServerConfig {
     command: paths.executablePath,
     args: entry.serverArgs,
     ...(entry.serverEnv ? { env: entry.serverEnv } : {}),
+    ...(entry.agentDescription
+      ? { pibo: { description: entry.agentDescription, descriptionSource: 'registry' as const } }
+      : {}),
   };
 }
 
