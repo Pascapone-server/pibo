@@ -32,7 +32,7 @@ import { createRunToolDefinitions, type PiboRunToolController } from "../runs/to
 import type { PiboThinkingLevel } from "./thinking.js";
 import { getInstalledCliToolContextFile } from "../tools/registry.js";
 import { createCodexCompatToolDefinitions } from "../tools/codex-compat.js";
-import { createCodexCompatExtension } from "./codex-compat.js";
+import { createCodexCompatExtension, normalizeCodexCompatWebSearchConfig } from "./codex-compat.js";
 import { getMcpAgentContextFile } from "../mcp/agent-context.js";
 import { createPiboSystemPromptTemplateExtension } from "./system-prompt-template.js";
 import { getActivePiboBasePromptPath } from "./base-prompt.js";
@@ -129,7 +129,9 @@ function getEnabledToolDefinitions(
 		? createSubagentToolDefinitions(profile.subagents, subagentRunner)
 		: [];
 	const codexCompatTools = codexCompatEnabled
-		? createCodexCompatToolDefinitions()
+		? createCodexCompatToolDefinitions({
+				includeWebSearch: profile.toolPackages.providerWebSearch !== true,
+			})
 		: [];
 	const yieldableTools = [
 		...(runControlBashTool ? [runControlBashTool] : []),
@@ -181,12 +183,7 @@ function getProfileExtensionFactories(
 		piboPromptTemplateExtension,
 		createCodexCompatExtension({
 			isChildSession: profile.parentSessionId !== undefined,
-			webSearch: profile.toolPackages.providerWebSearch === true
-				? {
-						external_web_access: true,
-						search_context_size: "medium",
-					}
-				: undefined,
+			webSearch: normalizeCodexCompatWebSearchConfig(profile.toolPackages),
 		}),
 		...(extensionFactories ?? []),
 	];
@@ -358,8 +355,8 @@ export async function inspectPiboProfile(options: PiboRuntimeOptions = {}): Prom
 			tools: profile.tools.map((tool) => ({
 				name: tool.name,
 				hasDefinition: Boolean(tool.definition),
-				registered: registeredToolNames.has(tool.name) || (tool.name === "web_search" && profile.toolPackages.providerWebSearch === true),
-				active: activeToolNames.has(tool.name) || (tool.name === "web_search" && profile.toolPackages.providerWebSearch === true),
+				registered: registeredToolNames.has(tool.name),
+				active: activeToolNames.has(tool.name),
 			})).concat(generatedTools),
 			subagents: profile.subagents.map((subagent) => {
 				const toolName = createSubagentToolName(subagent.name);

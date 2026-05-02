@@ -8,6 +8,10 @@ const CODEX_COMPAT_TOOL_NAMES = [
 	"web_search",
 	"view_image",
 ] as const;
+const CODEX_COMPAT_PROVIDER_TOOL_NAMES = [
+	"apply_patch",
+	"view_image",
+] as const;
 
 const CODEX_COMPAT_SUBAGENTS = ["default", "explorer", "worker"] as const;
 
@@ -70,6 +74,33 @@ export const piboCodexCompatPlugin = definePiboPlugin({
 					})
 					.addTools(context.getTools(CODEX_COMPAT_TOOL_NAMES))
 					.addSubagents(context.getSubagents(CODEX_COMPAT_SUBAGENTS))
+					.addContextFile(context.getContextFile(CODEX_BASE_PROMPT_CONTEXT_FILE_KEY))
+					.createSession();
+			},
+		});
+
+		api.registerProfile({
+			name: "codex-compat-openai-web",
+			aliases: ["codex-openai-web", "codex-web"],
+			description: "Codex-compatible Pibo profile with OpenAI Responses hosted web_search.",
+			create(context) {
+				return new InitialSessionContextBuilder("codex-compat-openai-web")
+					.withBuiltinToolNames(["read", "edit", "write"])
+					.withToolPackages({
+						codexCompat: true,
+						providerWebSearch: true,
+						providerWebSearchOptions: {
+							externalWebAccess: true,
+							searchContextSize: "medium",
+							includeSources: true,
+						},
+						runControl: true,
+					})
+					.addTools(context.getTools(CODEX_COMPAT_PROVIDER_TOOL_NAMES))
+					.addSubagents(context.getSubagents(CODEX_COMPAT_SUBAGENTS).map((subagent) => ({
+						...subagent,
+						targetProfile: "codex-compat-openai-web",
+					})))
 					.addContextFile(context.getContextFile(CODEX_BASE_PROMPT_CONTEXT_FILE_KEY))
 					.createSession();
 			},

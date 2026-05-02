@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import test from "node:test";
-import { buildCodexCompatSystemPrompt, addCodexCompatWebSearchProviderTool } from "../dist/core/codex-compat.js";
+import {
+	buildCodexCompatSystemPrompt,
+	addCodexCompatWebSearchProviderTool,
+	normalizeCodexCompatWebSearchConfig,
+} from "../dist/core/codex-compat.js";
 import { createPiboRuntime, inspectPiboProfile } from "../dist/core/runtime.js";
 import { createDefaultPiboPluginRegistry } from "../dist/plugins/builtin.js";
 
@@ -31,6 +35,33 @@ test("default registry exposes the codex-compatible profile and tool surface", (
 	assert.deepEqual(profile.contextFiles.map((contextFile) => contextFile.key), ["Codex Base Prompt"]);
 	assert.deepEqual(profile.contextFiles.map((contextFile) => basename(contextFile.path)), ["codex-base-prompt.md"]);
 	assert.equal(existsSync(profile.contextFiles[0].path), true);
+});
+
+test("default registry exposes the OpenAI web-search profile variant", () => {
+	const registry = createDefaultPiboPluginRegistry();
+	const profile = registry.createProfile("codex-web");
+
+	assert.equal(profile.profileName, "codex-compat-openai-web");
+	assert.equal(profile.builtinTools, "default");
+	assert.deepEqual(profile.builtinToolNames, ["read", "edit", "write"]);
+	assert.equal(profile.toolPackages.codexCompat, true);
+	assert.equal(profile.toolPackages.providerWebSearch, true);
+	assert.equal(profile.toolPackages.runControl, true);
+	assert.deepEqual(
+		profile.tools.map((tool) => tool.name),
+		[
+			"apply_patch",
+			"view_image",
+		],
+	);
+	assert.deepEqual(
+		profile.subagents.map((subagent) => [subagent.name, subagent.targetProfile]),
+		[
+			["default", "codex-compat-openai-web"],
+			["explorer", "codex-compat-openai-web"],
+			["worker", "codex-compat-openai-web"],
+		],
+	);
 });
 
 test("codex-compatible profile inspection shows active generated tools and local web search", async () => {
@@ -73,6 +104,18 @@ test("codex-compatible profile inspection shows active generated tools and local
 	assert.equal(contextFileNames.includes("codex-base-prompt.md"), true);
 	assert.equal(profile.contextFiles.some((contextFile) => /^(?:AGENTS|RULES|GLOSSARY)\.md$/.test(basename(contextFile.path))), false);
 	assert.equal(inspection.subagents.every((subagent) => subagent.active), true);
+});
+
+test("OpenAI web-search profile inspection does not expose local web_search", async () => {
+	const registry = createDefaultPiboPluginRegistry();
+	const profile = registry.createProfile("codex-compat-openai-web");
+	const inspection = await inspectPiboProfile({ profile, persistSession: false });
+	const activeTools = new Set(inspection.tools.filter((tool) => tool.active).map((tool) => tool.name));
+
+	assert.equal(activeTools.has("apply_patch"), true);
+	assert.equal(activeTools.has("view_image"), true);
+	assert.equal(activeTools.has("web_search"), false);
+	assert.equal(inspection.tools.some((tool) => tool.name === "web_search"), false);
 });
 
 test("codex-compatible profile uses Pibo run-control bash instead of exec tools", async () => {
@@ -131,25 +174,132 @@ test("codex-compatible prompt adds environment and child-agent framing without p
 	assert.doesNotMatch(prompt, /update_plan tool/);
 });
 
+test("codex-compatible prompt distinguishes provider web search", () => {
+	const prompt = buildCodexCompatSystemPrompt({
+		baseSystemPrompt: "Base prompt.",
+		cwd: "/repo",
+		shell: "bash",
+		currentDate: "2026-05-02",
+		timezone: "Europe/Berlin",
+		webSearchMode: "provider",
+	});
+
+	assert.match(prompt, /OpenAI Responses hosted web_search/);
+	assert.doesNotMatch(prompt, /normal Pibo tool/);
+});
+
+test("codex-compatible provider web-search options normalize boolean defaults", () => {
+	assert.deepEqual(
+		normalizeCodexCompatWebSearchConfig({ providerWebSearch: true }),
+		{
+			external_web_access: true,
+			search_context_size: "medium",
+			include_sources: true,
+		},
+	);
+	assert.equal(normalizeCodexCompatWebSearchConfig({ providerWebSearch: false }), undefined);
+});
+
+test("codex-compatible provider web-search options normalize cache-only, domains, and location", () => {
+	assert.deepEqual(
+		normalizeCodexCompatWebSearchConfig({
+			providerWebSearch: true,
+			providerWebSearchOptions: {
+				externalWebAccess: false,
+				searchContextSize: "high",
+				includeSources: false,
+				allowedDomains: [" example.com ", "https://invalid.example"],
+				blockedDomains: ["blocked.example", "bad/path"],
+				userLocation: {
+					country: " US ",
+					region: " New York ",
+					city: " New York ",
+					timezone: " America/New_York ",
+				},
+			},
+		}),
+		{
+			external_web_access: false,
+			search_context_size: "high",
+			include_sources: false,
+			filters: {
+				allowed_domains: ["example.com"],
+				blocked_domains: ["blocked.example"],
+			},
+			user_location: {
+				type: "approximate",
+				country: "US",
+				region: "New York",
+				city: "New York",
+				timezone: "America/New_York",
+			},
+		},
+	);
+});
+
 test("codex-compatible web search is serialized as a provider Responses tool", () => {
 	const payload = addCodexCompatWebSearchProviderTool(
 		{
 			model: "gpt-5.4",
 			input: [],
 			tools: [{ type: "function", name: "bash" }],
+			include: ["reasoning.encrypted_content"],
 		},
 		{
 			external_web_access: true,
 			search_context_size: "high",
-			filters: { allowed_domains: ["example.com"] },
+			include_sources: true,
+			filters: { allowed_domains: ["example.com"], blocked_domains: ["blocked.example"] },
 			user_location: { type: "approximate", country: "US", timezone: "America/New_York" },
 		},
 	);
 
+	assert.deepEqual(payload.include, ["reasoning.encrypted_content", "web_search_call.action.sources"]);
 	assert.deepEqual(payload.tools.at(-1), {
 		type: "web_search",
+		external_web_access: true,
 		search_context_size: "high",
 		user_location: { type: "approximate", country: "US", timezone: "America/New_York" },
-		filters: { allowed_domains: ["example.com"] },
+		filters: { allowed_domains: ["example.com"], blocked_domains: ["blocked.example"] },
 	});
+});
+
+test("codex-compatible web search supports cache-only provider mode", () => {
+	const payload = addCodexCompatWebSearchProviderTool(
+		{
+			model: "gpt-5.4",
+			input: [],
+			tools: [],
+		},
+		{
+			external_web_access: false,
+			search_context_size: "medium",
+			include_sources: false,
+		},
+	);
+
+	assert.deepEqual(payload.tools, [
+		{
+			type: "web_search",
+			external_web_access: false,
+			search_context_size: "medium",
+		},
+	]);
+	assert.equal("include" in payload, false);
+});
+
+test("codex-compatible web search injection does not duplicate existing provider tools", () => {
+	const input = {
+		model: "gpt-5.4",
+		input: [],
+		tools: [{ type: "web_search", external_web_access: true }],
+	};
+	const payload = addCodexCompatWebSearchProviderTool(input, {
+		external_web_access: true,
+		search_context_size: "medium",
+		include_sources: true,
+	});
+
+	assert.equal(payload, input);
+	assert.deepEqual(payload.tools, [{ type: "web_search", external_web_access: true }]);
 });

@@ -46,6 +46,23 @@ export type ToolPackageProfile = {
 	runControl?: boolean;
 	codexCompat?: boolean;
 	providerWebSearch?: boolean;
+	providerWebSearchOptions?: ProviderWebSearchOptions;
+};
+
+export type ProviderWebSearchOptions = {
+	externalWebAccess?: boolean;
+	searchContextSize?: "low" | "medium" | "high";
+	allowedDomains?: string[];
+	blockedDomains?: string[];
+	userLocation?: ProviderWebSearchUserLocation;
+	includeSources?: boolean;
+};
+
+export type ProviderWebSearchUserLocation = {
+	country?: string;
+	region?: string;
+	city?: string;
+	timezone?: string;
 };
 
 export type InitialSessionContextOptions = {

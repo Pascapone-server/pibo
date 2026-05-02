@@ -111,7 +111,11 @@ async function fetchWebSearchResults(
 	}
 }
 
-export function createCodexCompatToolDefinitions(): ToolDefinition[] {
+export type CodexCompatToolDefinitionOptions = {
+	includeWebSearch?: boolean;
+};
+
+export function createCodexCompatToolDefinitions(options: CodexCompatToolDefinitionOptions = {}): ToolDefinition[] {
 	const applyPatch = defineTool({
 		name: "apply_patch",
 		label: "Apply Patch",
@@ -216,7 +220,7 @@ export function createCodexCompatToolDefinitions(): ToolDefinition[] {
 
 	return [
 		applyPatch,
-		webSearch,
+		...(options.includeWebSearch === false ? [] : [webSearch]),
 		viewImage,
 	];
 }
