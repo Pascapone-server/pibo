@@ -7,6 +7,15 @@ export type ToolProfile = {
 	yieldable?: boolean;
 	pluginId?: string;
 	definition?: ToolDefinition;
+	providerTool?: ProviderToolProfile;
+};
+
+export type ProviderToolProfile = WebSearchProviderToolProfile;
+
+export type WebSearchProviderToolProfile = {
+	kind: "web_search";
+	provider: "openai";
+	options?: WebSearchProviderOptions;
 };
 
 export type SubagentProfile = {
@@ -45,20 +54,18 @@ export type BuiltinToolName = (typeof DEFAULT_BUILTIN_TOOL_NAMES)[number];
 export type ToolPackageProfile = {
 	runControl?: boolean;
 	codexCompat?: boolean;
-	providerWebSearch?: boolean;
-	providerWebSearchOptions?: ProviderWebSearchOptions;
 };
 
-export type ProviderWebSearchOptions = {
+export type WebSearchProviderOptions = {
 	externalWebAccess?: boolean;
 	searchContextSize?: "low" | "medium" | "high";
 	allowedDomains?: string[];
 	blockedDomains?: string[];
-	userLocation?: ProviderWebSearchUserLocation;
+	userLocation?: WebSearchProviderUserLocation;
 	includeSources?: boolean;
 };
 
-export type ProviderWebSearchUserLocation = {
+export type WebSearchProviderUserLocation = {
 	country?: string;
 	region?: string;
 	city?: string;

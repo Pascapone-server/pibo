@@ -19,6 +19,7 @@ import type {
 	ContextFileProfile,
 	BuiltinToolsMode,
 	InitialSessionContext,
+	ProviderToolProfile,
 	SkillProfile,
 	SubagentProfile,
 	ToolProfile,
@@ -62,6 +63,7 @@ export type PiboNativeToolInfo = {
 	hasDefinition: boolean;
 	pluginId?: string;
 	pluginName?: string;
+	providerTool?: ProviderToolProfile;
 };
 
 export type PiboSkillInfo = {

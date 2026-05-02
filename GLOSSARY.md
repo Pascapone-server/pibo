@@ -34,6 +34,12 @@ A profile registered from product state, such as a saved custom agent, rather th
 **Native Tool**:
 A Pibo plugin-registered tool that can be selected by profiles and exposed directly to the runtime.
 
+**Provider-Backed Native Tool**:
+A native tool whose stable Pibo tool name is selected by a profile, while the runtime exposes the capability through a model provider extension instead of a local Pi function tool definition.
+
+**Web Search Provider Adapter**:
+The product-level adapter that maps Pibo's stable `web_search` native tool to a concrete provider implementation, such as OpenAI Responses hosted web search.
+
 **Built-In Pi Tool**:
 A Pi Coding Agent engine tool, such as `read`, `bash`, `edit`, or `write`, that can be exposed through a profile without being registered as a Pibo native tool.
 

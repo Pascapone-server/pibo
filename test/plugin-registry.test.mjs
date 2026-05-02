@@ -36,6 +36,9 @@ test("default plugin registry builds profiles from registered resources", () => 
 		runYieldQa.subagents.map((subagent) => subagent.name),
 		["qa-researcher", "qa-reviewer"],
 	);
+	assert.ok(registry.getCapabilityCatalog().nativeTools.some((tool) => (
+		tool.name === "web_search" && tool.pluginId === "pibo.core" && tool.hasDefinition === false
+	)));
 	assert.deepEqual(registry.getChannels().map((channel) => channel.name), []);
 	assert.deepEqual(registry.getGatewayActionInfos(), [
 		{

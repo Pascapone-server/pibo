@@ -32,7 +32,8 @@ import { createRunToolDefinitions, type PiboRunToolController } from "../runs/to
 import type { PiboThinkingLevel } from "./thinking.js";
 import { getInstalledCliToolContextFile } from "../tools/registry.js";
 import { createCodexCompatToolDefinitions } from "../tools/codex-compat.js";
-import { createCodexCompatExtension, normalizeCodexCompatWebSearchConfig } from "./codex-compat.js";
+import { createCodexCompatExtension } from "./codex-compat.js";
+import { createWebSearchProviderExtension, isWebSearchProviderTool } from "../tools/web-search.js";
 import { getMcpAgentContextFile } from "../mcp/agent-context.js";
 import { createPiboSystemPromptTemplateExtension } from "./system-prompt-template.js";
 import { getActivePiboBasePromptPath } from "./base-prompt.js";
@@ -129,9 +130,7 @@ function getEnabledToolDefinitions(
 		? createSubagentToolDefinitions(profile.subagents, subagentRunner)
 		: [];
 	const codexCompatTools = codexCompatEnabled
-		? createCodexCompatToolDefinitions({
-				includeWebSearch: profile.toolPackages.providerWebSearch !== true,
-			})
+		? createCodexCompatToolDefinitions()
 		: [];
 	const yieldableTools = [
 		...(runControlBashTool ? [runControlBashTool] : []),
@@ -173,9 +172,14 @@ function getProfileExtensionFactories(
 	extensionFactories: readonly ExtensionFactory[] | undefined,
 ): ExtensionFactory[] | undefined {
 	const piboPromptTemplateExtension = createPiboSystemPromptTemplateExtension();
+	const providerToolExtensions = profile.tools
+		.filter((tool) => tool.enabled !== false)
+		.filter(isWebSearchProviderTool)
+		.map((tool) => createWebSearchProviderExtension(tool.providerTool));
 	if (profile.toolPackages.codexCompat !== true) {
 		return [
 			piboPromptTemplateExtension,
+			...providerToolExtensions,
 			...(extensionFactories ?? []),
 		];
 	}
@@ -183,8 +187,8 @@ function getProfileExtensionFactories(
 		piboPromptTemplateExtension,
 		createCodexCompatExtension({
 			isChildSession: profile.parentSessionId !== undefined,
-			webSearch: normalizeCodexCompatWebSearchConfig(profile.toolPackages),
 		}),
+		...providerToolExtensions,
 		...(extensionFactories ?? []),
 	];
 }
@@ -355,8 +359,8 @@ export async function inspectPiboProfile(options: PiboRuntimeOptions = {}): Prom
 			tools: profile.tools.map((tool) => ({
 				name: tool.name,
 				hasDefinition: Boolean(tool.definition),
-				registered: registeredToolNames.has(tool.name),
-				active: activeToolNames.has(tool.name),
+				registered: registeredToolNames.has(tool.name) || tool.providerTool !== undefined,
+				active: activeToolNames.has(tool.name) || tool.providerTool !== undefined,
 			})).concat(generatedTools),
 			subagents: profile.subagents.map((subagent) => {
 				const toolName = createSubagentToolName(subagent.name);

@@ -15,13 +15,11 @@ Those `web_search` calls returned DuckDuckGo-backed local search results with `r
 
 ## Corrective Change
 
-The visible Codex alias now resolves to the provider-backed profile:
+The visible Codex alias first moved to the provider-backed profile:
 
 - `codex` -> `codex-compat-openai-web`
-- local fallback -> `codex-compat-local-web`
-- local fallback aliases -> `codex-local`, `codex-duckduckgo`
 
-`codex-compat-openai-web` does not expose local `web_search` as an active native tool. It injects OpenAI Responses hosted `web_search` through the provider request extension. The local profile still exposes the DuckDuckGo-backed `web_search` tool for explicit fallback testing.
+That follow-up was then generalized: `web_search` is now registered by the core plugin as a native Pibo tool with an OpenAI provider adapter. The old DuckDuckGo-backed fallback and its `codex-local` / `codex-duckduckgo` profile aliases were removed.
 
 ## Verification
 
@@ -29,6 +27,5 @@ The visible Codex alias now resolves to the provider-backed profile:
 - `node --test test/codex-compat.test.mjs`
 - `npm run typecheck`
 - `npm run dev -- profile codex`
-- `npm run dev -- profile codex-local`
 
-`npm run dev -- profile codex` now reports `profileName: "codex-compat-openai-web"` and no active `web_search` native tool. `npm run dev -- profile codex-local` reports `profileName: "codex-compat-local-web"` and an active local `web_search` native tool.
+`npm run dev -- profile codex` now reports `profileName: "codex-compat-openai-web"` with an active provider-backed native `web_search` tool.

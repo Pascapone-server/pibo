@@ -9,6 +9,7 @@ import type {
 } from "../core/events.js";
 import { InitialSessionContextBuilder, type InitialSessionContext } from "../core/profiles.js";
 import { parsePiboThinkingLevel } from "../core/thinking.js";
+import { createWebSearchToolProfile } from "../tools/web-search.js";
 import { piboCodexCompatPlugin } from "./codex-compat.js";
 import { definePiboPlugin, PiboPluginRegistry } from "./registry.js";
 import type { PiboPlugin, PiboProfileBuildContext } from "./types.js";
@@ -78,6 +79,7 @@ export const piboCorePlugin = definePiboPlugin({
 			name: "pi-agent-harness",
 			path: ".codex/skills/pi-agent-harness/SKILL.md",
 		});
+		api.registerTool(createWebSearchToolProfile());
 		api.registerSubagents([
 			{
 				name: "qa-researcher",

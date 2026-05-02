@@ -228,6 +228,7 @@ export class PiboPluginRegistry {
 				hasDefinition: tool.definition !== undefined,
 				pluginId: tool.pluginId,
 				pluginName: tool.pluginId ? this.pluginNames.get(tool.pluginId) : undefined,
+				...(tool.providerTool ? { providerTool: tool.providerTool } : {}),
 			})),
 			skills: [...this.skills.values()].map((skill) => ({
 				name: skill.name,

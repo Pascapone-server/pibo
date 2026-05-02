@@ -4,11 +4,13 @@ import { basename } from "node:path";
 import test from "node:test";
 import {
 	buildCodexCompatSystemPrompt,
-	addCodexCompatWebSearchProviderTool,
-	normalizeCodexCompatWebSearchConfig,
 } from "../dist/core/codex-compat.js";
 import { createPiboRuntime, inspectPiboProfile } from "../dist/core/runtime.js";
 import { createDefaultPiboPluginRegistry } from "../dist/plugins/builtin.js";
+import {
+	addOpenAiWebSearchProviderTool,
+	normalizeOpenAiWebSearchConfig,
+} from "../dist/tools/web-search.js";
 
 test("default registry exposes the provider-backed codex-compatible profile", () => {
 	const registry = createDefaultPiboPluginRegistry();
@@ -18,15 +20,24 @@ test("default registry exposes the provider-backed codex-compatible profile", ()
 	assert.equal(profile.builtinTools, "default");
 	assert.deepEqual(profile.builtinToolNames, ["read", "edit", "write"]);
 	assert.equal(profile.toolPackages.codexCompat, true);
-	assert.equal(profile.toolPackages.providerWebSearch, true);
 	assert.equal(profile.toolPackages.runControl, true);
 	assert.deepEqual(
 		profile.tools.map((tool) => tool.name),
 		[
 			"apply_patch",
+			"web_search",
 			"view_image",
 		],
 	);
+	assert.deepEqual(profile.tools.find((tool) => tool.name === "web_search")?.providerTool, {
+		kind: "web_search",
+		provider: "openai",
+		options: {
+			externalWebAccess: true,
+			searchContextSize: "medium",
+			includeSources: true,
+		},
+	});
 	assert.deepEqual(
 		profile.subagents.map((subagent) => [subagent.name, subagent.targetProfile]),
 		[
@@ -40,37 +51,28 @@ test("default registry exposes the provider-backed codex-compatible profile", ()
 	assert.equal(existsSync(profile.contextFiles[0].path), true);
 });
 
-test("default registry exposes the local web-search fallback profile", () => {
+test("default registry exposes web_search as a core native tool", () => {
 	const registry = createDefaultPiboPluginRegistry();
-	const profile = registry.createProfile("codex-local");
+	const catalog = registry.getCapabilityCatalog();
+	const webSearch = catalog.nativeTools.find((tool) => tool.name === "web_search");
 
-	assert.equal(profile.profileName, "codex-compat-local-web");
-	assert.equal(profile.builtinTools, "default");
-	assert.deepEqual(profile.builtinToolNames, ["read", "edit", "write"]);
-	assert.equal(profile.toolPackages.codexCompat, true);
-	assert.equal(profile.toolPackages.providerWebSearch, false);
-	assert.equal(profile.toolPackages.runControl, true);
-	assert.deepEqual(
-		profile.tools.map((tool) => tool.name),
-		[
-			"apply_patch",
-			"web_search",
-			"view_image",
-		],
-	);
-	assert.deepEqual(
-		profile.subagents.map((subagent) => [subagent.name, subagent.targetProfile]),
-		[
-			["default", "codex-compat-local-web"],
-			["explorer", "codex-compat-local-web"],
-			["worker", "codex-compat-local-web"],
-		],
-	);
+	assert.ok(webSearch);
+	assert.equal(webSearch.pluginId, "pibo.core");
+	assert.equal(webSearch.hasDefinition, false);
+	assert.deepEqual(webSearch.providerTool, {
+		kind: "web_search",
+		provider: "openai",
+		options: {
+			externalWebAccess: true,
+			searchContextSize: "medium",
+			includeSources: true,
+		},
+	});
 });
 
-test("codex-compatible profile inspection shows active generated tools and local web search", async () => {
+test("codex-compatible profile inspection shows active generated tools and provider-backed web search", async () => {
 	const registry = createDefaultPiboPluginRegistry();
-	const profile = registry.createProfile("codex-compat-local-web");
+	const profile = registry.createProfile("codex");
 	const inspection = await inspectPiboProfile({ profile, persistSession: false });
 	const activeTools = new Set(inspection.tools.filter((tool) => tool.active).map((tool) => tool.name));
 
@@ -110,16 +112,16 @@ test("codex-compatible profile inspection shows active generated tools and local
 	assert.equal(inspection.subagents.every((subagent) => subagent.active), true);
 });
 
-test("OpenAI web-search profile inspection does not expose local web_search", async () => {
+test("provider-backed web_search is active without a local function definition", async () => {
 	const registry = createDefaultPiboPluginRegistry();
 	const profile = registry.createProfile("codex-compat-openai-web");
 	const inspection = await inspectPiboProfile({ profile, persistSession: false });
-	const activeTools = new Set(inspection.tools.filter((tool) => tool.active).map((tool) => tool.name));
+	const webSearch = inspection.tools.find((tool) => tool.name === "web_search");
 
-	assert.equal(activeTools.has("apply_patch"), true);
-	assert.equal(activeTools.has("view_image"), true);
-	assert.equal(activeTools.has("web_search"), false);
-	assert.equal(inspection.tools.some((tool) => tool.name === "web_search"), false);
+	assert.ok(webSearch);
+	assert.equal(webSearch.hasDefinition, false);
+	assert.equal(webSearch.registered, true);
+	assert.equal(webSearch.active, true);
 });
 
 test("codex-compatible profile uses Pibo run-control bash instead of exec tools", async () => {
@@ -178,48 +180,43 @@ test("codex-compatible prompt adds environment and child-agent framing without p
 	assert.doesNotMatch(prompt, /update_plan tool/);
 });
 
-test("codex-compatible prompt distinguishes provider web search", () => {
+test("codex-compatible prompt references selected web_search generically", () => {
 	const prompt = buildCodexCompatSystemPrompt({
 		baseSystemPrompt: "Base prompt.",
 		cwd: "/repo",
 		shell: "bash",
 		currentDate: "2026-05-02",
 		timezone: "Europe/Berlin",
-		webSearchMode: "provider",
 	});
 
-	assert.match(prompt, /OpenAI Responses hosted web_search/);
-	assert.doesNotMatch(prompt, /normal Pibo tool/);
+	assert.match(prompt, /When web_search is selected by the profile/);
+	assert.doesNotMatch(prompt, /OpenAI Responses hosted web_search/);
 });
 
-test("codex-compatible provider web-search options normalize boolean defaults", () => {
+test("OpenAI web-search provider options normalize boolean defaults", () => {
 	assert.deepEqual(
-		normalizeCodexCompatWebSearchConfig({ providerWebSearch: true }),
+		normalizeOpenAiWebSearchConfig(undefined),
 		{
 			external_web_access: true,
 			search_context_size: "medium",
 			include_sources: true,
 		},
 	);
-	assert.equal(normalizeCodexCompatWebSearchConfig({ providerWebSearch: false }), undefined);
 });
 
-test("codex-compatible provider web-search options normalize cache-only, domains, and location", () => {
+test("OpenAI web-search provider options normalize cache-only, domains, and location", () => {
 	assert.deepEqual(
-		normalizeCodexCompatWebSearchConfig({
-			providerWebSearch: true,
-			providerWebSearchOptions: {
-				externalWebAccess: false,
-				searchContextSize: "high",
-				includeSources: false,
-				allowedDomains: [" example.com ", "https://invalid.example"],
-				blockedDomains: ["blocked.example", "bad/path"],
-				userLocation: {
-					country: " US ",
-					region: " New York ",
-					city: " New York ",
-					timezone: " America/New_York ",
-				},
+		normalizeOpenAiWebSearchConfig({
+			externalWebAccess: false,
+			searchContextSize: "high",
+			includeSources: false,
+			allowedDomains: [" example.com ", "https://invalid.example"],
+			blockedDomains: ["blocked.example", "bad/path"],
+			userLocation: {
+				country: " US ",
+				region: " New York ",
+				city: " New York ",
+				timezone: " America/New_York ",
 			},
 		}),
 		{
@@ -241,8 +238,8 @@ test("codex-compatible provider web-search options normalize cache-only, domains
 	);
 });
 
-test("codex-compatible web search is serialized as a provider Responses tool", () => {
-	const payload = addCodexCompatWebSearchProviderTool(
+test("OpenAI web search is serialized as a provider Responses tool", () => {
+	const payload = addOpenAiWebSearchProviderTool(
 		{
 			model: "gpt-5.4",
 			input: [],
@@ -268,8 +265,8 @@ test("codex-compatible web search is serialized as a provider Responses tool", (
 	});
 });
 
-test("codex-compatible web search supports cache-only provider mode", () => {
-	const payload = addCodexCompatWebSearchProviderTool(
+test("OpenAI web search supports cache-only provider mode", () => {
+	const payload = addOpenAiWebSearchProviderTool(
 		{
 			model: "gpt-5.4",
 			input: [],
@@ -292,13 +289,13 @@ test("codex-compatible web search supports cache-only provider mode", () => {
 	assert.equal("include" in payload, false);
 });
 
-test("codex-compatible web search injection does not duplicate existing provider tools", () => {
+test("OpenAI web search injection does not duplicate existing provider tools", () => {
 	const input = {
 		model: "gpt-5.4",
 		input: [],
 		tools: [{ type: "web_search", external_web_access: true }],
 	};
-	const payload = addCodexCompatWebSearchProviderTool(input, {
+	const payload = addOpenAiWebSearchProviderTool(input, {
 		external_web_access: true,
 		search_context_size: "medium",
 		include_sources: true,
