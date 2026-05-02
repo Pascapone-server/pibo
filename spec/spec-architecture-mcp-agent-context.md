@@ -17,7 +17,7 @@ This specification covers:
 
 - Adding an MCP Servers section to the Agent Designer.
 - Adding agent-facing MCP server descriptions to `mcp_servers.json`.
-- Allowing descriptions to be set through the MCP CLI and the Chat Web UI.
+- Allowing descriptions to be set through the MCP CLI and the Chat Web Context area.
 - Persisting selected MCP servers on custom agents.
 - Injecting selected MCP server hints into the Pi Coding Agent context.
 
@@ -27,22 +27,24 @@ This specification does not require MCP tools to become native Pi custom tools. 
 
 - **MCP CLI**: The `pibo mcp` operator CLI for configuring, discovering, and calling external Model Context Protocol servers.
 - **MCP Server**: An external stdio or HTTP Model Context Protocol server configured in `mcp_servers.json`.
-- **MCP Server Description**: A short agent-facing text that explains why a configured MCP server exists and how an agent should begin discovery.
+- **MCP Tool Context**: A short agent-facing text that explains why a configured MCP server exists and how an agent should begin discovery.
 - **MCP Agent Context**: A generated context document injected into a runtime profile when a custom agent selects one or more described MCP servers.
 - **Agent Designer**: The Chat Web App UI used to create and edit custom agents.
+- **MCP Tools View**: The Chat Web Context area used to view and edit MCP tool context metadata.
 - **Custom Agent**: A user-owned profile stored in `.pibo/chat-agents.sqlite` and registered dynamically with the Pibo plugin registry.
 - **Registry Description**: An MCP server description supplied by a curated registry preset and treated as read-only in the UI.
 - **User Description**: An MCP server description supplied manually through CLI or UI and editable by the user.
 
 ## 3. Requirements, Constraints & Guidelines
 
-- **REQ-001**: The Agent Designer MUST expose an `MCP Servers` section near the existing profile capability sections, preferably directly below `Subagents`.
+- **REQ-001**: The Agent Designer MUST expose an `MCP Servers` selection section near the existing profile capability sections, preferably directly below `Subagents`.
 - **REQ-002**: The `MCP Servers` section MUST list configured MCP servers from the active `mcp_servers.json` lookup path.
 - **REQ-003**: The Agent Designer MUST show whether each MCP server has an agent-facing description.
 - **REQ-004**: A configured MCP server without a description MUST be visible with a warning or missing-description state.
-- **REQ-005**: A user MUST be able to add or edit a user-owned MCP server description from the Agent Designer.
+- **REQ-005**: The Agent Designer MUST NOT inline-edit MCP server descriptions; it MUST provide a navigation action to the Context area's `MCP Tools` view.
 - **REQ-006**: A user MUST be able to add or edit a user-owned MCP server description from the CLI.
-- **REQ-007**: Registry-provided MCP server descriptions MUST be read-only in the Agent Designer.
+- **REQ-007**: A user MUST be able to add or edit user-owned MCP tool context from the Chat Web Context area's `MCP Tools` view.
+- **REQ-007A**: Registry-provided MCP server descriptions MUST be read-only in the `MCP Tools` view.
 - **REQ-008**: Custom agents MUST persist selected MCP server names separately from native tools, skills, packages, context files, and subagents.
 - **REQ-009**: A runtime MUST inject MCP agent context only for MCP servers selected by the active custom agent.
 - **REQ-010**: A runtime MUST NOT inject MCP agent context for every configured MCP server by default.
@@ -159,12 +161,13 @@ The runtime skips selected servers that are missing from the active config or do
 ## 5. Acceptance Criteria
 
 - **AC-001**: Given a configured MCP server without `pibo.description`, when the Agent Designer loads, then the MCP server appears with a missing-description warning.
-- **AC-002**: Given a user enters a valid description in the Agent Designer, when it is saved, then the active MCP config contains the description with `descriptionSource: "user"`.
+- **AC-002**: Given a user opens an MCP server from the Agent Designer, when they click Edit, then Chat Web navigates to Context > MCP Tools with that server prioritized.
+- **AC-002A**: Given a user enters valid MCP tool context in Context > MCP Tools, when it is saved, then the active MCP config contains the description with `descriptionSource: "user"`.
 - **AC-003**: Given a user runs `pibo mcp config describe filesystem "..."`, when the command succeeds, then the description is written without changing command, args, env, cwd, url, headers, allowedTools, or disabledTools.
 - **AC-004**: Given a custom agent selects `filesystem`, when the custom agent is saved, then its stored definition includes `mcpServers: ["filesystem"]`.
 - **AC-005**: Given a custom agent selects a described MCP server, when a runtime is built for that profile, then `.pibo/context/enabled-mcp-servers.md` is present in loaded context files.
 - **AC-006**: Given a custom agent selects no MCP servers, when a runtime is built, then no MCP server context file is injected.
-- **AC-007**: Given an MCP server has `descriptionSource: "registry"`, when the Agent Designer renders it, then the description is visible but not editable.
+- **AC-007**: Given an MCP server has `descriptionSource: "registry"`, when Context > MCP Tools renders it, then the description is visible but not editable.
 - **AC-008**: Given the Agent Designer requests the MCP catalog, when MCP servers are configured, then the backend must not start stdio server processes or make HTTP MCP requests.
 
 ## 6. Test Automation Strategy
@@ -184,8 +187,9 @@ The runtime skips selected servers that are missing from the active config or do
 - **UI tests/manual checks**:
   - Agent Designer renders MCP Servers below Subagents.
   - Missing-description state is visible.
-  - User descriptions can be edited.
-  - Registry descriptions are read-only.
+  - Agent Designer MCP rows navigate to Context > MCP Tools for editing.
+  - User descriptions can be edited in Context > MCP Tools.
+  - Registry descriptions are read-only in Context > MCP Tools.
 
 Focused commands include:
 
@@ -210,7 +214,7 @@ Pibo currently has two separate external capability surfaces:
 - `pibo tools` manages curated external CLI tools and injects a short installed-tool context document into runtimes.
 - `pibo mcp` manages external MCP servers but does not currently expose them through profiles or runtime context.
 
-The desired integration is to make MCP visible and selectable in the same Agent Designer mental model as native tools, skills, packages, context files, and subagents. The model should receive only a short hint that an MCP server exists. This preserves the current operator-CLI boundary and avoids turning MCP servers into ungoverned runtime tool side channels.
+The desired integration is to make MCP visible and selectable in the same Agent Designer mental model as native tools, skills, packages, context files, and subagents, while editing the model-visible MCP text in the Context area alongside other context sources. The model should receive only a short hint that an MCP server exists. This preserves the current operator-CLI boundary and avoids turning MCP servers into ungoverned runtime tool side channels.
 
 Native MCP tool adapters can be designed later as a separate product capability with explicit policy, sandbox, permissions, and execution normalization.
 
@@ -250,7 +254,7 @@ Expected UI state:
 - Server is listed.
 - Transport is `stdio`.
 - Description is missing.
-- Edit/Add description action is available.
+- Edit/Add description action opens Context > MCP Tools.
 - Selection should be disabled or warning-gated until a description exists.
 
 ### Registry-Owned Description

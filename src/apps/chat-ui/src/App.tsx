@@ -32,7 +32,7 @@ import {
 	Wrench,
 	X,
 } from "lucide-react";
-import { deleteCustomAgent, deleteRoom, deleteSession, getBootstrap, getTrace, patchCustomAgent, patchMcpServerDescription, patchRoom, patchSession, postAction, postContextFile, postCustomAgent, postMessage, postRoom, postSession, signInWithGoogle, signOut, type SaveCustomAgentInput } from "./api";
+import { deleteCustomAgent, deleteRoom, deleteSession, getBootstrap, getTrace, patchCustomAgent, patchRoom, patchSession, postAction, postContextFile, postCustomAgent, postMessage, postRoom, postSession, signInWithGoogle, signOut, type SaveCustomAgentInput } from "./api";
 import type { AgentCatalog, BootstrapData, CustomAgent, CustomAgentSubagent, PiboRoom, PiboSessionTraceView, PiboTraceNode, PiboTraceOrderKey, PiboWebSessionNode } from "./types";
 import { adaptTrace } from "./tracing/adapt";
 import { type SessionBreadcrumbItem, type SessionDerivationLink, type SessionOriginLink } from "./tracing/TraceTimeline";
@@ -42,6 +42,7 @@ import { childTraceOrder, compareTraceOrder, liveTraceOrder } from "../../../sha
 import { ContextFilesView } from "./context/ContextFilesView";
 import { BasePromptView } from "./context/BasePromptView";
 import { PiboToolsView } from "./context/PiboToolsView";
+import { McpToolsView } from "./context/McpToolsView";
 import { getChatSessionView, listChatSessionViews } from "./session-views/registry";
 import { DEFAULT_CHAT_SESSION_VIEW_ID, type ChatSessionViewId } from "./session-views/types";
 import {
@@ -57,7 +58,7 @@ import {
 } from "./cache";
 
 type Area = "sessions" | "agents" | "context" | "settings";
-type ContextPanel = "context-files" | "base-prompt" | "pibo-tools";
+type ContextPanel = "context-files" | "base-prompt" | "pibo-tools" | "mcp-tools";
 
 export type ChatAppRoute =
 	| { area: "sessions"; roomId?: string; piboSessionId?: string; sessionViewId?: ChatSessionViewId }
@@ -159,6 +160,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 	const [creatingSession, setCreatingSession] = useState(false);
 	const [contextPanel, setContextPanel] = useState<ContextPanel>("context-files");
 	const [selectedContextFileKey, setSelectedContextFileKey] = useState<string | null>(null);
+	const [selectedMcpServerName, setSelectedMcpServerName] = useState<string | null>(null);
 	const [creatingRoom, setCreatingRoom] = useState(false);
 	const [deleteRoomTarget, setDeleteRoomTarget] = useState<PiboRoom | null>(null);
 	const [deleteRoomConfirmName, setDeleteRoomConfirmName] = useState("");
@@ -243,6 +245,22 @@ export function App({ route }: { route: ChatAppRoute }) {
 		setContextPanel("context-files");
 		navigateToRoute({ area: "context" });
 	}, [navigateToRoute]);
+
+	const openMcpToolsEditor = useCallback((name: string) => {
+		setSelectedMcpServerName(name);
+		setContextPanel("mcp-tools");
+		navigateToRoute({ area: "context" });
+	}, [navigateToRoute]);
+
+	const updateMcpServerInBootstrap = useCallback((server: AgentCatalog["mcpServers"][number]) => {
+		setBootstrap((current) => current ? {
+			...current,
+			agentCatalog: current.agentCatalog ? {
+				...current.agentCatalog,
+				mcpServers: current.agentCatalog.mcpServers.map((candidate) => candidate.name === server.name ? server : candidate),
+			} : current.agentCatalog,
+		} : current);
+	}, []);
 
 	const loadBootstrap = useCallback(async (
 		piboSessionId?: string,
@@ -688,6 +706,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 						onSelect={setPreferredNewSessionProfile}
 						onCreateSession={(profile) => void createSession(profile)}
 						onEditContextFile={openContextFileEditor}
+						onEditMcpServer={openMcpToolsEditor}
 						onAgentsChanged={() => void loadBootstrap(selectedPiboSessionId ?? undefined, showArchivedRef.current, selectedRoomId ?? undefined, { selectSession: false })}
 						creatingSession={creatingSession || selectedRoomArchived}
 					/>
@@ -854,6 +873,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 							activePanel={contextPanel}
 							onSelect={setContextPanel}
 							toolCount={bootstrap.agentCatalog?.piboTools.length ?? 0}
+							mcpServerCount={bootstrap.agentCatalog?.mcpServers.length ?? 0}
 						/>
 					) : (
 						<SettingsSidebar />
@@ -917,6 +937,12 @@ export function App({ route }: { route: ChatAppRoute }) {
 					{area === "context" ? (
 						contextPanel === "pibo-tools" ? (
 							<PiboToolsView tools={bootstrap.agentCatalog?.piboTools ?? []} />
+						) : contextPanel === "mcp-tools" ? (
+							<McpToolsView
+								servers={bootstrap.agentCatalog?.mcpServers ?? []}
+								selectedServerName={selectedMcpServerName}
+								onServerSaved={updateMcpServerInBootstrap}
+							/>
 						) : contextPanel === "base-prompt" ? (
 							<BasePromptView />
 						) : (
@@ -2112,6 +2138,7 @@ function AgentsView({
 	onSelect,
 	onCreateSession,
 	onEditContextFile,
+	onEditMcpServer,
 	onAgentsChanged,
 	creatingSession,
 }: {
@@ -2121,6 +2148,7 @@ function AgentsView({
 	onSelect: (profile: string) => void;
 	onCreateSession: (profile: string) => void;
 	onEditContextFile: (key: string) => void;
+	onEditMcpServer: (name: string) => void;
 	onAgentsChanged: () => void;
 	creatingSession: boolean;
 }) {
@@ -2131,7 +2159,6 @@ function AgentsView({
 	const [showArchivedAgents, setShowArchivedAgents] = useState(() => localStorage.getItem("pibo.chat.showArchivedAgents") === "true");
 	const [deleteConfirmName, setDeleteConfirmName] = useState("");
 	const [localError, setLocalError] = useState<string | null>(null);
-	const [mcpDescriptionDrafts, setMcpDescriptionDrafts] = useState<Record<string, string>>({});
 	const [newContextFileName, setNewContextFileName] = useState("");
 	const [newContextFileScope, setNewContextFileScope] = useState<"global" | "agent">("agent");
 	const designerAvailable = Boolean(catalog);
@@ -2255,33 +2282,6 @@ function AgentsView({
 				contextFiles: current.contextFiles.includes(file.key) ? current.contextFiles : [...current.contextFiles, file.key],
 			}));
 			setNewContextFileName("");
-			setLocalError(null);
-		} catch (caught) {
-			setLocalError(caught instanceof Error ? caught.message : String(caught));
-		} finally {
-			setSaving(false);
-		}
-	};
-
-	const saveMcpDescription = async (serverName: string) => {
-		if (!designerAvailable || readOnly) return;
-		const description = (mcpDescriptionDrafts[serverName] ?? "").trim();
-		if (!description) {
-			setLocalError("MCP server description is required.");
-			return;
-		}
-		setSaving(true);
-		try {
-			const response = await patchMcpServerDescription(serverName, description);
-			setCatalog((current) => current ? {
-				...current,
-				mcpServers: current.mcpServers.map((server) => server.name === response.server.name ? response.server : server),
-			} : current);
-			setMcpDescriptionDrafts((current) => {
-				const next = { ...current };
-				delete next[serverName];
-				return next;
-			});
 			setLocalError(null);
 		} catch (caught) {
 			setLocalError(caught instanceof Error ? caught.message : String(caught));
@@ -2486,10 +2486,7 @@ function AgentsView({
 						draft={draft}
 						setDraft={setDraft}
 						readOnly={readOnly}
-						saving={saving}
-						descriptionDrafts={mcpDescriptionDrafts}
-						setDescriptionDrafts={setMcpDescriptionDrafts}
-						onSaveDescription={saveMcpDescription}
+						onEditServer={onEditMcpServer}
 					/>
 					{archivedDraft && draft.profileName ? (
 						<DesignerPanel title="Delete Agent">
@@ -2802,10 +2799,12 @@ function ContextSidebar({
 	activePanel,
 	onSelect,
 	toolCount,
+	mcpServerCount,
 }: {
 	activePanel: ContextPanel;
 	onSelect: Dispatch<SetStateAction<ContextPanel>>;
 	toolCount: number;
+	mcpServerCount: number;
 }) {
 	return (
 		<div className="p-2">
@@ -2844,7 +2843,7 @@ function ContextSidebar({
 				<button
 					type="button"
 					onClick={() => onSelect("pibo-tools")}
-					className={`flex w-full items-center gap-2 border p-2 text-left ${
+					className={`mb-1 flex w-full items-center gap-2 border p-2 text-left ${
 						activePanel === "pibo-tools"
 							? "border-[#11a4d4] bg-[#11a4d4]/10"
 							: "border-slate-800 bg-[#151f24] hover:border-slate-700"
@@ -2857,6 +2856,24 @@ function ContextSidebar({
 					</div>
 					<span className="inline-flex min-w-6 items-center justify-center border border-slate-700 bg-[#101d22] px-1.5 py-0.5 text-[10px] font-mono text-slate-400">
 						{toolCount}
+					</span>
+				</button>
+				<button
+					type="button"
+					onClick={() => onSelect("mcp-tools")}
+					className={`flex w-full items-center gap-2 border p-2 text-left ${
+						activePanel === "mcp-tools"
+							? "border-[#11a4d4] bg-[#11a4d4]/10"
+							: "border-slate-800 bg-[#151f24] hover:border-slate-700"
+					}`}
+				>
+					<Server size={13} className="text-[#11a4d4]" />
+					<div className="min-w-0 flex-1">
+						<span className="block truncate text-sm text-slate-200">MCP Tools</span>
+						<span className="block truncate font-mono text-[10px] text-slate-500">mcp-context</span>
+					</div>
+					<span className="inline-flex min-w-6 items-center justify-center border border-slate-700 bg-[#101d22] px-1.5 py-0.5 text-[10px] font-mono text-slate-400">
+						{mcpServerCount}
 					</span>
 				</button>
 			</div>
@@ -3190,27 +3207,19 @@ function McpServersDesigner({
 	draft,
 	setDraft,
 	readOnly,
-	saving,
-	descriptionDrafts,
-	setDescriptionDrafts,
-	onSaveDescription,
+	onEditServer,
 }: {
 	servers?: AgentCatalog["mcpServers"];
 	draft: AgentDraft;
 	setDraft: Dispatch<SetStateAction<AgentDraft>>;
 	readOnly: boolean;
-	saving: boolean;
-	descriptionDrafts: Record<string, string>;
-	setDescriptionDrafts: Dispatch<SetStateAction<Record<string, string>>>;
-	onSaveDescription: (serverName: string) => Promise<void>;
+	onEditServer: (serverName: string) => void;
 }) {
 	return (
 		<DesignerPanel title="MCP Servers">
 			<div className="grid grid-cols-2 max-[1100px]:grid-cols-1 gap-2">
 				{servers ? servers.map((server) => {
-					const descriptionValue = descriptionDrafts[server.name] ?? server.description ?? "";
 					const selectionDisabled = readOnly || !server.hasDescription;
-					const descriptionChanged = descriptionValue.trim() !== (server.description ?? "");
 					return (
 						<div key={server.name} className={`border rounded-sm bg-[#151f24] p-2 ${draft.mcpServers.includes(server.name) ? "border-[#11a4d4]" : server.hasDescription ? "border-slate-800" : "border-[#f59e0b]/60"}`}>
 							<button
@@ -3238,27 +3247,18 @@ function McpServersDesigner({
 									Missing agent description
 								</div>
 							)}
-							{server.editable && !readOnly ? (
-								<div className="mt-2 grid grid-cols-[1fr_auto] gap-2">
-									<textarea
-										value={descriptionValue}
-										maxLength={480}
-										onChange={(event) => setDescriptionDrafts((current) => ({ ...current, [server.name]: event.target.value }))}
-										className="min-h-[58px] min-w-0 resize-y bg-[#0e1116] border border-slate-700 rounded-sm px-2 py-1 text-xs outline-none focus:border-[#11a4d4]"
-										placeholder="Agent-facing MCP description"
-									/>
-									<button
-										type="button"
-										disabled={saving || !descriptionChanged || !descriptionValue.trim()}
-										onClick={() => void onSaveDescription(server.name)}
-										title="Save MCP Description"
-										aria-label="Save MCP Description"
-										className="h-8 w-8 inline-flex items-center justify-center border border-[#11a4d4] rounded-sm text-[#11a4d4] bg-[#11a4d4]/10 disabled:opacity-50"
-									>
-										<Save size={13} />
-									</button>
-								</div>
-							) : null}
+							<div className="mt-2 flex justify-end">
+								<button
+									type="button"
+									onClick={() => onEditServer(server.name)}
+									title="Edit MCP Tool Context"
+									aria-label="Edit MCP Tool Context"
+									className="inline-flex h-6 items-center justify-center gap-1 border border-[#11a4d4]/70 px-1.5 text-[10px] uppercase tracking-wider text-[#7dd3fc] hover:border-[#11a4d4] hover:text-sky-100"
+								>
+									<Edit3 size={12} />
+									Edit
+								</button>
+							</div>
 						</div>
 					);
 				}) : <EmptyCatalog />}

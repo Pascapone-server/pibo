@@ -154,6 +154,9 @@ The `pibo mcp` operator CLI for configuring, discovering, and calling external M
 **MCP Server**:
 An external stdio or HTTP Model Context Protocol server configured outside the Pibo plugin runtime.
 
+**MCP Tool Context**:
+The short model-visible description for a configured MCP server, edited through the Context area's MCP Tools view or `pibo mcp config describe` and injected only when a profile selects that server.
+
 **MCP Registry**:
 A curated list of optional MCP server presets that can be installed into the normal MCP config path.
 

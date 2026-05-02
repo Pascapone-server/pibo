@@ -79,15 +79,17 @@ This preserves the existing server entry and writes only Pibo-owned metadata:
 }
 ```
 
-Descriptions are capped at 480 characters. Registry-provided descriptions use `descriptionSource: "registry"` and are read-only in the Agent Designer.
+Descriptions are capped at 480 characters. Registry-provided descriptions use `descriptionSource: "registry"` and are read-only in the Chat Web Context area's `MCP Tools` view.
 
 ## Agent Designer Context
 
 The Chat Web Agent Designer lists configured MCP servers in the `MCP Servers` section below `Subagents`.
 
 - Servers without `pibo.description` are visible with a missing-description state and cannot be selected.
-- User-owned descriptions can be edited from the Agent Designer or the CLI.
-- Registry descriptions are visible but not editable.
+- The Agent Designer only selects MCP servers for a custom agent; it does not inline-edit descriptions.
+- Each MCP server row has an edit action that opens Context > MCP Tools.
+- User-owned descriptions can be edited from Context > MCP Tools or the CLI.
+- Registry descriptions are visible in Context > MCP Tools but not editable.
 - Selected MCP server names are stored on custom agents separately from native tools, skills, context files, packages, and subagents.
 
 At runtime, selected described servers are injected as a generated context document:
