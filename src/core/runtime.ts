@@ -301,6 +301,7 @@ export async function createPiboRuntime(options: PiboRuntimeOptions = {}): Promi
 			services,
 			sessionManager: runtimeSessionManager,
 			sessionStartEvent,
+			model: resolveProfileModel(profile, services),
 			thinkingLevel: options.thinkingLevel,
 			customTools,
 			noTools: profile.builtinTools === "disabled" ? "builtin" : undefined,
@@ -330,6 +331,28 @@ export async function createPiboRuntime(options: PiboRuntimeOptions = {}): Promi
 		agentDir,
 		sessionManager,
 	});
+}
+
+function resolveProfileModel(
+	profile: InitialSessionContext,
+	services: Awaited<ReturnType<typeof createAgentSessionServices>>,
+) {
+	if (!profile.model) return undefined;
+
+	const model = services.modelRegistry.find(profile.model.provider, profile.model.id);
+	if (!model) {
+		throw new Error(
+			`Profile "${profile.profileName}" requests unknown model ${profile.model.provider}/${profile.model.id}.`,
+		);
+	}
+
+	if (!services.modelRegistry.hasConfiguredAuth(model)) {
+		throw new Error(
+			`Profile "${profile.profileName}" requires configured auth for ${profile.model.provider}/${profile.model.id}.`,
+		);
+	}
+
+	return model;
 }
 
 export async function inspectPiboProfile(options: PiboRuntimeOptions = {}): Promise<PiboProfileInspection> {

@@ -114,6 +114,16 @@ export const piboCorePlugin = definePiboPlugin({
 					.createSession();
 			},
 		});
+		api.registerProfile({
+			name: "pibo-kimi-coding",
+			aliases: ["kimi", "kimi-coding"],
+			description: "Pibo profile pinned to Kimi For Coding. Requires KIMI_API_KEY or configured kimi-coding auth.",
+			create(context) {
+				return createBaseProfileBuilder("pibo-kimi-coding", context)
+					.withModel({ provider: "kimi-coding", id: "kimi-for-coding" })
+					.createSession();
+			},
+		});
 		api.registerGatewayAction({
 			name: "status",
 			description: "Return current session status.",
