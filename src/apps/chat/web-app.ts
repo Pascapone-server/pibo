@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { extname, isAbsolute, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 import type { PiboJsonObject, PiboJsonValue, PiboOutputEvent } from "../../core/events.js";
 import { PiboWebHttpError, readJsonBody, responseHtml, responseJson } from "../../web/http.js";
@@ -158,7 +159,7 @@ type PiboRoomNodeWithUnread = PiboRoom & {
 	children: PiboRoomNodeWithUnread[];
 };
 
-const CHAT_UI_DIST_DIR = resolve(process.cwd(), "dist/apps/chat-ui");
+const CHAT_UI_DIST_DIR = resolve(fileURLToPath(new URL("../../../dist/apps/chat-ui", import.meta.url)));
 const compressedAssetCache = new Map<string, Uint8Array>();
 const TRACE_CACHE_MAX_ENTRIES = 128;
 
