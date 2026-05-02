@@ -63,12 +63,13 @@ import {
 
 type Area = "sessions" | "agents" | "context" | "settings";
 type ContextPanel = "context-files" | "base-prompt" | "compaction-prompt" | "pibo-tools" | "mcp-tools";
+type SettingsPanel = "general" | "pi-packages";
 
 export type ChatAppRoute =
 	| { area: "sessions"; roomId?: string; piboSessionId?: string; sessionViewId?: ChatSessionViewId }
 	| { area: "agents" }
 	| { area: "context" }
-	| { area: "settings" };
+	| { area: "settings"; panel?: SettingsPanel };
 
 type ForkActionResponse = {
 	result: {
@@ -148,6 +149,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 	const routeRoomId = route.area === "sessions" ? route.roomId : undefined;
 	const routePiboSessionId = route.area === "sessions" ? route.piboSessionId : undefined;
 	const routeSessionViewId = route.area === "sessions" ? route.sessionViewId : undefined;
+	const settingsPanel: SettingsPanel = route.area === "settings" ? route.panel ?? "general" : "general";
 	const [bootstrap, setBootstrap] = useState<BootstrapData | null>(null);
 	const [selectedPiboSessionId, setSelectedPiboSessionId] = useState<string | null>(null);
 	const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
@@ -203,7 +205,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 				return;
 			}
 			if (target.area === "settings") {
-				void navigate({ to: "/settings", replace });
+				void navigate({ to: target.panel === "pi-packages" ? "/settings/pi-packages" : "/settings", replace });
 				return;
 			}
 			if (target.roomId && target.piboSessionId) {
@@ -265,6 +267,34 @@ export function App({ route }: { route: ChatAppRoute }) {
 			} : current.agentCatalog,
 		} : current);
 	}, []);
+
+	const upsertPiPackageInBootstrap = useCallback((pkg: PiPackageCatalogItem) => {
+		const applyPackage = (current: BootstrapData | null | undefined) => {
+			if (!current?.agentCatalog) return current;
+			const others = current.agentCatalog.piPackages.filter((candidate) => candidate.id !== pkg.id);
+			return {
+				...current,
+				agentCatalog: {
+					...current.agentCatalog,
+					piPackages: [...others, pkg].sort((left, right) => left.name.localeCompare(right.name)),
+				},
+			};
+		};
+		setBootstrap((current) => applyPackage(current) ?? null);
+		queryClient.setQueriesData<BootstrapData>({ queryKey: ["chat", "bootstrap"] }, (current) => applyPackage(current) ?? undefined);
+	}, [queryClient]);
+
+	const removePiPackageFromBootstrap = useCallback((pkg: PiPackageCatalogItem) => {
+		const applyRemoval = (current: BootstrapData | null | undefined) => current?.agentCatalog ? {
+			...current,
+			agentCatalog: {
+				...current.agentCatalog,
+				piPackages: current.agentCatalog.piPackages.filter((candidate) => candidate.id !== pkg.id),
+			},
+		} : current;
+		setBootstrap((current) => applyRemoval(current) ?? null);
+		queryClient.setQueriesData<BootstrapData>({ queryKey: ["chat", "bootstrap"] }, (current) => applyRemoval(current) ?? undefined);
+	}, [queryClient]);
 
 	const loadBootstrap = useCallback(async (
 		piboSessionId?: string,
@@ -888,7 +918,11 @@ export function App({ route }: { route: ChatAppRoute }) {
 							mcpServerCount={bootstrap.agentCatalog?.mcpServers.length ?? 0}
 						/>
 					) : (
-						<SettingsSidebar />
+						<SettingsSidebar
+							activePanel={settingsPanel}
+							onSelect={(panel) => navigateToRoute({ area: "settings", panel })}
+							piPackageCount={bootstrap.agentCatalog?.piPackages.length ?? 0}
+						/>
 					)}
 				</aside>
 
@@ -964,10 +998,14 @@ export function App({ route }: { route: ChatAppRoute }) {
 								)
 							) : (
 								<SettingsView
+									activePanel={settingsPanel}
 									showThinking={showThinking}
 									setShowThinking={setShowThinking}
 									expandThinking={expandThinking}
 									setExpandThinking={setExpandThinking}
+									piPackages={bootstrap.agentCatalog?.piPackages}
+									onPiPackageChanged={upsertPiPackageInBootstrap}
+									onPiPackageRemoved={removePiPackageFromBootstrap}
 								/>
 							)}
 						</main>
@@ -2482,8 +2520,6 @@ function AgentsView({
 						packages={catalog?.piPackages}
 						draft={draft}
 						setDraft={setDraft}
-						setCatalog={setCatalog}
-						designerAvailable={designerAvailable}
 						readOnly={readOnly}
 					/>
 					<DesignerPanel title="Context Files">
@@ -2819,17 +2855,51 @@ function AgentSidebarRow({
 	);
 }
 
-function SettingsSidebar() {
+function SettingsSidebar({
+	activePanel,
+	onSelect,
+	piPackageCount,
+}: {
+	activePanel: SettingsPanel;
+	onSelect: (panel: SettingsPanel) => void;
+	piPackageCount: number;
+}) {
 	return (
 		<div className="p-2">
 			<div className="mb-4">
 				<div className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Settings</div>
 				<button
 					type="button"
-					className="w-full mb-1 border border-[#11a4d4] bg-[#11a4d4]/10 rounded-sm text-left p-2"
+					onClick={() => onSelect("general")}
+					className={`mb-1 flex w-full items-center gap-2 border p-2 text-left ${
+						activePanel === "general"
+							? "border-[#11a4d4] bg-[#11a4d4]/10"
+							: "border-slate-800 bg-[#151f24] hover:border-slate-700"
+					}`}
 				>
-					<span className="block text-sm truncate text-slate-200">General</span>
-					<span className="block text-[10px] font-mono truncate text-slate-500">browser-local</span>
+					<Settings size={13} className="text-[#11a4d4]" />
+					<div className="min-w-0">
+						<span className="block truncate text-sm text-slate-200">General</span>
+						<span className="block truncate font-mono text-[10px] text-slate-500">browser-local</span>
+					</div>
+				</button>
+				<button
+					type="button"
+					onClick={() => onSelect("pi-packages")}
+					className={`flex w-full items-center gap-2 border p-2 text-left ${
+						activePanel === "pi-packages"
+							? "border-[#11a4d4] bg-[#11a4d4]/10"
+							: "border-slate-800 bg-[#151f24] hover:border-slate-700"
+					}`}
+				>
+					<Layers size={13} className="text-[#11a4d4]" />
+					<div className="min-w-0 flex-1">
+						<span className="block truncate text-sm text-slate-200">Pi Packages</span>
+						<span className="block truncate font-mono text-[10px] text-slate-500">runtime-packages</span>
+					</div>
+					<span className="inline-flex min-w-6 items-center justify-center border border-slate-700 bg-[#101d22] px-1.5 py-0.5 text-[10px] font-mono text-slate-400">
+						{piPackageCount}
+					</span>
 				</button>
 			</div>
 		</div>
@@ -3088,86 +3158,17 @@ function PiPackagesDesigner({
 	packages,
 	draft,
 	setDraft,
-	setCatalog,
-	designerAvailable,
 	readOnly,
 }: {
 	packages?: PiPackageCatalogItem[];
 	draft: AgentDraft;
 	setDraft: Dispatch<SetStateAction<AgentDraft>>;
-	setCatalog: Dispatch<SetStateAction<AgentCatalog | null>>;
-	designerAvailable: boolean;
 	readOnly: boolean;
 }) {
-	const [source, setSource] = useState("");
-	const [busy, setBusy] = useState<string | null>(null);
-	const [error, setError] = useState<string | null>(null);
 	const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
-	const packageList = packages ?? [];
+	const allPackages = packages ?? [];
+	const packageList = allPackages.filter(isSelectablePiPackage);
 	const selectedCount = packageList.filter((pkg) => isPiPackageSelected(draft.piPackages, pkg)).length;
-	const disabledCount = packageList.filter((pkg) => !pkg.enabled).length;
-
-	const upsertCatalogPackage = (pkg: PiPackageCatalogItem) => {
-		setCatalog((current) => {
-			if (!current) return current;
-			const others = current.piPackages.filter((item) => item.id !== pkg.id);
-			return { ...current, piPackages: [...others, pkg].sort((left, right) => left.name.localeCompare(right.name)) };
-		});
-	};
-
-	const addPackage = async () => {
-		if (!designerAvailable || busy) return;
-		setBusy("add");
-		try {
-			const pkg = await postPiPackage(source);
-			upsertCatalogPackage(pkg);
-			setSource("");
-			setExpanded((current) => new Set(current).add(pkg.id));
-			setError(null);
-		} catch (caught) {
-			setError(caught instanceof Error ? caught.message : String(caught));
-		} finally {
-			setBusy(null);
-		}
-	};
-
-	const toggleEnabled = async (pkg: PiPackageCatalogItem) => {
-		if (!designerAvailable || busy) return;
-		setBusy(`${pkg.id}:enabled`);
-		try {
-			const next = await patchPiPackage(pkg.id, { enabled: !pkg.enabled });
-			upsertCatalogPackage(next);
-			setError(null);
-		} catch (caught) {
-			setError(caught instanceof Error ? caught.message : String(caught));
-		} finally {
-			setBusy(null);
-		}
-	};
-
-	const unregisterPackage = async (pkg: PiPackageCatalogItem) => {
-		if (!designerAvailable || busy) return;
-		if (!window.confirm(`Unregister Pi package "${pkg.name}"?`)) return;
-		setBusy(`${pkg.id}:delete`);
-		try {
-			await deletePiPackage(pkg.id);
-			setCatalog((current) => current ? { ...current, piPackages: current.piPackages.filter((item) => item.id !== pkg.id) } : current);
-			setDraft((current) => ({
-				...current,
-				piPackages: current.piPackages.filter((name) => name !== pkg.id && name !== pkg.name),
-			}));
-			setExpanded((current) => {
-				const next = new Set(current);
-				next.delete(pkg.id);
-				return next;
-			});
-			setError(null);
-		} catch (caught) {
-			setError(caught instanceof Error ? caught.message : String(caught));
-		} finally {
-			setBusy(null);
-		}
-	};
 
 	const toggleExpanded = (id: string) => {
 		setExpanded((current) => {
@@ -3180,24 +3181,8 @@ function PiPackagesDesigner({
 
 	return (
 		<DesignerPanel title="Pi Packages">
-			<div className="grid gap-2">
-				<div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-					<input
-						value={source}
-						disabled={!designerAvailable || busy === "add"}
-						onChange={(event) => setSource(event.target.value)}
-						className="min-w-0 bg-[#0e1116] border border-slate-700 rounded-sm px-3 py-2 text-sm outline-none focus:border-[#11a4d4] disabled:opacity-60"
-						placeholder="https://pi.dev/packages/package-name"
-					/>
-					<button type="button" disabled={!designerAvailable || busy === "add" || !source.trim()} onClick={() => void addPackage()} title="Add Pi Package" aria-label="Add Pi Package" className="h-9 w-9 inline-flex items-center justify-center border border-[#11a4d4] rounded-sm text-[#11a4d4] bg-[#11a4d4]/10 disabled:opacity-50">
-						<Plus size={14} />
-					</button>
-				</div>
-				<div className="text-[11px] text-slate-500">Extensions execute code in the Pi runtime. Review package source before adding it.</div>
-				{error ? <div className="border border-red-500/60 bg-red-500/10 text-red-200 px-3 py-2 text-sm rounded-sm">{error}</div> : null}
-				<div className="font-mono text-[10px] uppercase tracking-wider text-slate-500">
-					{packageList.length} registered / {selectedCount} selected / {disabledCount} disabled
-				</div>
+			<div className="font-mono text-[10px] uppercase tracking-wider text-slate-500">
+				{packageList.length} available / {selectedCount} selected / {allPackages.length} registered
 			</div>
 			{packages ? (
 				packageList.length ? (
@@ -3209,19 +3194,17 @@ function PiPackagesDesigner({
 								selected={isPiPackageSelected(draft.piPackages, pkg)}
 								readOnly={readOnly}
 								expanded={expanded.has(pkg.id)}
-								busy={busy?.startsWith(`${pkg.id}:`) ?? false}
+								busy={false}
 								onToggleSelected={() => {
-									if (!readOnly && (pkg.enabled || isPiPackageSelected(draft.piPackages, pkg))) {
+									if (!readOnly) {
 										setDraft((current) => ({ ...current, piPackages: togglePiPackageSelection(current.piPackages, pkg) }));
 									}
 								}}
 								onToggleExpanded={() => toggleExpanded(pkg.id)}
-								onToggleEnabled={() => void toggleEnabled(pkg)}
-								onUnregister={() => void unregisterPackage(pkg)}
 							/>
 						))}
 					</div>
-				) : <EmptyCatalog message="No Pi packages registered" />
+				) : <EmptyCatalog message="No installed and enabled Pi packages available. Manage Pi Packages in Settings." />
 			) : <EmptyCatalog />}
 		</DesignerPanel>
 	);
@@ -3245,8 +3228,8 @@ function PiPackageCard({
 	busy: boolean;
 	onToggleSelected: () => void;
 	onToggleExpanded: () => void;
-	onToggleEnabled: () => void;
-	onUnregister: () => void;
+	onToggleEnabled?: () => void;
+	onUnregister?: () => void;
 }) {
 	const hasErrors = pkg.diagnostics.some((diagnostic) => diagnostic.type === "error");
 	const selectable = !readOnly && (pkg.enabled || selected);
@@ -3268,12 +3251,16 @@ function PiPackageCard({
 					<button type="button" onClick={onToggleExpanded} title={expanded ? "Hide Details" : "Show Details"} aria-label={expanded ? "Hide Details" : "Show Details"} className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]">
 						{expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
 					</button>
-					<button type="button" disabled={busy} onClick={onToggleEnabled} title={pkg.enabled ? "Disable Package" : "Enable Package"} aria-label={pkg.enabled ? "Disable Package" : "Enable Package"} className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4] disabled:opacity-50">
-						{pkg.enabled ? <PowerOff size={13} /> : <Power size={13} />}
-					</button>
-					<button type="button" disabled={busy} onClick={onUnregister} title="Unregister Package" aria-label="Unregister Package" className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-red-400 hover:text-red-300 disabled:opacity-50">
-						<Trash2 size={13} />
-					</button>
+					{onToggleEnabled ? (
+						<button type="button" disabled={busy} onClick={onToggleEnabled} title={pkg.enabled ? "Disable Package" : "Enable Package"} aria-label={pkg.enabled ? "Disable Package" : "Enable Package"} className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4] disabled:opacity-50">
+							{pkg.enabled ? <PowerOff size={13} /> : <Power size={13} />}
+						</button>
+					) : null}
+					{onUnregister ? (
+						<button type="button" disabled={busy} onClick={onUnregister} title="Unregister Package" aria-label="Unregister Package" className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-red-400 hover:text-red-300 disabled:opacity-50">
+							<Trash2 size={13} />
+						</button>
+					) : null}
 				</div>
 			</div>
 			{expanded ? <PiPackageDetails pkg={pkg} /> : null}
@@ -3461,6 +3448,10 @@ function togglePiPackageSelection(selected: string[], pkg: PiPackageCatalogItem)
 	return [...selected, pkg.id];
 }
 
+function isSelectablePiPackage(pkg: PiPackageCatalogItem): boolean {
+	return pkg.enabled && pkg.installStatus === "installed";
+}
+
 function piPackageMeta(pkg: AgentCatalog["piPackages"][number]): string {
 	const resources = pkg.resourceTypes.length ? pkg.resourceTypes.join(" + ") : "resources pending";
 	const version = pkg.version ? `v${pkg.version}` : pkg.installStatus;
@@ -3602,16 +3593,36 @@ function McpServersDesigner({
 }
 
 function SettingsView({
+	activePanel,
 	showThinking,
 	setShowThinking,
 	expandThinking,
 	setExpandThinking,
+	piPackages,
+	onPiPackageChanged,
+	onPiPackageRemoved,
 }: {
+	activePanel: SettingsPanel;
 	showThinking: boolean;
 	setShowThinking: (value: boolean) => void;
 	expandThinking: boolean;
 	setExpandThinking: (value: boolean) => void;
+	piPackages?: PiPackageCatalogItem[];
+	onPiPackageChanged: (pkg: PiPackageCatalogItem) => void;
+	onPiPackageRemoved: (pkg: PiPackageCatalogItem) => void;
 }) {
+	if (activePanel === "pi-packages") {
+		return (
+			<div className="p-6 overflow-auto">
+				<h1 className="text-sm font-bold uppercase tracking-wider mb-4 flex items-center gap-2">
+					<Layers size={16} />
+					Pi Packages
+				</h1>
+				<PiPackagesSettings packages={piPackages} onPackageChanged={onPiPackageChanged} onPackageRemoved={onPiPackageRemoved} />
+			</div>
+		);
+	}
+
 	return (
 		<div className="p-6 overflow-auto">
 			<h1 className="text-sm font-bold uppercase tracking-wider mb-4 flex items-center gap-2">
@@ -3639,6 +3650,169 @@ function SettingsView({
 					}}
 				/>
 			</DesignerPanel>
+		</div>
+	);
+}
+
+function PiPackagesSettings({
+	packages,
+	onPackageChanged,
+	onPackageRemoved,
+}: {
+	packages?: PiPackageCatalogItem[];
+	onPackageChanged: (pkg: PiPackageCatalogItem) => void;
+	onPackageRemoved: (pkg: PiPackageCatalogItem) => void;
+}) {
+	const [source, setSource] = useState("");
+	const [busy, setBusy] = useState<string | null>(null);
+	const [error, setError] = useState<string | null>(null);
+	const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+	const packageList = packages ?? [];
+	const installedCount = packageList.filter((pkg) => pkg.installStatus === "installed").length;
+	const enabledCount = packageList.filter((pkg) => pkg.enabled).length;
+
+	const addPackage = async () => {
+		if (busy) return;
+		setBusy("add");
+		try {
+			const pkg = await postPiPackage(source);
+			onPackageChanged(pkg);
+			setSource("");
+			setExpanded((current) => new Set(current).add(pkg.id));
+			setError(null);
+		} catch (caught) {
+			setError(caught instanceof Error ? caught.message : String(caught));
+		} finally {
+			setBusy(null);
+		}
+	};
+
+	const toggleEnabled = async (pkg: PiPackageCatalogItem) => {
+		if (busy) return;
+		setBusy(`${pkg.id}:enabled`);
+		try {
+			const next = await patchPiPackage(pkg.id, { enabled: !pkg.enabled });
+			onPackageChanged(next);
+			setError(null);
+		} catch (caught) {
+			setError(caught instanceof Error ? caught.message : String(caught));
+		} finally {
+			setBusy(null);
+		}
+	};
+
+	const unregisterPackage = async (pkg: PiPackageCatalogItem) => {
+		if (busy) return;
+		if (!window.confirm(`Unregister Pi package "${pkg.name}"?`)) return;
+		setBusy(`${pkg.id}:delete`);
+		try {
+			const removed = await deletePiPackage(pkg.id);
+			onPackageRemoved(removed);
+			setExpanded((current) => {
+				const next = new Set(current);
+				next.delete(pkg.id);
+				return next;
+			});
+			setError(null);
+		} catch (caught) {
+			setError(caught instanceof Error ? caught.message : String(caught));
+		} finally {
+			setBusy(null);
+		}
+	};
+
+	const toggleExpanded = (id: string) => {
+		setExpanded((current) => {
+			const next = new Set(current);
+			if (next.has(id)) next.delete(id);
+			else next.add(id);
+			return next;
+		});
+	};
+
+	return (
+		<DesignerPanel title="Pi Package Management">
+			<div className="grid gap-2">
+				<div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+					<input
+						value={source}
+						disabled={!packages || busy === "add"}
+						onChange={(event) => setSource(event.target.value)}
+						className="min-w-0 bg-[#0e1116] border border-slate-700 rounded-sm px-3 py-2 text-sm outline-none focus:border-[#11a4d4] disabled:opacity-60"
+						placeholder="https://pi.dev/packages/package-name"
+					/>
+					<button type="button" disabled={!packages || busy === "add" || !source.trim()} onClick={() => void addPackage()} title="Add Pi Package" aria-label="Add Pi Package" className="h-9 w-9 inline-flex items-center justify-center border border-[#11a4d4] rounded-sm text-[#11a4d4] bg-[#11a4d4]/10 disabled:opacity-50">
+						<Plus size={14} />
+					</button>
+				</div>
+				<div className="text-[11px] text-slate-500">Extensions execute code in the Pi runtime. Review package source before adding it.</div>
+				{error ? <div className="border border-red-500/60 bg-red-500/10 text-red-200 px-3 py-2 text-sm rounded-sm">{error}</div> : null}
+				<div className="font-mono text-[10px] uppercase tracking-wider text-slate-500">
+					{packageList.length} registered / {installedCount} installed / {enabledCount} enabled
+				</div>
+			</div>
+			{packages ? (
+				packageList.length ? (
+					<div className="grid gap-2">
+						{packageList.map((pkg) => (
+							<PiPackageManagementCard
+								key={pkg.id}
+								pkg={pkg}
+								expanded={expanded.has(pkg.id)}
+								busy={busy?.startsWith(`${pkg.id}:`) ?? false}
+								onToggleExpanded={() => toggleExpanded(pkg.id)}
+								onToggleEnabled={() => void toggleEnabled(pkg)}
+								onUnregister={() => void unregisterPackage(pkg)}
+							/>
+						))}
+					</div>
+				) : <EmptyCatalog message="No Pi packages registered" />
+			) : <EmptyCatalog />}
+		</DesignerPanel>
+	);
+}
+
+function PiPackageManagementCard({
+	pkg,
+	expanded,
+	busy,
+	onToggleExpanded,
+	onToggleEnabled,
+	onUnregister,
+}: {
+	pkg: PiPackageCatalogItem;
+	expanded: boolean;
+	busy: boolean;
+	onToggleExpanded: () => void;
+	onToggleEnabled: () => void;
+	onUnregister: () => void;
+}) {
+	const hasErrors = pkg.diagnostics.some((diagnostic) => diagnostic.type === "error");
+	return (
+		<div className={`border rounded-sm ${pkg.enabled ? "border-slate-800 bg-[#151f24]" : "border-slate-800 bg-[#151f24] opacity-75"}`}>
+			<div className="grid grid-cols-[1fr_auto] gap-2 p-2">
+				<div className="min-w-0">
+					<div className="flex items-center gap-2">
+						<span className="min-w-0 truncate text-sm text-slate-200">{pkg.name}</span>
+						<span className={`shrink-0 border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider ${pkg.enabled ? "border-[#11a4d4]/60 text-[#7dd3fc]" : "border-slate-700 text-slate-500"}`}>{pkg.enabled ? "enabled" : "disabled"}</span>
+						<span className={`shrink-0 border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider ${pkg.installStatus === "installed" ? "border-[#0bda57]/50 text-green-300" : "border-[#f59e0b]/50 text-amber-100"}`}>{pkg.installStatus}</span>
+					</div>
+					<div className="truncate text-xs text-slate-500">{pkg.description ?? pkg.source}</div>
+					<div className={`font-mono text-[10px] mt-1 ${hasErrors ? "text-[#f59e0b]" : "text-[#11a4d4]"}`}>{piPackageMeta(pkg)}</div>
+				</div>
+				<div className="flex items-start gap-1">
+					<button type="button" onClick={onToggleExpanded} title={expanded ? "Hide Details" : "Show Details"} aria-label={expanded ? "Hide Details" : "Show Details"} className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]">
+						{expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+					</button>
+					<button type="button" disabled={busy} onClick={onToggleEnabled} title={pkg.enabled ? "Disable Package" : "Enable Package"} aria-label={pkg.enabled ? "Disable Package" : "Enable Package"} className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4] disabled:opacity-50">
+						{pkg.enabled ? <PowerOff size={13} /> : <Power size={13} />}
+					</button>
+					<button type="button" disabled={busy} onClick={onUnregister} title="Unregister Package" aria-label="Unregister Package" className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-red-400 hover:text-red-300 disabled:opacity-50">
+						<Trash2 size={13} />
+					</button>
+				</div>
+			</div>
+			{expanded ? <PiPackageDetails pkg={pkg} /> : null}
 		</div>
 	);
 }
