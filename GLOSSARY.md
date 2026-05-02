@@ -73,6 +73,9 @@ A read-only context file shipped by a plugin and registered in the capability ca
 **Pibo Base Prompt**:
 The Pibo-owned base system prompt template, using either the library prompt or a persisted custom prompt.
 
+**Pibo Compaction Prompt**:
+The Pibo-owned prompt set used for Pi session compaction summaries, using either the library prompt or a persisted custom prompt.
+
 **Plugin**:
 A statically loaded internal module that registers Pibo capabilities with the plugin registry.
 

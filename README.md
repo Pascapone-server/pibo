@@ -98,6 +98,8 @@ The Chat Web App now also has a dedicated Context area at `/apps/chat/context`. 
 
 The Context area also exposes the Pibo Base Prompt. The library prompt lives at `context/pibo-system-prompt.md`; the Chat Web App can switch between that read-only library prompt and a persisted custom prompt stored under `.pibo/base-prompt.md`. Runtime prompt templates replace `{{availableTools}}` and `{{guidelines}}` from the active Pi/Pibo tool surface before project context and skills are appended.
 
+The Context area also exposes the Pibo Compaction Prompt. The library prompt lives at `context/pibo-compaction-prompt.md`; the Chat Web App can switch between that read-only library prompt and a persisted custom prompt stored under `.pibo/compaction-prompt.md`. At runtime Pibo handles Pi's `session_before_compact` hook and uses the active compaction prompt sections for summary creation, update-summary creation, and split-turn prefix summaries.
+
 ## Profiles
 
 The default profile is registered by the core plugin. It loads the local `pi-agent-harness` skill and uses Pi Coding Agent's built-in tools for normal coding work.

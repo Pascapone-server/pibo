@@ -37,6 +37,7 @@ import { createWebSearchProviderExtension, isWebSearchProviderTool } from "../to
 import { getMcpAgentContextFile } from "../mcp/agent-context.js";
 import { createPiboSystemPromptTemplateExtension } from "./system-prompt-template.js";
 import { getActivePiboBasePromptPath } from "./base-prompt.js";
+import { createPiboCompactionPromptExtension } from "./compaction-prompt.js";
 import { getPiPackageRuntimeOptions } from "../pi-packages/runtime.js";
 
 export type PiboRuntimeOptions = {
@@ -174,6 +175,7 @@ function getProfileExtensionFactories(
 	extensionFactories: readonly ExtensionFactory[] | undefined,
 ): ExtensionFactory[] | undefined {
 	const piboPromptTemplateExtension = createPiboSystemPromptTemplateExtension();
+	const piboCompactionPromptExtension = createPiboCompactionPromptExtension();
 	const providerToolExtensions = profile.tools
 		.filter((tool) => tool.enabled !== false)
 		.filter(isWebSearchProviderTool)
@@ -181,12 +183,14 @@ function getProfileExtensionFactories(
 	if (profile.toolPackages.codexCompat !== true) {
 		return [
 			piboPromptTemplateExtension,
+			piboCompactionPromptExtension,
 			...providerToolExtensions,
 			...(extensionFactories ?? []),
 		];
 	}
 	return [
 		piboPromptTemplateExtension,
+		piboCompactionPromptExtension,
 		createCodexCompatExtension({
 			isChildSession: profile.parentSessionId !== undefined,
 		}),

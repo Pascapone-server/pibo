@@ -39,6 +39,12 @@ import {
 	setPiboBasePromptMode,
 	type PiboBasePromptMode,
 } from "../../core/base-prompt.js";
+import {
+	readPiboCompactionPrompt,
+	savePiboCustomCompactionPrompt,
+	setPiboCompactionPromptMode,
+	type PiboCompactionPromptMode,
+} from "../../core/compaction-prompt.js";
 import { inspectPiPackageSource } from "../../pi-packages/metadata.js";
 import { findPiPackage, listPiPackages, removePiPackage, setPiPackageEnabled, upsertPiPackage } from "../../pi-packages/store.js";
 
@@ -442,7 +448,17 @@ function normalizeBasePromptMode(value: unknown): PiboBasePromptMode {
 	throw new PiboWebHttpError("mode must be library or custom", 400);
 }
 
+function normalizeCompactionPromptMode(value: unknown): PiboCompactionPromptMode {
+	if (value === "library" || value === "custom") return value;
+	throw new PiboWebHttpError("mode must be library or custom", 400);
+}
+
 function normalizeBasePromptMarkdown(value: unknown): string {
+	if (typeof value !== "string") throw new PiboWebHttpError("markdown must be a string", 400);
+	return value;
+}
+
+function normalizeCompactionPromptMarkdown(value: unknown): string {
 	if (typeof value !== "string") throw new PiboWebHttpError("markdown must be a string", 400);
 	return value;
 }
@@ -2419,6 +2435,25 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				await requireSession(request, context);
 				const body = await readJsonBody<ChatBasePromptBody>(request);
 				return responseJson({ basePrompt: await savePiboCustomBasePrompt(normalizeBasePromptMarkdown(body.markdown), process.cwd()) });
+			}
+
+			if (url.pathname === `${CHAT_WEB_API_PREFIX}/compaction-prompt` && request.method === "GET") {
+				await requireSession(request, context);
+				return responseJson({ compactionPrompt: await readPiboCompactionPrompt(process.cwd()) });
+			}
+
+			if (url.pathname === `${CHAT_WEB_API_PREFIX}/compaction-prompt` && request.method === "PATCH") {
+				requireSameOriginJsonRequest(request);
+				await requireSession(request, context);
+				const body = await readJsonBody<ChatBasePromptBody>(request);
+				return responseJson({ compactionPrompt: setPiboCompactionPromptMode(normalizeCompactionPromptMode(body.mode), process.cwd()) });
+			}
+
+			if (url.pathname === `${CHAT_WEB_API_PREFIX}/compaction-prompt/custom` && request.method === "PUT") {
+				requireSameOriginJsonRequest(request);
+				await requireSession(request, context);
+				const body = await readJsonBody<ChatBasePromptBody>(request);
+				return responseJson({ compactionPrompt: await savePiboCustomCompactionPrompt(normalizeCompactionPromptMarkdown(body.markdown), process.cwd()) });
 			}
 
 			const mcpServerName = mcpServerResourceName(url.pathname);

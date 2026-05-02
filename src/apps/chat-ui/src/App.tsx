@@ -44,6 +44,7 @@ import { countRender } from "./renderMetrics";
 import { childTraceOrder, compareTraceOrder, liveTraceOrder, parseTraceStreamFrameId } from "../../../shared/trace-order.js";
 import { ContextFilesView } from "./context/ContextFilesView";
 import { BasePromptView } from "./context/BasePromptView";
+import { CompactionPromptView } from "./context/CompactionPromptView";
 import { PiboToolsView } from "./context/PiboToolsView";
 import { McpToolsView } from "./context/McpToolsView";
 import { getChatSessionView, listChatSessionViews } from "./session-views/registry";
@@ -61,7 +62,7 @@ import {
 } from "./cache";
 
 type Area = "sessions" | "agents" | "context" | "settings";
-type ContextPanel = "context-files" | "base-prompt" | "pibo-tools" | "mcp-tools";
+type ContextPanel = "context-files" | "base-prompt" | "compaction-prompt" | "pibo-tools" | "mcp-tools";
 
 export type ChatAppRoute =
 	| { area: "sessions"; roomId?: string; piboSessionId?: string; sessionViewId?: ChatSessionViewId }
@@ -943,32 +944,34 @@ export function App({ route }: { route: ChatAppRoute }) {
 						}}
 						onError={setError}
 					/>
-				) : (
-				<main className="min-h-0 flex flex-col">
-					{area === "context" ? (
-						contextPanel === "pibo-tools" ? (
-							<PiboToolsView tools={bootstrap.agentCatalog?.piboTools ?? []} />
-						) : contextPanel === "mcp-tools" ? (
-							<McpToolsView
-								servers={bootstrap.agentCatalog?.mcpServers ?? []}
-								selectedServerName={selectedMcpServerName}
-								onServerSaved={updateMcpServerInBootstrap}
-							/>
-						) : contextPanel === "base-prompt" ? (
-							<BasePromptView />
-						) : (
-							<ContextFilesView agentProfiles={contextAgentProfiles} selectedFileKey={selectedContextFileKey} />
-						)
 					) : (
-						<SettingsView
-							showThinking={showThinking}
-							setShowThinking={setShowThinking}
-							expandThinking={expandThinking}
-							setExpandThinking={setExpandThinking}
-						/>
+						<main className="min-h-0 flex flex-col">
+							{area === "context" ? (
+								contextPanel === "pibo-tools" ? (
+									<PiboToolsView tools={bootstrap.agentCatalog?.piboTools ?? []} />
+								) : contextPanel === "mcp-tools" ? (
+									<McpToolsView
+										servers={bootstrap.agentCatalog?.mcpServers ?? []}
+										selectedServerName={selectedMcpServerName}
+										onServerSaved={updateMcpServerInBootstrap}
+									/>
+								) : contextPanel === "base-prompt" ? (
+									<BasePromptView />
+								) : contextPanel === "compaction-prompt" ? (
+									<CompactionPromptView />
+								) : (
+									<ContextFilesView agentProfiles={contextAgentProfiles} selectedFileKey={selectedContextFileKey} />
+								)
+							) : (
+								<SettingsView
+									showThinking={showThinking}
+									setShowThinking={setShowThinking}
+									expandThinking={expandThinking}
+									setExpandThinking={setExpandThinking}
+								/>
+							)}
+						</main>
 					)}
-				</main>
-				)}
 					{deleteRoomTarget ? (
 						<DeleteRoomModal
 							room={deleteRoomTarget}
@@ -2876,6 +2879,21 @@ function ContextSidebar({
 					<div className="min-w-0">
 						<span className="block truncate text-sm text-slate-200">Base Prompt</span>
 						<span className="block truncate font-mono text-[10px] text-slate-500">system-prompt</span>
+					</div>
+				</button>
+				<button
+					type="button"
+					onClick={() => onSelect("compaction-prompt")}
+					className={`mb-1 flex w-full items-center gap-2 border p-2 text-left ${
+						activePanel === "compaction-prompt"
+							? "border-[#11a4d4] bg-[#11a4d4]/10"
+							: "border-slate-800 bg-[#151f24] hover:border-slate-700"
+					}`}
+				>
+					<Brain size={13} className="text-[#11a4d4]" />
+					<div className="min-w-0">
+						<span className="block truncate text-sm text-slate-200">Compaction Prompt</span>
+						<span className="block truncate font-mono text-[10px] text-slate-500">summary-prompt</span>
 					</div>
 				</button>
 				<button

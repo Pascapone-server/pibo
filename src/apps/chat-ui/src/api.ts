@@ -79,6 +79,23 @@ export type BasePromptSnapshot = {
 	};
 };
 
+export type CompactionPromptMode = "library" | "custom";
+
+export type CompactionPromptSnapshot = {
+	mode: CompactionPromptMode;
+	effectiveMode: CompactionPromptMode;
+	library: {
+		path: string;
+		markdown: string;
+	};
+	custom: {
+		path: string;
+		markdown: string;
+		exists: boolean;
+		updatedAt?: string;
+	};
+};
+
 export async function getBootstrap(
 	piboSessionId?: string,
 	includeArchived = false,
@@ -160,6 +177,26 @@ export async function saveCustomBasePrompt(markdown: string): Promise<BasePrompt
 		headers: { "content-type": "application/json" },
 		body: JSON.stringify({ markdown }),
 	})).basePrompt;
+}
+
+export async function getCompactionPrompt(): Promise<CompactionPromptSnapshot> {
+	return (await requestJson<{ compactionPrompt: CompactionPromptSnapshot }>("/api/chat/compaction-prompt")).compactionPrompt;
+}
+
+export async function setCompactionPromptMode(mode: CompactionPromptMode): Promise<CompactionPromptSnapshot> {
+	return (await requestJson<{ compactionPrompt: CompactionPromptSnapshot }>("/api/chat/compaction-prompt", {
+		method: "PATCH",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ mode }),
+	})).compactionPrompt;
+}
+
+export async function saveCustomCompactionPrompt(markdown: string): Promise<CompactionPromptSnapshot> {
+	return (await requestJson<{ compactionPrompt: CompactionPromptSnapshot }>("/api/chat/compaction-prompt/custom", {
+		method: "PUT",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ markdown }),
+	})).compactionPrompt;
 }
 
 export async function postContextFile(input: {
