@@ -21,7 +21,7 @@ The current implementation adds a default Pibo plugin and profile that expose a 
 | --- | --- | --- |
 | Plugin registration | Implemented | Plugin id is `pibo.codex-compat`. |
 | Profile registration | Implemented | Primary profile is `codex-compat`; alias is `codex`. |
-| Built-in Pi tools suppression | Implemented | The profile disables Pi built-in tools so the Codex-like tool surface is dominant. |
+| Selective Pi basic tools | Implemented | The profile enables Pi/Pibo `read`, `edit`, and `write`, and intentionally leaves Pi built-in `bash` out so Pibo run-control supplies the shell surface. |
 | Project instruction files | Removed from plugin | `AGENTS.md`, `RULES.md`, and `GLOSSARY.md` are project-local files and are no longer registered by the Codex compatibility plugin. |
 | Codex base prompt context file | Implemented | The plugin now provides one Codex base-prompt context file at `context/codex-base-prompt.md`. |
 | Environment context | Implemented | Prompt hook injects `cwd`, `shell`, `current_date`, `timezone`, and visible subagent roles. |
@@ -38,7 +38,10 @@ The `codex-compat` profile exposes these model-visible tool names:
 
 | Tool name | Status | Implementation notes |
 | --- | --- | --- |
-| `bash` | Implemented through Pibo run package | Pibo run-control provides the shell-command tool for the profile. |
+| `read` | Implemented through Pi/Pibo basic tools | Reads files and images through the standard Pi read tool. |
+| `edit` | Implemented through Pi/Pibo basic tools | Performs precise exact-text edits through the standard Pi edit tool. |
+| `write` | Implemented through Pi/Pibo basic tools | Creates or overwrites files through the standard Pi write tool. |
+| `bash` | Implemented through Pibo run package | Pibo run-control provides the shell-command tool for the profile; Pi built-in `bash` is not selected. |
 | `apply_patch` | Implemented | Invokes the local `apply_patch` command with a Codex-style patch body. |
 | `web_search` | Implemented locally | Executes a local web search request and returns compact titles, URLs, and snippets. Provider delegation remains available as an optional extension path. |
 | `view_image` | Implemented | Reads a local image file and returns an inline image tool result. |
@@ -124,7 +127,11 @@ Codex models cached versus live search through the provider `web_search.external
 
 ### Shell Execution
 
-Shell execution uses Pibo run-control's native `bash` tool, which can also be launched through `pibo_run_start` when shell work should be yielded. PTY-backed terminal behavior is intentionally deferred and remains a future run-control parity item.
+Shell execution uses Pibo run-control's native `bash` tool, which can also be launched through `pibo_run_start` when shell work should be yielded. The profile keeps Pi `read`, `edit`, and `write` active, but does not select Pi built-in `bash`. PTY-backed terminal behavior is intentionally deferred and remains a future run-control parity item.
+
+### Search And File Discovery
+
+The Codex-compatible profile does not enable Pi's separate `grep`, `find`, or `ls` tools by default. Codex-style file discovery remains shell-driven through `bash` and repository tools such as `rg`, `rg --files`, `find`, and `ls`. The separate Pi search/list tools can stay available as future profile options, but they are not part of the v1 default surface.
 
 ### Agent Orchestration
 
@@ -147,6 +154,7 @@ The following tracks replace the old flat gap list.
 | Prompt snapshot tests | V2 | Update tests so they assert one Codex base-prompt context file and no plugin-owned project-local context files. |
 | Agent orchestration | Done for plugin scope | The plugin uses Pibo generated subagent tools and the native `pibo-run-control` package instead of Codex-specific agent lifecycle tools. Future orchestration changes belong to Pibo's run-system design, not this plugin. |
 | Agent Designer built-in tools | Done | Pi built-in basic tools remain in Basics and can be toggled individually. |
+| Codex v1 tool surface | Done | The default profile exposes `read`, `edit`, `write`, Pibo run-control `bash`, Codex-compatible patch/search/image tools, generated subagents, and `pibo_run_*`. |
 
 ## 6. Validation Performed
 
@@ -161,6 +169,8 @@ Test coverage currently verifies:
 - The default registry exposes the `codex-compat` profile and `codex` alias.
 - The profile exposes the expected Codex-compatible coding tool names and Pibo-native run/subagent tools.
 - The profile exposes subagent roles `default`, `explorer`, and `worker`.
+- The active `codex-compat` profile exposes `read`, `edit`, and `write`.
+- The active `codex-compat` profile uses Pibo run-control `bash` and does not select Pi built-in `bash`.
 - The profile includes the Codex base-prompt context file and no plugin-owned `AGENTS.md`, `RULES.md`, or `GLOSSARY.md` context files.
 - The Codex-compatible prompt includes environment context and child-agent framing.
 - The prompt does not imply unavailable plan-mode tools.
@@ -177,7 +187,10 @@ Test coverage currently verifies:
 | `context/codex-base-prompt.md` | Provides the plugin-owned Codex base-prompt context file. |
 | `src/tools/codex-compat.ts` | Implements Codex-compatible patch, web search, and image tools. Shell execution is provided by Pibo run control. |
 | `src/core/codex-compat.ts` | Implements prompt wrapping and provider web-search payload injection. |
-| `src/core/runtime.ts` | Wires Codex-compatible generated tools and prompt/provider extension hooks into runtime creation. |
+| `src/core/runtime.ts` | Wires Codex-compatible generated tools, Pibo base prompt ownership, and prompt/provider extension hooks into runtime creation. |
+| `src/core/base-prompt.ts` | Owns the Pibo library/custom base prompt state and file locations. |
+| `src/core/system-prompt-template.ts` | Expands `{{availableTools}}` and `{{guidelines}}` placeholders from the active runtime tool surface. |
+| `context/pibo-system-prompt.md` | Provides the library Pibo base prompt used by default runtime creation. |
 | `src/core/profiles.ts` | Adds profile package flags for `codexCompat` and `providerWebSearch`. |
 | `src/plugins/builtin.ts` | Adds the Codex compatibility plugin to the default plugin registry. |
 | `test/codex-compat.test.mjs` | Adds focused tests for profile shape, prompt behavior, and provider web-search serialization. |

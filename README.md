@@ -94,9 +94,13 @@ The designer configures native Pibo agent capabilities only: plugin-registered t
 
 The Chat Web App now also has a dedicated Context area at `/apps/chat/context`. It reuses the managed context-file APIs inside the main Chat UI shell so operators can create, edit, relocate, and remove managed context files without leaving the authenticated Chat Web App. Plugin context files are shown there as read-only sources, and both the Context area and Agent Designer can create linked managed copies when a user wants to customize shipped content safely.
 
+The Context area also exposes the Pibo Base Prompt. The library prompt lives at `context/pibo-system-prompt.md`; the Chat Web App can switch between that read-only library prompt and a persisted custom prompt stored under `.pibo/base-prompt.md`. Runtime prompt templates replace `{{availableTools}}` and `{{guidelines}}` from the active Pi/Pibo tool surface before project context and skills are appended.
+
 ## Profiles
 
 The default profile is registered by the core plugin. It loads the local `pi-agent-harness` skill and uses Pi Coding Agent's built-in tools for normal coding work.
+
+The `codex-compat` profile is the first complete Codex-compatible profile. It keeps the Pibo runtime boundary while exposing Codex-like coding affordances: Pi/Pibo `read`, `edit`, and `write`; Pibo run-control `bash`; `apply_patch`, `web_search`, and `view_image`; generated `pibo_subagent_default`, `pibo_subagent_explorer`, and `pibo_subagent_worker`; and the `pibo_run_*` lifecycle tools. It intentionally does not expose Pi's separate `grep`, `find`, or `ls` tools by default; search remains Codex-style through `bash` and commands such as `rg`.
 
 Profiles can opt into registered subagents. Pibo exposes enabled subagents to Pi as generated tools named `pibo_subagent_<name>`, routed through normal pibo sessions. Generated subagent tools are always parallel-capable; agents sequence subagent work by waiting for a direct result before issuing a later call or by using `pibo_run_start` for yielded work.
 

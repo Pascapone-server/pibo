@@ -62,7 +62,7 @@ export const piboCodexCompatPlugin = definePiboPlugin({
 			description: "Codex-compatible Pibo profile with Codex-like tools, prompt framing, and subagents.",
 			create(context) {
 				return new InitialSessionContextBuilder("codex-compat")
-					.withBuiltinTools("disabled")
+					.withBuiltinToolNames(["read", "edit", "write"])
 					.withToolPackages({
 						codexCompat: true,
 						providerWebSearch: false,

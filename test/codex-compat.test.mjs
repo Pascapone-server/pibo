@@ -11,7 +11,8 @@ test("default registry exposes the codex-compatible profile and tool surface", (
 	const profile = registry.createProfile("codex");
 
 	assert.equal(profile.profileName, "codex-compat");
-	assert.equal(profile.builtinTools, "disabled");
+	assert.equal(profile.builtinTools, "default");
+	assert.deepEqual(profile.builtinToolNames, ["read", "edit", "write"]);
 	assert.equal(profile.toolPackages.codexCompat, true);
 	assert.equal(profile.toolPackages.providerWebSearch, false);
 	assert.equal(profile.toolPackages.runControl, true);
@@ -94,7 +95,13 @@ test("codex-compatible profile uses Pibo run-control bash instead of exec tools"
 
 	try {
 		const activeTools = new Set(runtime.session.getActiveToolNames());
+		assert.equal(activeTools.has("read"), true);
+		assert.equal(activeTools.has("edit"), true);
+		assert.equal(activeTools.has("write"), true);
 		assert.equal(activeTools.has("bash"), true);
+		assert.equal(activeTools.has("grep"), false);
+		assert.equal(activeTools.has("find"), false);
+		assert.equal(activeTools.has("ls"), false);
 		const startTool = runtime.session.getToolDefinition("pibo_run_start");
 		assert.ok(startTool);
 		assert.equal(startTool.parameters.properties.toolName.enum.includes("bash"), true);

@@ -33,6 +33,12 @@ import {
 import { createCustomAgentProfileDefinition } from "./agent-profiles.js";
 import { createDefaultPiboReliabilityStore, PiboReliabilityStore } from "../../reliability/store.js";
 import { listMcpServerInfos, setMcpServerDescription } from "../../mcp/agent-context.js";
+import {
+	readPiboBasePrompt,
+	savePiboCustomBasePrompt,
+	setPiboBasePromptMode,
+	type PiboBasePromptMode,
+} from "../../core/base-prompt.js";
 
 export const CHAT_WEB_APP_NAME = "pibo.chat-web";
 export const CHAT_WEB_CHANNEL = "pibo.chat-web";
@@ -105,6 +111,11 @@ type ChatAgentBody = {
 
 type ChatMcpServerDescriptionBody = {
 	description?: unknown;
+};
+
+type ChatBasePromptBody = {
+	mode?: unknown;
+	markdown?: unknown;
 };
 
 type ChatMessageBody = {
@@ -373,6 +384,16 @@ function normalizeMcpServerDescriptionBody(value: unknown): string {
 	if (!description) throw new PiboWebHttpError("MCP server description is required", 400);
 	if (description.length > 480) throw new PiboWebHttpError("MCP server description is too long", 400);
 	return description;
+}
+
+function normalizeBasePromptMode(value: unknown): PiboBasePromptMode {
+	if (value === "library" || value === "custom") return value;
+	throw new PiboWebHttpError("mode must be library or custom", 400);
+}
+
+function normalizeBasePromptMarkdown(value: unknown): string {
+	if (typeof value !== "string") throw new PiboWebHttpError("markdown must be a string", 400);
+	return value;
 }
 
 function normalizeAgentArchived(value: unknown): boolean | undefined {
@@ -2254,6 +2275,25 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 					catalog: await buildAgentCatalog(context),
 					profiles: context.channelContext.getProfiles?.() ?? [],
 				});
+			}
+
+			if (url.pathname === `${CHAT_WEB_API_PREFIX}/base-prompt` && request.method === "GET") {
+				await requireSession(request, context);
+				return responseJson({ basePrompt: await readPiboBasePrompt(process.cwd()) });
+			}
+
+			if (url.pathname === `${CHAT_WEB_API_PREFIX}/base-prompt` && request.method === "PATCH") {
+				requireSameOriginJsonRequest(request);
+				await requireSession(request, context);
+				const body = await readJsonBody<ChatBasePromptBody>(request);
+				return responseJson({ basePrompt: setPiboBasePromptMode(normalizeBasePromptMode(body.mode), process.cwd()) });
+			}
+
+			if (url.pathname === `${CHAT_WEB_API_PREFIX}/base-prompt/custom` && request.method === "PUT") {
+				requireSameOriginJsonRequest(request);
+				await requireSession(request, context);
+				const body = await readJsonBody<ChatBasePromptBody>(request);
+				return responseJson({ basePrompt: await savePiboCustomBasePrompt(normalizeBasePromptMarkdown(body.markdown), process.cwd()) });
 			}
 
 			const mcpServerName = mcpServerResourceName(url.pathname);

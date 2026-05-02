@@ -60,6 +60,10 @@ Assumptions:
   - optional user location
   - optional search context size
 - **REQ-006**: The Codex compatibility layer MUST expose a Codex-like core tool surface with these names unless a technical blocker is documented:
+  - `read`
+  - `edit`
+  - `write`
+  - `bash` through Pibo run-control, not Pi built-in bash
   - `apply_patch`
   - `web_search`
   - `view_image`
@@ -83,6 +87,8 @@ Assumptions:
 - **REQ-024**: Pibo run-control completion delivery MUST use Pibo's native mailbox and notification mechanism. The compatibility plugin MUST NOT add a separate Codex mailbox implementation.
 - **REQ-025**: PTY-backed shell execution is out of scope for the first Codex-compat implementation. It MAY be revisited as a future Pibo run-control enhancement.
 - **REQ-026**: Agent Designer MUST allow custom agents to enable or disable each Pi built-in basic tool individually while keeping the controls grouped in the Basics section.
+- **REQ-027**: The default `codex-compat` profile MUST enable Pi/Pibo `read`, `edit`, and `write`, MUST leave Pi built-in `bash` out, and MUST use Pibo run-control `bash` as the shell tool.
+- **REQ-028**: The default `codex-compat` profile MUST NOT enable Pi `grep`, `find`, or `ls` by default. File discovery remains shell-driven through `bash` and commands such as `rg`.
 - **CON-001**: Pibo MUST NOT implement a local browser runtime purely to satisfy `web_search` parity.
 - **CON-002**: Codex compatibility MUST NOT require Plan mode, Codex-specific TUI state, or approval popups.
 - **CON-003**: Compatibility naming MAY use Codex names for coding tools, but agent orchestration MUST use Pibo-native `pibo_subagent_*` and `pibo_run_*` names.
@@ -129,7 +135,10 @@ The compatibility profile should expose this initial tool surface:
 
 | Visible tool name | Implementation strategy | Notes |
 | --- | --- | --- |
-| `bash` | Pibo run-control yieldable shell tool | Provided by the native Pibo run-control package; this is the shell-command surface for the compatibility profile. |
+| `read` | Pi/Pibo basic read tool | Standard file and image reading surface. |
+| `edit` | Pi/Pibo basic edit tool | Standard exact-text file edit surface. |
+| `write` | Pi/Pibo basic write tool | Standard file creation and overwrite surface. |
+| `bash` | Pibo run-control yieldable shell tool | Provided by the native Pibo run-control package; Pi built-in `bash` is not selected. |
 | `apply_patch` | New Pibo freeform patch tool | Match Codex patch flow closely. |
 | `web_search` | Local Pibo tool by default; optional OpenAI provider-backed tool | No local browser/browser-use runtime owned by the plugin. |
 | `view_image` | Pibo local image view tool | Follow current local-file image viewing semantics. |
@@ -224,6 +233,8 @@ Recommended environment context shape:
 - **AC-012**: Given the compatibility tool surface includes `apply_patch`, When the model edits files manually, Then the visible editing contract matches the patch-based flow expected by Codex-tuned behavior.
 - **AC-013**: Given Codex-specific agent lifecycle tools are intentionally out of scope, When the compatibility profile is inspected, Then `spawn_agent`, `send_input`, `resume_agent`, `wait_agent`, and `close_agent` are not active tools.
 - **AC-014**: Given a custom agent is edited in Agent Designer, When the Basics built-in tools group is expanded, Then `read`, `bash`, `edit`, and `write` can be enabled or disabled individually.
+- **AC-015**: Given the default `codex-compat` profile is active, When runtime active tools are listed, Then `read`, `edit`, `write`, Pibo run-control `bash`, Codex-compatible patch/search/image tools, generated subagents, and `pibo_run_*` are active.
+- **AC-016**: Given the default `codex-compat` profile is active, When runtime active tools are listed, Then Pi `grep`, `find`, and `ls` are not active by default.
 
 ## 6. Test Automation Strategy
 

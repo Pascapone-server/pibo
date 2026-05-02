@@ -34,6 +34,8 @@ import { getInstalledCliToolContextFile } from "../tools/registry.js";
 import { createCodexCompatToolDefinitions } from "../tools/codex-compat.js";
 import { createCodexCompatExtension } from "./codex-compat.js";
 import { getMcpAgentContextFile } from "../mcp/agent-context.js";
+import { createPiboSystemPromptTemplateExtension } from "./system-prompt-template.js";
+import { getActivePiboBasePromptPath } from "./base-prompt.js";
 
 export type PiboRuntimeOptions = {
 	cwd?: string;
@@ -168,10 +170,15 @@ function getProfileExtensionFactories(
 	profile: InitialSessionContext,
 	extensionFactories: readonly ExtensionFactory[] | undefined,
 ): ExtensionFactory[] | undefined {
+	const piboPromptTemplateExtension = createPiboSystemPromptTemplateExtension();
 	if (profile.toolPackages.codexCompat !== true) {
-		return extensionFactories ? [...extensionFactories] : undefined;
+		return [
+			piboPromptTemplateExtension,
+			...(extensionFactories ?? []),
+		];
 	}
 	return [
+		piboPromptTemplateExtension,
 		createCodexCompatExtension({
 			isChildSession: profile.parentSessionId !== undefined,
 			webSearch: profile.toolPackages.providerWebSearch === true
@@ -252,6 +259,7 @@ export async function createPiboRuntime(options: PiboRuntimeOptions = {}): Promi
 				additionalSkillPaths: skillPaths,
 				extensionFactories: getProfileExtensionFactories(profile, options.extensionFactories),
 				noContextFiles: profile.autoContextFiles === false,
+				systemPrompt: getActivePiboBasePromptPath(runtimeCwd),
 				agentsFilesOverride: (base) => ({
 					agentsFiles: mergeContextFiles(
 						base.agentsFiles,

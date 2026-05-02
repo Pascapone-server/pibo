@@ -62,6 +62,23 @@ export type ProductEvent = {
 	};
 };
 
+export type BasePromptMode = "library" | "custom";
+
+export type BasePromptSnapshot = {
+	mode: BasePromptMode;
+	effectiveMode: BasePromptMode;
+	library: {
+		path: string;
+		markdown: string;
+	};
+	custom: {
+		path: string;
+		markdown: string;
+		exists: boolean;
+		updatedAt?: string;
+	};
+};
+
 export async function getBootstrap(
 	piboSessionId?: string,
 	includeArchived = false,
@@ -123,6 +140,26 @@ export async function getAgentCatalog(): Promise<{
 
 export async function getCustomAgents(): Promise<{ agents: CustomAgent[] }> {
 	return requestJson("/api/chat/agents");
+}
+
+export async function getBasePrompt(): Promise<BasePromptSnapshot> {
+	return (await requestJson<{ basePrompt: BasePromptSnapshot }>("/api/chat/base-prompt")).basePrompt;
+}
+
+export async function setBasePromptMode(mode: BasePromptMode): Promise<BasePromptSnapshot> {
+	return (await requestJson<{ basePrompt: BasePromptSnapshot }>("/api/chat/base-prompt", {
+		method: "PATCH",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ mode }),
+	})).basePrompt;
+}
+
+export async function saveCustomBasePrompt(markdown: string): Promise<BasePromptSnapshot> {
+	return (await requestJson<{ basePrompt: BasePromptSnapshot }>("/api/chat/base-prompt/custom", {
+		method: "PUT",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ markdown }),
+	})).basePrompt;
 }
 
 export async function postContextFile(input: {
