@@ -2529,7 +2529,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 					const trace = await buildTraceView({
 						session: selectedSession,
 						sessions: ownedSessions,
-						events: state.readModel.listEvents(selectedSession.id),
+						events: state.readModel.listAllEvents(selectedSession.id),
 						status: indexedSession?.status,
 						includeRawEvents: false,
 					});
@@ -2598,7 +2598,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				const trace = await buildTraceView({
 					session: selectedSession,
 					sessions: ownedSessions,
-					events: state.readModel.listEvents(selectedSession.id),
+					events: state.readModel.listAllEvents(selectedSession.id),
 					status: indexedSession?.status,
 					includeRawEvents,
 					rawEventsLimit,

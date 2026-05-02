@@ -187,6 +187,19 @@ export class ChatWebReadModel {
 		return rows.map(eventFromRow);
 	}
 
+	listAllEvents(piboSessionId: string): ChatWebStoredEvent[] {
+		const rows = this.db
+			.prepare(
+				`
+					SELECT rowid AS _rowid, * FROM web_chat_events
+					WHERE pibo_session_id = ?
+					ORDER BY event_sequence ASC, _rowid ASC
+				`,
+			)
+			.all(piboSessionId) as EventRow[];
+		return rows.map(eventFromRow);
+	}
+
 	getLatestEventSequence(piboSessionId: string): number {
 		const row = this.db
 			.prepare("SELECT COALESCE(MAX(event_sequence), 0) AS latest_sequence FROM web_chat_events WHERE pibo_session_id = ?")

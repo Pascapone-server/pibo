@@ -164,6 +164,7 @@ Out of scope for V1:
 - **REQ-086**: Chat Web live assistant message identity MUST prefer `assistantIndex` over provider `contentIndex` so separate assistant text segments remain separate when a provider reuses `contentIndex` in one turn.
 - **REQ-087**: Chat Web live reasoning identity MUST prefer `thinkingIndex` over provider `contentIndex` so separate thinking segments remain separate when a provider reuses `contentIndex` in one turn.
 - **REQ-088**: Trace sorting MUST use explicit trace order metadata from Pi transcript order, Chat Web read-model event sequence, or SSE stream cursor/frame order instead of wall-clock timestamps as the primary ordering source.
+- **REQ-089**: Trace reconstruction MUST NOT use the bounded Raw Events inspector window as its projection input. While a turn is running, the trace endpoint MUST retain all stored events needed to reconstruct the open turn so older live reasoning, assistant, and tool nodes do not disappear and reappear during refresh.
 - **CON-001**: Pibo must not move channel, auth, profile, or UI policy into Pi Coding Agent.
 - **CON-002**: Pibo must preserve the existing product boundary: Pi owns agent execution and session JSONL; Pibo owns channels, routing, auth, policy, web UI, and read models.
 - **CON-003**: The Web App must consume Pibo view models derived from Pi JSONL and Pibo events, not raw Pi events directly.
@@ -321,7 +322,7 @@ The read model must store raw inputs for reconstructing the Web Chat view:
 - **Raw Pibo event log**: the original normalized Pibo output events, stored in order. This is the receipt trail. It is useful for debugging, replay, and rebuilding a view model after code changes.
 - **Session index**: session and parent-child metadata needed to list main sessions, nested subagent sessions, and session status efficiently.
 
-The trace API may return a bounded latest-event window for rendering. If it does, it must preserve insertion order within the returned window and must not assume that `message_started` or `message_queued` is always present for a still-running turn.
+The trace API may return a bounded latest-event window for Raw Events inspector rendering. This bounded window is a display/debug payload only. Trace node reconstruction must use the complete stored event set required for the selected session, or an equivalent open-turn-complete event set, before applying `rawEventsLimit`. If a bounded raw event window is returned, it must preserve insertion order within the returned window and must not assume that `message_started` or `message_queued` is always present for a still-running turn.
 
 V1 must not persist materialized trace nodes. Trace nodes such as `tool.call`, `agent.delegation`, and `execution.command` are derived at read time or in memory from Pi JSONL plus the raw Pibo event log. Pi JSONL remains canonical for transcript content.
 
@@ -397,6 +398,7 @@ The full `/tree` command is not a V1 Web Chat command because full tree browsing
 - **AC-038**: Given the client receives `TEXT_MESSAGE_END`, When the selected session is still mounted, Then Chat Web schedules an immediate trace/bootstrap refresh.
 - **AC-039**: Given a provider reuses the same `contentIndex` for an intermediate assistant response and a final assistant response in one routed turn, When live SSE frames are applied before reload, Then the responses render as separate `assistant.message` nodes in the streamed order.
 - **AC-040**: Given live trace nodes and persisted trace nodes have overlapping timestamps, When the trace view sorts nodes, Then explicit `orderKey` metadata determines the order before timestamp fallback is considered.
+- **AC-041**: Given a running turn has emitted more events than the Raw Events inspector limit, When the trace endpoint refreshes with a small `rawEventsLimit`, Then previously visible live reasoning, assistant, and tool nodes for that open turn remain present in the trace view.
 
 ## 6. Test Automation Strategy
 
@@ -410,12 +412,14 @@ The full `/tree` command is not a V1 Web Chat command because full tree browsing
   - Persisted assistant progress/final text ordering around tool calls.
   - Live assistant and reasoning segment identity when providers reuse `contentIndex`.
   - Trace order-key comparison across transcript, event-log, and live sources.
+  - Read-model full event retrieval for trace projection separate from bounded Raw Events display retrieval.
 
 - **Integration Tests**:
   - Chat API session list and selected session endpoints.
   - SSE or streaming event ingestion into the read model.
   - Live assistant and thinking delta aggregation while a turn is running.
   - Latest-event-window reconstruction when the retained window does not include `message_started`.
+  - Running-turn trace refresh after more than the default read-model event window has been recorded.
   - Clone and fork execution flows.
   - Reconstruction from Pi session JSONL plus raw Pibo event log.
   - Trace refresh triggers for `TEXT_MESSAGE_END` lifecycle frames.

@@ -257,6 +257,11 @@ test("chat read model keeps newest events when limiting session event history", 
 	assert.equal(events.at(-1)?.type, "assistant_message");
 	assert.equal(events.at(-1)?.payload.type, "assistant_message");
 	assert.notEqual(events[0].payload.type === "assistant_delta" ? events[0].payload.text : undefined, "delta-0");
+
+	const allEvents = readModel.listAllEvents(session.id);
+	assert.equal(allEvents.length, 1006);
+	assert.equal(allEvents[0].payload.type === "assistant_delta" ? allEvents[0].payload.text : undefined, "delta-0");
+	assert.equal(allEvents.at(-1)?.payload.type, "assistant_message");
 	readModel.close();
 });
 
