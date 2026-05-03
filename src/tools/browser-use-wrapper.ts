@@ -126,6 +126,49 @@ except Exception:
 PY
 }
 
+find_chrome_pids_for_profile() {
+  user_data_dir=$1
+  # Try pgrep first, fallback to ps+grep
+  if command -v pgrep >/dev/null 2>&1; then
+    pgrep -f "chrome.*--user-data-dir=.*$user_data_dir" 2>/dev/null || true
+  else
+    ps aux 2>/dev/null | grep -F "$user_data_dir" | grep -E 'chrome|chromium' | grep -v grep | awk '{print $2}' || true
+  fi
+}
+
+kill_stale_chrome_for_profile() {
+  user_data_dir=$1
+  lock_file="$user_data_dir/SingletonLock"
+
+  # Find and terminate any Chrome process using this profile directory
+  stale_pids=$(find_chrome_pids_for_profile "$user_data_dir")
+  for stale_pid in $stale_pids; do
+    if [ -n "$stale_pid" ] && kill -0 "$stale_pid" 2>/dev/null; then
+      echo "pibo browser-use: terminating stale Chrome process $stale_pid for profile..." >&2
+      kill -TERM "$stale_pid" 2>/dev/null || true
+    fi
+  done
+
+  # Give processes a moment to exit gracefully
+  sleep 0.5
+  for stale_pid in $stale_pids; do
+    if [ -n "$stale_pid" ] && kill -0 "$stale_pid" 2>/dev/null; then
+      kill -KILL "$stale_pid" 2>/dev/null || true
+    fi
+  done
+  sleep 0.2
+
+  # Remove stale lock file if it remains
+  if [ -f "$lock_file" ]; then
+    rm -f "$lock_file" 2>/dev/null || true
+  fi
+
+  # Also clean up stale state files for this session
+  safe_session=$(printf '%s' "$session" | tr -c 'A-Za-z0-9_.-' '_')
+  state_dir=\${BROWSER_USE_HOME:-$HOME/.browser-use}/pibo-cdp
+  rm -f "$state_dir/$safe_session.pid" "$state_dir/$safe_session.port" 2>/dev/null || true
+}
+
 persistent_chrome_url_if_alive() {
   safe_session=$(printf '%s' "$session" | tr -c 'A-Za-z0-9_.-' '_')
   state_dir=\${BROWSER_USE_HOME:-$HOME/.browser-use}/pibo-cdp
@@ -169,6 +212,7 @@ ensure_persistent_chrome() {
   fi
 
   mkdir -p "$user_data_dir"
+  kill_stale_chrome_for_profile "$user_data_dir"
   profile_directory=$(resolve_profile_directory "$user_data_dir" "$default_profile")
   chrome_port=$(find_free_port)
   headless_arg=
@@ -224,6 +268,9 @@ ensure_persistent_chrome() {
   if [ "$ready" -ne 1 ]; then
     echo "pibo browser-use: Chrome did not expose CDP on port $chrome_port." >&2
     sed -n '1,80p' "$log_file" >&2 2>/dev/null || true
+    if grep -q "SingletonLock" "$log_file" 2>/dev/null; then
+      echo "pibo browser-use: hint: a stale Chrome process held the profile lock. It was terminated; retry your command." >&2
+    fi
     exit 1
   fi
 
