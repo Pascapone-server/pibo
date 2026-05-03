@@ -36,7 +36,7 @@ import {
 	X,
 } from "lucide-react";
 import { deleteCustomAgent, deletePiPackage, deleteRoom, deleteSession, getBootstrap, getTrace, patchCustomAgent, patchModelDefaults, patchPiPackage, patchRoom, patchSession, postAction, postContextFile, postCustomAgent, postMessage, postPiPackage, postRoom, postSession, signInWithGoogle, signOut, type SaveCustomAgentInput } from "./api";
-import type { AgentCatalog, BootstrapData, CustomAgent, CustomAgentSubagent, ModelDefaults, ModelProfile, PiboRoom, PiboSessionTraceView, PiboTraceNode, PiboTraceOrderKey, PiboWebSessionNode } from "./types";
+import type { AgentCatalog, BootstrapData, CustomAgent, CustomAgentSubagent, ModelCatalog, ModelDefaults, ModelProfile, PiboRoom, PiboSessionTraceView, PiboTraceNode, PiboTraceOrderKey, PiboWebSessionNode } from "./types";
 import { adaptTrace } from "./tracing/adapt";
 import { type SessionBreadcrumbItem, type SessionDerivationLink, type SessionOriginLink } from "./tracing/TraceTimeline";
 import { JsonRenderer } from "./tracing/JsonRenderer";
@@ -579,7 +579,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 	const updateRoom = async (roomId: string, input: { name?: string; topic?: string | null; workspace?: string | null }) => {
 		try {
 			await patchRoom(roomId, input);
-			const data = await loadBootstrap(selectedPiboSessionId ?? undefined, showArchivedRef.current, roomId, { force: true });
+			const data = await loadBootstrap(selectedPiboSessionId ?? undefined, showArchivedRef.current, roomId);
 			if (area === "sessions") navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
 			setError(null);
 		} catch (caught) {
@@ -594,7 +594,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 				setShowArchivedRooms(true);
 				localStorage.setItem("pibo.chat.showArchivedRooms", "true");
 			}
-			const data = await loadBootstrap(selectedPiboSessionId ?? undefined, showArchivedRef.current, selectedRoomId ?? undefined, { force: true });
+			const data = await loadBootstrap(selectedPiboSessionId ?? undefined, showArchivedRef.current, selectedRoomId ?? undefined);
 			if (area === "sessions") navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
 			setError(null);
 		} catch (caught) {
@@ -616,7 +616,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 				setSelectedRoomId(null);
 				setSelectedPiboSessionId(null);
 			}
-			const data = await loadBootstrap(undefined, showArchivedRef.current, undefined, { force: true });
+			const data = await loadBootstrap(undefined, showArchivedRef.current);
 			if (area === "sessions") navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
 			setDeleteRoomTarget(null);
 			setDeleteRoomConfirmName("");
@@ -745,6 +745,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 						agents={bootstrap.agents}
 						initialCustomAgents={bootstrap.customAgents}
 						initialCatalog={bootstrap.agentCatalog}
+						modelCatalog={bootstrap.modelCatalog}
 						onSelect={setPreferredNewSessionProfile}
 						onCreateSession={(profile) => void createSession(profile)}
 						onEditContextFile={openContextFileEditor}
@@ -1004,6 +1005,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 									expandThinking={expandThinking}
 									setExpandThinking={setExpandThinking}
 									modelDefaults={bootstrap.modelDefaults}
+									modelCatalog={bootstrap.modelCatalog}
 									onModelDefaultsChanged={(modelDefaults) => {
 										setBootstrap((current) => current ? { ...current, modelDefaults } : current);
 									}}
@@ -2220,6 +2222,7 @@ function AgentsView({
 	agents,
 	initialCustomAgents,
 	initialCatalog,
+	modelCatalog,
 	onSelect,
 	onCreateSession,
 	onEditContextFile,
@@ -2230,6 +2233,7 @@ function AgentsView({
 	agents: BootstrapData["agents"];
 	initialCustomAgents: CustomAgent[];
 	initialCatalog?: AgentCatalog;
+	modelCatalog?: ModelCatalog;
 	onSelect: (profile: string) => void;
 	onCreateSession: (profile: string) => void;
 	onEditContextFile: (key: string) => void;
@@ -2515,18 +2519,27 @@ function AgentsView({
 						<input value={draft.displayName} disabled={readOnly} onChange={(event) => setDraft((current) => ({ ...current, displayName: event.target.value }))} className={`min-w-0 bg-[#0e1116] border rounded-sm px-3 py-2 text-sm outline-none focus:border-[#11a4d4] disabled:opacity-60 ${agentNameError ? "border-[#f59e0b]" : "border-slate-700"}`} placeholder="agent-name" />
 						{agentNameError ? <div className="text-xs text-amber-100">{agentNameError}</div> : null}
 						<textarea value={draft.description} disabled={readOnly} onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))} className="min-h-[72px] bg-[#0e1116] border border-slate-700 rounded-sm px-3 py-2 text-sm outline-none focus:border-[#11a4d4] disabled:opacity-60" placeholder="Description" />
-						<ModelProfileInputs
+						{draft.source === "profile" && draft.hardPinnedModel ? (
+							<div className="border border-slate-700 bg-[#151f24] text-slate-300 px-3 py-2 text-xs rounded-sm">
+								This plugin profile hard-pins <span className="font-mono">{formatModelProfile(draft.hardPinnedModel)}</span>. Main-agent and subagent defaults do not apply.
+							</div>
+						) : null}
+						<ModelSelector
 							title="Main Agent Model"
+							catalog={modelCatalog}
 							value={draft.mainModel}
+							allowUnset
 							readOnly={readOnly}
-							placeholderLabel="settings default"
+							hint="Unset to use the settings default."
 							onChange={(mainModel) => setDraft((current) => ({ ...current, mainModel }))}
 						/>
-						<ModelProfileInputs
+						<ModelSelector
 							title="Subagent Model"
+							catalog={modelCatalog}
 							value={draft.subagentModel}
+							allowUnset
 							readOnly={readOnly}
-							placeholderLabel="settings default"
+							hint="Unset to use the settings default."
 							onChange={(subagentModel) => setDraft((current) => ({ ...current, subagentModel }))}
 						/>
 						<InlineCheckboxToggle disabled={readOnly} checked={draft.autoContextFiles} title="Load AGENTS.md / CLAUDE.md" onToggle={() => setDraft((current) => ({ ...current, autoContextFiles: !current.autoContextFiles }))} />
@@ -2618,6 +2631,7 @@ type AgentDraft = SaveCustomAgentInput & {
 	id?: string;
 	profileName?: string;
 	archivedAt?: string;
+	hardPinnedModel?: ModelProfile;
 	source: "custom" | "profile";
 };
 
@@ -2637,6 +2651,7 @@ function createBlankAgentDraft(catalog?: AgentCatalog): AgentDraft {
 		builtinToolNames: [...DEFAULT_BUILTIN_TOOL_NAMES],
 		autoContextFiles: true,
 		runControl: false,
+		hardPinnedModel: undefined,
 		source: "custom",
 	};
 }
@@ -2660,6 +2675,7 @@ function agentToDraft(agent: CustomAgent): AgentDraft {
 		autoContextFiles: agent.autoContextFiles ?? true,
 		runControl: agent.runControl,
 		archivedAt: agent.archivedAt,
+		hardPinnedModel: undefined,
 		source: "custom",
 	};
 }
@@ -2680,6 +2696,7 @@ function profileToDraft(profile: BootstrapData["agents"][number], catalog?: Agen
 		builtinToolNames: normalizeBuiltinToolNames(profile.builtinToolNames, profile.builtinTools),
 		autoContextFiles: profile.autoContextFiles ?? true,
 		runControl: profile.runControl ?? false,
+		hardPinnedModel: profile.model,
 		profileName: profile.name,
 		source: "profile",
 	};
@@ -2691,6 +2708,7 @@ function copyProfileToDraft(profile: BootstrapData["agents"][number], catalog?: 
 		...draft,
 		displayName: `${profile.name}-copy`,
 		id: undefined,
+		hardPinnedModel: undefined,
 		profileName: undefined,
 		source: "custom",
 	};
@@ -3640,6 +3658,7 @@ function SettingsView({
 	expandThinking,
 	setExpandThinking,
 	modelDefaults,
+	modelCatalog,
 	onModelDefaultsChanged,
 	piPackages,
 	onPiPackageChanged,
@@ -3651,6 +3670,7 @@ function SettingsView({
 	expandThinking: boolean;
 	setExpandThinking: (value: boolean) => void;
 	modelDefaults?: ModelDefaults;
+	modelCatalog?: ModelCatalog;
 	onModelDefaultsChanged: (value: ModelDefaults) => void;
 	piPackages?: PiPackageCatalogItem[];
 	onPiPackageChanged: (pkg: PiPackageCatalogItem) => void;
@@ -3696,6 +3716,7 @@ function SettingsView({
 				/>
 				<ModelDefaultsSettings
 					modelDefaults={modelDefaults}
+					modelCatalog={modelCatalog}
 					onChanged={onModelDefaultsChanged}
 				/>
 			</DesignerPanel>
@@ -3705,9 +3726,11 @@ function SettingsView({
 
 function ModelDefaultsSettings({
 	modelDefaults,
+	modelCatalog,
 	onChanged,
 }: {
 	modelDefaults?: ModelDefaults;
+	modelCatalog?: ModelCatalog;
 	onChanged: (value: ModelDefaults) => void;
 }) {
 	const [draft, setDraft] = useState<ModelDefaults>(modelDefaults ?? {});
@@ -3735,18 +3758,22 @@ function ModelDefaultsSettings({
 	return (
 		<div className="grid gap-3 border-t border-slate-800 pt-3">
 			<div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Runtime Model Defaults</div>
-			<ModelProfileInputs
+			<ModelSelector
 				title="Main Agent Default"
+				catalog={modelCatalog}
 				value={draft.main}
+				allowUnset
 				readOnly={saving}
-				placeholderLabel="provider fallback"
+				hint="Unset to use provider fallback."
 				onChange={(main) => void save({ ...draft, main })}
 			/>
-			<ModelProfileInputs
+			<ModelSelector
 				title="Subagent Default"
+				catalog={modelCatalog}
 				value={draft.subagent}
+				allowUnset
 				readOnly={saving}
-				placeholderLabel="provider fallback"
+				hint="Unset to use provider fallback."
 				onChange={(subagent) => void save({ ...draft, subagent })}
 			/>
 			{error ? <div className="text-xs text-amber-100">{error}</div> : null}
@@ -3754,66 +3781,118 @@ function ModelDefaultsSettings({
 	);
 }
 
-function ModelProfileInputs({
+function ModelSelector({
 	title,
+	catalog,
 	value,
+	allowUnset,
 	readOnly,
-	placeholderLabel,
+	hint,
 	onChange,
 }: {
 	title: string;
+	catalog?: ModelCatalog;
 	value?: ModelProfile;
+	allowUnset: boolean;
 	readOnly: boolean;
-	placeholderLabel: string;
+	hint?: string;
 	onChange: (value: ModelProfile | undefined) => void;
 }) {
-	const [provider, setProvider] = useState(value?.provider ?? "");
-	const [id, setId] = useState(value?.id ?? "");
+	const [providerId, setProviderId] = useState(value?.provider ?? "");
+	const [modelId, setModelId] = useState(value?.id ?? "");
+	const providers = catalog?.providers ?? [];
+	const selectedProvider = providers.find((provider) => provider.id === providerId);
+	const hasStaleProvider = Boolean(providerId) && !selectedProvider;
+	const staleProviderLabel = hasStaleProvider ? `${providerId} (unknown provider)` : "";
+	const selectedModel = selectedProvider?.models.find((model) => model.id === modelId);
+	const hasStaleModel = Boolean(providerId && modelId && selectedProvider && !selectedModel);
+	const providerModels = selectedProvider?.models ?? [];
+	const providerAuthConfigured = selectedProvider?.authConfigured;
 
 	useEffect(() => {
-		setProvider(value?.provider ?? "");
-		setId(value?.id ?? "");
+		setProviderId(value?.provider ?? "");
+		setModelId(value?.id ?? "");
 	}, [value?.id, value?.provider]);
-
-	const emit = (nextProvider: string, nextId: string) => {
-		if (!nextProvider && !nextId) {
-			onChange(undefined);
-			return;
-		}
-		if (nextProvider && nextId) {
-			onChange({ provider: nextProvider, id: nextId });
-		}
-	};
 
 	return (
 		<div className="grid gap-2">
-			<div className="text-[11px] uppercase tracking-wider text-slate-500">{title}</div>
-			<div className="grid grid-cols-2 max-[1100px]:grid-cols-1 gap-2">
-				<input
-					value={provider}
-					disabled={readOnly}
-					onChange={(event) => {
-						const nextProvider = event.target.value.trim();
-						setProvider(nextProvider);
-						emit(nextProvider, id);
-					}}
-					className="min-w-0 bg-[#0e1116] border border-slate-700 rounded-sm px-3 py-2 text-sm outline-none focus:border-[#11a4d4] disabled:opacity-60"
-					placeholder={`${placeholderLabel} provider`}
-				/>
-				<input
-					value={id}
-					disabled={readOnly}
-					onChange={(event) => {
-						const nextId = event.target.value.trim();
-						setId(nextId);
-						emit(provider, nextId);
-					}}
-					className="min-w-0 bg-[#0e1116] border border-slate-700 rounded-sm px-3 py-2 text-sm outline-none focus:border-[#11a4d4] disabled:opacity-60"
-					placeholder={`${placeholderLabel} model`}
-				/>
+			<div className="flex items-center justify-between gap-3">
+				<div className="text-[11px] uppercase tracking-wider text-slate-500">{title}</div>
+				{allowUnset ? (
+					<button
+						type="button"
+						disabled={readOnly || (!providerId && !modelId)}
+						onClick={() => {
+							setProviderId("");
+							setModelId("");
+							onChange(undefined);
+						}}
+						className="text-[10px] uppercase tracking-wider text-slate-500 hover:text-slate-300 disabled:opacity-50"
+					>
+						Unset
+					</button>
+				) : null}
 			</div>
+			{hint ? <div className="text-xs text-slate-500">{hint}</div> : null}
+			{providers.length === 0 ? (
+				<div className="text-xs text-slate-500 border border-dashed border-slate-700 rounded-sm p-3">
+					Model catalog unavailable.
+				</div>
+			) : null}
+			<div className="grid grid-cols-2 max-[1100px]:grid-cols-1 gap-2">
+				<select
+					value={providerId}
+					disabled={readOnly}
+					onChange={(event) => {
+						const nextProviderId = event.target.value;
+						setProviderId(nextProviderId);
+						setModelId("");
+					}}
+					className="min-w-0 bg-[#0e1116] border border-slate-700 rounded-sm px-3 py-2 text-sm outline-none focus:border-[#11a4d4] disabled:opacity-60"
+				>
+					<option value="">Select provider</option>
+					{providers.map((provider) => (
+						<option key={provider.id} value={provider.id}>
+							{provider.label}
+						</option>
+					))}
+					{hasStaleProvider ? <option value={providerId}>{staleProviderLabel}</option> : null}
+				</select>
+				<select
+					value={modelId}
+					disabled={readOnly}
+					onChange={(event) => {
+						const nextModelId = event.target.value;
+						setModelId(nextModelId);
+						if (providerId && nextModelId) onChange({ provider: providerId, id: nextModelId });
+					}}
+					className="min-w-0 bg-[#0e1116] border border-slate-700 rounded-sm px-3 py-2 text-sm outline-none focus:border-[#11a4d4] disabled:opacity-60"
+				>
+					<option value="">{providerId ? "Select model" : "Select provider first"}</option>
+					{providerModels.map((model) => (
+						<option key={model.id} value={model.id}>
+							{model.label}
+						</option>
+					))}
+					{hasStaleModel ? <option value={modelId}>{`${modelId} (unknown model)`}</option> : null}
+				</select>
+			</div>
+			{providerId ? (
+				<div className="text-xs text-slate-500">
+					{hasStaleProvider
+						? "Stored provider is no longer present in the catalog."
+						: providerAuthConfigured
+							? "Provider auth configured."
+							: "Provider auth missing."}
+				</div>
+			) : null}
+			{hasStaleModel ? <div className="text-xs text-amber-100">Stored model is no longer present in the catalog.</div> : null}
 		</div>
 	);
+}
+
+function formatModelProfile(model: ModelProfile): string {
+	return `${model.provider}/${model.id}`;
 }
 
 function PiPackagesSettings({

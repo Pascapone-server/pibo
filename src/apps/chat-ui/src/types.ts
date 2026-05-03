@@ -130,6 +130,7 @@ export type BootstrapData = {
 	agents: AgentProfile[];
 	customAgents: CustomAgent[];
 	modelDefaults?: ModelDefaults;
+	modelCatalog?: ModelCatalog;
 	agentCatalog?: AgentCatalog;
 	capabilities: { actions: Array<{ name: string; description?: string; slashCommands: string[] }> };
 };
@@ -142,6 +143,25 @@ export type ModelProfile = {
 export type ModelDefaults = {
 	main?: ModelProfile;
 	subagent?: ModelProfile;
+};
+
+export type ModelCatalog = {
+	providers: ProviderCatalogEntry[];
+};
+
+export type ProviderCatalogEntry = {
+	id: string;
+	label: string;
+	authConfigured: boolean;
+	models: ModelCatalogEntry[];
+};
+
+export type ModelCatalogEntry = {
+	provider: string;
+	id: string;
+	label: string;
+	authConfigured?: boolean;
+	supportsReasoning?: boolean;
 };
 
 export type AgentProfile = {

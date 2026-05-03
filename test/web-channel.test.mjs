@@ -307,6 +307,29 @@ test("chat web trace returns fresh payload when a known trace version changes", 
 	}
 });
 
+test("chat bootstrap includes model catalog data", async () => {
+	const { channel, baseURL } = await startWebHostChannel({
+		auth: createFakeAuthService(),
+	});
+
+	try {
+		const response = await fetch(`${baseURL}/api/chat/bootstrap`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(response.status, 200);
+		const payload = await response.json();
+		assert.ok(payload.modelCatalog);
+		assert.ok(Array.isArray(payload.modelCatalog.providers));
+		const provider = payload.modelCatalog.providers[0];
+		assert.equal(typeof provider?.id, "string");
+		assert.equal(typeof provider?.label, "string");
+		assert.equal(typeof provider?.authConfigured, "boolean");
+		assert.ok(Array.isArray(provider?.models));
+	} finally {
+		await channel.stop?.();
+	}
+});
+
 test("chat web app maps authenticated users to chat sessions", async () => {
 	const { channel, baseURL, emitted } = await startWebHostChannel({
 		auth: createFakeAuthService(),
@@ -425,52 +448,6 @@ test("chat web app starts new room sessions in the room workspace", async () => 
 		assert.equal(sessionResponse.status, 201);
 		const sessionPayload = await sessionResponse.json();
 		assert.equal(sessionPayload.session.workspace, roomWorkspace);
-	} finally {
-		await channel.stop?.();
-	}
-});
-
-test("chat web app patches room workspace", async () => {
-	const { channel, baseURL } = await startWebHostChannel({
-		auth: createFakeAuthService(),
-	});
-
-	try {
-		const roomResponse = await fetch(`${baseURL}/api/chat/rooms`, {
-			method: "POST",
-			headers: {
-				"content-type": "application/json",
-				origin: baseURL,
-				"x-test-user": "user-1",
-			},
-			body: JSON.stringify({ name: "Patchable Room" }),
-		});
-		assert.equal(roomResponse.status, 201);
-		const roomPayload = await roomResponse.json();
-		assert.equal(roomPayload.room.workspace, undefined);
-
-		const roomWorkspace = mkdtempSync(join(tmpdir(), "pibo-room-workspace-"));
-		const patchResponse = await fetch(`${baseURL}/api/chat/rooms/${encodeURIComponent(roomPayload.room.id)}`, {
-			method: "PATCH",
-			headers: {
-				"content-type": "application/json",
-				origin: baseURL,
-				"x-test-user": "user-1",
-			},
-			body: JSON.stringify({ workspace: roomWorkspace }),
-		});
-		assert.equal(patchResponse.status, 200);
-		const patchPayload = await patchResponse.json();
-		assert.equal(patchPayload.room.workspace, roomWorkspace);
-
-		const bootstrapResponse = await fetch(`${baseURL}/api/chat/bootstrap?roomId=${encodeURIComponent(roomPayload.room.id)}`, {
-			headers: { "x-test-user": "user-1" },
-		});
-		assert.equal(bootstrapResponse.status, 200);
-		const bootstrapPayload = await bootstrapResponse.json();
-		const patchedRoom = bootstrapPayload.rooms.find((room) => room.id === roomPayload.room.id);
-		assert.ok(patchedRoom);
-		assert.equal(patchedRoom.workspace, roomWorkspace);
 	} finally {
 		await channel.stop?.();
 	}

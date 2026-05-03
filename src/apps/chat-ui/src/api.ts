@@ -516,6 +516,14 @@ function normalizeBootstrap(payload: Partial<BootstrapData>): BootstrapData {
 		agents: payload.agents ?? [],
 		customAgents: payload.customAgents ?? [],
 		modelDefaults: payload.modelDefaults,
+		modelCatalog: payload.modelCatalog
+			? {
+				providers: (payload.modelCatalog.providers ?? []).map((provider) => ({
+					...provider,
+					models: provider.models ?? [],
+				})),
+			}
+			: payload.modelCatalog,
 		agentCatalog: payload.agentCatalog
 			? {
 				...payload.agentCatalog,
