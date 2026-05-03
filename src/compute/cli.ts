@@ -3,9 +3,12 @@ import {
 	IMAGE_NAME,
 	imageExists,
 	shouldRebuild,
+	shouldRebuildDeps,
 	dockerBuild,
 	saveHash,
+	saveDepHash,
 	spawnWorker,
+	spawnDevWorker,
 	listWorkers,
 	releaseWorker,
 	reapWorkers,
@@ -17,6 +20,7 @@ import os from "node:os";
 
 const WORKSPACE_DIR = process.env.PIBO_COMPUTE_WORKSPACE || "/root/code/pibo";
 const HASH_FILE = path.join(os.homedir(), ".pibo", "compute-image-hash");
+const DEP_HASH_FILE = path.join(os.homedir(), ".pibo", "compute-dep-hash");
 
 function printJson(value: unknown): void {
 	console.log(JSON.stringify(value, null, 2));
@@ -51,6 +55,43 @@ export async function runComputeCli(argv: string[]): Promise<void> {
 			printJson(worker);
 		});
 
+	const devCmd = program.command("dev").description("Development environment commands");
+
+	devCmd
+		.command("spawn")
+		.description("Spawn a development container with a Git worktree")
+		.requiredOption("--worktree <name>", "Git worktree / branch name")
+		.option("--repo <path>", "Repository directory", WORKSPACE_DIR)
+		.option("--owner <owner>", "Owner tag for the container")
+		.action(async (options: { worktree: string; repo: string; owner?: string }) => {
+			await mkdir(path.dirname(DEP_HASH_FILE), { recursive: true });
+
+			console.error("[pibo compute] Checking Docker image status...");
+			const needsBuild = !(await imageExists(IMAGE_NAME)) || (await shouldRebuildDeps(options.repo, DEP_HASH_FILE));
+			if (needsBuild) {
+				console.error(`[pibo compute] Dependencies changed (package.json, package-lock.json, or Dockerfile).`);
+				console.error(`[pibo compute] Rebuilding Docker image ${IMAGE_NAME} — this takes 1-2 minutes...`);
+				await dockerBuild(options.repo);
+				await saveDepHash(options.repo, DEP_HASH_FILE);
+				console.error("[pibo compute] Docker image build complete.");
+			} else {
+				console.error("[pibo compute] Using cached Docker image (dependencies unchanged).");
+			}
+
+			console.error(`[pibo compute] Creating git worktree '${options.worktree}'...`);
+			const worker = await spawnDevWorker({
+				repoDir: options.repo,
+				worktreeName: options.worktree,
+				owner: options.owner,
+			});
+			console.error(`[pibo compute] Dev container '${worker.id}' started.`);
+			console.error(`[pibo compute] Ports: gateway=${worker.gatewayPort}, cdp=${worker.cdpPort}, chat-ui=${worker.webUIPortChat}, context-files=${worker.webUIPortContext}`);
+			console.error(`[pibo compute] Worktree: ${worker.worktree}`);
+			console.error(`[pibo compute] Connect: ${worker.connect}`);
+
+			printJson(worker);
+		});
+
 	program
 		.command("rebuild")
 		.description("Force rebuild the pibo:latest image")
@@ -58,6 +99,7 @@ export async function runComputeCli(argv: string[]): Promise<void> {
 			console.error(`Rebuilding ${IMAGE_NAME} from ${WORKSPACE_DIR}...`);
 			await dockerBuild(WORKSPACE_DIR);
 			await saveHash(WORKSPACE_DIR, HASH_FILE);
+			await saveDepHash(WORKSPACE_DIR, DEP_HASH_FILE);
 			console.error("Build complete.");
 		});
 

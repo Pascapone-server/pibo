@@ -37,6 +37,20 @@ export async function imageExists(name: string): Promise<boolean> {
 	}
 }
 
+export async function getDependencyHash(workspaceDir: string): Promise<string> {
+	const hash = createHash("sha256");
+	const files = ["package.json", "package-lock.json", "Dockerfile"];
+	for (const file of files) {
+		try {
+			const content = await readFile(path.join(workspaceDir, file));
+			hash.update(content);
+		} catch {
+			// file missing, skip
+		}
+	}
+	return hash.digest("hex");
+}
+
 export async function getSourceHash(workspaceDir: string): Promise<string> {
 	const hash = createHash("sha256");
 	const files: string[] = [];
@@ -92,10 +106,153 @@ export async function shouldRebuild(workspaceDir: string, hashFile: string): Pro
 	}
 }
 
+export async function shouldRebuildDeps(workspaceDir: string, hashFile: string): Promise<boolean> {
+	const currentHash = await getDependencyHash(workspaceDir);
+	try {
+		const savedHash = await readFile(hashFile, "utf-8");
+		return savedHash.trim() !== currentHash;
+	} catch {
+		return true;
+	}
+}
+
 export async function saveHash(workspaceDir: string, hashFile: string): Promise<void> {
 	const hash = await getSourceHash(workspaceDir);
 	await mkdir(path.dirname(hashFile), { recursive: true });
 	await writeFile(hashFile, hash, "utf-8");
+}
+
+export async function saveDepHash(workspaceDir: string, hashFile: string): Promise<void> {
+	const hash = await getDependencyHash(workspaceDir);
+	await mkdir(path.dirname(hashFile), { recursive: true });
+	await writeFile(hashFile, hash, "utf-8");
+}
+
+export interface SpawnedDevWorker {
+	id: string;
+	image: string;
+	gatewayHost: string;
+	gatewayPort: number;
+	cdpPort: number;
+	webUIPortChat: number;
+	webUIPortContext: number;
+	connect: string;
+	worktree: string;
+}
+
+const DEV_PORT_BASE = 4800;
+const DEV_PORT_BLOCK_SIZE = 10;
+
+async function findNextPortBlock(): Promise<number> {
+	const { stdout } = await execFileAsync("docker", [
+		"ps",
+		"--filter",
+		`label=${LABEL_ROLE}=dev`,
+		"--format",
+		"{{.Labels}}",
+	]);
+	const usedBlocks = new Set<number>();
+	for (const line of stdout.trim().split("\n")) {
+		const match = line.match(/pibo\.compute\.portBlock=(\d+)/);
+		if (match) usedBlocks.add(Number(match[1]));
+	}
+	let block = 0;
+	while (usedBlocks.has(block)) block++;
+	return block;
+}
+
+export async function createWorktree(repoDir: string, name: string): Promise<string> {
+	const worktreePath = path.join(repoDir, ".worktrees", name);
+	try {
+		await execFileAsync("git", ["worktree", "add", worktreePath, "-b", name], { cwd: repoDir });
+	} catch (err: any) {
+		if (err.stderr?.includes("already exists")) {
+			// branch or worktree exists; try without -b
+			await execFileAsync("git", ["worktree", "add", worktreePath, name], { cwd: repoDir });
+		} else {
+			throw err;
+		}
+	}
+	return worktreePath;
+}
+
+export async function spawnDevWorker(options: {
+	repoDir: string;
+	worktreeName: string;
+	owner?: string;
+}): Promise<SpawnedDevWorker> {
+	const worktreePath = path.join(options.repoDir, ".worktrees", options.worktreeName);
+	await createWorktree(options.repoDir, options.worktreeName);
+
+	const block = await findNextPortBlock();
+	const base = DEV_PORT_BASE + block * DEV_PORT_BLOCK_SIZE;
+	const gatewayPort = base;
+	const cdpPort = base + 1;
+	const webUIPortChat = base + 2;
+	const webUIPortContext = base + 3;
+
+	const id = `pibo-dev-${options.worktreeName}`;
+	const createdAt = new Date().toISOString();
+
+	const args = [
+		"run",
+		"-d",
+		"--name",
+		id,
+		"-p",
+		`${gatewayPort}:4789`,
+		"-p",
+		`${cdpPort}:56663`,
+		"-p",
+		`${webUIPortChat}:4790`,
+		"-p",
+		`${webUIPortContext}:4791`,
+		"-v",
+		`${worktreePath}:/workspace`,
+		"-w",
+		"/workspace",
+		"--label",
+		`${LABEL_ROLE}=dev`,
+		"--label",
+		`${LABEL_CREATED_AT}=${createdAt}`,
+		"--label",
+		`pibo.compute.portBlock=${block}`,
+		"--label",
+		`pibo.compute.worktree=${options.worktreeName}`,
+		...(options.owner ? ["--label", `${LABEL_OWNER}=${options.owner}`] : []),
+		"--entrypoint",
+		"/bin/sh",
+		IMAGE_NAME,
+		"-c",
+		"tail -f /dev/null",
+	];
+
+	// Mount host node_modules into the container so dependencies are immediately available
+	const hostNodeModules = path.join(options.repoDir, "node_modules");
+	try {
+		const { stdout } = await execFileAsync("ls", ["-d", hostNodeModules]);
+		if (stdout.trim()) {
+			args.splice(args.indexOf("-w") + 2, 0, "-v", `${hostNodeModules}:/workspace/node_modules`);
+		}
+	} catch {
+		// host node_modules does not exist; skip mount
+	}
+
+	await execFileAsync("docker", args, { cwd: options.repoDir });
+
+	const host = await detectHost();
+
+	return {
+		id,
+		image: IMAGE_NAME,
+		gatewayHost: host,
+		gatewayPort,
+		cdpPort,
+		webUIPortChat,
+		webUIPortContext,
+		connect: `docker exec -it ${id} bash`,
+		worktree: worktreePath,
+	};
 }
 
 export async function spawnWorker(options: {
