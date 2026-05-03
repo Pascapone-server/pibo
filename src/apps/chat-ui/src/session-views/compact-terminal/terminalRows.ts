@@ -212,10 +212,6 @@ function createToolRowCandidate(node: PiboTraceNode, turnId?: string): RowCandid
 		const row = createCommandToolRow(node, command);
 		return { row, turnId, exploring: undefined };
 	}
-	if (node.title === "status") {
-		const row = createStatusToolRow(node);
-		return { row, turnId, exploring: undefined };
-	}
 	const preview = previewLines(node.error ?? node.output, 4, node.error ? "red" : "dim");
 	const row: CompactTerminalRow = {
 		id: node.id,
@@ -335,6 +331,9 @@ function createYieldedRunRow(node: PiboTraceNode): CompactTerminalRow {
 }
 
 function createExecutionCommandRow(node: PiboTraceNode): CompactTerminalRow {
+	if (node.title === "status") {
+		return createStatusToolRow(node);
+	}
 	const command = shellCommandValue(node.output) ?? shellCommandValue(node.input) ?? node.title;
 	const preview = previewLines(node.error ?? node.output, 4, node.error ? "red" : "dim", 180);
 	return {
