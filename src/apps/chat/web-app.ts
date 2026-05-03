@@ -929,6 +929,24 @@ function ensureCustomAgentProfiles(state: ChatWebAppState, context: PiboWebAppCo
 	}
 }
 
+function serializeCustomAgent(agent: CustomAgentDefinition, context: PiboWebAppContext) {
+	return {
+		...agent,
+		brokenContextFiles: listBrokenContextFiles(agent.contextFiles, context),
+	};
+}
+
+function serializeCustomAgents(agents: readonly CustomAgentDefinition[], context: PiboWebAppContext) {
+	return agents.map((agent) => serializeCustomAgent(agent, context));
+}
+
+function listBrokenContextFiles(keys: readonly string[], context: PiboWebAppContext): string[] {
+	const catalog = context.channelContext.getCapabilityCatalog?.();
+	if (!catalog) return [];
+	const knownKeys = new Set(catalog.contextFiles.map((contextFile) => contextFile.key));
+	return keys.filter((key) => !knownKeys.has(key));
+}
+
 function createAgentInput(ownerScope: string, body: ChatAgentBody) {
 	return {
 		ownerScope,
@@ -2565,7 +2583,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 			if (url.pathname === `${CHAT_WEB_API_PREFIX}/agents` && request.method === "GET") {
 				const webSession = await requireSession(request, context);
 				const includeArchived = parseBooleanSearchParam(url, "includeArchived");
-				return responseJson({ agents: state.agentStore.list(webSession.ownerScope, { includeArchived }) });
+				return responseJson({ agents: serializeCustomAgents(state.agentStore.list(webSession.ownerScope, { includeArchived }), context) });
 			}
 
 			if (url.pathname === `${CHAT_WEB_API_PREFIX}/agents` && request.method === "POST") {
@@ -2576,7 +2594,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				requireAgentProfileNameAvailable(state, context, input.displayName);
 				const agent = state.agentStore.create(input);
 				context.channelContext.upsertProfile?.(createCustomAgentProfileDefinition(agent));
-				return responseJson({ agent }, { status: 201 });
+				return responseJson({ agent: serializeCustomAgent(agent, context) }, { status: 201 });
 			}
 
 			const patchAgentId = agentResourceId(url.pathname);
@@ -2598,7 +2616,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				} else {
 					context.channelContext.upsertProfile?.(createCustomAgentProfileDefinition(owned));
 				}
-				return responseJson({ agent: owned });
+				return responseJson({ agent: serializeCustomAgent(owned, context) });
 			}
 
 			if (patchAgentId && request.method === "DELETE") {

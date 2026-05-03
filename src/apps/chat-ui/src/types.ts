@@ -262,6 +262,7 @@ export type CustomAgent = {
 	builtinToolNames: string[];
 	autoContextFiles: boolean;
 	runControl: boolean;
+	brokenContextFiles?: string[];
 	createdAt: string;
 	updatedAt: string;
 	archivedAt?: string;

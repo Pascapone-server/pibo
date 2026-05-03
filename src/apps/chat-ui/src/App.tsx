@@ -2592,6 +2592,41 @@ function AgentsView({
 						readOnly={readOnly}
 					/>
 					<DesignerPanel title="Context Files">
+						{draft.brokenContextFiles?.length ? (
+							<div className="border border-red-500/60 bg-red-500/10 rounded-sm p-3 space-y-2">
+								<div className="flex items-start gap-2 text-red-100">
+									<AlertTriangle size={14} className="mt-0.5 shrink-0" />
+									<div className="space-y-1">
+										<div className="text-sm font-medium">This agent references missing context files.</div>
+										<div className="text-xs text-red-200/90">Remove these broken links and save the agent to persist the cleanup.</div>
+									</div>
+								</div>
+								<div className="grid gap-2">
+									{draft.brokenContextFiles.map((contextFileKey) => (
+										<div key={contextFileKey} className="flex items-center gap-2 border border-red-500/40 bg-[#2a1417] rounded-sm px-3 py-2">
+											<div className="min-w-0 flex-1">
+												<div className="truncate text-sm text-red-100">{contextFileKey}</div>
+												<div className="text-[11px] uppercase tracking-wider text-red-300/80">Broken link</div>
+											</div>
+											<button
+												type="button"
+												disabled={readOnly}
+												onClick={() => setDraft((current) => ({
+													...current,
+													contextFiles: current.contextFiles.filter((item) => item !== contextFileKey),
+													brokenContextFiles: (current.brokenContextFiles ?? []).filter((item) => item !== contextFileKey),
+												}))}
+												className="h-8 w-8 inline-flex items-center justify-center border border-red-500/60 rounded-sm text-red-200 hover:border-red-400 hover:text-red-100 disabled:opacity-50"
+												title="Remove Broken Context File"
+												aria-label="Remove Broken Context File"
+											>
+												<X size={14} />
+											</button>
+										</div>
+									))}
+								</div>
+							</div>
+						) : null}
 						<div className="grid grid-cols-[1fr_auto] gap-2">
 							<input value={newContextFileName} disabled={readOnly} onChange={(event) => setNewContextFileName(event.target.value)} className="min-w-0 bg-[#0e1116] border border-slate-700 rounded-sm px-3 py-2 text-sm outline-none focus:border-[#11a4d4] disabled:opacity-60" placeholder="New context file" />
 							<button type="button" disabled={readOnly || saving || !newContextFileName.trim() || Boolean(agentNameError)} onClick={() => void createContextFileForDraft()} title="Create Context File" aria-label="Create Context File" className="h-9 w-9 inline-flex items-center justify-center border border-[#11a4d4] rounded-sm text-[#11a4d4] bg-[#11a4d4]/10 disabled:opacity-50">
@@ -2653,6 +2688,7 @@ type AgentDraft = SaveCustomAgentInput & {
 	profileName?: string;
 	archivedAt?: string;
 	hardPinnedModel?: ModelProfile;
+	brokenContextFiles?: string[];
 	source: "custom" | "profile";
 };
 
@@ -2672,6 +2708,7 @@ function createBlankAgentDraft(catalog?: AgentCatalog): AgentDraft {
 		builtinToolNames: [...DEFAULT_BUILTIN_TOOL_NAMES],
 		autoContextFiles: true,
 		runControl: false,
+		brokenContextFiles: [],
 		hardPinnedModel: undefined,
 		source: "custom",
 	};
@@ -2695,6 +2732,7 @@ function agentToDraft(agent: CustomAgent): AgentDraft {
 		builtinToolNames: normalizeBuiltinToolNames(agent.builtinToolNames, agent.builtinTools),
 		autoContextFiles: agent.autoContextFiles ?? true,
 		runControl: agent.runControl,
+		brokenContextFiles: agent.brokenContextFiles ?? [],
 		archivedAt: agent.archivedAt,
 		hardPinnedModel: undefined,
 		source: "custom",
@@ -2717,6 +2755,7 @@ function profileToDraft(profile: BootstrapData["agents"][number], catalog?: Agen
 		builtinToolNames: normalizeBuiltinToolNames(profile.builtinToolNames, profile.builtinTools),
 		autoContextFiles: profile.autoContextFiles ?? true,
 		runControl: profile.runControl ?? false,
+		brokenContextFiles: [],
 		hardPinnedModel: profile.model,
 		profileName: profile.name,
 		source: "profile",
