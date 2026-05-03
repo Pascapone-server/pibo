@@ -49,7 +49,7 @@ After navigation, submit, keypress navigation, major DOM changes, or scroll on c
 \`\`\`bash
 browser-use --headed open <url>                # Starts Pibo-managed persistent PIBo Chrome via CDP
 browser-use --fresh-profile open <url>         # Starts a fresh temporary browser profile
-browser-use connect                            # Connect to local Chrome via CDP
+browser-use --connect open <url>               # Connect to local Chrome via CDP (requires --remote-debugging-port)
 browser-use --profile "Default" open <url>     # Upstream profile mode; Browser Use may copy it to a temp dir
 \`\`\`
 
@@ -167,7 +167,7 @@ browser-use profile list
 
 To intentionally use a real local Chrome user data directory instead of the Pibo-managed one, set \`PIBO_BROWSER_USE_CHROME_USER_DATA_DIR\` before starting the session.
 
-If \`browser-use connect\` cannot find Chrome, ask the user whether they want to relaunch Chrome with remote debugging or use a managed Chromium profile.
+If \`browser-use --connect\` cannot find Chrome, ask the user whether they want to relaunch Chrome with remote debugging or use a managed Chromium profile.
 
 ## Tips
 
@@ -184,6 +184,7 @@ If \`browser-use connect\` cannot find Chrome, ask the user whether they want to
 11. \`select\` confirms the visible option text, while \`get value\` returns the underlying option value.
 12. Avoid \`browser-use --version\`; this CLI does not support it.
 13. Avoid \`extract\`; it is listed by the CLI but is not implemented in this version.
+14. If Chrome fails to start with a "SingletonLock" error, the wrapper auto-detects and terminates stale Chrome processes holding the lock. Retry your command.
 `,
 };
 
@@ -227,7 +228,7 @@ After navigation, submit, keypress navigation, major DOM changes, or scroll on c
 \`\`\`bash
 browser-use open <url>
 browser-use --headed open <url>
-browser-use connect
+browser-use --connect open <url>
 browser-use --cdp-url ws://localhost:9222/devtools/browser/... open <url>
 \`\`\`
 
