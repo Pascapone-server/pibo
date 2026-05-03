@@ -170,6 +170,13 @@ export class ChatWebReadModel {
 		);
 	}
 
+	getSession(piboSessionId: string): ChatWebSessionIndexItem | undefined {
+		const row = this.db
+			.prepare("SELECT * FROM web_chat_sessions WHERE pibo_session_id = ?")
+			.get(piboSessionId) as SessionRow | undefined;
+		return row ? sessionFromRow(row) : undefined;
+	}
+
 	listEvents(piboSessionId: string, limit = 1000): ChatWebStoredEvent[] {
 		const rows = this.db
 			.prepare(
