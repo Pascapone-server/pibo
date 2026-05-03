@@ -168,6 +168,14 @@ export const piboCorePlugin = definePiboPlugin({
 			},
 		});
 		api.registerGatewayAction({
+			name: "kill",
+			description: "Kill the active agent run and all subagent sessions recursively.",
+			slashCommands: ["kill"],
+			async execute(context) {
+				return await context.kill();
+			},
+		});
+		api.registerGatewayAction({
 			name: "dispose",
 			description: "Dispose the routed session runtime.",
 			hidden: true,

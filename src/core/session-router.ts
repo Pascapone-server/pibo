@@ -172,6 +172,33 @@ export class PiboSessionRouter {
 		return output;
 	}
 
+	async killSession(piboSessionId: string): Promise<{ killed: string[] }> {
+		const killed: string[] = [];
+		const session = this.sessions.get(piboSessionId);
+		if (session) {
+			killed.push(await session.kill());
+			const children = await this.killChildSessions(piboSessionId);
+			killed.push(...children.killed);
+		}
+		return { killed };
+	}
+
+	private async killChildSessions(parentId: string): Promise<{ killed: string[] }> {
+		const killed: string[] = [];
+		const allSessions = this.sessionStore.list?.() ?? [];
+		for (const session of allSessions) {
+			if (session.parentId === parentId) {
+				const childSession = this.sessions.get(session.id);
+				if (childSession) {
+					killed.push(await childSession.kill());
+				}
+				const nested = await this.killChildSessions(session.id);
+				killed.push(...nested.killed);
+			}
+		}
+		return { killed };
+	}
+
 	getPiboSessionIds(): string[] {
 		return [...this.sessions.keys()];
 	}
@@ -263,6 +290,7 @@ export class PiboSessionRouter {
 			this.pluginRegistry,
 			this.options.forwardPiEvents ?? false,
 			(result, event) => this.handleSessionOperation(result, event),
+			(id) => this.killChildSessions(id),
 		);
 		this.sessions.set(piboSession.id, session);
 		return session;

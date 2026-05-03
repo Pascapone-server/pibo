@@ -164,6 +164,7 @@ export type PiboGatewayActionContext = {
 	setThinkingLevel(level: PiboThinkingLevel): PiboThinkingResult;
 	cycleThinkingLevel(): PiboThinkingResult;
 	compact(customInstructions?: string): Promise<CompactionResult>;
+	kill(): Promise<{ killed: string[] }>;
 };
 
 export type PiboGatewayAction = {

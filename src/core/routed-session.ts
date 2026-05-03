@@ -264,6 +264,7 @@ export class RoutedSession {
 		private readonly pluginRegistry: PiboPluginRegistry,
 		private readonly forwardPiEvents: boolean,
 		private readonly onSessionOperation?: PiboSessionOperationListener,
+		private readonly onKillChildren?: (piboSessionId: string) => Promise<{ killed: string[] }>,
 	) {
 		this.bindRuntimeSession();
 		this.runtime.setRebindSession(async () => {
@@ -464,6 +465,12 @@ export class RoutedSession {
 		await this.runtime.dispose();
 	}
 
+	async kill(): Promise<string> {
+		this.queue.length = 0;
+		await this.runtime.session.abort();
+		return this.piboSessionId;
+	}
+
 	async cancelMessage(eventId: string): Promise<boolean> {
 		this.assertActive();
 
@@ -557,6 +564,14 @@ export class RoutedSession {
 				setThinkingLevel: (level) => this.setThinkingLevel(level),
 				cycleThinkingLevel: () => this.cycleThinkingLevel(),
 				compact: (customInstructions) => this.compact(customInstructions),
+				kill: async () => {
+					const killed = [await this.kill()];
+					if (this.onKillChildren) {
+						const children = await this.onKillChildren(this.piboSessionId);
+						killed.push(...children.killed);
+					}
+					return { killed };
+				},
 			},
 			event,
 		);
