@@ -89,6 +89,12 @@ export async function runPiboCli(argv = process.argv): Promise<void> {
 		return;
 	}
 
+	if (argv[2] === "skills") {
+		const { runSkillsCli } = await import("./skills/cli.js");
+		await runSkillsCli([argv[0] ?? "node", "pibo skills", ...argv.slice(3)]);
+		return;
+	}
+
 	if (argv[2] === "config" && (argv[3] === "--help" || argv[3] === "-h" || argv.length === 3)) {
 		printConfigDiscovery();
 		return;
@@ -155,6 +161,18 @@ export async function runPiboCli(argv = process.argv): Promise<void> {
 		.action(async (args: string[]) => {
 			const { runComputeCli } = await import("./compute/cli.js");
 			await runComputeCli([argv[0] ?? "node", "pibo compute", ...args]);
+		});
+
+	program
+		.command("skills")
+		.description("Manage Pibo user skills")
+		.helpOption(false)
+		.allowUnknownOption(true)
+		.allowExcessArguments(true)
+		.argument("[args...]")
+		.action(async (args: string[]) => {
+			const { runSkillsCli } = await import("./skills/cli.js");
+			await runSkillsCli([argv[0] ?? "node", "pibo skills", ...args]);
 		});
 
 	const config = program.command("config").description(`Manage pibo config at ${DEFAULT_PIBO_CONFIG_PATH}`).helpOption(false);
@@ -290,6 +308,7 @@ Commands:
   pi-packages  Register Pi Coding Agent packages
   debug        Inspect local Pibo data
   compute      Manage Pibo Docker compute workers
+  skills       Manage Pibo user skills
   profile      Inspect a pibo profile
   tui          Start the direct Pi TUI
   tui:routed   Start the local routed Pibo TUI
