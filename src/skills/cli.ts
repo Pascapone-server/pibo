@@ -11,7 +11,7 @@ export async function runSkillsCli(argv: string[]): Promise<void> {
 	const manager = new UserSkillManager(process.cwd());
 
 	const program = new Command();
-	program.name("pibo skills").description("Manage Pibo user skills").helpOption(false);
+	program.name("pibo skills").description("Manage Pibo user skills");
 
 	program
 		.command("list")
