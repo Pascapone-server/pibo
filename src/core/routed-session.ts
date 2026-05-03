@@ -20,6 +20,8 @@ import type {
 	PiboThinkingResult,
 } from "./events.js";
 import type { PiboThinkingLevel } from "./thinking.js";
+import type { CompactionResult } from "@mariozechner/pi-coding-agent";
+import type { ContextUsage } from "@mariozechner/pi-coding-agent";
 
 type PiSessionTreeNode = ReturnType<SessionManager["getTree"]>[number];
 
@@ -327,6 +329,10 @@ export class RoutedSession {
 		};
 	}
 
+	getContextUsage(): ContextUsage | undefined {
+		return this.runtime.session.getContextUsage();
+	}
+
 	removeQueuedMessages(predicate: (event: PiboMessageEvent) => boolean): number {
 		this.assertActive();
 
@@ -443,6 +449,11 @@ export class RoutedSession {
 		return this.getThinkingResult();
 	}
 
+	async compact(customInstructions?: string): Promise<CompactionResult> {
+		this.assertActive();
+		return await this.runtime.session.compact(customInstructions);
+	}
+
 	async dispose(): Promise<void> {
 		if (this.disposed) return;
 
@@ -529,6 +540,7 @@ export class RoutedSession {
 			{
 				piboSessionId: this.piboSessionId,
 				getStatus: () => this.getStatus(),
+				getContextUsage: () => this.getContextUsage(),
 				clearQueue: () => this.clearQueue(),
 				abort: async () => {
 					await this.runtime.session.abort();
@@ -544,6 +556,7 @@ export class RoutedSession {
 				switchSession: (params) => this.switchSession(params),
 				setThinkingLevel: (level) => this.setThinkingLevel(level),
 				cycleThinkingLevel: () => this.cycleThinkingLevel(),
+				compact: (customInstructions) => this.compact(customInstructions),
 			},
 			event,
 		);

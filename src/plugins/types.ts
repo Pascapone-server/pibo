@@ -11,6 +11,8 @@ import type {
 	PiboSessionTreeResult,
 	PiboThinkingResult,
 } from "../core/events.js";
+import type { CompactionResult } from "@mariozechner/pi-coding-agent";
+import type { ContextUsage } from "@mariozechner/pi-coding-agent";
 import type { PiboThinkingLevel } from "../core/thinking.js";
 import type { PiboChannel } from "../channels/types.js";
 import type { PiboAuthService } from "../auth/types.js";
@@ -147,6 +149,7 @@ export type PiboProductEvent = PiboProductEventInput & {
 export type PiboGatewayActionContext = {
 	piboSessionId: string;
 	getStatus(): PiboSessionStatus;
+	getContextUsage(): ContextUsage | undefined;
 	clearQueue(): number;
 	abort(): Promise<void>;
 	dispose(): Promise<void>;
@@ -160,6 +163,7 @@ export type PiboGatewayActionContext = {
 	switchSession(params: PiboSessionSwitchParams): Promise<PiboSessionOperationResult>;
 	setThinkingLevel(level: PiboThinkingLevel): PiboThinkingResult;
 	cycleThinkingLevel(): PiboThinkingResult;
+	compact(customInstructions?: string): Promise<CompactionResult>;
 };
 
 export type PiboGatewayAction = {

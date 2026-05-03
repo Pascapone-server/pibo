@@ -32,7 +32,6 @@ const BLOCKED_PI_TUI_COMMANDS = new Set([
 	"login",
 	"logout",
 	"new",
-	"compact",
 	"reload",
 	"debug",
 	"resume",

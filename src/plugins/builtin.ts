@@ -126,10 +126,20 @@ export const piboCorePlugin = definePiboPlugin({
 		});
 		api.registerGatewayAction({
 			name: "status",
-			description: "Return current session status.",
+			description: "Return current session status with context usage quota.",
 			slashCommands: ["status"],
 			execute(context) {
-				return context.getStatus();
+				return { ...context.getStatus(), contextUsage: context.getContextUsage() };
+			},
+		});
+		api.registerGatewayAction({
+			name: "compact",
+			description: "Manually compact the session context.",
+			slashCommands: ["compact"],
+			async execute(context, event) {
+				const params = getObjectParams(event);
+				const customInstructions = typeof params?.customInstructions === "string" ? params.customInstructions : undefined;
+				return await context.compact(customInstructions);
 			},
 		});
 		api.registerGatewayAction({
