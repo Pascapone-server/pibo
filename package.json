@@ -1,6 +1,6 @@
 {
   "name": "@pasko70/pibo",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "type": "module",
   "description": "Minimal TypeScript wrapper around Pi Coding Agent.",
   "files": [

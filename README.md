@@ -21,6 +21,8 @@ npm run build
 npm run start -- --help
 ```
 
+The current Chat Web build includes two session views over the same routed trace data: the default nested `Trace` view and the compact `Terminal` view. Both views now use virtualization in the UI layer, so long-running sessions stay responsive without changing trace reconstruction, ordering, or live-update semantics.
+
 ## Docs
 
 - `docs/architecture.md` describes the current runtime architecture and boundaries.
@@ -85,7 +87,7 @@ In the Chat Web App, personal sessions can be archived before deletion. Permanen
 
 The Chat Web App also has Pibo Rooms. Each user gets a locked `Personal Chat` room automatically. The personal room is shown separately from user-created rooms and cannot be renamed, archived, or deleted. User-created rooms can be archived first, then permanently deleted after typing the room name. Archived rooms remain inspectable and show their contained sessions, but they are read-only: no new sessions, messages, or execution actions can be started in that room. Permanent room deletion removes the room subtree, contained sessions, subagent session descendants, and Chat Web read-model/event-log rows.
 
-Within the Sessions area, the Chat Web App now has an internal session-view registry. The existing nested trace renderer remains the default `Trace` view, and the same `PiboSessionTraceView` data can also be rendered through a compact Codex-style `Terminal` view selected by `?view=trace|terminal` or by browser-local preference.
+Within the Sessions area, the Chat Web App now has an internal session-view registry. The existing nested trace renderer remains the default `Trace` view, and the same `PiboSessionTraceView` data can also be rendered through a compact Codex-style `Terminal` view selected by `?view=trace|terminal` or by browser-local preference. Both session views are virtualized at the rendering layer so very long histories remain fast without changing the underlying trace tree, trace ordering, or live SSE merge logic.
 
 Managed context files are now a first-class product capability. The `pibo.context-files` plugin exposes editable global and agent-scoped markdown context files through `/api/context-files`, stores managed-file metadata and revisions in `.pibo/context-files/context-files.sqlite`, and emits product events when managed files are created, changed, removed, or updated on disk. Plugin-shipped context files remain immutable source files; the product can create linked managed copies from them, track source hashes and link state, diff the managed copy against its source, reset back to source, restore older revisions, or adopt a changed source as the new managed baseline.
 
