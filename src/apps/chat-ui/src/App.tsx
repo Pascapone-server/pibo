@@ -506,6 +506,26 @@ export function App({ route }: { route: ChatAppRoute }) {
 		return commands;
 	}, [bootstrap]);
 
+	const skills = useMemo(() => {
+		if (!bootstrap) return [];
+		const catalogSkills = bootstrap.agentCatalog?.skills ?? [];
+		const userSkills = bootstrap.agentCatalog?.userSkills ?? [];
+		const allSkills = [...catalogSkills, ...userSkills];
+
+		const selectedSessionProfile = selectedPiboSessionId
+			? findSessionNode(bootstrap.sessions, selectedPiboSessionId)?.profile ?? bootstrap.session.profile
+			: bootstrap.session.profile;
+
+		const agentSkills = [
+			...bootstrap.agents.map((agent) => ({ name: agent.name, skills: agent.skills })),
+			...bootstrap.customAgents.map((agent) => ({ name: agent.profileName, skills: agent.skills })),
+		];
+		const currentAgent = agentSkills.find((agent) => agent.name === selectedSessionProfile);
+		const allowedSkillNames = new Set(currentAgent?.skills ?? []);
+
+		return allSkills.filter((skill) => allowedSkillNames.has(skill.name));
+	}, [bootstrap, selectedPiboSessionId]);
+
 	const selectSession = useCallback(async (piboSessionId: string) => {
 		setSelectedPiboSessionId(piboSessionId);
 		const data = await loadBootstrap(piboSessionId);
@@ -1005,6 +1025,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 						showThinking={showThinking}
 						expandThinking={expandThinking}
 						commands={slashCommands}
+						skills={skills}
 						composerText={composerText}
 						composerFocusSignal={composerFocusSignal}
 						onComposerTextChange={setComposerText}
@@ -1131,6 +1152,7 @@ function SessionTracePane({
 	showThinking,
 	expandThinking,
 	commands,
+	skills,
 	composerText,
 	composerFocusSignal,
 	onComposerTextChange,
@@ -1160,6 +1182,7 @@ function SessionTracePane({
 	showThinking: boolean;
 	expandThinking: boolean;
 	commands: Array<{ slash: string; action: string; description: string }>;
+	skills: Array<{ name: string; description?: string; path?: string }>;
 	composerText: string;
 	composerFocusSignal: number;
 	onComposerTextChange: Dispatch<SetStateAction<string>>;
@@ -1407,6 +1430,7 @@ function SessionTracePane({
 				<Composer
 					disabled={!selectedPiboSessionId || selectedRoomArchived}
 					commands={commands}
+					skills={skills}
 					value={composerText}
 					focusSignal={composerFocusSignal}
 					onValueChange={onComposerTextChange}
@@ -2153,6 +2177,7 @@ function formatRoomSummary(room: PiboRoom): string {
 function Composer({
 	disabled = false,
 	commands,
+	skills,
 	value,
 	focusSignal,
 	onValueChange,
@@ -2161,6 +2186,7 @@ function Composer({
 }: {
 	disabled?: boolean;
 	commands: Array<{ slash: string; action: string; description: string }>;
+	skills: Array<{ name: string; description?: string; path?: string }>;
 	value: string;
 	focusSignal: number;
 	onValueChange: (value: string) => void;
@@ -2169,7 +2195,29 @@ function Composer({
 }) {
 	const inputRef = useRef<HTMLTextAreaElement>(null);
 	const activeCommandRef = useRef<HTMLButtonElement>(null);
+	const activeSkillRef = useRef<HTMLButtonElement>(null);
 	const [activeIndex, setActiveIndex] = useState(0);
+	const [activeSkillIndex, setActiveSkillIndex] = useState(0);
+	const [cursorPos, setCursorPos] = useState(0);
+
+	const skillTrigger = useMemo(() => {
+		for (let i = cursorPos - 1; i >= 0; i--) {
+			const char = value[i];
+			if (char === " " || char === "\n" || char === "\t") break;
+			if (char === "$") {
+				if (i > 0 && value[i - 1] === "\\") continue;
+				const query = value.slice(i + 1, cursorPos).toLowerCase();
+				return { query, startPos: i, endPos: cursorPos };
+			}
+		}
+		return null;
+	}, [value, cursorPos]);
+
+	const filteredSkills = useMemo(() => {
+		if (!skillTrigger) return [];
+		return skills.filter((skill) => skill.name.toLowerCase().startsWith(skillTrigger.query));
+	}, [skillTrigger, skills]);
+
 	const filtered = value.trim().startsWith("/")
 		? commands.filter((command) => command.slash.startsWith(value.trim().split(/\s+/)[0]))
 		: [];
@@ -2180,8 +2228,17 @@ function Composer({
 	}, [activeIndex, filtered.length]);
 
 	useEffect(() => {
+		if (!filteredSkills.length || activeSkillIndex < filteredSkills.length) return;
+		setActiveSkillIndex(0);
+	}, [activeSkillIndex, filteredSkills.length]);
+
+	useEffect(() => {
 		activeCommandRef.current?.scrollIntoView({ block: "nearest" });
 	}, [activeIndex, filtered.length]);
+
+	useEffect(() => {
+		activeSkillRef.current?.scrollIntoView({ block: "nearest" });
+	}, [activeSkillIndex, filteredSkills.length]);
 
 	useEffect(() => {
 		if (focusSignal <= 0) return;
@@ -2190,16 +2247,34 @@ function Composer({
 		const cursorPosition = input.value.length;
 		input.focus();
 		input.setSelectionRange(cursorPosition, cursorPosition);
+		setCursorPos(cursorPosition);
 	}, [focusSignal]);
 
 	useLayoutEffect(() => {
 		resizeComposerInput(inputRef.current);
 	}, [value]);
 
+	const insertSkill = (skillName: string) => {
+		if (!skillTrigger || !inputRef.current) return;
+		const before = value.slice(0, skillTrigger.startPos);
+		const after = value.slice(skillTrigger.endPos);
+		const newValue = before + "$" + skillName + after;
+		onValueChange(newValue);
+		const newCursorPos = skillTrigger.startPos + 1 + skillName.length;
+		requestAnimationFrame(() => {
+			inputRef.current?.setSelectionRange(newCursorPos, newCursorPos);
+			setCursorPos(newCursorPos);
+		});
+	};
+
 	const submit = async () => {
 		if (disabled) return;
 		const text = value.trim();
 		if (!text) return;
+		if (filteredSkills.length) {
+			insertSkill(filteredSkills[Math.min(activeSkillIndex, filteredSkills.length - 1)].name);
+			return;
+		}
 		if (filtered.length && !commands.some((command) => command.slash === text.split(/\s+/)[0])) {
 			onValueChange(filtered[Math.min(activeIndex, filtered.length - 1)].slash);
 			return;
@@ -2211,6 +2286,22 @@ function Composer({
 
 	return (
 		<div className="relative p-3 bg-[#151f24] border-t border-slate-800">
+			{filteredSkills.length ? (
+				<div className="absolute left-3 bottom-full mb-2 w-[min(520px,calc(100%-24px))] max-h-72 overflow-auto bg-[#0e1116] border border-emerald-500 rounded-sm shadow-xl">
+					{filteredSkills.map((skill, index) => (
+						<button
+							key={skill.name}
+							ref={index === activeSkillIndex ? activeSkillRef : null}
+							type="button"
+							onClick={() => insertSkill(skill.name)}
+							className={`w-full grid grid-cols-[120px_1fr] gap-2 px-3 py-2 text-left border-b border-slate-800 ${index === activeSkillIndex ? "bg-emerald-500/15" : ""}`}
+						>
+							<span className="font-mono text-emerald-400">${skill.name}</span>
+							<span className="text-xs text-slate-400">{skill.description ?? skill.path ?? ""}</span>
+						</button>
+					))}
+				</div>
+			) : null}
 			{filtered.length ? (
 				<div className="absolute left-3 bottom-full mb-2 w-[min(520px,calc(100%-24px))] max-h-72 overflow-auto bg-[#0e1116] border border-[#11a4d4] rounded-sm shadow-xl">
 					{filtered.map((command, index) => (
@@ -2236,8 +2327,18 @@ function Composer({
 					rows={1}
 					value={value}
 					disabled={disabled}
-					onChange={(event) => onValueChange(event.target.value)}
+					onChange={(event) => {
+						onValueChange(event.target.value);
+						setCursorPos(event.target.selectionStart);
+					}}
 					onKeyDown={(event) => {
+						if (filteredSkills.length && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+							event.preventDefault();
+							setActiveSkillIndex((current) =>
+								event.key === "ArrowDown" ? (current + 1) % filteredSkills.length : (current - 1 + filteredSkills.length) % filteredSkills.length,
+							);
+							return;
+						}
 						if (filtered.length && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
 							event.preventDefault();
 							setActiveIndex((current) =>
@@ -2250,7 +2351,7 @@ function Composer({
 							void submit();
 						}
 					}}
-					placeholder={disabled ? "Select a session to message" : "Message selected session or type /"}
+					placeholder={disabled ? "Select a session to message" : "Message selected session, type / for commands or $ for skills"}
 					className="h-10 min-h-10 resize-none overflow-hidden bg-[#0e1116] border border-slate-700 rounded-sm px-3 py-2 text-sm leading-5 outline-none focus:border-[#11a4d4] disabled:opacity-50 [scrollbar-gutter:stable]"
 				/>
 				<button

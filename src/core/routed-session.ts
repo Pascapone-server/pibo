@@ -22,6 +22,7 @@ import type {
 import type { PiboThinkingLevel } from "./thinking.js";
 import type { CompactionResult } from "@mariozechner/pi-coding-agent";
 import type { ContextUsage } from "@mariozechner/pi-coding-agent";
+import { expandInlineSkills } from "./skill-expansion.js";
 
 type PiSessionTreeNode = ReturnType<SessionManager["getTree"]>[number];
 
@@ -509,7 +510,11 @@ export class RoutedSession {
 					this.nextAssistantIndex = 0;
 					this.activeThinkingIndex = undefined;
 					this.nextThinkingIndex = 0;
-					await this.runtime.session.prompt(event.text, { source: promptSource(event.source) });
+					const expandedText = expandInlineSkills(
+						event.text,
+						this.runtime.session.resourceLoader.getSkills().skills,
+					);
+					await this.runtime.session.prompt(expandedText, { source: promptSource(event.source) });
 					this.emit({
 						type: "message_finished",
 						piboSessionId: this.piboSessionId,
