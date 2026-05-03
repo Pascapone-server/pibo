@@ -54,8 +54,13 @@ test("default plugin registry builds profiles from registered resources", () => 
 	assert.deepEqual(registry.getGatewayActionInfos(), [
 		{
 			name: "status",
-			description: "Return current session status.",
+			description: "Return current session status with context usage quota.",
 			slashCommands: ["status"],
+		},
+		{
+			name: "compact",
+			description: "Manually compact the session context.",
+			slashCommands: ["compact"],
 		},
 		{
 			name: "session_id",
@@ -71,6 +76,11 @@ test("default plugin registry builds profiles from registered resources", () => 
 			name: "abort",
 			description: "Abort the active Pi agent run.",
 			slashCommands: ["abort"],
+		},
+		{
+			name: "kill",
+			description: "Kill the active agent run and all subagent sessions recursively.",
+			slashCommands: ["kill"],
 		},
 		{
 			name: "thinking",

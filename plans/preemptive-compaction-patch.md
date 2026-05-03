@@ -26,8 +26,7 @@ Monkey-Patch `agent.continue()` in `RoutedSession`, um vor jedem `continue()` ei
 ### 1. Import hinzufügen (oben)
 
 ```ts
-import { estimateContextTokens, shouldCompact, type CompactionSettings } from "@mariozechner/pi-coding-agent/dist/core/compaction/index.js";
-import { getLatestCompactionEntry } from "@mariozechner/pi-coding-agent/dist/core/session-manager.js";
+import { SessionManager, type AgentSessionRuntime, shouldCompact } from "@mariozechner/pi-coding-agent";
 ```
 
 ### 2. Methode `patchAgentContinue` hinzufügen (in `RoutedSession`)
@@ -46,23 +45,13 @@ private patchAgentContinue(): void {
         const settings = session.settingsManager.getCompactionSettings();
         if (!settings.enabled) return originalContinue();
 
-        const messages = agent.state.messages;
-        const estimate = estimateContextTokens(messages);
+        // getContextUsage() already handles the stale-usage-after-compaction
+        // check internally. If tokens is null, the last assistant usage predates
+        // the latest compaction and we should skip until the next LLM response.
+        const contextUsage = session.getContextUsage();
+        if (!contextUsage || contextUsage.tokens === null) return originalContinue();
 
-        // Skip wenn Usage von vor der letzten Compaction stammt
-        const branch = session.sessionManager.getBranch();
-        const compactionEntry = getLatestCompactionEntry(branch);
-        if (compactionEntry && estimate.lastUsageIndex !== null) {
-            const usageMsg = messages[estimate.lastUsageIndex];
-            if (
-                usageMsg?.role === "assistant" &&
-                usageMsg.timestamp <= new Date(compactionEntry.timestamp).getTime()
-            ) {
-                return originalContinue();
-            }
-        }
-
-        if (shouldCompact(estimate.tokens, contextWindow, settings)) {
+        if (shouldCompact(contextUsage.tokens, contextWindow, settings)) {
             await session.compact();
         }
 
@@ -70,6 +59,8 @@ private patchAgentContinue(): void {
     };
 }
 ```
+
+> **Hinweis zur Implementierung:** Der ursprüngliche Plan wollte `estimateContextTokens()` und `getLatestCompactionEntry()` direkt aus `pi-coding-agent/dist/core/...` importieren. Unter `NodeNext`-Modul-Auflösung sind diese internen Pfade aber blockiert, da sie nicht in der `package.json` `exports` stehen. Stattdessen wird `session.getContextUsage()` verwendet, die **intern exakt dieselbe Logik** abdeckt (Token-Schätzung + Prüfung, ob die letzte Assistant-Usage vor der letzten Compaction liegt).
 
 ### 3. Aufruf im Konstruktor (nach `bindRuntimeSession`)
 
@@ -96,8 +87,8 @@ constructor(...) {
 |---|---|---|
 | `session.compact()` ruft intern `abort()` auf → könnte laufenden Agent unterbrechen | Niedrig | Agent ist zwischen Tool-Calls idle (`activeRun = undefined`). `abort()` ist no-op. |
 | Race: Compaction läuft, User sendet gleichzeitig Nachricht | Niedrig | `session.compact()` blockiert; Pibo-Queue verhindert parallele Messages. |
-| Doppelte Compaction (Framework + Patch) | Niedrig | `prepareCompaction` returned `undefined` wenn letzter Eintrag schon `compaction` ist. |
-| Monkey-Patch geht bei Framework-Update kaputt | Mittel | Patch ist klein (20 Zeilen), leicht anzupassen. |
+| Doppelte Compaction (Framework + Patch) | Niedrig | `getContextUsage()` returned `tokens: null` nach Compaction → Patch überspringt. Zusätzlich: `prepareCompaction` returned `undefined` wenn letzter Eintrag schon `compaction` ist. |
+| Monkey-Patch geht bei Framework-Update kaputt | Mittel | Patch ist klein (~20 Zeilen), leicht anzupassen. |
 
 ## Alternative (sauber, aber Framework-Change)
 
@@ -116,3 +107,4 @@ if (lastAssistant) {
 - **Kein Framework-Fork**: Patch bleibt im Pibo-Code, `pi-coding-agent` bleibt Dependency.
 - **Kein neuer Extension-Event**: `turn_end` ist asynchron, Agent macht sofort `continue()`. Extension kann nicht blockieren.
 - **Monkey-Patch auf `agent.continue()`**: Einzige Stelle, die synchron vor dem nächsten LLM-Call greift.
+- **Keine internen Imports**: `NodeNext`-Modul-Auflösung blockiert Pfade außerhalb der `package.json` `exports`. Stattdessen wird `session.getContextUsage()` genutzt, die dieselbe Logik intern kapselt.
