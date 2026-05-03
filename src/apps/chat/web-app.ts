@@ -40,7 +40,6 @@ import {
 } from "../../core/model-defaults.js";
 import type { ModelProfile } from "../../core/profiles.js";
 import { createCustomAgentProfileDefinition } from "./agent-profiles.js";
-import { loadModelCatalog } from "./model-catalog.js";
 import { createDefaultPiboReliabilityStore, PiboReliabilityStore } from "../../reliability/store.js";
 import { listMcpServerInfos, setMcpServerDescription } from "../../mcp/agent-context.js";
 import {
@@ -2429,7 +2428,6 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 					agents: context.channelContext.getProfiles?.() ?? [],
 					customAgents: state.agentStore.list(webSession.ownerScope, { includeArchived: true }),
 					modelDefaults: loadChatModelDefaults(process.cwd()),
-					modelCatalog: await loadModelCatalog(process.cwd()),
 					agentCatalog: await buildAgentCatalog(context),
 					capabilities: {
 						actions: context.channelContext.getGatewayActions(),
@@ -2814,6 +2812,43 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				}
 				const deletedSessionIds = deleteSessionSubtree(state, context, webSession, selectedSession);
 				return responseJson({ deletedSessionIds });
+			}
+
+			const sessionKillPrefix = `${CHAT_WEB_API_PREFIX}/sessions/`;
+			if (url.pathname.startsWith(sessionKillPrefix) && url.pathname.endsWith("/kill") && request.method === "POST") {
+				requireSameOriginJsonRequest(request);
+				const webSession = await requireSession(request, context);
+				const encodedId = url.pathname.slice(sessionKillPrefix.length, -5);
+				if (!encodedId || encodedId.includes("/")) {
+					throw new PiboWebHttpError("Invalid session id", 400);
+				}
+				const killSessionId = decodeURIComponent(encodedId);
+				const selectedSession = resolveRequestedSession(state, context, webSession, defaultProfile, killSessionId);
+				const output = await context.channelContext.emit({
+					type: "execution",
+					piboSessionId: selectedSession.id,
+					id: randomUUID(),
+					action: "kill",
+				});
+				return responseJson(output);
+			}
+
+			if (url.pathname.startsWith(sessionKillPrefix) && url.pathname.endsWith("/kill-all") && request.method === "POST") {
+				requireSameOriginJsonRequest(request);
+				const webSession = await requireSession(request, context);
+				const encodedId = url.pathname.slice(sessionKillPrefix.length, -9);
+				if (!encodedId || encodedId.includes("/")) {
+					throw new PiboWebHttpError("Invalid session id", 400);
+				}
+				const killAllSessionId = decodeURIComponent(encodedId);
+				const selectedSession = resolveRequestedSession(state, context, webSession, defaultProfile, killAllSessionId);
+				const output = await context.channelContext.emit({
+					type: "execution",
+					piboSessionId: selectedSession.id,
+					id: randomUUID(),
+					action: "kill_all",
+				});
+				return responseJson(output);
 			}
 
 			if (url.pathname === `${CHAT_WEB_API_PREFIX}/trace` && request.method === "GET") {

@@ -172,19 +172,26 @@ export class PiboSessionRouter {
 		return output;
 	}
 
-	async killSession(piboSessionId: string): Promise<{ killed: string[] }> {
+	async killSession(piboSessionId: string, options?: { includeRuns?: boolean }): Promise<{ killed: string[]; cancelledRuns: string[] }> {
 		const killed: string[] = [];
+		const cancelledRuns: string[] = [];
 		const session = this.sessions.get(piboSessionId);
 		if (session) {
 			killed.push(await session.kill());
-			const children = await this.killChildSessions(piboSessionId);
+			if (options?.includeRuns) {
+				const runs = this.runRegistry.cancelOwnerRuns(piboSessionId);
+				cancelledRuns.push(...runs.map((r) => r.runId));
+			}
+			const children = await this.killChildSessions(piboSessionId, options);
 			killed.push(...children.killed);
+			cancelledRuns.push(...children.cancelledRuns);
 		}
-		return { killed };
+		return { killed, cancelledRuns };
 	}
 
-	private async killChildSessions(parentId: string): Promise<{ killed: string[] }> {
+	private async killChildSessions(parentId: string, options?: { includeRuns?: boolean }): Promise<{ killed: string[]; cancelledRuns: string[] }> {
 		const killed: string[] = [];
+		const cancelledRuns: string[] = [];
 		const allSessions = this.sessionStore.list?.() ?? [];
 		for (const session of allSessions) {
 			if (session.parentId === parentId) {
@@ -192,11 +199,16 @@ export class PiboSessionRouter {
 				if (childSession) {
 					killed.push(await childSession.kill());
 				}
-				const nested = await this.killChildSessions(session.id);
+				if (options?.includeRuns) {
+					const runs = this.runRegistry.cancelOwnerRuns(session.id);
+					cancelledRuns.push(...runs.map((r) => r.runId));
+				}
+				const nested = await this.killChildSessions(session.id, options);
 				killed.push(...nested.killed);
+				cancelledRuns.push(...nested.cancelledRuns);
 			}
 		}
-		return { killed };
+		return { killed, cancelledRuns };
 	}
 
 	getPiboSessionIds(): string[] {
@@ -290,7 +302,7 @@ export class PiboSessionRouter {
 			this.pluginRegistry,
 			this.options.forwardPiEvents ?? false,
 			(result, event) => this.handleSessionOperation(result, event),
-			(id) => this.killChildSessions(id),
+			(id, opts) => this.killChildSessions(id, opts),
 		);
 		this.sessions.set(piboSession.id, session);
 		return session;

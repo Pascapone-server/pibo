@@ -324,3 +324,114 @@ test("runtime reopens an existing persisted session by profile session id", asyn
 		if (currentFile) await rm(dirname(currentFile), { recursive: true, force: true });
 	}
 });
+
+test("kill cancels child sessions but not yielded runs", async () => {
+	const store = new InMemoryPiboSessionStore();
+	store.create({
+		id: "ps_parent",
+		piSessionId: "11111111-1111-4111-8111-111111111111",
+		channel: "pibo.test",
+		kind: "chat",
+		profile: "pibo-minimal",
+		ownerScope: "user:test",
+	});
+	store.create({
+		id: "ps_child",
+		piSessionId: "22222222-2222-4222-8222-222222222222",
+		channel: "pibo.subagents",
+		kind: "subagent",
+		profile: "pibo-minimal",
+		parentId: "ps_parent",
+		ownerScope: "user:test",
+	});
+	const router = new PiboSessionRouter({
+		persistSession: false,
+		sessionStore: store,
+	});
+
+	try {
+		await router.emit({
+			type: "execution",
+			piboSessionId: "ps_parent",
+			action: "status",
+		});
+		await router.emit({
+			type: "execution",
+			piboSessionId: "ps_child",
+			action: "status",
+		});
+
+		const run = router.runRegistry.startToolRun({
+			ownerPiboSessionId: "ps_child",
+			toolName: "bash",
+		});
+		assert.equal(run.status, "running");
+
+		const result = await router.killSession("ps_parent");
+		assert.deepEqual(result.killed.sort(), ["ps_child", "ps_parent"]);
+		assert.deepEqual(result.cancelledRuns, []);
+
+		assert.equal(router.runRegistry.status("ps_child", run.runId).status, "running");
+		router.runRegistry.cancel("ps_child", run.runId);
+	} finally {
+		await router.disposeAll();
+	}
+});
+
+test("kill_all cancels child sessions and yielded runs recursively", async () => {
+	const store = new InMemoryPiboSessionStore();
+	store.create({
+		id: "ps_parent",
+		piSessionId: "11111111-1111-4111-8111-111111111111",
+		channel: "pibo.test",
+		kind: "chat",
+		profile: "pibo-minimal",
+		ownerScope: "user:test",
+	});
+	store.create({
+		id: "ps_child",
+		piSessionId: "22222222-2222-4222-8222-222222222222",
+		channel: "pibo.subagents",
+		kind: "subagent",
+		profile: "pibo-minimal",
+		parentId: "ps_parent",
+		ownerScope: "user:test",
+	});
+	const router = new PiboSessionRouter({
+		persistSession: false,
+		sessionStore: store,
+	});
+
+	try {
+		await router.emit({
+			type: "execution",
+			piboSessionId: "ps_parent",
+			action: "status",
+		});
+		await router.emit({
+			type: "execution",
+			piboSessionId: "ps_child",
+			action: "status",
+		});
+
+		const childRun = router.runRegistry.startToolRun({
+			ownerPiboSessionId: "ps_child",
+			toolName: "bash",
+		});
+		const parentRun = router.runRegistry.startToolRun({
+			ownerPiboSessionId: "ps_parent",
+			toolName: "bash",
+		});
+
+		const result = await router.killSession("ps_parent", { includeRuns: true });
+		assert.deepEqual(result.killed.sort(), ["ps_child", "ps_parent"]);
+		assert.equal(result.cancelledRuns.length, 2);
+		assert.ok(result.cancelledRuns.includes(childRun.runId));
+		assert.ok(result.cancelledRuns.includes(parentRun.runId));
+
+		assert.equal(router.runRegistry.status("ps_child", childRun.runId).status, "cancelled");
+		assert.equal(router.runRegistry.status("ps_parent", parentRun.runId).status, "cancelled");
+	} finally {
+		await router.disposeAll();
+	}
+});

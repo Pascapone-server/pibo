@@ -20,7 +20,7 @@ export type PiboMessageEvent = {
 	id?: string;
 };
 
-export type BuiltinPiboExecutionAction = "status" | "session_id" | "clear_queue" | "abort" | "dispose";
+export type BuiltinPiboExecutionAction = "status" | "session_id" | "clear_queue" | "abort" | "dispose" | "kill_all";
 
 export type PiboSessionExecutionAction =
 	| "session.current"
@@ -273,21 +273,6 @@ export type PiboToolExecutionFinishedEvent = {
 	isError: boolean;
 };
 
-export type PiboCompactionStartEvent = {
-	type: "compaction_start";
-	piboSessionId: string;
-	reason: string;
-};
-
-export type PiboCompactionEndEvent = {
-	type: "compaction_end";
-	piboSessionId: string;
-	reason: string;
-	result?: unknown;
-	aborted: boolean;
-	errorMessage?: string;
-};
-
 export type PiboOutputEvent =
 	| PiboMessageQueuedEvent
 	| PiboMessageStartedEvent
@@ -302,8 +287,6 @@ export type PiboOutputEvent =
 	| PiboToolExecutionFinishedEvent
 	| PiboSubagentSessionEvent
 	| PiboAssistantMessageEvent
-	| PiboCompactionStartEvent
-	| PiboCompactionEndEvent
 	| { type: "execution_result"; piboSessionId: string; eventId?: string; action: PiboExecutionAction; result: unknown }
 	| { type: "session_error"; piboSessionId: string; eventId?: string; error: string }
 	| { type: "pi_event"; piboSessionId: string; event: unknown };
