@@ -40,11 +40,14 @@ import {
 } from "lucide-react";
 import { createUserSkill, deleteCustomAgent, deletePiPackage, deleteRoom, deleteSession, deleteUserSkill, getBootstrap, getTrace, getUserSkill, installUserSkill, listUserSkills, patchCustomAgent, patchModelDefaults, patchPiPackage, patchRoom, patchSession, postAction, postContextFile, postCustomAgent, postMessage, postPiPackage, postRoom, postSession, signInWithGoogle, signOut, updateUserSkill, type SaveCustomAgentInput } from "./api";
 import type { AgentCatalog, BootstrapData, CustomAgent, CustomAgentSubagent, ModelCatalog, ModelDefaults, ModelProfile, PiboRoom, PiboSessionTraceView, PiboTraceNode, PiboTraceOrderKey, PiboWebSessionNode, UserSkill } from "./types";
+import type { ChatWebStoredEvent } from "../../../shared/trace-types.js";
 import { adaptTrace } from "./tracing/adapt";
+import { collectBackendNodes } from "./tracing/snapshotCollector";
 import { type SessionBreadcrumbItem, type SessionDerivationLink, type SessionOriginLink } from "./tracing/TraceTimeline";
 import { JsonRenderer } from "./tracing/JsonRenderer";
 import { countRender } from "./renderMetrics";
-import { childTraceOrder, compareTraceOrder, liveTraceOrder, parseTraceStreamFrameId } from "../../../shared/trace-order.js";
+import { parseTraceStreamFrameId } from "../../../shared/trace-order.js";
+import { buildTraceViewFromEvents } from "../../../shared/trace-engine.js";
 import { ContextFilesView } from "./context/ContextFilesView";
 import { BasePromptView } from "./context/BasePromptView";
 import { CompactionPromptView } from "./context/CompactionPromptView";
@@ -1243,20 +1246,22 @@ function SessionTracePane({
 	const queryClient = useQueryClient();
 	const pendingStreamEventsBySession = useRef(new Map<string, ChatStreamEvent[]>());
 	const pendingStreamFrame = useRef<number | undefined>(undefined);
+	const liveEventSeqRef = useRef(0);
+	const [allEvents, setAllEvents] = useState<ChatWebStoredEvent[]>([]);
 	const traceQueryKey = useMemo(
 		() =>
 			selectedPiboSessionId
-				? chatTraceQueryKey(selectedPiboSessionId, { includeRawEvents: showRawEvents, rawEventsLimit: DEFAULT_RAW_EVENTS_LIMIT })
+				? chatTraceQueryKey(selectedPiboSessionId, { includeRawEvents: true, rawEventsLimit: 10000 })
 				: null,
-		[selectedPiboSessionId, showRawEvents],
+		[selectedPiboSessionId],
 	);
 	const traceQuery = useQuery({
 		queryKey: traceQueryKey ?? ["chat", "trace", "idle", "compact", DEFAULT_RAW_EVENTS_LIMIT],
 		queryFn: () => {
 			if (!selectedPiboSessionId) throw new Error("Session is required");
 			return loadTraceQueryData(queryClient, selectedPiboSessionId, {
-				includeRawEvents: showRawEvents,
-				rawEventsLimit: DEFAULT_RAW_EVENTS_LIMIT,
+				includeRawEvents: true,
+				rawEventsLimit: 10000,
 			});
 		},
 		enabled: Boolean(selectedPiboSessionId),
@@ -1264,22 +1269,63 @@ function SessionTracePane({
 		refetchOnWindowFocus: false,
 		retry: 1,
 	});
-	const currentTraceView = traceQuery.data ?? null;
+
+	// Reset allEvents when trace query data changes (initial load or refresh)
+	useEffect(() => {
+		if (traceQuery.data) {
+			setAllEvents(traceQuery.data.rawEvents);
+			const maxSeq = traceQuery.data.rawEvents
+				.map((e) => e.eventSequence ?? 0)
+				.reduce((a, b) => Math.max(a, b), 0);
+			liveEventSeqRef.current = maxSeq + 1;
+		}
+	}, [traceQuery.data]);
+
+	const currentTraceView = useMemo(() => {
+		if (!selectedPiboSessionId || !bootstrap || allEvents.length === 0) return traceQuery.data ?? null;
+		const sessionStatus = bootstrap.sessions.find((s) => s.piboSessionId === selectedPiboSessionId)?.status ?? "idle";
+		return buildTraceViewFromEvents({
+			session: {
+				id: selectedPiboSessionId,
+				piSessionId: bootstrap.session.piSessionId,
+				title: traceQuery.data?.title ?? bootstrap.session.title ?? "Untitled",
+			},
+			events: allEvents,
+			status: sessionStatus,
+			latestStreamId: traceQuery.data?.latestStreamId,
+			includeRawEvents: true,
+			rawEventsLimit: 10000,
+		});
+	}, [allEvents, selectedPiboSessionId, bootstrap, traceQuery.data]);
 
 	const flushPendingStreamEvents = useCallback((piboSessionId: string) => {
 		const pending = pendingStreamEventsBySession.current.get(piboSessionId);
 		if (!pending?.length) return;
-		const queries = queryClient.getQueryCache().findAll({ queryKey: traceQueriesForSession(piboSessionId) });
-		let applied = queries.length === 0;
-		for (const query of queries) {
-			queryClient.setQueryData<PiboSessionTraceView>(query.queryKey, (current: PiboSessionTraceView | undefined) => {
-				if (!isTraceView(current) || current.piboSessionId !== piboSessionId) return current;
-				applied = true;
-				return applyChatStreamEvents(current, pending);
-			});
+		const rawEvents = pending.filter(
+			(e): e is Extract<ChatStreamEvent, { type: "RAW_EVENT" }> => e.type === "RAW_EVENT",
+		);
+		if (!rawEvents.length) {
+			pendingStreamEventsBySession.current.delete(piboSessionId);
+			return;
 		}
-		if (applied) pendingStreamEventsBySession.current.delete(piboSessionId);
-	}, [queryClient]);
+		setAllEvents((current) => {
+			const newEvents: ChatWebStoredEvent[] = rawEvents.map((e) => {
+				const streamFrame = e.streamFrameId ? parseTraceStreamFrameId(e.streamFrameId) : undefined;
+				return {
+					id: e.streamFrameId ? `stream:${e.streamFrameId}` : `live:${Date.now()}:${Math.random()}`,
+					piboSessionId: e.piboSessionId ?? piboSessionId,
+					eventSequence: liveEventSeqRef.current++,
+					streamId: streamFrame?.streamId,
+					streamFrameIndex: streamFrame?.frameIndex,
+					type: e.event.type,
+					createdAt: new Date().toISOString(),
+					payload: e.event,
+				};
+			});
+			return [...current, ...newEvents];
+		});
+		pendingStreamEventsBySession.current.delete(piboSessionId);
+	}, []);
 
 	const schedulePendingStreamFlush = useCallback(() => {
 		if (pendingStreamFrame.current !== undefined || !selectedPiboSessionId) return;
@@ -1387,6 +1433,19 @@ function SessionTracePane({
 		if (!currentTraceView?.piboSessionId) return;
 		flushPendingStreamEvents(currentTraceView.piboSessionId);
 	}, [currentTraceView?.piboSessionId, flushPendingStreamEvents]);
+
+	useEffect(() => {
+		const handleVisibilityChange = () => {
+			if (!currentTraceView?.piboSessionId) return;
+			collectBackendNodes(currentTraceView.piboSessionId, `tab:${document.visibilityState}`, currentTraceView.nodes, {
+				traceVersion: currentTraceView.version,
+				latestStreamId: currentTraceView.latestStreamId,
+				lastRawEventId: currentTraceView.rawEvents.at(-1)?.id,
+			});
+		};
+		document.addEventListener("visibilitychange", handleVisibilityChange);
+		return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+	}, [currentTraceView]);
 
 	return (
 		<>
@@ -4698,7 +4757,7 @@ type ChatStreamEvent = ChatStreamEventMeta & (
 	| { type: "TOOL_CALL_RESULT"; toolCallId: string; result: unknown; isError: boolean }
 	| { type: "AGENT_DELEGATION"; toolCallId?: string; toolName: string; subagentName: string; childPiboSessionId: string; threadKey?: string }
 	| { type: "EXECUTION_RESULT"; runId?: string; eventId?: string; action: string; result: unknown }
-	| { type: "RAW_EVENT"; event: unknown }
+	| { type: "RAW_EVENT"; event: { type: string; [key: string]: unknown } }
 );
 
 function chatStreamEvent(message: MessageEvent): ChatStreamEvent | undefined {
@@ -4733,527 +4792,6 @@ function eventShouldRefreshNavigation(event: ChatStreamEvent): boolean {
 	return event.type === "RUN_STARTED" || event.type === "RUN_FINISHED" || event.type === "RUN_ERROR" || event.type === "TEXT_MESSAGE_END";
 }
 
-function liveOrder(event: ChatStreamEvent, nodeType: PiboTraceNode["type"]): PiboTraceOrderKey {
-	return liveTraceOrder(event.streamId, event.streamFrameIndex, nodeType);
-}
-
-function applyChatStreamEvents(view: PiboSessionTraceView, events: ChatStreamEvent[]): PiboSessionTraceView {
-	if (!events.length) return view;
-	return events.reduce(applyChatStreamEvent, view);
-}
-
-function applyChatStreamEvent(view: PiboSessionTraceView, event: ChatStreamEvent): PiboSessionTraceView {
-	if (event.type === "ready") return view;
-	if (event.streamFrameId && view.rawEvents.some((rawEvent) => rawEvent.id === `stream:${event.streamFrameId}`)) {
-		return view;
-	}
-	const createdAt = new Date().toISOString();
-	let nodes = view.nodes;
-
-	switch (event.type) {
-		case "RUN_STARTED":
-			nodes = insertTraceNodeIfMissing(nodes, {
-				id: messageTurnNodeId(event.runId),
-				piboSessionId: view.piboSessionId,
-				eventId: event.runId,
-				type: "agent.turn",
-				title: "Agent Turn",
-				status: "running",
-				startedAt: createdAt,
-				summary: event.input?.text,
-				input: event.input,
-				source: "live",
-				stableKey: `turn:${event.runId}`,
-				orderKey: liveOrder(event, "agent.turn"),
-				children: [],
-			});
-			break;
-		case "RUN_FINISHED":
-			nodes = completeRunNodes(nodes, event.runId, createdAt);
-			break;
-		case "RUN_ERROR": {
-			if (event.runId) {
-				nodes = updateTraceNode(nodes, messageTurnNodeId(event.runId), (node) => ({
-					...node,
-					status: "error",
-					completedAt: createdAt,
-					error: event.message,
-				}));
-			}
-			nodes = upsertTraceNode(nodes, {
-				id: `event:error:${event.runId ?? createdAt}`,
-				parentId: event.runId ? messageTurnNodeId(event.runId) : undefined,
-				piboSessionId: view.piboSessionId,
-				eventId: event.runId,
-				type: "error",
-				title: "Error",
-				status: "error",
-				startedAt: createdAt,
-				error: event.message,
-				output: event.message,
-				source: "live",
-				stableKey: `error:${event.runId ?? createdAt}`,
-				orderKey: liveOrder(event, "error"),
-				children: [],
-			});
-			break;
-		}
-		case "TEXT_MESSAGE_START":
-			nodes = insertTraceNodeIfMissing(nodes, assistantNode(event.messageId, event.runId, view.piboSessionId, createdAt, liveOrder(event, "assistant.message")));
-			break;
-		case "TEXT_MESSAGE_CONTENT":
-			nodes = appendTextToNode(nodes, assistantNode(event.messageId, event.runId, view.piboSessionId, createdAt, liveOrder(event, "assistant.message")), event.delta);
-			break;
-		case "TEXT_MESSAGE_END":
-			nodes = upsertTraceNode(nodes, {
-				...assistantNode(event.messageId, event.runId, view.piboSessionId, createdAt, liveOrder(event, "assistant.message")),
-				status: "done",
-				completedAt: createdAt,
-				...(event.finalText === undefined ? {} : { summary: event.finalText, output: event.finalText }),
-			});
-			nodes = updateTraceNode(nodes, messageTurnNodeId(event.runId ?? event.messageId), (node) => ({
-				...node,
-				status: "done",
-				completedAt: createdAt,
-			}));
-			break;
-		case "REASONING_MESSAGE_START":
-			nodes = insertTraceNodeIfMissing(nodes, reasoningNode(event.messageId, event.runId, view.piboSessionId, createdAt, liveOrder(event, "model.reasoning")));
-			break;
-		case "REASONING_MESSAGE_CONTENT":
-			nodes = appendTextToNode(nodes, reasoningNode(event.messageId, event.runId, view.piboSessionId, createdAt, liveOrder(event, "model.reasoning")), event.delta);
-			break;
-		case "REASONING_MESSAGE_END":
-			nodes = upsertTraceNode(nodes, {
-				...reasoningNode(event.messageId, event.runId, view.piboSessionId, createdAt, liveOrder(event, "model.reasoning")),
-				status: "done",
-				completedAt: createdAt,
-				...(event.finalText === undefined ? {} : { summary: event.finalText, output: event.finalText }),
-			});
-			break;
-		case "TOOL_CALL_START":
-			nodes = insertTraceNodeIfMissing(nodes, {
-				id: toolNodeId(event.toolCallId),
-				parentId: event.runId ? messageTurnNodeId(event.runId) : undefined,
-				piboSessionId: view.piboSessionId,
-				eventId: event.runId,
-				toolCallId: event.toolCallId,
-				type: "tool.call",
-				title: event.toolName,
-				status: "running",
-				startedAt: createdAt,
-				input: event.args,
-				source: "live",
-				stableKey: `tool:${event.toolCallId}`,
-				orderKey: liveOrder(event, "tool.call"),
-				children: [],
-			});
-			break;
-		case "TOOL_CALL_ARGS":
-			nodes = updateTraceNode(nodes, toolNodeId(event.toolCallId), (node) => ({ ...node, input: event.args }));
-			break;
-		case "TOOL_CALL_RESULT":
-			nodes = updateTraceNode(nodes, toolNodeId(event.toolCallId), (node) => ({
-				...withAsyncAgentRunChild(
-					{
-						...node,
-						status: event.isError ? "error" : "done",
-						completedAt: createdAt,
-						output: event.result,
-						error: event.isError ? stringifyUnknown(event.result) : node.error,
-					},
-					view.piboSessionId,
-					createdAt,
-				),
-			}));
-			break;
-		case "AGENT_DELEGATION": {
-			const id = event.toolCallId ? toolNodeId(event.toolCallId) : `event:subagent:${event.childPiboSessionId}`;
-			const existing = findTraceNode(nodes, id);
-			if (existing && isRunStartToolNode(existing)) {
-				nodes = updateTraceNode(nodes, id, (node) =>
-					withAsyncAgentDelegationChild(node, event, view.piboSessionId, createdAt),
-				);
-				break;
-			}
-			nodes = upsertTraceNode(nodes, {
-				id,
-				piboSessionId: view.piboSessionId,
-				toolCallId: event.toolCallId,
-				type: "agent.delegation",
-				title: event.toolName,
-				status: "running",
-				startedAt: createdAt,
-				summary: event.subagentName,
-				input: { subagentName: event.subagentName, threadKey: event.threadKey },
-				linkedPiboSessionId: event.childPiboSessionId,
-				source: "live",
-				stableKey: event.toolCallId ? `tool:${event.toolCallId}` : `subagent:${event.childPiboSessionId}`,
-				orderKey: liveOrder(event, "agent.delegation"),
-				children: [],
-			});
-			break;
-		}
-		case "EXECUTION_RESULT": {
-			if (isInternalSessionOperation(event.action)) break;
-			const executionId = event.runId
-				? `event:execution_result:${event.runId}:${event.action}`
-				: `event:execution_result:${event.streamFrameId ?? createdAt}:${event.action}`;
-			nodes = upsertTraceNode(nodes, {
-				id: executionId,
-				parentId: event.runId
-					? messageTurnNodeId(event.runId)
-					: event.eventId
-						? messageTurnNodeId(event.eventId)
-						: undefined,
-				piboSessionId: view.piboSessionId,
-				eventId: event.runId,
-				type: "execution.command",
-				title: event.action,
-				status: "done",
-				startedAt: createdAt,
-				input: { action: event.action },
-				output: event.result,
-				source: "live",
-				stableKey: `execution:${event.runId ?? event.streamFrameId ?? createdAt}:${event.action}`,
-				orderKey: liveOrder(event, "execution.command"),
-				children: [],
-			});
-			break;
-		}
-		case "RAW_EVENT":
-			break;
-	}
-
-	return {
-		...view,
-		nodes,
-		rawEvents: appendRawStreamEvent(view.rawEvents, event, createdAt),
-	};
-}
-
-function insertTraceNodeIfMissing(nodes: PiboTraceNode[], node: PiboTraceNode): PiboTraceNode[] {
-	return findTraceNode(nodes, node.id) ? nodes : upsertTraceNode(nodes, node);
-}
-
-function upsertTraceNode(nodes: PiboTraceNode[], update: PiboTraceNode): PiboTraceNode[] {
-	const existing = findTraceNode(nodes, update.id);
-	if (existing) {
-		return updateTraceNode(nodes, update.id, (node) => ({
-			...node,
-			...update,
-			startedAt: node.startedAt ?? update.startedAt,
-			source: node.source ?? update.source,
-			stableKey: node.stableKey ?? update.stableKey,
-			orderKey: node.orderKey ?? update.orderKey,
-			children: update.children.length ? update.children : node.children,
-		}));
-	}
-	const parent = update.parentId ? findTraceNode(nodes, update.parentId) : undefined;
-	if (parent) {
-		return updateTraceNode(nodes, parent.id, (node) => ({
-			...node,
-			children: sortTraceNodes([...(node.children ?? []), update]),
-		}));
-	}
-	return sortTraceNodes([...nodes, update]);
-}
-
-function updateTraceNode(
-	nodes: PiboTraceNode[],
-	id: string,
-	update: (node: PiboTraceNode) => PiboTraceNode,
-): PiboTraceNode[] {
-	const result = updateTraceNodeInTree(nodes, id, update);
-	return result ?? nodes;
-}
-
-function updateTraceNodeInTree(
-	nodes: PiboTraceNode[],
-	id: string,
-	update: (node: PiboTraceNode) => PiboTraceNode,
-): PiboTraceNode[] | undefined {
-	for (let index = 0; index < nodes.length; index += 1) {
-		const node = nodes[index];
-		if (node.id === id) {
-			const updated = update(node);
-			if (updated === node) return undefined;
-			const next = nodes.slice();
-			next[index] = updated;
-			return next;
-		}
-		const updatedChildren = updateTraceNodeInTree(node.children ?? [], id, update);
-		if (updatedChildren) {
-			const next = nodes.slice();
-			next[index] = { ...node, children: updatedChildren };
-			return next;
-		}
-	}
-	return undefined;
-}
-
-function completeRunNodes(nodes: PiboTraceNode[], runId: string, completedAt: string): PiboTraceNode[] {
-	const turnNodeId = messageTurnNodeId(runId);
-	let changed = false;
-	const next = nodes.map((node) => {
-		const completedChildren = node.children.length ? completeRunNodes(node.children, runId, completedAt) : node.children;
-		const childrenChanged = completedChildren !== node.children;
-		const belongsToRun = node.id === turnNodeId || node.eventId === runId || node.parentId === turnNodeId;
-		if (!childrenChanged && (!belongsToRun || node.status !== "running")) return node;
-		changed = true;
-		return {
-			...node,
-			...(belongsToRun && node.status === "running" ? { status: "done" as const, completedAt } : {}),
-			children: completedChildren,
-		};
-	});
-	return changed ? next : nodes;
-}
-
-function appendTextToNode(nodes: PiboTraceNode[], node: PiboTraceNode, delta: string): PiboTraceNode[] {
-	const existing = findTraceNode(nodes, node.id);
-	if (!existing) {
-		return upsertTraceNode(nodes, { ...node, summary: delta, output: delta });
-	}
-	const text = `${typeof existing.output === "string" ? existing.output : ""}${delta}`;
-	return updateTraceNode(nodes, existing.id, (current) => ({
-		...current,
-		status: "running",
-		summary: text,
-		output: text,
-	}));
-}
-
-function sortTraceNodes(nodes: PiboTraceNode[]): PiboTraceNode[] {
-	return [...nodes]
-		.sort(compareTraceNodes)
-		.map((node) => (node.children.length ? { ...node, children: sortTraceNodes(node.children) } : node));
-}
-
-function compareTraceNodes(left: PiboTraceNode, right: PiboTraceNode): number {
-	const byTraceOrder = compareTraceOrder(left.orderKey, right.orderKey);
-	if (byTraceOrder !== 0) return byTraceOrder;
-	return (left.startedAt ?? "").localeCompare(right.startedAt ?? "") || left.id.localeCompare(right.id);
-}
-
-function findTraceNode(nodes: PiboTraceNode[], id: string): PiboTraceNode | undefined {
-	for (const node of nodes) {
-		if (node.id === id) return node;
-		const child = findTraceNode(node.children ?? [], id);
-		if (child) return child;
-	}
-	return undefined;
-}
-
-function assistantNode(
-	messageId: string,
-	runId: string | undefined,
-	piboSessionId: string,
-	startedAt: string,
-	orderKey: PiboTraceOrderKey,
-): PiboTraceNode {
-	const parentEventId = runId ?? messageId;
-	return {
-		id: assistantMessageNodeId(messageId),
-		parentId: messageTurnNodeId(parentEventId),
-		piboSessionId,
-		eventId: parentEventId,
-		type: "assistant.message",
-		title: "Agent Message",
-		status: "running",
-		startedAt,
-		summary: "",
-		output: "",
-		source: "live",
-		stableKey: `assistant:${messageId}`,
-		orderKey,
-		children: [],
-	};
-}
-
-function reasoningNode(
-	messageId: string,
-	runId: string | undefined,
-	piboSessionId: string,
-	startedAt: string,
-	orderKey: PiboTraceOrderKey,
-): PiboTraceNode {
-	const parentEventId = runId ?? messageId;
-	return {
-		id: thinkingNodeId(messageId),
-		parentId: messageTurnNodeId(parentEventId),
-		piboSessionId,
-		eventId: parentEventId,
-		type: "model.reasoning",
-		title: "Thinking",
-		status: "running",
-		startedAt,
-		summary: "",
-		output: "",
-		source: "live",
-		stableKey: `reasoning:${messageId}`,
-		orderKey,
-		children: [],
-	};
-}
-
-function appendRawStreamEvent(events: RawEvent[], event: ChatStreamEvent, createdAt: string): RawEvent[] {
-	return [
-		...events.slice(-999),
-		{
-			id: event.streamFrameId ? `stream:${event.streamFrameId}` : `stream:${createdAt}:${events.length}`,
-			type: event.type,
-			createdAt,
-			payload: event,
-		},
-	];
-}
-
-function messageTurnNodeId(eventId: string): string {
-	return `event:message:${eventId}`;
-}
-
-function assistantMessageNodeId(eventId: string): string {
-	return `event:assistant:${eventId}`;
-}
-
-function thinkingNodeId(eventId: string): string {
-	return `event:thinking:${eventId}`;
-}
-
-function toolNodeId(toolCallId: string): string {
-	return `tool:${toolCallId}`;
-}
-
-function withAsyncAgentDelegationChild(
-	parent: PiboTraceNode,
-	event: Extract<ChatStreamEvent, { type: "AGENT_DELEGATION" }>,
-	piboSessionId: string,
-	startedAt: string,
-): PiboTraceNode {
-	const child = createAsyncAgentRunNode(parent, piboSessionId, startedAt, {
-		toolName: event.toolName,
-		subagentName: event.subagentName,
-		threadKey: event.threadKey,
-		linkedPiboSessionId: event.childPiboSessionId,
-	});
-	return child ? withTraceChild(parent, child) : parent;
-}
-
-function withAsyncAgentRunChild(parent: PiboTraceNode, piboSessionId: string, startedAt: string): PiboTraceNode {
-	const child = createAsyncAgentRunNode(parent, piboSessionId, startedAt);
-	return child ? withTraceChild(parent, child) : parent;
-}
-
-function withTraceChild(parent: PiboTraceNode, child: PiboTraceNode): PiboTraceNode {
-	const existing = parent.children.find((candidate) => candidate.id === child.id);
-	if (!existing) return { ...parent, children: sortTraceNodes([...parent.children, child]) };
-	return {
-		...parent,
-		children: sortTraceNodes(
-			parent.children.map((candidate) =>
-				candidate.id === child.id
-					? {
-							...candidate,
-							...child,
-							runId: child.runId ?? candidate.runId,
-							linkedPiboSessionId: child.linkedPiboSessionId ?? candidate.linkedPiboSessionId,
-							startedAt: candidate.startedAt ?? child.startedAt,
-							source: candidate.source ?? child.source,
-							stableKey: candidate.stableKey ?? child.stableKey,
-							orderKey: candidate.orderKey ?? child.orderKey,
-							children: candidate.children,
-						}
-					: candidate,
-			),
-		),
-	};
-}
-
-function createAsyncAgentRunNode(
-	parent: PiboTraceNode,
-	piboSessionId: string,
-	startedAt: string,
-	delegation?: { toolName: string; subagentName: string; threadKey?: string; linkedPiboSessionId?: string },
-): PiboTraceNode | undefined {
-	if (!isRunStartToolNode(parent)) return undefined;
-	const run = extractRunSnapshot(parent.output);
-	const input = isRecord(parent.input) ? parent.input : {};
-	const toolName = stringField(run?.toolName) || stringField(input.toolName) || delegation?.toolName;
-	if (!toolName || !toolName.startsWith("pibo_subagent_")) return undefined;
-	const runId = stringField(run?.runId);
-	const runStatus = stringField(run?.status);
-	const subagentName = delegation?.subagentName || toolName.slice("pibo_subagent_".length);
-	const completionPolicy = stringField(run?.completionPolicy) || stringField(input.completionPolicy);
-
-	return {
-		id: `${parent.id}:async-agent`,
-		parentId: parent.id,
-		piboSessionId,
-		eventId: parent.eventId,
-		toolCallId: parent.toolCallId,
-		runId,
-		type: "agent.async",
-		title: subagentName,
-		status: asyncAgentStatus(parent, runStatus),
-		startedAt,
-		completedAt: runStatus === "completed" || runStatus === "cancelled" ? parent.completedAt : undefined,
-		summary: `Started by ${parent.title}`,
-		input: {
-			startedBy: parent.title,
-			startToolCallId: parent.toolCallId,
-			toolName,
-			subagentName,
-			runId,
-			completionPolicy,
-			arguments: input.arguments,
-			threadKey: delegation?.threadKey,
-		},
-		output: run,
-		error: parent.error,
-		linkedPiboSessionId: delegation?.linkedPiboSessionId ?? parent.linkedPiboSessionId,
-		source: parent.source,
-		stableKey: runId ? `async-agent:${runId}` : `${parent.stableKey ?? parent.id}:async-agent`,
-		orderKey: childTraceOrder(parent.orderKey, "agent.async"),
-		children: [],
-	};
-}
-
-function isRunStartToolNode(node: PiboTraceNode): boolean {
-	return node.type === "tool.call" && node.title === "pibo_run_start";
-}
-
-function extractRunSnapshot(value: unknown): Record<string, unknown> | undefined {
-	if (!isRecord(value)) return undefined;
-	if (typeof value.runId === "string" && typeof value.toolName === "string") return value;
-	if (isRecord(value.details) && typeof value.details.runId === "string" && typeof value.details.toolName === "string") {
-		return value.details;
-	}
-	return undefined;
-}
-
-function stringField(value: unknown): string {
-	return typeof value === "string" ? value : "";
-}
-
-function asyncAgentStatus(parent: PiboTraceNode, runStatus: string): PiboTraceNode["status"] {
-	if (parent.status === "error" || runStatus === "failed") return "error";
-	if (runStatus === "completed" || runStatus === "cancelled") return "done";
-	return "running";
-}
-
-function isInternalSessionOperation(action: string): boolean {
-	return action === "session.fork" || action === "session.clone" || action === "session.switch";
-}
-
-function stringifyUnknown(value: unknown): string {
-	if (typeof value === "string") return value;
-	try {
-		return JSON.stringify(value);
-	} catch {
-		return String(value);
-	}
-}
 
 function compactRawEvents(events: RawEvent[]): CompactRawEvent[] {
 	const compacted: CompactRawEvent[] = [];

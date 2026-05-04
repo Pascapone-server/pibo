@@ -3,6 +3,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { extname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { brotliCompressSync, gzipSync } from "node:zlib";
+import os from "node:os";
 import type { PiboJsonObject, PiboJsonValue, PiboOutputEvent } from "../../core/events.js";
 import { PiboWebHttpError, readJsonBody, responseHtml, responseJson } from "../../web/http.js";
 import type { PiboWebApp, PiboWebAppContext, PiboWebSession } from "../../web/types.js";
@@ -685,18 +686,18 @@ function ensureEventIndexing(state: ChatWebAppState, context: PiboWebAppContext)
 	state.subscribedContext = context;
 	state.unsubscribe = context.channelContext.subscribe((event) => {
 		const session = context.channelContext.getSession(event.piboSessionId);
-		state.readModel.recordEvent(event, session);
+		const room = session ? ensureSessionRoom(state, context, session) : undefined;
+		const stored = state.eventLog.appendOutputEvent(event, {
+			roomId: room?.id,
+			actorId: session?.ownerScope,
+		});
+		state.readModel.recordEvent(event, session, stored.streamId);
 		state.reliabilityStore.append({
 			topic: "pibo.output",
 			key: event.piboSessionId,
 			eventId: `pibo.output:${event.piboSessionId}:${event.type}:${randomUUID()}`,
 			retentionClass: reliabilityRetentionClassForOutputEvent(event),
 			payload: event as PiboJsonValue,
-		});
-		const room = session ? ensureSessionRoom(state, context, session) : undefined;
-		const stored = state.eventLog.appendOutputEvent(event, {
-			roomId: room?.id,
-			actorId: session?.ownerScope,
 		});
 		for (const listener of state.liveListeners) listener(stored);
 	});
@@ -2567,7 +2568,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 		liveListeners: new Set(),
 		activeEventStreams: new Map(),
 		pendingDisconnectAborts: new Map(),
-		userSkillManager: new UserSkillManager(process.cwd()),
+		userSkillManager: new UserSkillManager(os.homedir()),
 	};
 
 	const requireSession = (request: Request, context: PiboWebAppContext): Promise<PiboWebSession> =>
@@ -3206,6 +3207,30 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				});
 				setTraceCache(state.traceCache, cacheKey, trace);
 				return responseJson(trace, { headers });
+			}
+
+			if (url.pathname === `${CHAT_WEB_API_PREFIX}/debug/trace-at-sequence` && request.method === "POST") {
+				requireSameOriginJsonRequest(request);
+				await requireSession(request, context);
+				const body = await readJsonBody<{ piboSessionId?: unknown; eventSequence?: unknown }>(request);
+				const piboSessionId = typeof body.piboSessionId === "string" ? body.piboSessionId : undefined;
+				const eventSequence = typeof body.eventSequence === "number" ? body.eventSequence : undefined;
+				if (!piboSessionId || eventSequence === undefined) {
+					throw new PiboWebHttpError("Missing piboSessionId or eventSequence", 400);
+				}
+				const session = context.channelContext.getSession(piboSessionId);
+				if (!session) throw new PiboWebHttpError("Session not found", 404);
+				const ownedSessions = listOwnedSessions(context, await requireSession(request, context));
+				const allEvents = state.readModel.listAllEvents(piboSessionId);
+				const filteredEvents = allEvents.filter((e) => (e.eventSequence ?? 0) <= eventSequence);
+				const indexedSession = state.readModel.listSessions().find((item) => item.piboSessionId === piboSessionId);
+				const trace = await buildTraceView({
+					session,
+					sessions: ownedSessions,
+					events: filteredEvents,
+					status: indexedSession?.status,
+				});
+				return responseJson(trace);
 			}
 
 			if (url.pathname === `${CHAT_WEB_API_PREFIX}/message` && request.method === "POST") {

@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { PiboOutputEvent } from "../../core/events.js";
 import type { PiboSession } from "../../sessions/store.js";
+import type { ChatWebStoredEvent } from "../../shared/trace-types.js";
 
 type SessionRow = {
 	pibo_session_id: string;
@@ -23,20 +24,14 @@ type EventRow = {
 	pibo_session_id: string;
 	event_sequence: number | null;
 	event_id: string | null;
+	stream_id: number | null;
 	type: string;
 	created_at: string;
 	payload_json: string;
 };
 
-export type ChatWebStoredEvent = {
-	id: string;
-	piboSessionId: string;
-	eventSequence?: number;
-	eventId?: string;
-	type: string;
-	createdAt: string;
-	payload: PiboOutputEvent;
-};
+export type { ChatWebStoredEvent };
+export type ChatWebStoredPiboEvent = ChatWebStoredEvent<PiboOutputEvent>;
 
 export type ChatWebSessionIndexItem = {
 	piboSessionId: string;
@@ -83,12 +78,14 @@ export class ChatWebReadModel {
 				pibo_session_id TEXT NOT NULL,
 				event_sequence INTEGER,
 				event_id TEXT,
+				stream_id INTEGER,
 				type TEXT NOT NULL,
 				created_at TEXT NOT NULL,
 				payload_json TEXT NOT NULL
 			);
 		`);
 		this.migrateEventSequence();
+		this.migrateStreamId();
 		this.db.exec(`
 
 			CREATE INDEX IF NOT EXISTS idx_web_chat_events_session_created
@@ -143,7 +140,7 @@ export class ChatWebReadModel {
 			);
 	}
 
-	recordEvent(event: PiboOutputEvent, session?: PiboSession): ChatWebStoredEvent {
+	recordEvent(event: PiboOutputEvent, session?: PiboSession, streamId?: number): ChatWebStoredPiboEvent {
 		if (session) this.upsertSession(session, statusFromEvent(event));
 
 		const id = randomUUID();
@@ -152,16 +149,16 @@ export class ChatWebReadModel {
 		const eventId = "eventId" in event && typeof event.eventId === "string" ? event.eventId : undefined;
 		this.db
 			.prepare(
-				"INSERT INTO web_chat_events (id, pibo_session_id, event_sequence, event_id, type, created_at, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+				"INSERT INTO web_chat_events (id, pibo_session_id, event_sequence, event_id, stream_id, type, created_at, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
 			)
-			.run(id, event.piboSessionId, eventSequence, eventId ?? null, event.type, createdAt, JSON.stringify(event));
+			.run(id, event.piboSessionId, eventSequence, eventId ?? null, streamId ?? null, event.type, createdAt, JSON.stringify(event));
 		this.db
 			.prepare(
 				"UPDATE web_chat_sessions SET last_activity_at = ?, status = ?, updated_at = ? WHERE pibo_session_id = ?",
 			)
 			.run(createdAt, statusFromEvent(event), createdAt, event.piboSessionId);
 
-		return { id, piboSessionId: event.piboSessionId, eventSequence, eventId, type: event.type, createdAt, payload: event };
+		return { id, piboSessionId: event.piboSessionId, eventSequence, eventId, streamId, type: event.type, createdAt, payload: event };
 	}
 
 	listSessions(): ChatWebSessionIndexItem[] {
@@ -177,7 +174,7 @@ export class ChatWebReadModel {
 		return row ? sessionFromRow(row) : undefined;
 	}
 
-	listEvents(piboSessionId: string, limit = 1000): ChatWebStoredEvent[] {
+	listEvents(piboSessionId: string, limit = 1000): ChatWebStoredPiboEvent[] {
 		const rows = this.db
 			.prepare(
 				`
@@ -194,7 +191,7 @@ export class ChatWebReadModel {
 		return rows.map(eventFromRow);
 	}
 
-	listAllEvents(piboSessionId: string): ChatWebStoredEvent[] {
+	listAllEvents(piboSessionId: string): ChatWebStoredPiboEvent[] {
 		const rows = this.db
 			.prepare(
 				`
@@ -250,6 +247,13 @@ export class ChatWebReadModel {
 		this.db.exec("UPDATE web_chat_events SET event_sequence = rowid WHERE event_sequence IS NULL");
 	}
 
+	private migrateStreamId(): void {
+		const eventColumns = tableColumns(this.db, "web_chat_events");
+		if (!eventColumns.has("stream_id")) {
+			this.db.exec("ALTER TABLE web_chat_events ADD COLUMN stream_id INTEGER");
+		}
+	}
+
 	private nextEventSequence(piboSessionId: string): number {
 		const row = this.db
 			.prepare("SELECT COALESCE(MAX(event_sequence), 0) + 1 AS next_sequence FROM web_chat_events WHERE pibo_session_id = ?")
@@ -298,12 +302,13 @@ function sessionFromRow(row: SessionRow): ChatWebSessionIndexItem {
 	};
 }
 
-function eventFromRow(row: EventRow): ChatWebStoredEvent {
+function eventFromRow(row: EventRow): ChatWebStoredPiboEvent {
 	return {
 		id: row.id,
 		piboSessionId: row.pibo_session_id,
 		eventSequence: row.event_sequence ?? undefined,
 		eventId: row.event_id ?? undefined,
+		streamId: row.stream_id ?? undefined,
 		type: row.type,
 		createdAt: row.created_at,
 		payload: JSON.parse(row.payload_json) as PiboOutputEvent,

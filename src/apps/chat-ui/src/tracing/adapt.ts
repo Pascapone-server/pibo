@@ -1,4 +1,4 @@
-import type { PiboTraceNode, Span, SpanStatus, SpanType, Trace } from "../types";
+import type { PiboTraceNode, Span, SpanStatus, SpanType, Trace } from "../types.js";
 
 const spanCache = new WeakMap<PiboTraceNode, Span>();
 

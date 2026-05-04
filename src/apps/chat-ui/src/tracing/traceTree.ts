@@ -1,5 +1,4 @@
-import { compareTraceOrder } from "../../../../shared/trace-order.js";
-import type { Span } from "../types";
+import type { Span } from "../types.js";
 
 const shouldDisplaySpan = (span: Span): boolean => {
 	if (span.spanType === "model.request") return false;
@@ -10,7 +9,7 @@ const shouldDisplaySpan = (span: Span): boolean => {
 export function processSpanTree(spans: Span[]): Span[] {
 	const processed: Span[] = [];
 
-	for (const span of sortByStartTime(spans)) {
+	for (const span of spans) {
 		processed.push(...displaySpansFor(span));
 	}
 
@@ -22,19 +21,9 @@ function displaySpansFor(span: Span): Span[] {
 	if (span.spanType === "agent.run") return children ?? [];
 	if (span.spanType === "model.response") {
 		const response = span.children ? { ...span, children: undefined } : span;
-		return sortByStartTime([...(children ?? []), response]);
+		return [...(children ?? []), response];
 	}
 
 	if (!shouldDisplaySpan(span)) return children ?? [];
 	return children === span.children ? [span] : [{ ...span, children }];
-}
-
-function sortByStartTime(spans: Span[]): Span[] {
-	return [...spans].sort(compareSpans);
-}
-
-function compareSpans(left: Span, right: Span): number {
-	const byTraceOrder = compareTraceOrder(left.pibo?.traceOrder, right.pibo?.traceOrder);
-	if (byTraceOrder !== 0) return byTraceOrder;
-	return left.startTime - right.startTime || left.id.localeCompare(right.id);
 }

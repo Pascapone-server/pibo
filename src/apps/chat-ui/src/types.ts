@@ -1,55 +1,12 @@
-export type PiboTraceNodeType =
-	| "user.message"
-	| "assistant.message"
-	| "agent.turn"
-	| "model.reasoning"
-	| "tool.call"
-	| "tool.result"
-	| "agent.delegation"
-	| "agent.async"
-	| "execution.command"
-	| "yielded.run"
-	| "error";
+import type {
+	PiboTraceNode,
+	PiboTraceNodeType,
+	PiboTraceNodeStatus,
+	PiboTraceSource,
+	PiboTraceOrderKey,
+} from "../../../shared/trace-types.js";
 
-export type PiboTraceNodeStatus = "running" | "done" | "error";
-
-export type PiboTraceSource = "transcript" | "event-log" | "live";
-
-export type PiboTraceOrderKey = {
-	sourceRank: number;
-	turnSeq: number;
-	transcriptIndex?: number;
-	contentPartIndex?: number;
-	eventSequence?: number;
-	streamId?: number;
-	streamFrameIndex?: number;
-	phaseRank: number;
-};
-
-export type PiboTraceNode = {
-	id: string;
-	parentId?: string;
-	entryId?: string;
-	piboSessionId: string;
-	eventId?: string;
-	toolCallId?: string;
-	runId?: string;
-	type: PiboTraceNodeType;
-	title: string;
-	status: PiboTraceNodeStatus;
-	startedAt?: string;
-	completedAt?: string;
-	durationMs?: number;
-	summary?: string;
-	input?: unknown;
-	output?: unknown;
-	error?: string;
-	linkedPiboSessionId?: string;
-	source?: PiboTraceSource;
-	stableKey?: string;
-	orderKey?: PiboTraceOrderKey;
-	children: PiboTraceNode[];
-};
+export type { PiboTraceNode, PiboTraceNodeType, PiboTraceNodeStatus, PiboTraceSource, PiboTraceOrderKey };
 
 export type PiboWebSessionNode = {
 	piboSessionId: string;
@@ -109,15 +66,7 @@ export type PiboSession = {
 	updatedAt: string;
 };
 
-export type PiboSessionTraceView = {
-	piboSessionId: string;
-	piSessionId: string;
-	title: string;
-	version: string;
-	latestStreamId?: number;
-	nodes: PiboTraceNode[];
-	rawEvents: Array<{ id: string; type: string; createdAt: string; payload: unknown }>;
-};
+export type { PiboSessionTraceView } from "../../../shared/trace-types.js";
 
 export type BootstrapData = {
 	identity: { userId: string; email?: string; name?: string };
