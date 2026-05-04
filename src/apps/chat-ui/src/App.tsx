@@ -18,9 +18,11 @@ import {
 	EyeOff,
 	ExternalLink,
 	FolderPlus,
+	Key,
 	Layers,
 	Lock,
 	LogOut,
+	Menu,
 	MessageSquarePlus,
 	Plus,
 	Power,
@@ -64,7 +66,7 @@ import {
 
 type Area = "sessions" | "agents" | "context" | "settings";
 type ContextPanel = "context-files" | "base-prompt" | "compaction-prompt" | "pibo-tools" | "mcp-tools";
-type SettingsPanel = "general" | "pi-packages" | "skills";
+type SettingsPanel = "general" | "pi-packages" | "skills" | "providers";
 
 export type ChatAppRoute =
 	| { area: "sessions"; roomId?: string; piboSessionId?: string; sessionViewId?: ChatSessionViewId }
@@ -169,6 +171,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 	const [selectedContextFileKey, setSelectedContextFileKey] = useState<string | null>(null);
 	const [selectedMcpServerName, setSelectedMcpServerName] = useState<string | null>(null);
 	const [creatingRoom, setCreatingRoom] = useState(false);
+	const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 	const [deleteRoomTarget, setDeleteRoomTarget] = useState<PiboRoom | null>(null);
 	const [deleteRoomConfirmName, setDeleteRoomConfirmName] = useState("");
 	const [deletingRoom, setDeletingRoom] = useState(false);
@@ -216,6 +219,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 	}, [sessionViewId]);
 	const navigateToRoute = useCallback(
 		(target: ChatAppRoute, replace = false, nextSessionViewId = sessionViewId) => {
+			setMobileSidebarOpen(false);
 			const sessionViewSearch = { view: nextSessionViewId };
 			if (target.area === "agents") {
 				void navigate({ to: "/agents", replace });
@@ -230,6 +234,8 @@ export function App({ route }: { route: ChatAppRoute }) {
 					void navigate({ to: "/settings/pi-packages", replace });
 				} else if (target.panel === "skills") {
 					void navigate({ to: "/settings/skills", replace });
+				} else if (target.panel === "providers") {
+					void navigate({ to: "/settings/providers", replace });
 				} else {
 					void navigate({ to: "/settings", replace });
 				}
@@ -528,11 +534,13 @@ export function App({ route }: { route: ChatAppRoute }) {
 
 	const selectSession = useCallback(async (piboSessionId: string) => {
 		setSelectedPiboSessionId(piboSessionId);
+		setMobileSidebarOpen(false);
 		const data = await loadBootstrap(piboSessionId);
 		navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
 	}, [loadBootstrap, navigateToSelectedSession]);
 
 	const selectRoom = useCallback(async (roomId: string) => {
+		setMobileSidebarOpen(false);
 		const storedPiboSessionId = readStoredSelection().sessionsByRoom?.[roomId];
 		setSelectedRoomId(roomId);
 		setSelectedPiboSessionId(storedPiboSessionId ?? null);
@@ -783,8 +791,20 @@ export function App({ route }: { route: ChatAppRoute }) {
 			)}
 			<div className="h-screen overflow-hidden bg-[#101d22] text-slate-200 grid grid-rows-[56px_1fr]">
 				<header className="flex items-center justify-between gap-3 px-4 bg-[#1a262b] border-b border-slate-800">
-				<div className="font-extrabold tracking-[0.08em] uppercase text-lg">Pibo Chat</div>
-				<nav className="flex gap-1">
+					<div className="flex items-center gap-2">
+						<button
+							type="button"
+							onClick={() => setMobileSidebarOpen(true)}
+							className="min-[981px]:hidden p-1.5 border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]"
+							title="Open sidebar"
+							aria-label="Open sidebar"
+						>
+							<Menu size={16} />
+						</button>
+						<img src="/apps/chat/assets/logo.png" alt="Logo" className="h-5 w-auto" />
+						<div className="font-extrabold tracking-[0.08em] uppercase text-lg">Pibo Chat</div>
+					</div>
+					<nav className="flex gap-1">
 					{(["sessions", "agents", "context", "settings"] as const).map((item) => (
 						<button
 							key={item}
@@ -817,8 +837,8 @@ export function App({ route }: { route: ChatAppRoute }) {
 				className={`min-h-0 ${
 					area === "agents" ? "h-full overflow-hidden" : `grid ${
 						area === "sessions" && showRawEvents
-						? "grid-cols-[300px_minmax(0,1fr)_320px] max-[980px]:grid-cols-[240px_minmax(0,1fr)]"
-						: "grid-cols-[300px_minmax(0,1fr)] max-[980px]:grid-cols-[240px_minmax(0,1fr)]"
+						? "grid-cols-[300px_minmax(0,1fr)_320px] max-[980px]:grid-cols-1"
+						: "grid-cols-[300px_minmax(0,1fr)] max-[980px]:grid-cols-1"
 					}`
 				}`}
 			>
@@ -837,11 +857,22 @@ export function App({ route }: { route: ChatAppRoute }) {
 					/>
 				) : (
 				<>
-				<aside className="min-h-0 overflow-auto bg-[#1a262b] border-r border-slate-800">
+				{/* Mobile sidebar backdrop */}
+				<div
+					className={`fixed inset-0 z-30 bg-black/60 min-[981px]:hidden transition-opacity duration-200 ${
+						mobileSidebarOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
+					}`}
+					onClick={() => setMobileSidebarOpen(false)}
+				/>
+				<aside
+					className={`min-h-0 overflow-auto bg-[#1a262b] border-r border-slate-800 max-[980px]:fixed max-[980px]:left-0 max-[980px]:top-0 max-[980px]:bottom-0 max-[980px]:z-40 max-[980px]:w-[280px] max-[980px]:transition-transform max-[980px]:duration-200 ${
+						mobileSidebarOpen ? "max-[980px]:translate-x-0" : "max-[980px]:-translate-x-full"
+					}`}
+				>
 					<div className="h-11 px-3 border-b border-slate-800 flex items-center justify-between text-xs font-bold uppercase tracking-wider">
 						<span>{area}</span>
-						{area === "sessions" ? (
-							<div className="flex items-center gap-1">
+						<div className="flex items-center gap-1">
+							{area === "sessions" ? (
 								<button
 									type="button"
 									onClick={() =>
@@ -856,8 +887,17 @@ export function App({ route }: { route: ChatAppRoute }) {
 								>
 									<RefreshCw size={13} />
 								</button>
-							</div>
-						) : null}
+							) : null}
+							<button
+								type="button"
+								onClick={() => setMobileSidebarOpen(false)}
+								className="min-[981px]:hidden p-1 border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]"
+								title="Close sidebar"
+								aria-label="Close sidebar"
+							>
+								<X size={13} />
+							</button>
+						</div>
 					</div>
 					{area === "sessions" ? (
 						<div className="p-2 space-y-3">
@@ -1099,6 +1139,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 									userSkills={bootstrap.agentCatalog?.userSkills}
 									onUserSkillChanged={upsertUserSkillInBootstrap}
 									onUserSkillRemoved={removeUserSkillFromBootstrap}
+									piboSessionId={selectedPiboSessionId}
 								/>
 							)}
 						</main>
@@ -3159,7 +3200,7 @@ function SettingsSidebar({
 				<button
 					type="button"
 					onClick={() => onSelect("skills")}
-					className={`flex w-full items-center gap-2 border p-2 text-left ${
+					className={`mb-1 flex w-full items-center gap-2 border p-2 text-left ${
 						activePanel === "skills"
 							? "border-[#11a4d4] bg-[#11a4d4]/10"
 							: "border-slate-800 bg-[#151f24] hover:border-slate-700"
@@ -3173,6 +3214,21 @@ function SettingsSidebar({
 					<span className="inline-flex min-w-6 items-center justify-center border border-slate-700 bg-[#101d22] px-1.5 py-0.5 text-[10px] font-mono text-slate-400">
 						{userSkillCount}
 					</span>
+				</button>
+				<button
+					type="button"
+					onClick={() => onSelect("providers")}
+					className={`flex w-full items-center gap-2 border p-2 text-left ${
+						activePanel === "providers"
+							? "border-[#11a4d4] bg-[#11a4d4]/10"
+							: "border-slate-800 bg-[#151f24] hover:border-slate-700"
+					}`}
+				>
+					<Key size={13} className="text-[#11a4d4]" />
+					<div className="min-w-0">
+						<span className="block truncate text-sm text-slate-200">Providers</span>
+						<span className="block truncate font-mono text-[10px] text-slate-500">auth + api keys</span>
+					</div>
 				</button>
 			</div>
 		</div>
@@ -3865,6 +3921,8 @@ function McpServersDesigner({
 	);
 }
 
+import { ProviderSettingsView } from "./settings/ProviderSettingsView";
+
 function SettingsView({
 	activePanel,
 	showThinking,
@@ -3880,6 +3938,7 @@ function SettingsView({
 	userSkills,
 	onUserSkillChanged,
 	onUserSkillRemoved,
+	piboSessionId,
 }: {
 	activePanel: SettingsPanel;
 	showThinking: boolean;
@@ -3895,6 +3954,7 @@ function SettingsView({
 	userSkills?: UserSkill[];
 	onUserSkillChanged: (skill: UserSkill) => void;
 	onUserSkillRemoved: (skillId: string) => void;
+	piboSessionId?: string | null;
 }) {
 	if (activePanel === "pi-packages") {
 		return (
@@ -3916,6 +3976,18 @@ function SettingsView({
 					Skills
 				</h1>
 				<UserSkillsSettings skills={userSkills} onSkillChanged={onUserSkillChanged} onSkillRemoved={onUserSkillRemoved} />
+			</div>
+		);
+	}
+
+	if (activePanel === "providers") {
+		return (
+			<div className="p-6 overflow-auto">
+				<h1 className="text-sm font-bold uppercase tracking-wider mb-4 flex items-center gap-2">
+					<Key size={16} />
+					Providers
+				</h1>
+				<ProviderSettingsView piboSessionId={piboSessionId} />
 			</div>
 		);
 	}
