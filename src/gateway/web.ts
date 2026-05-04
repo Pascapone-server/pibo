@@ -3,6 +3,7 @@ import type { BetterAuthServiceOptions } from "../auth/better-auth.js";
 import { createPiboBetterAuthPlugin } from "../plugins/better-auth.js";
 import { createPiboChatWebPlugin, type ChatWebAppOptions } from "../plugins/chat-web.js";
 import { createPiboContextFilesPlugin, type ContextFilesPluginOptions } from "../plugins/context-files.js";
+import { createPiboDevAuthPlugin } from "../plugins/dev-auth.js";
 import { PiboPluginRegistry } from "../plugins/registry.js";
 import { createPiboWebHostPlugin } from "../plugins/web.js";
 import { DEFAULT_WEB_CHANNEL_HOST, DEFAULT_WEB_CHANNEL_PORT, type WebHostChannelOptions } from "../web/channel.js";
@@ -47,11 +48,12 @@ export function resolveWebGatewayServerOptions(options: WebGatewayServerOptions 
 
 export function createWebPiboPluginRegistry(options: WebGatewayServerOptions = {}): PiboPluginRegistry {
 	const resolvedOptions = resolveWebGatewayServerOptions(options);
+	const useDevAuth = process.env.PIBO_DEV_AUTH === "1";
 	return PiboPluginRegistry.create({
 		plugins: [
 			...createDefaultPiboPlugins(),
-			createPiboBetterAuthPlugin(resolvedOptions.auth),
-			createPiboWebHostPlugin({ announce: false, canonicalBaseURL: authBaseURL(resolvedOptions), ...resolvedOptions.web }),
+			useDevAuth ? createPiboDevAuthPlugin() : createPiboBetterAuthPlugin(resolvedOptions.auth),
+			createPiboWebHostPlugin({ announce: false, canonicalBaseURL: useDevAuth ? undefined : authBaseURL(resolvedOptions), ...resolvedOptions.web }),
 			createPiboContextFilesPlugin(resolvedOptions.contextFiles),
 			createPiboChatWebPlugin(resolvedOptions.chat),
 		],
@@ -59,6 +61,9 @@ export function createWebPiboPluginRegistry(options: WebGatewayServerOptions = {
 }
 
 function createChatAppURL(options: WebGatewayServerOptions, host: string, port: number): string {
+	if (process.env.PIBO_DEV_AUTH === "1") {
+		return `http://${host}:${port}/apps/chat`;
+	}
 	const baseURL = options.auth?.baseURL ?? loadPiboConfig().auth?.baseURL;
 	if (baseURL) {
 		try {
