@@ -81,8 +81,9 @@ The `-L` flag follows redirects. The flow is:
 - The dev-auth session lives in an HTTP cookie (`pibo_dev_session`). Pass the
   cookie jar (`-c`/`-b`) to every request that needs authentication.
 - Sessions do not persist across worker restarts. Each new `pibo compute spawn`
-  creates a fresh dev identity with the same fixed values.
+  generates a random session token, so cookies from one worker do not work on
+  another.
 - Better Auth stays available on the host gateway. The dev-auth plugin only
-  runs inside Docker workers.
-- To use real Better Auth in a container, mount a valid `.pibo/config.json`
-  and set `PIBO_DEV_AUTH=0` before starting the gateway.
+  runs inside Docker workers and requires both `PIBO_DEV_AUTH=1` and
+  `PIBO_IN_DOCKER=1` to activate. It will never load on the host gateway,
+  even if `PIBO_DEV_AUTH` is set.
