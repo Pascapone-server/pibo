@@ -95,7 +95,9 @@ function authTemplateDir(status: CliToolStatus): string {
 function defaultTemplateDir(status: CliToolStatus): string {
   const preferred = authTemplateDir(status);
   if (existsSync(preferred)) return preferred;
-  return join(status.homeDir, 'chrome-profiles', BROWSER_USE_DEFAULT_PROFILE);
+  // Never fall back to the active default profile (it may be running).
+  // Create an empty template directory so leases get clean profiles.
+  return preferred;
 }
 
 function readRegistry(status: CliToolStatus): LeaseRegistry {
@@ -189,27 +191,24 @@ function killLeaseProcess(status: CliToolStatus, lease: BrowserUseLease): void {
 }
 
 async function copyTemplateProfile(templateDir: string, userDataDir: string): Promise<void> {
-  if (!existsSync(templateDir)) {
-    throw new Error(
-      formatCliError({
-        code: ErrorCode.CLIENT_ERROR,
-        type: 'BROWSER_USE_AUTH_TEMPLATE_MISSING',
-        message: `Browser-use auth template does not exist: ${templateDir}`,
-        suggestion: 'Run `pibo tools browser-use auth-template env`, open the Chat Web App, sign in, then acquire a lease again.',
-      }),
-    );
+  if (existsSync(templateDir)) {
+    assertTemplateIsNotRunning(templateDir);
+    await rm(userDataDir, { recursive: true, force: true });
+    await mkdir(userDataDir, { recursive: true });
+    await cp(templateDir, userDataDir, {
+      recursive: true,
+      filter: (source) => {
+        const base = source.split(/[\\/]/).pop() ?? '';
+        return !base.startsWith('Singleton') && base !== 'DevToolsActivePort';
+      },
+    });
+    return;
   }
-  assertTemplateIsNotRunning(templateDir);
 
+  // Template does not exist yet: create a clean empty profile directory.
+  // Chrome will initialise a fresh profile on first start.
   await rm(userDataDir, { recursive: true, force: true });
   await mkdir(userDataDir, { recursive: true });
-  await cp(templateDir, userDataDir, {
-    recursive: true,
-    filter: (source) => {
-      const base = source.split(/[\\/]/).pop() ?? '';
-      return !base.startsWith('Singleton') && base !== 'DevToolsActivePort';
-    },
-  });
 }
 
 function assertTemplateIsNotRunning(templateDir: string): void {

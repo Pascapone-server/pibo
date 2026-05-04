@@ -138,7 +138,6 @@ find_chrome_pids_for_profile() {
 
 kill_stale_chrome_for_profile() {
   user_data_dir=$1
-  lock_file="$user_data_dir/SingletonLock"
 
   # Find and terminate any Chrome process using this profile directory
   stale_pids=$(find_chrome_pids_for_profile "$user_data_dir")
@@ -158,10 +157,12 @@ kill_stale_chrome_for_profile() {
   done
   sleep 0.2
 
-  # Remove stale lock file if it remains
-  if [ -f "$lock_file" ]; then
-    rm -f "$lock_file" 2>/dev/null || true
-  fi
+  # Remove stale lock files if they remain
+  for stale_file in SingletonLock SingletonCookie SingletonSocket; do
+    if [ -f "$user_data_dir/$stale_file" ]; then
+      rm -f "$user_data_dir/$stale_file" 2>/dev/null || true
+    fi
+  done
 
   # Also clean up stale state files for this session
   safe_session=$(printf '%s' "$session" | tr -c 'A-Za-z0-9_.-' '_')
@@ -212,72 +213,82 @@ ensure_persistent_chrome() {
   fi
 
   mkdir -p "$user_data_dir"
-  kill_stale_chrome_for_profile "$user_data_dir"
-  profile_directory=$(resolve_profile_directory "$user_data_dir" "$default_profile")
-  chrome_port=$(find_free_port)
-  headless_arg=
-  if [ "$headed" -eq 0 ]; then
-    headless_arg=--headless=new
-  fi
-  if command -v setsid >/dev/null 2>&1; then
-    setsid "$chrome_bin" \\
-      --user-data-dir="$user_data_dir" \\
-      --profile-directory="$profile_directory" \\
-      --remote-debugging-port="$chrome_port" \\
-      --no-first-run \\
-      --no-default-browser-check \\
-      --disable-default-apps \\
-      --no-sandbox \\
-      --disable-setuid-sandbox \\
-      --disable-dev-shm-usage \\
-      $headless_arg \\
-      about:blank >"$log_file" 2>&1 &
-  else
-    nohup "$chrome_bin" \\
-      --user-data-dir="$user_data_dir" \\
-      --profile-directory="$profile_directory" \\
-      --remote-debugging-port="$chrome_port" \\
-      --no-first-run \\
-      --no-default-browser-check \\
-      --disable-default-apps \\
-      --no-sandbox \\
-      --disable-setuid-sandbox \\
-      --disable-dev-shm-usage \\
-      $headless_arg \\
-      about:blank >"$log_file" 2>&1 &
-  fi
-  chrome_pid=$!
 
-  ready=0
-  if [ "\${PIBO_BROWSER_USE_SKIP_CDP_WAIT:-}" = "1" ]; then
-    ready=1
-  fi
-  attempt=0
-  while [ "$ready" -ne 1 ] && [ "$attempt" -lt 50 ]; do
-    if pibo_cdp_is_ready "$chrome_port"; then
+  retry=0
+  while [ "$retry" -lt 2 ]; do
+    kill_stale_chrome_for_profile "$user_data_dir"
+    profile_directory=$(resolve_profile_directory "$user_data_dir" "$default_profile")
+    chrome_port=$(find_free_port)
+    headless_arg=
+    if [ "$headed" -eq 0 ]; then
+      headless_arg=--headless=new
+    fi
+    rm -f "$log_file"
+    if command -v setsid >/dev/null 2>&1; then
+      setsid "$chrome_bin" \\
+        --user-data-dir="$user_data_dir" \\
+        --profile-directory="$profile_directory" \\
+        --remote-debugging-port="$chrome_port" \\
+        --no-first-run \\
+        --no-default-browser-check \\
+        --disable-default-apps \\
+        --no-sandbox \\
+        --disable-setuid-sandbox \\
+        --disable-dev-shm-usage \\
+        $headless_arg \\
+        about:blank >"$log_file" 2>&1 &
+    else
+      nohup "$chrome_bin" \\
+        --user-data-dir="$user_data_dir" \\
+        --profile-directory="$profile_directory" \\
+        --remote-debugging-port="$chrome_port" \\
+        --no-first-run \\
+        --no-default-browser-check \\
+        --disable-default-apps \\
+        --no-sandbox \\
+        --disable-setuid-sandbox \\
+        --disable-dev-shm-usage \\
+        $headless_arg \\
+        about:blank >"$log_file" 2>&1 &
+    fi
+    chrome_pid=$!
+
+    ready=0
+    if [ "\${PIBO_BROWSER_USE_SKIP_CDP_WAIT:-}" = "1" ]; then
       ready=1
-      break
     fi
-    if ! kill -0 "$chrome_pid" 2>/dev/null; then
-      break
-    fi
-    attempt=$((attempt + 1))
-    sleep 0.1
-  done
+    attempt=0
+    while [ "$ready" -ne 1 ] && [ "$attempt" -lt 50 ]; do
+      if pibo_cdp_is_ready "$chrome_port"; then
+        ready=1
+        break
+      fi
+      if ! kill -0 "$chrome_pid" 2>/dev/null; then
+        break
+      fi
+      attempt=$((attempt + 1))
+      sleep 0.1
+    done
 
-  if [ "$ready" -ne 1 ]; then
-    echo "pibo browser-use: Chrome did not expose CDP on port $chrome_port." >&2
+    if [ "$ready" -eq 1 ]; then
+      printf '%s\\n' "$chrome_pid" > "$pid_file"
+      printf '%s\\n' "$chrome_port" > "$port_file"
+      printf 'pibo browser-use: started Chrome profile "%s" (%s/%s) on CDP port %s.\\n' "$default_profile" "$user_data_dir" "$profile_directory" "$chrome_port" >&2
+      printf 'http://127.0.0.1:%s\\n' "$chrome_port"
+      return
+    fi
+
+    echo "pibo browser-use: Chrome did not expose CDP on port $chrome_port (attempt $retry)." >&2
     sed -n '1,80p' "$log_file" >&2 2>/dev/null || true
     if grep -q "SingletonLock" "$log_file" 2>/dev/null; then
-      echo "pibo browser-use: hint: a stale Chrome process held the profile lock. It was terminated; retry your command." >&2
+      echo "pibo browser-use: retrying after lock cleanup..." >&2
     fi
-    exit 1
-  fi
+    retry=$((retry + 1))
+    sleep 0.5
+  done
 
-  printf '%s\\n' "$chrome_pid" > "$pid_file"
-  printf '%s\\n' "$chrome_port" > "$port_file"
-  printf 'pibo browser-use: started Chrome profile "%s" (%s/%s) on CDP port %s.\\n' "$default_profile" "$user_data_dir" "$profile_directory" "$chrome_port" >&2
-  printf 'http://127.0.0.1:%s\\n' "$chrome_port"
+  echo "pibo browser-use: Chrome failed to start after retries." >&2
+  exit 1
 }
 
 while [ "$#" -gt 0 ]; do
@@ -352,6 +363,17 @@ if [ -n "$sanitized_args" ]; then
   done <<EOF
 $sanitized_args
 EOF
+fi
+
+# Prepend --session if the user did not pass it explicitly and a non-default session is set.
+has_session_arg=0
+for a in "$@"; do
+  case "$a" in
+    --session|--session=*) has_session_arg=1; break ;;
+  esac
+done
+if [ "$has_session_arg" -eq 0 ] && [ "$session" != "default" ]; then
+  set -- --session "$session" "$@"
 fi
 
 session_pid_file=\${BROWSER_USE_HOME:-$HOME/.browser-use}/$session.pid

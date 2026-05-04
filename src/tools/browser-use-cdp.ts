@@ -35,6 +35,42 @@ type PageProbe = {
 const DEFAULT_CDP_URL = 'http://127.0.0.1:56663';
 const DEFAULT_TIMEOUT_MS = 2500;
 
+function discoverCdpUrl(): string {
+  const candidates: string[] = [];
+  if (process.env.BROWSER_USE_HOME) {
+    candidates.push(join(process.env.BROWSER_USE_HOME, 'pibo-cdp'));
+  }
+  if (process.env.HOME) {
+    candidates.push(join(process.env.HOME, '.pibo', 'tools', 'browser-use', 'home', 'pibo-cdp'));
+    candidates.push(join(process.env.HOME, '.browser-use', 'pibo-cdp'));
+  }
+  for (const stateDir of candidates) {
+    try {
+      if (!existsSync(stateDir)) continue;
+      const entries = readdirSync(stateDir)
+        .filter((f) => f.endsWith('.port'))
+        .map((f) => {
+          const path = join(stateDir, f);
+          const portText = readFileSync(path, 'utf-8').trim();
+          const port = Number.parseInt(portText, 10);
+          const mtime = statSync(path).mtimeMs;
+          return { port, mtime, valid: Number.isFinite(port) && port > 0 };
+        })
+        .filter((e) => e.valid)
+        .sort((a, b) => b.mtime - a.mtime);
+      if (entries.length > 0) {
+        return `http://127.0.0.1:${entries[0].port}`;
+      }
+    } catch {
+      // ignore discovery errors for this candidate
+    }
+  }
+  return DEFAULT_CDP_URL;
+}
+
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+
 const CHAT_TARGET_PROBE = `(() => {
   const text = String(document.body?.innerText || "");
   const textareas = [...document.querySelectorAll("textarea")].map((textarea) => ({
@@ -96,7 +132,7 @@ export function printAttachChatExports(target: BrowserUseCdpTarget, cdpUrl = DEF
 }
 
 function normalizeCdpUrl(value?: string): string {
-  return (value || DEFAULT_CDP_URL).replace(/\/+$/, '');
+  return (value || discoverCdpUrl()).replace(/\/+$/, '');
 }
 
 async function fetchChromeTargets(cdpUrl: string, timeoutMs: number): Promise<ChromeTarget[]> {

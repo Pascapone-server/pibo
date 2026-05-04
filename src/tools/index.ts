@@ -295,7 +295,7 @@ export async function runToolsCli(argv = process.argv): Promise<void> {
   browserUse
     .command('targets')
     .description('List Chrome CDP targets with Chat auth hints')
-    .option('--cdp-url <url>', 'Chrome DevTools HTTP URL', 'http://127.0.0.1:56663')
+    .option('--cdp-url <url>', 'Chrome DevTools HTTP URL')
     .option('--no-probe', 'Only read /json/list without page DOM probes')
     .option('--json', 'Print machine-readable target data')
     .action(async (options: { cdpUrl?: string; probe?: boolean; json?: boolean }) => {
@@ -314,7 +314,7 @@ export async function runToolsCli(argv = process.argv): Promise<void> {
   browserUse
     .command('attach-chat')
     .description('Export the best existing authenticated Chat target')
-    .option('--cdp-url <url>', 'Chrome DevTools HTTP URL', 'http://127.0.0.1:56663')
+    .option('--cdp-url <url>', 'Chrome DevTools HTTP URL')
     .option('--json', 'Print machine-readable target data')
     .action(async (options: { cdpUrl?: string; json?: boolean }) => {
       const targets = await listBrowserUseCdpTargets({ cdpUrl: options.cdpUrl });
