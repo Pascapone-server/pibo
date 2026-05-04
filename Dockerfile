@@ -41,7 +41,7 @@ RUN /app/scripts/prepare-browser-use-wrapper.sh
 # Persistente Verzeichnisse für Pibo
 RUN mkdir -p /root/.pibo /root/.browser-use
 
-EXPOSE 4789 56663
+EXPOSE 4788 4789 56663
 
 ENTRYPOINT ["/app/scripts/docker-entrypoint.sh"]
-CMD ["gateway"]
+CMD ["gateway:web"]

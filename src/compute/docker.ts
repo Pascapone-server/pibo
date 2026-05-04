@@ -17,6 +17,7 @@ export interface SpawnedWorker {
 	gatewayHost: string;
 	gatewayPort: number;
 	cdpPort: number;
+	webPort: number;
 	connect: string;
 }
 
@@ -277,13 +278,15 @@ export async function spawnWorker(options: {
 		"4789",
 		"-p",
 		"56663",
+		"-p",
+		"4788",
 		"--label",
 		`${LABEL_ROLE}=worker`,
 		"--label",
 		`${LABEL_CREATED_AT}=${createdAt}`,
 		...(options.owner ? ["--label", `${LABEL_OWNER}=${options.owner}`] : []),
 		IMAGE_NAME,
-		"gateway",
+		"gateway:web",
 	];
 
 	await execFileAsync("docker", args, { cwd: options.workspaceDir });
@@ -291,9 +294,11 @@ export async function spawnWorker(options: {
 	// Get assigned ports
 	const { stdout: port4789 } = await execFileAsync("docker", ["port", id, "4789"]);
 	const { stdout: port56663 } = await execFileAsync("docker", ["port", id, "56663"]);
+	const { stdout: port4788 } = await execFileAsync("docker", ["port", id, "4788"]);
 
 	const gatewayPort = parseHostPort(port4789);
 	const cdpPort = parseHostPort(port56663);
+	const webPort = parseHostPort(port4788);
 
 	// Detect host IP
 	const host = await detectHost();
@@ -304,6 +309,7 @@ export async function spawnWorker(options: {
 		gatewayHost: host,
 		gatewayPort,
 		cdpPort,
+		webPort,
 		connect: `docker exec -it ${id} bash`,
 	};
 }
