@@ -123,10 +123,7 @@ export class ChatWebReadModel {
 					channel = excluded.channel,
 					kind = excluded.kind,
 					updated_at = excluded.updated_at,
-					status = CASE
-						WHEN web_chat_sessions.status = 'running' AND excluded.status = 'idle' THEN web_chat_sessions.status
-						ELSE excluded.status
-					END
+					status = excluded.status
 			`)
 			.run(
 				session.id,
@@ -142,7 +139,9 @@ export class ChatWebReadModel {
 	}
 
 	recordEvent(event: PiboOutputEvent, session?: PiboSession, streamId?: number): ChatWebStoredPiboEvent {
-		if (session) this.upsertSession(session, statusFromEvent(event));
+		const previousStatus = this.getSession(event.piboSessionId)?.status;
+		const nextStatus = statusFromEvent(event, previousStatus);
+		if (session) this.upsertSession(session, nextStatus);
 
 		const id = randomUUID();
 		const createdAt = new Date().toISOString();
@@ -157,7 +156,7 @@ export class ChatWebReadModel {
 			.prepare(
 				"UPDATE web_chat_sessions SET last_activity_at = ?, status = ?, updated_at = ? WHERE pibo_session_id = ?",
 			)
-			.run(createdAt, statusFromEvent(event), createdAt, event.piboSessionId);
+			.run(createdAt, nextStatus, createdAt, event.piboSessionId);
 
 		return { id, piboSessionId: event.piboSessionId, eventSequence, eventId, streamId, type: event.type, createdAt, payload: event };
 	}
@@ -271,21 +270,29 @@ export function createDefaultChatWebReadModel(_cwd?: string): ChatWebReadModel {
 	return new ChatWebReadModel(piboHomePath("web-chat.sqlite"));
 }
 
-function statusFromEvent(event: PiboOutputEvent): ChatWebSessionIndexItem["status"] {
+function statusFromEvent(
+	event: PiboOutputEvent,
+	previousStatus: ChatWebSessionIndexItem["status"] = "idle",
+): ChatWebSessionIndexItem["status"] {
 	if (event.type === "session_error") return "error";
+	if (event.type === "message_finished") return "idle";
 	if (
+		event.type === "message_queued" ||
 		event.type === "message_started" ||
 		event.type === "assistant_delta" ||
+		event.type === "assistant_message" ||
 		event.type === "thinking_started" ||
 		event.type === "thinking_delta" ||
 		event.type === "thinking_finished" ||
+		event.type === "tool_call" ||
 		event.type === "subagent_session" ||
 		event.type === "tool_execution_started" ||
-		event.type === "tool_execution_updated"
+		event.type === "tool_execution_updated" ||
+		event.type === "tool_execution_finished"
 	) {
 		return "running";
 	}
-	return "idle";
+	return previousStatus;
 }
 
 function sessionFromRow(row: SessionRow): ChatWebSessionIndexItem {

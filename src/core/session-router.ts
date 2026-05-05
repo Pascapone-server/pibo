@@ -17,6 +17,7 @@ import type {
 	PiboMessageEvent,
 	PiboOutputEvent,
 	PiboSessionOperationResult,
+	PiboSessionStatus,
 } from "./events.js";
 import { createSubagentToolName, type PiboSubagentRunner } from "../subagents/tool.js";
 import { PiboRunRegistry, type PiboRunNotification } from "../runs/registry.js";
@@ -218,6 +219,14 @@ export class PiboSessionRouter {
 
 	getPiboSessionIds(): string[] {
 		return [...this.sessions.keys()];
+	}
+
+	getSessionRuntimeStatus(piboSessionId: string): PiboSessionStatus | undefined {
+		return this.sessions.get(piboSessionId)?.getStatus();
+	}
+
+	listSessionRuntimeStatuses(): PiboSessionStatus[] {
+		return [...this.sessions.values()].map((session) => session.getStatus());
 	}
 
 	async emitMessageAndWaitForReply(

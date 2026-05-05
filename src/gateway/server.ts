@@ -231,6 +231,8 @@ export class PiboGatewayServer {
 			deleteSession: (id) => this.requireSessionStore().delete?.(id) ?? false,
 			findSessions: (input) => this.requireSessionStore().find(input),
 			listSessions: () => this.requireSessionStore().list?.() ?? [],
+			getSessionRuntimeStatus: (piboSessionId) => this.requireRouter().getSessionRuntimeStatus(piboSessionId),
+			listSessionRuntimeStatuses: () => this.requireRouter().listSessionRuntimeStatuses(),
 			getGatewayActions: () => this.pluginRegistry.getGatewayActionInfos(),
 			getProfiles: () => this.pluginRegistry.getProfileInfos(),
 			getCapabilityCatalog: () => this.pluginRegistry.getCapabilityCatalog(),

@@ -1409,7 +1409,7 @@ function SessionTracePane({
 		if (!selectedPiboSessionId || !traceQueryKey) return;
 		if (!currentTraceView || currentTraceView.piboSessionId !== selectedPiboSessionId) return;
 		const params = selectedRoomId
-			? new URLSearchParams({ roomId: selectedRoomId, piboSessionId: selectedPiboSessionId })
+			? new URLSearchParams({ roomId: selectedRoomId })
 			: new URLSearchParams({ piboSessionId: selectedPiboSessionId });
 		if (currentTraceView?.latestStreamId !== undefined) {
 			params.set("since", `${currentTraceView.latestStreamId}:999999`);
@@ -2047,6 +2047,7 @@ function SessionNode({
 		onRename(node.piboSessionId, title ? title : null);
 		setEditing(false);
 	};
+	const signal = sessionNodeSignal(node);
 
 	return (
 		<div>
@@ -2119,7 +2120,7 @@ function SessionNode({
 							<UnreadBadge count={node.unreadCount} />
 						</button>
 						<span className="grid grid-rows-[16px_16px] place-items-center gap-0.5">
-							<span className={`h-2 w-2 rounded-full ${node.status === "running" ? "bg-[#0bda57]" : node.status === "error" ? "bg-red-500" : "bg-slate-600"}`} />
+							<span className={signal.className} title={signal.title} aria-label={signal.title} />
 							{hasChildren ? (
 								<button
 									type="button"
@@ -2187,6 +2188,20 @@ function SessionNode({
 			)) : null}
 		</div>
 	);
+}
+
+function sessionNodeSignal(node: PiboWebSessionNode): { className: string; title: string } {
+	const base = "session-signal h-2 w-2 rounded-full";
+	if (node.status === "error") {
+		return { className: `${base} session-signal-error`, title: "Run failed" };
+	}
+	if (node.status === "running") {
+		return { className: `${base} session-signal-running`, title: "Runtime is working" };
+	}
+	if ((node.unreadCount ?? 0) > 0) {
+		return { className: `${base} session-signal-unread`, title: "New completed assistant message" };
+	}
+	return { className: `${base} session-signal-idle`, title: "Idle" };
 }
 
 function sessionTreeHasSession(nodes: PiboWebSessionNode[], piboSessionId: string): boolean {

@@ -1,4 +1,4 @@
-import type { PiboEventListener, PiboInputEvent, PiboOutputEvent } from "../core/events.js";
+import type { PiboEventListener, PiboInputEvent, PiboOutputEvent, PiboSessionStatus } from "../core/events.js";
 import type {
 	PiboCapabilityCatalog,
 	PiboGatewayActionInfo,
@@ -35,6 +35,8 @@ export type PiboChannelContext = {
 	deleteSession?(id: string): boolean;
 	findSessions(input: FindPiboSessionsInput): PiboSession[];
 	listSessions?(): PiboSession[];
+	getSessionRuntimeStatus?(piboSessionId: string): PiboSessionStatus | undefined;
+	listSessionRuntimeStatuses?(): PiboSessionStatus[];
 	getGatewayActions(): PiboGatewayActionInfo[];
 	getProfiles?(): PiboProfileInfo[];
 	getCapabilityCatalog?(): PiboCapabilityCatalog;

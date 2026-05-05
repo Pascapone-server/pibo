@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { parseSessionEntries, SessionManager, type SessionEntry } from "@mariozechner/pi-coding-agent";
-import type { PiboSessionListItem } from "../../core/events.js";
+import type { PiboSessionListItem, PiboSessionStatus } from "../../core/events.js";
 import type { ModelProfile } from "../../core/profiles.js";
 import type { PiboSession } from "../../sessions/store.js";
 import { buildTraceViewFromEvents } from "../../shared/trace-engine.js";
@@ -99,6 +99,7 @@ export async function buildSessionNodes(
 	indexItems: ChatWebSessionIndexItem[],
 	cwd = process.cwd(),
 	unreadCounts: ReadonlyMap<string, number> = new Map(),
+	runtimeStatuses: ReadonlyMap<string, PiboSessionStatus> = new Map(),
 ): Promise<PiboWebSessionNode[]> {
 	const indexByKey = new Map(indexItems.map((item) => [item.piboSessionId, item]));
 	const nodes = new Map<string, PiboWebSessionNode>();
@@ -115,6 +116,7 @@ export async function buildSessionNodes(
 			(await piSessions).find((piSession) => piSession.id === session.piSessionId),
 		);
 		const indexed = indexByKey.get(session.id);
+		const runtimeStatus = runtimeStatuses.get(session.id);
 		nodes.set(session.id, {
 			piboSessionId: session.id,
 			piSessionId: session.piSessionId,
@@ -126,7 +128,7 @@ export async function buildSessionNodes(
 			title: createSessionTitle(session, metadata),
 			subtitle: session.id,
 			archived: isChatWebSessionArchived(session),
-			status: indexed?.status ?? "idle",
+			status: sessionNodeStatus(indexed?.status, runtimeStatus),
 			lastActivityAt: indexed?.lastActivityAt ?? metadata.modified ?? session.updatedAt,
 			unreadCount: unreadCounts.get(session.id) || undefined,
 			derivedSessions: [],
@@ -167,6 +169,23 @@ export async function buildSessionNodes(
 	};
 	sortNodes(roots);
 	return roots;
+}
+
+function sessionNodeStatus(
+	indexedStatus: PiboWebSessionStatus | undefined,
+	runtimeStatus: PiboSessionStatus | undefined,
+): PiboWebSessionStatus {
+	if (runtimeStatus && !runtimeStatus.disposed) {
+		if (
+			runtimeStatus.processing ||
+			runtimeStatus.streaming ||
+			runtimeStatus.queuedMessages > 0 ||
+			runtimeStatus.activeTools.length > 0
+		) {
+			return "running";
+		}
+	}
+	return indexedStatus ?? "idle";
 }
 
 export async function buildTraceView(input: TraceBuildInput): Promise<PiboSessionTraceView> {

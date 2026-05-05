@@ -1463,6 +1463,23 @@ function buildSessionUnreadCounts(
 	return counts;
 }
 
+function runtimeStatusesForSessions(
+	context: PiboWebAppContext,
+	sessions: readonly PiboSession[],
+): Map<string, NonNullable<ReturnType<NonNullable<PiboWebAppContext["channelContext"]["getSessionRuntimeStatus"]>>>> {
+	const output = new Map<string, NonNullable<ReturnType<NonNullable<PiboWebAppContext["channelContext"]["getSessionRuntimeStatus"]>>>>();
+	const runtimeStatuses = context.channelContext.listSessionRuntimeStatuses?.();
+	if (runtimeStatuses) {
+		for (const status of runtimeStatuses) output.set(status.piboSessionId, status);
+		return output;
+	}
+	for (const session of sessions) {
+		const status = context.channelContext.getSessionRuntimeStatus?.(session.id);
+		if (status) output.set(session.id, status);
+	}
+	return output;
+}
+
 function buildRoomUnreadCounts(
 	state: ChatWebAppState,
 	rooms: PiboRoomNode[],
@@ -2697,6 +2714,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 					state.readModel.listSessions(),
 					process.cwd(),
 					sessionUnreadCounts,
+					runtimeStatusesForSessions(context, roomSessions),
 				);
 				const roomTree = state.roomStore.listRoomTree(webSession.ownerScope);
 				const roomUnreadCounts = buildRoomUnreadCounts(state, roomTree, principalId);
@@ -3025,6 +3043,9 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 					await buildSessionNodes(
 						roomSessions,
 						state.readModel.listSessions(),
+						process.cwd(),
+						new Map(),
+						runtimeStatusesForSessions(context, roomSessions),
 					),
 				);
 			}
@@ -3082,7 +3103,13 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				return responseJson({
 					room,
 					member: state.roomStore.getMember(room.id, principalIdFor(webSession)),
-					sessions: await buildSessionNodes(ownedSessions, state.readModel.listSessions()),
+					sessions: await buildSessionNodes(
+						ownedSessions,
+						state.readModel.listSessions(),
+						process.cwd(),
+						new Map(),
+						runtimeStatusesForSessions(context, ownedSessions),
+					),
 				});
 			}
 
