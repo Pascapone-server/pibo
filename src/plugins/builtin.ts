@@ -237,11 +237,11 @@ export const piboCorePlugin = definePiboPlugin({
 		});
 		api.registerGatewayAction({
 			name: "thinking",
-			description: "Cycle or set the routed Pi thinking level.",
+			description: "Show or set the routed Pi thinking level.",
 			slashCommands: ["thinking"],
 			execute(context, event) {
 				const params = getThinkingParams(event);
-				return params.level ? context.setThinkingLevel(params.level) : context.cycleThinkingLevel();
+				return params.level ? context.setThinkingLevel(params.level) : context.getThinkingLevel();
 			},
 		});
 		api.registerGatewayAction({

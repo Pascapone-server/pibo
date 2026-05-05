@@ -166,6 +166,7 @@ export type PiboGatewayActionContext = {
 	getSessionTree(): PiboSessionTreeResult;
 	navigateSessionTree(params: PiboSessionTreeNavigateParams): Promise<PiboSessionOperationResult>;
 	switchSession(params: PiboSessionSwitchParams): Promise<PiboSessionOperationResult>;
+	getThinkingLevel(): PiboThinkingResult;
 	setThinkingLevel(level: PiboThinkingLevel): PiboThinkingResult;
 	cycleThinkingLevel(): PiboThinkingResult;
 	compact(customInstructions?: string): Promise<CompactionResult>;

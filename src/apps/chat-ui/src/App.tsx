@@ -531,7 +531,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 					slash: `/${command}`,
 					action: action.name,
 					description: action.name === "thinking" && command === "thinking"
-						? "Cycle thinking level or use /thinking <level>."
+						? "Show thinking level or use /thinking <level>."
 						: action.description ?? action.name,
 				})),
 		);

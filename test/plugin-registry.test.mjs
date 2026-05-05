@@ -89,7 +89,7 @@ test("default plugin registry builds profiles from registered resources", () => 
 		},
 		{
 			name: "thinking",
-			description: "Cycle or set the routed Pi thinking level.",
+			description: "Show or set the routed Pi thinking level.",
 			slashCommands: ["thinking"],
 		},
 		{

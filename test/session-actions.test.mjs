@@ -66,6 +66,25 @@ async function createSessionHarness() {
 	};
 }
 
+test("thinking action without level reports current level without cycling", async () => {
+	const harness = await createSessionHarness();
+	try {
+		harness.routed.runtime.session.setThinkingLevel("medium");
+
+		const result = await harness.routed.executeAction({
+			type: "execution",
+			piboSessionId: "route:test",
+			action: "thinking",
+		});
+
+		assert.equal(result.type, "execution_result");
+		assert.equal(result.result.level, "medium");
+		assert.equal(harness.routed.runtime.session.thinkingLevel, "medium");
+	} finally {
+		await harness.dispose();
+	}
+});
+
 test("session fork replaces the active Pi session and can switch back", async () => {
 	const harness = await createSessionHarness();
 	try {

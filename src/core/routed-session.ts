@@ -691,6 +691,7 @@ export class RoutedSession {
 				getSessionTree: () => this.getSessionTree(),
 				navigateSessionTree: (params) => this.navigateSessionTree(params),
 				switchSession: (params) => this.switchSession(params),
+				getThinkingLevel: () => this.getThinkingResult(),
 				setThinkingLevel: (level) => this.setThinkingLevel(level),
 				cycleThinkingLevel: () => this.cycleThinkingLevel(),
 				compact: (customInstructions) => this.compact(customInstructions),
