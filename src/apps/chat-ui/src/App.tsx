@@ -1338,9 +1338,12 @@ function SessionTracePane({
 	}, [traceQuery.data]);
 
 	const currentTraceView = useMemo(() => {
+		const queriedEvents = traceQuery.data?.piboSessionId === selectedPiboSessionId
+			? traceQuery.data.rawEvents
+			: undefined;
 		const allEvents = selectedTraceEvents?.piboSessionId === selectedPiboSessionId
 			? selectedTraceEvents.events
-			: undefined;
+			: queriedEvents;
 		if (!selectedPiboSessionId || !bootstrap || !allEvents?.length) {
 			return traceQuery.data?.piboSessionId === selectedPiboSessionId ? traceQuery.data : null;
 		}
