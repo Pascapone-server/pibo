@@ -127,94 +127,21 @@ export function buildTraceViewFromEvents(input: TraceBuildInput): PiboSessionTra
 	const hasPersistedTranscript = entries.some((entry) => entry.type === "message");
 
 	for (const storedEvent of input.events) {
-		const payload = storedEvent.payload as PiboOutputEvent;
-		if (
-			hasPersistedTranscript &&
-			isTranscriptEchoEvent(payload) &&
-			!shouldKeepTranscriptEchoEvent(payload, openTranscriptEventIds)
-		) {
-			continue;
-		}
-		if (hasPersistedTranscript && isStaleToolCallEchoEvent(payload, sessionStatus)) {
-			continue;
-		}
-		if (payload.type === "assistant_delta") {
-			mergeAssistantDeltaEvent(
-				nodes, byId, payload, sessionStatus, storedEvent.createdAt, storedEvent.eventSequence,
-				storedEvent.streamId, storedEvent.streamFrameIndex,
-			);
-			continue;
-		}
-		if (payload.type === "thinking_delta") {
-			mergeThinkingDeltaEvent(
-				nodes, byId, payload, sessionStatus, storedEvent.createdAt, storedEvent.eventSequence,
-				storedEvent.streamId, storedEvent.streamFrameIndex,
-			);
-			continue;
-		}
-		const node = traceNodeFromEvent(
+		applySingleEventToNodes(
+			nodes,
+			byId,
 			input.session.id,
-			payload,
+			storedEvent,
 			childByParent,
 			linkedChildByToolCallId,
+			hasPersistedTranscript,
+			openTranscriptEventIds,
 			sessionStatus,
-			storedEvent.createdAt,
-			storedEvent.eventSequence,
-			storedEvent.streamId,
-			storedEvent.streamFrameIndex,
 		);
-		if (!node) continue;
-		if (node.type === "agent.turn" && node.eventId) {
-			const existingTurn = [...byId.values()].find(
-				(candidate) => candidate.type === "agent.turn" && candidate.eventId === node.eventId,
-			);
-			if (existingTurn) {
-				existingTurn.status = node.status;
-				existingTurn.completedAt = node.completedAt ?? existingTurn.completedAt;
-				continue;
-			}
-		}
-		if (node.type === "assistant.message") {
-			const existing = byId.get(node.id);
-			if (existing) {
-				mergeAssistantMessageEvent(existing, node);
-				closeParentTurnForFinalAssistant(byId, existing);
-				continue;
-			}
-			closeParentTurnForFinalAssistant(byId, node);
-		}
-		if (node.type === "model.reasoning") {
-			const existing = byId.get(node.id);
-			if (existing) {
-				mergeReasoningEvent(existing, node);
-				continue;
-			}
-		}
-		if (node.toolCallId) {
-			const existing = [...byId.values()].find(
-				(candidate) =>
-					candidate.toolCallId === node.toolCallId &&
-					(candidate.type === "tool.call" || candidate.type === "agent.delegation"),
-			);
-			if (existing) {
-				if (isRunStartToolNode(existing) && node.type === "agent.delegation") {
-					attachAsyncAgentRunNode(existing, input.session.id, storedEvent.createdAt, node);
-					continue;
-				}
-				mergeToolEvent(existing, node);
-				attachAsyncAgentRunNode(existing, input.session.id, storedEvent.createdAt);
-				continue;
-			}
-		}
-		if (node.eventId && byId.has(node.id)) continue;
-		attachAsyncAgentRunNode(node, input.session.id, storedEvent.createdAt);
-		nodes.push(node);
-		for (const indexed of flattenTraceNodes([node])) byId.set(indexed.id, indexed);
 	}
 
 	const nestedNodes = nestTraceNodes(nodes);
 	reconcileAsyncAgentRunStatuses(nestedNodes);
-	sortTraceNodes(nestedNodes);
 
 	return {
 		piboSessionId: input.session.id,
@@ -231,6 +158,149 @@ export function buildTraceViewFromEvents(input: TraceBuildInput): PiboSessionTra
 }
 
 // ── transcript helpers ───────────────────────────────────────────
+
+function applySingleEventToNodes(
+	nodes: PiboTraceNode[],
+	byId: Map<string, PiboTraceNode>,
+	piboSessionId: string,
+	storedEvent: ChatWebStoredEvent,
+	childByParent: Map<string, Array<{ id: string; metadata?: Record<string, unknown> }>>,
+	linkedChildByToolCallId: Map<string, string>,
+	hasPersistedTranscript: boolean,
+	openTranscriptEventIds: ReadonlySet<string>,
+	sessionStatus: PiboWebSessionStatus,
+): void {
+	const payload = storedEvent.payload as PiboOutputEvent;
+	if (
+		hasPersistedTranscript &&
+		isTranscriptEchoEvent(payload) &&
+		!shouldKeepTranscriptEchoEvent(payload, openTranscriptEventIds)
+	) {
+		return;
+	}
+	if (hasPersistedTranscript && isStaleToolCallEchoEvent(payload, sessionStatus)) {
+		return;
+	}
+	if (payload.type === "assistant_delta") {
+		mergeAssistantDeltaEvent(
+			nodes,
+			byId,
+			payload,
+			sessionStatus,
+			storedEvent.createdAt,
+			storedEvent.eventSequence,
+			storedEvent.streamId,
+			storedEvent.streamFrameIndex,
+		);
+		return;
+	}
+	if (payload.type === "thinking_delta") {
+		mergeThinkingDeltaEvent(
+			nodes,
+			byId,
+			payload,
+			sessionStatus,
+			storedEvent.createdAt,
+			storedEvent.eventSequence,
+			storedEvent.streamId,
+			storedEvent.streamFrameIndex,
+		);
+		return;
+	}
+	const node = traceNodeFromEvent(
+		piboSessionId,
+		payload,
+		childByParent,
+		linkedChildByToolCallId,
+		sessionStatus,
+		storedEvent.createdAt,
+		storedEvent.eventSequence,
+		storedEvent.streamId,
+		storedEvent.streamFrameIndex,
+	);
+	if (!node) return;
+	if (node.type === "agent.turn" && node.eventId) {
+		const existingTurn = [...byId.values()].find(
+			(candidate) => candidate.type === "agent.turn" && candidate.eventId === node.eventId,
+		);
+		if (existingTurn) {
+			existingTurn.status = node.status;
+			existingTurn.completedAt = node.completedAt ?? existingTurn.completedAt;
+			return;
+		}
+	}
+	if (node.type === "assistant.message") {
+		const existing = byId.get(node.id);
+		if (existing) {
+			mergeAssistantMessageEvent(existing, node);
+			closeParentTurnForFinalAssistant(byId, existing);
+			return;
+		}
+		closeParentTurnForFinalAssistant(byId, node);
+	}
+	if (node.type === "model.reasoning") {
+		const existing = byId.get(node.id);
+		if (existing) {
+			mergeReasoningEvent(existing, node);
+			return;
+		}
+	}
+	if (node.toolCallId) {
+		const existing = [...byId.values()].find(
+			(candidate) =>
+				candidate.toolCallId === node.toolCallId &&
+				(candidate.type === "tool.call" || candidate.type === "agent.delegation"),
+		);
+		if (existing) {
+			if (isRunStartToolNode(existing) && node.type === "agent.delegation") {
+				attachAsyncAgentRunNode(existing, piboSessionId, storedEvent.createdAt, node);
+				return;
+			}
+			mergeToolEvent(existing, node);
+			attachAsyncAgentRunNode(existing, piboSessionId, storedEvent.createdAt);
+			return;
+		}
+	}
+	if (node.eventId && byId.has(node.id)) return;
+	attachAsyncAgentRunNode(node, piboSessionId, storedEvent.createdAt);
+	nodes.push(node);
+	for (const indexed of flattenTraceNodes([node])) byId.set(indexed.id, indexed);
+}
+
+export function patchTraceViewWithEvent(
+	view: PiboSessionTraceView,
+	event: ChatWebStoredEvent,
+	sessionStatus: PiboWebSessionStatus,
+): PiboSessionTraceView {
+	if (view.rawEvents.some((re) => re.id === event.id)) {
+		return view;
+	}
+
+	const allNodes = flattenTraceNodes(view.nodes).map((node) => ({ ...node, children: [] }));
+	const byId = mapTraceNodesById(allNodes);
+
+	applySingleEventToNodes(
+		allNodes,
+		byId,
+		view.piboSessionId,
+		event,
+		new Map(),
+		new Map(),
+		false,
+		new Set(),
+		sessionStatus,
+	);
+
+	const nestedNodes = nestTraceNodes(allNodes);
+	reconcileAsyncAgentRunStatuses(nestedNodes);
+
+	return {
+		...view,
+		rawEvents: [...view.rawEvents, event],
+		nodes: nestedNodes,
+		latestStreamId: event.streamId ?? view.latestStreamId,
+	};
+}
 
 function projectTranscriptEntries(
 	entries: SessionEntry[],
