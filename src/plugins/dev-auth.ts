@@ -4,6 +4,7 @@ import type { PiboAuthService, PiboAuthSession } from "../auth/types.js";
 
 const COOKIE_NAME = "pibo_dev_session";
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
 function generateToken(): string {
 	return randomBytes(32).toString("hex");
@@ -22,6 +23,26 @@ function getCookieValue(headers: Headers): string | undefined {
 	if (!cookie) return undefined;
 	const match = cookie.match(new RegExp(`${COOKIE_NAME}=([^;]+)`));
 	return match?.[1];
+}
+
+function firstHeaderValue(value: string | null): string | undefined {
+	return value?.split(",")[0]?.trim() || undefined;
+}
+
+function isLoopbackHost(value: string | undefined): boolean {
+	if (!value) return false;
+	try {
+		const hostname = new URL(`http://${value}`).hostname;
+		return LOOPBACK_HOSTS.has(hostname);
+	} catch {
+		return false;
+	}
+}
+
+export function isLoopbackDevAuthRequest(request: Request): boolean {
+	const host = firstHeaderValue(request.headers.get("host"));
+	const forwardedHost = firstHeaderValue(request.headers.get("x-forwarded-host"));
+	return isLoopbackHost(host) && (!forwardedHost || isLoopbackHost(forwardedHost));
 }
 
 function createDevAuthService(): PiboAuthService {
@@ -59,6 +80,10 @@ function createDevAuthService(): PiboAuthService {
 			return session;
 		},
 		async handleRequest(request) {
+			if (!isLoopbackDevAuthRequest(request)) {
+				return Response.json({ error: "Dev auth only accepts loopback requests" }, { status: 403 });
+			}
+
 			const url = new URL(request.url);
 
 			if (url.pathname === "/api/auth/sign-in/social") {

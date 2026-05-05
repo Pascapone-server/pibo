@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from "node:fs";
 import { createDefaultPiboPlugins } from "../plugins/builtin.js";
 import type { BetterAuthServiceOptions } from "../auth/better-auth.js";
 import { createPiboBetterAuthPlugin } from "../plugins/better-auth.js";
@@ -13,6 +14,7 @@ import { clearFallbackPidFile, clearPidFile, writeFallbackGatewayPid, writeGatew
 
 export type WebGatewayServerOptions = GatewayServerOptions & {
 	auth?: BetterAuthServiceOptions;
+	devAuth?: boolean;
 	web?: WebHostChannelOptions;
 	chat?: ChatWebAppOptions;
 	contextFiles?: ContextFilesPluginOptions;
@@ -20,6 +22,29 @@ export type WebGatewayServerOptions = GatewayServerOptions & {
 
 const PUBLIC_WEB_CHANNEL_HOST = "0.0.0.0";
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
+function isDockerRuntime(): boolean {
+	if (existsSync("/.dockerenv")) return true;
+	try {
+		const cgroup = readFileSync("/proc/1/cgroup", "utf-8");
+		return /docker|kubepods|containerd/.test(cgroup);
+	} catch {
+		return false;
+	}
+}
+
+export function resolveWebGatewayAuthMode(options: WebGatewayServerOptions = {}): "better-auth" | "dev-auth" {
+	if (!options.devAuth) {
+		if (process.env.PIBO_DEV_AUTH === "1") {
+			throw new Error("PIBO_DEV_AUTH no longer activates dev auth for gateway:web; use the Docker worker entrypoint instead.");
+		}
+		return "better-auth";
+	}
+	if (!isDockerRuntime()) {
+		throw new Error("Pibo dev auth can only be enabled inside a Docker worker runtime.");
+	}
+	return "dev-auth";
+}
 
 function authBaseURL(options: WebGatewayServerOptions): string | undefined {
 	return options.auth?.baseURL ?? loadPiboConfig().auth?.baseURL;
@@ -48,7 +73,7 @@ export function resolveWebGatewayServerOptions(options: WebGatewayServerOptions 
 
 export function createWebPiboPluginRegistry(options: WebGatewayServerOptions = {}): PiboPluginRegistry {
 	const resolvedOptions = resolveWebGatewayServerOptions(options);
-	const useDevAuth = process.env.PIBO_DEV_AUTH === "1" && process.env.PIBO_IN_DOCKER === "1";
+	const useDevAuth = resolveWebGatewayAuthMode(resolvedOptions) === "dev-auth";
 	return PiboPluginRegistry.create({
 		plugins: [
 			...createDefaultPiboPlugins(),
@@ -61,7 +86,7 @@ export function createWebPiboPluginRegistry(options: WebGatewayServerOptions = {
 }
 
 function createChatAppURL(options: WebGatewayServerOptions, host: string, port: number): string {
-	if (process.env.PIBO_DEV_AUTH === "1") {
+	if (options.devAuth) {
 		return `http://${host}:${port}/apps/chat`;
 	}
 	const baseURL = options.auth?.baseURL ?? loadPiboConfig().auth?.baseURL;

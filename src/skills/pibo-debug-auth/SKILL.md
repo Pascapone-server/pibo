@@ -15,7 +15,7 @@ Every Docker compute worker starts with a built-in dev authentication plugin. No
 
 ## How dev auth works in a Docker worker
 
-When `pibo compute spawn` creates a worker, the entrypoint sets `PIBO_DEV_AUTH=1`. This activates the dev-auth plugin (`src/plugins/dev-auth.ts`) instead of Better Auth.
+When `pibo compute spawn` creates a worker, the Docker entrypoint starts `gateway:web` through the internal `{ devAuth: true }` option. This activates the dev-auth plugin (`src/plugins/dev-auth.ts`) instead of Better Auth only inside the worker runtime. Environment variables such as `PIBO_DEV_AUTH` do not activate dev auth for the normal host gateway.
 
 The plugin provides a cookie-based session with a fixed identity:
 
@@ -84,6 +84,10 @@ The `-L` flag follows redirects. The flow is:
   generates a random session token, so cookies from one worker do not work on
   another.
 - Better Auth stays available on the host gateway. The dev-auth plugin only
-  runs inside Docker workers and requires both `PIBO_DEV_AUTH=1` and
-  `PIBO_IN_DOCKER=1` to activate. It will never load on the host gateway,
-  even if `PIBO_DEV_AUTH` is set.
+  runs when the Docker worker entrypoint passes the internal `devAuth: true`
+  option and the process detects a Docker/container runtime. `PIBO_DEV_AUTH`
+  is intentionally ignored by the normal host gateway and causes startup to
+  fail closed if set there.
+- Dev auth only accepts loopback browser requests. Requests forwarded from a
+  public host, for example through nginx with `X-Forwarded-Host`, receive `403`
+  even if a worker is accidentally exposed.

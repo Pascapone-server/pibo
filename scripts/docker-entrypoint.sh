@@ -27,10 +27,8 @@ case "${1:-gateway}" in
     exec node -e "import('./dist/gateway/server.js').then(m => m.runGatewayServer({ host: '0.0.0.0' }))"
     ;;
   gateway:web)
-    echo "[docker-entrypoint] Starting Pibo gateway:web on 0.0.0.0:4789 ..."
-    export PIBO_DEV_AUTH=1
-    export PIBO_IN_DOCKER=1
-    exec node -e "import('./dist/gateway/web.js').then(m => m.runWebGatewayServer({ web: { host: '0.0.0.0' } }))"
+    echo "[docker-entrypoint] Starting Pibo gateway:web with dev auth on 0.0.0.0:4789 ..."
+    exec node -e "import('./dist/gateway/web.js').then(m => m.runWebGatewayServer({ devAuth: true, web: { host: '0.0.0.0' } }))"
     ;;
   shell|bash|sh)
     exec /bin/sh
