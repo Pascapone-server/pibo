@@ -33,7 +33,11 @@ export function createChatStreamState(): ChatStreamState {
 	};
 }
 
-export function chatStreamFramesFromOutputEvent(event: PiboOutputEvent, state: ChatStreamState): ChatStreamEvent[] {
+export function chatStreamFramesFromOutputEvent(
+	event: PiboOutputEvent,
+	state: ChatStreamState,
+	options: { includeRawEvent?: boolean } = {},
+): ChatStreamEvent[] {
 	const eventId = "eventId" in event && typeof event.eventId === "string" ? event.eventId : undefined;
 	const frames: ChatStreamEvent[] = [];
 	const reasoningMessageId = reasoningIdFromOutputEvent(event);
@@ -114,7 +118,7 @@ export function chatStreamFramesFromOutputEvent(event: PiboOutputEvent, state: C
 			break;
 	}
 
-	frames.push({ type: "RAW_EVENT", event });
+	if (options.includeRawEvent ?? true) frames.push({ type: "RAW_EVENT", event });
 	return frames;
 }
 

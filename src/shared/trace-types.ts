@@ -10,6 +10,7 @@ export type PiboTraceNodeType =
 	| "agent.delegation"
 	| "agent.async"
 	| "execution.command"
+	| "execution.compaction"
 	| "yielded.run"
 	| "error";
 

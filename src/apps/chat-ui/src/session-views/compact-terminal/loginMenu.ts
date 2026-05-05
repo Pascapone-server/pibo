@@ -12,6 +12,25 @@ export type LoginMenuResult = {
 	providers: LoginProvider[];
 };
 
+export type ModelMenuModel = {
+	provider: string;
+	id: string;
+	label: string;
+	supportsReasoning?: boolean;
+};
+
+export type ModelMenuProvider = {
+	id: string;
+	label: string;
+	authConfigured: boolean;
+	models: ModelMenuModel[];
+};
+
+export type ModelMenuResult = {
+	action: "show_model_menu";
+	providers: ModelMenuProvider[];
+};
+
 export type ActionEnvelope = {
 	type?: string;
 	result?: unknown;
@@ -21,6 +40,12 @@ export function isLoginMenuResult(value: unknown): value is LoginMenuResult {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
 	const record = value as Record<string, unknown>;
 	return record.action === "show_login_menu" && Array.isArray(record.providers);
+}
+
+export function isModelMenuResult(value: unknown): value is ModelMenuResult {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+	const record = value as Record<string, unknown>;
+	return record.action === "show_model_menu" && Array.isArray(record.providers);
 }
 
 export function unwrapActionResult(value: unknown): unknown {

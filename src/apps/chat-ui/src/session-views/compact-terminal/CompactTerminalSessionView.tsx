@@ -8,6 +8,7 @@ import type { ChatSessionViewProps } from "../types";
 import { TerminalDetails } from "./TerminalDetails";
 import { TerminalLine } from "./TerminalLine";
 import { TerminalLoginCard } from "./TerminalLoginCard";
+import { TerminalModelCard } from "./TerminalModelCard";
 import { TerminalStatusCard } from "./TerminalStatusCard";
 import { TerminalThinkingCard } from "./TerminalThinkingCard";
 import { buildCompactTerminalRows, type CompactTerminalLine } from "./terminalRows";
@@ -30,6 +31,7 @@ export function CompactTerminalSessionView({
 	onFork,
 	onOpenSession,
 	onThinkingLevelChange,
+	onModelChanged,
 }: ChatSessionViewProps) {
 	const rows = useMemo(
 		() => buildCompactTerminalRows(traceView, { showThinking }),
@@ -196,7 +198,13 @@ export function CompactTerminalSessionView({
 													<div className="min-w-0">
 														<TerminalLoginCard row={row} piboSessionId={traceView?.piboSessionId} />
 													</div>
-												) : row.kind === "reasoning" && row.markdown ? (
+												) : row.kind === "tool.model" ? (
+											<div className="min-w-0">
+												<TerminalModelCard row={row} piboSessionId={traceView?.piboSessionId} onModelChanged={onModelChanged} />
+											</div>
+										) : row.kind === "execution.compaction" && row.status === "running" ? (
+											<TerminalCompactionLine />
+										) : row.kind === "reasoning" && row.markdown ? (
 													<>
 														{visibleLines.map((line, index) => <TerminalLine key={`${row.id}:${index}`} line={line} status={row.status} clampLines={collapseToolCallPreview && index === 0 ? 5 : undefined} />)}
 														<div className="ml-[1.9rem] min-w-0">
@@ -270,7 +278,8 @@ function isToolCallLikeRow(row: { kind: string; expandable?: boolean }) {
 		row.kind === "agent.delegation" ||
 		row.kind === "agent.async" ||
 		row.kind === "yielded.run" ||
-		row.kind === "execution.command"
+		row.kind === "execution.command" ||
+		row.kind === "execution.compaction"
 	);
 }
 
@@ -283,6 +292,28 @@ function isInteractiveEventTarget(event: MouseEvent<HTMLElement> | KeyboardEvent
 
 function TerminalStreamingFooter() {
 	return <div className="px-4 py-3 text-[#737373]">• Working</div>;
+}
+
+function TerminalCompactionLine() {
+	const dots = useAnimatedDots();
+	return (
+		<div className="grid grid-cols-[1.9rem_minmax(0,1fr)] gap-2 whitespace-pre-wrap break-words">
+			<span className="whitespace-pre text-[#38bdf8]">•</span>
+			<span className="min-w-0">
+				<span className="font-semibold text-[#38bdf8]">Compacting</span>
+				<span className="text-[#38bdf8]">{dots}</span>
+			</span>
+		</div>
+	);
+}
+
+function useAnimatedDots() {
+	const [count, setCount] = useState(0);
+	useEffect(() => {
+		const interval = window.setInterval(() => setCount((current) => (current + 1) % 4), 400);
+		return () => window.clearInterval(interval);
+	}, []);
+	return ".".repeat(count);
 }
 
 function TerminalBadge({

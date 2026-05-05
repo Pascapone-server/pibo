@@ -3,26 +3,29 @@ import { DEFAULT_CHAT_SESSION_VIEW_ID, type ChatSessionViewId } from "./types";
 import { TraceSessionView } from "./TraceSessionView";
 import { CompactTerminalSessionView } from "./compact-terminal/CompactTerminalSessionView";
 
-const builtinChatSessionViews = [
+export const inactiveChatSessionViews = [
 	{
 		id: "trace",
 		label: "Trace",
-		description: "Existing nested execution flow view.",
+		description: "Existing nested execution flow view. Kept as a dormant plugin, but not registered as an active session view.",
 		render: (props) => <TraceSessionView {...props} />,
 	},
+] satisfies readonly ChatSessionView[];
+
+const builtinChatSessionViews = [
 	{
 		id: "terminal",
 		label: "Terminal",
 		description: "Compact Codex-style terminal transcript.",
 		render: (props) => <CompactTerminalSessionView {...props} />,
 	},
-] satisfies readonly ChatSessionView[];
+] satisfies readonly (ChatSessionView & { id: ChatSessionViewId })[];
 
 const builtinChatSessionViewById = new Map<ChatSessionViewId, ChatSessionView>(
 	builtinChatSessionViews.map((view) => [view.id, view]),
 );
 
-export function listChatSessionViews(): readonly ChatSessionView[] {
+export function listChatSessionViews(): readonly (ChatSessionView & { id: ChatSessionViewId })[] {
 	return builtinChatSessionViews;
 }
 

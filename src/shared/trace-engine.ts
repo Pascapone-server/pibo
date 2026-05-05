@@ -248,6 +248,13 @@ function applySingleEventToNodes(
 		}
 		closeParentTurnForFinalAssistant(byId, node);
 	}
+	if (node.type === "execution.compaction") {
+		const existing = findLatestCompactionNode(nodes);
+		if (existing) {
+			mergeCompactionEvent(existing, node);
+			return;
+		}
+	}
 	if (node.type === "model.reasoning") {
 		const existing = byId.get(node.id);
 		if (existing) {
@@ -869,6 +876,31 @@ function traceNodeFromEvent(
 				input: { action: event.action },
 				output: event.result,
 			};
+		case "compaction_start":
+			return {
+				...base,
+				id: `event:compaction:${eventSequence ?? streamId ?? cryptoSafeId(event)}`,
+				type: "execution.compaction",
+				title: "compact",
+				status: "running",
+				summary: "Compacting",
+				input: { reason: event.reason },
+				stableKey: "compaction:active",
+			};
+		case "compaction_end":
+			return {
+				...base,
+				id: `event:compaction:end:${eventSequence ?? streamId ?? cryptoSafeId(event)}`,
+				type: "execution.compaction",
+				title: "compact",
+				status: event.errorMessage ? "error" : "done",
+				completedAt: createdAt,
+				summary: event.aborted ? "Compaction skipped" : event.errorMessage ? "Compaction failed" : "Compacted",
+				input: { reason: event.reason },
+				output: event.result,
+				error: event.errorMessage,
+				stableKey: "compaction:active",
+			};
 		case "session_error":
 			return {
 				...base,
@@ -1087,6 +1119,9 @@ function eventNodeKind(type: PiboOutputEvent["type"]): PiboTraceNode["type"] {
 			return "assistant.message";
 		case "execution_result":
 			return "execution.command";
+		case "compaction_start":
+		case "compaction_end":
+			return "execution.compaction";
 		case "session_error":
 			return "error";
 		default:
@@ -1158,6 +1193,19 @@ function mergeToolEvent(target: PiboTraceNode, update: PiboTraceNode): void {
 	target.error = update.error ?? target.error;
 	target.completedAt = update.completedAt ?? target.completedAt;
 	target.linkedPiboSessionId = update.linkedPiboSessionId ?? target.linkedPiboSessionId;
+}
+
+function findLatestCompactionNode(nodes: readonly PiboTraceNode[]): PiboTraceNode | undefined {
+	return flattenTraceNodes([...nodes]).reverse().find((node) => node.type === "execution.compaction" && node.status === "running");
+}
+
+function mergeCompactionEvent(target: PiboTraceNode, update: PiboTraceNode): void {
+	target.status = update.status;
+	target.summary = update.summary ?? target.summary;
+	target.input = update.input ?? target.input;
+	target.output = update.output ?? target.output;
+	target.error = update.error ?? target.error;
+	target.completedAt = update.completedAt ?? target.completedAt;
 }
 
 function attachAsyncAgentRunNode(

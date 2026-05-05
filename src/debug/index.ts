@@ -17,6 +17,9 @@ type ParsedOptions = {
 	before?: string;
 	queue?: string;
 	destructive: boolean;
+	apply: boolean;
+	dryRun: boolean;
+	store?: string;
 };
 
 export async function runDebugCli(argv = process.argv): Promise<void> {
@@ -149,6 +152,20 @@ async function runDebugTrace(args: string[]): Promise<void> {
 async function runDebugEvents(args: string[]): Promise<void> {
 	if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
 		printDebugEventsDiscovery();
+		return;
+	}
+	if (args[0] === "compact-deltas") {
+		const options = parseOptions(args.slice(1));
+		const { formatJson } = await import("./sql.js");
+		const { formatDeltaCompaction, runDeltaCompaction } = await import("./delta-compaction.js");
+		const result = runDeltaCompaction({
+			apply: options.apply,
+			store: options.store,
+			session: options.key,
+			json: options.json,
+		});
+		if (options.json) console.log(formatJson(result));
+		else console.log(formatDeltaCompaction(result));
 		return;
 	}
 	if (args[0] === "stream") {
@@ -329,7 +346,7 @@ async function runDebugRuns(args: string[]): Promise<void> {
 }
 
 function parseOptions(args: string[]): ParsedOptions {
-	const parsed: ParsedOptions = { positionals: [], json: false, events: false, runningOnly: false, check: false, destructive: false };
+	const parsed: ParsedOptions = { positionals: [], json: false, events: false, runningOnly: false, check: false, destructive: false, apply: false, dryRun: false };
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index];
 		if (arg === "--json") {
@@ -409,6 +426,21 @@ function parseOptions(args: string[]): ParsedOptions {
 		}
 		if (arg === "--destructive") {
 			parsed.destructive = true;
+			continue;
+		}
+		if (arg === "--apply") {
+			parsed.apply = true;
+			continue;
+		}
+		if (arg === "--dry-run") {
+			parsed.dryRun = true;
+			continue;
+		}
+		if (arg === "--store") {
+			const value = args[index + 1];
+			if (!value) throw new Error("--store requires a value");
+			parsed.store = value;
+			index += 1;
 			continue;
 		}
 		if (arg === "--queue") {
@@ -560,6 +592,7 @@ Usage:
   pibo debug events stream [--topic topic] [--after stream_id] [--limit n] [--json]
   pibo debug events stats [--topic topic] [--session pibo-session-id] [--retention class] [--json]
   pibo debug events prune --topic topic --retention class --before iso-date [--limit n] [--destructive] [--json]
+  pibo debug events compact-deltas [--dry-run|--apply] [--store chat|reliability] [--session ps_...] [--json]
   pibo debug events consumers [--json]
 
 Examples:

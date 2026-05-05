@@ -234,7 +234,7 @@ test("chat stream adapter prefers pibo thinking segments over repeated provider 
 	);
 });
 
-test("chat read model keeps newest events when limiting session event history", () => {
+test("chat read model ignores live-only deltas when limiting session event history", () => {
 	const readModel = new ChatWebReadModel(":memory:");
 	const session = createTestSession();
 	readModel.upsertSession(session);
@@ -261,15 +261,14 @@ test("chat read model keeps newest events when limiting session event history", 
 	);
 
 	const events = readModel.listEvents(session.id, 1000);
-	assert.equal(events.length, 1000);
+	assert.equal(events.length, 1);
 	assert.equal(events.at(-1)?.type, "assistant_message");
 	assert.equal(events.at(-1)?.payload.type, "assistant_message");
-	assert.notEqual(events[0].payload.type === "assistant_delta" ? events[0].payload.text : undefined, "delta-0");
 
 	const allEvents = readModel.listAllEvents(session.id);
-	assert.equal(allEvents.length, 1006);
-	assert.equal(allEvents[0].payload.type === "assistant_delta" ? allEvents[0].payload.text : undefined, "delta-0");
+	assert.equal(allEvents.length, 1);
 	assert.equal(allEvents.at(-1)?.payload.type, "assistant_message");
+	assert.deepEqual(readModel.countEventsByType({ eventTypes: ["assistant_delta"] }), []);
 	readModel.close();
 });
 
@@ -296,7 +295,7 @@ test("chat read model only promotes sessions on user input and final assistant o
 	readModel.close();
 });
 
-test("chat read model assigns stable per-session event sequence", () => {
+test("chat read model assigns stable per-session event sequence for durable events", () => {
 	const readModel = new ChatWebReadModel(":memory:");
 	const session = createTestSession();
 	readModel.upsertSession(session);
@@ -307,7 +306,7 @@ test("chat read model assigns stable per-session event sequence", () => {
 
 	assert.deepEqual(
 		readModel.listEvents(session.id).map((event) => event.eventSequence),
-		[1, 2, 3],
+		[1],
 	);
 	readModel.close();
 });

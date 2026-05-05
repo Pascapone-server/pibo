@@ -10,6 +10,7 @@ export type TraceNodeKind =
 	| "agent.delegation"
 	| "agent.async"
 	| "execution.command"
+	| "execution.compaction"
 	| "yielded.run"
 	| "error";
 
@@ -33,6 +34,7 @@ export const TRACE_SOURCE_RANK: Record<TraceSource, number> = {
 export const TRACE_PHASE_RANK: Record<TraceNodeKind, number> = {
 	"user.message": 0,
 	"execution.command": 1,
+	"execution.compaction": 1,
 	"agent.turn": 2,
 	"model.reasoning": 3,
 	"tool.call": 4,

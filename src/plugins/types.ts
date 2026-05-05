@@ -169,6 +169,7 @@ export type PiboGatewayActionContext = {
 	getThinkingLevel(): PiboThinkingResult;
 	setThinkingLevel(level: PiboThinkingLevel): PiboThinkingResult;
 	cycleThinkingLevel(): PiboThinkingResult;
+	setModel(model: ModelProfile): Promise<ModelProfile>;
 	compact(customInstructions?: string): Promise<CompactionResult>;
 	kill(): Promise<{ killed: string[]; cancelledRuns: string[] }>;
 	killAll(): Promise<{ killed: string[]; cancelledRuns: string[] }>;

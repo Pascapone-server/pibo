@@ -11,11 +11,13 @@ export type CompactTerminalRowKind =
 	| "tool.status"
 	| "tool.thinking"
 	| "tool.login"
+	| "tool.model"
 	| "tool.group.exploring"
 	| "agent.delegation"
 	| "agent.async"
 	| "yielded.run"
 	| "execution.command"
+	| "execution.compaction"
 	| "error";
 
 export type TerminalInlineToken = {
@@ -135,6 +137,9 @@ function createRowCandidate(node: PiboTraceNode, turnId?: string): RowCandidate 
 			break;
 		case "execution.command":
 			candidate = { row: createExecutionCommandRow(node), turnId };
+			break;
+		case "execution.compaction":
+			candidate = { row: createCompactionRow(node), turnId };
 			break;
 		case "error":
 			candidate = { row: createErrorRow(node), turnId };
@@ -334,6 +339,30 @@ function createYieldedRunRow(node: PiboTraceNode): CompactTerminalRow {
 	};
 }
 
+function createCompactionRow(node: PiboTraceNode): CompactTerminalRow {
+	const label = node.status === "running"
+		? "Compacting"
+		: node.status === "error"
+			? "Compaction failed"
+			: stringValue(node.summary) || "Compacted";
+	return {
+		id: node.id,
+		kind: "execution.compaction",
+		status: mapStatus(node.status),
+		lines: [
+			{
+				prefix: "bullet",
+				tokens: [token(label, toneForStatus(node.status), node.status === "error" ? "bold" : "semibold")],
+			},
+		],
+		sourceNodeIds: [node.id],
+		input: node.input,
+		output: node.output,
+		error: node.error,
+		expandable: node.input !== undefined || node.output !== undefined || Boolean(node.error),
+	};
+}
+
 function createExecutionCommandRow(node: PiboTraceNode): CompactTerminalRow {
 	if (node.title === "status") {
 		return createStatusToolRow(node);
@@ -343,6 +372,9 @@ function createExecutionCommandRow(node: PiboTraceNode): CompactTerminalRow {
 	}
 	if (node.title === "login" && isLoginMenuOutput(node.output)) {
 		return createLoginToolRow(node);
+	}
+	if (node.title === "model" && isModelMenuOutput(node.output)) {
+		return createModelToolRow(node);
 	}
 	const command = shellCommandValue(node.output) ?? shellCommandValue(node.input) ?? node.title;
 	const preview = previewLines(node.error ?? node.output, TOOL_OUTPUT_PREVIEW_LINES, node.error ? "red" : "dim", 180);
@@ -407,10 +439,30 @@ function createLoginToolRow(node: PiboTraceNode): CompactTerminalRow {
 	};
 }
 
+function createModelToolRow(node: PiboTraceNode): CompactTerminalRow {
+	return {
+		id: node.id,
+		kind: "tool.model",
+		status: mapStatus(node.status),
+		lines: [],
+		sourceNodeIds: [node.id],
+		input: node.input,
+		output: node.output,
+		error: node.error,
+		expandable: false,
+	};
+}
+
 function isLoginMenuOutput(value: unknown): boolean {
 	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
 	const record = value as Record<string, unknown>;
 	return record.action === "show_login_menu" && Array.isArray(record.providers);
+}
+
+function isModelMenuOutput(value: unknown): boolean {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+	const record = value as Record<string, unknown>;
+	return record.action === "show_model_menu" && Array.isArray(record.providers);
 }
 
 function createCommandToolRow(node: PiboTraceNode, command: string): CompactTerminalRow {

@@ -11,6 +11,7 @@ import { InitialSessionContextBuilder, type InitialSessionContext } from "../cor
 import { parsePiboThinkingLevel } from "../core/thinking.js";
 import { createWebSearchToolProfile } from "../tools/web-search.js";
 import { completeLogin, getLoginStatus, removeLogin, setApiKey, startLogin } from "../auth/login-actions.js";
+import { loadModelCatalog } from "../apps/chat/model-catalog.js";
 import { piboCodexCompatPlugin } from "./codex-compat.js";
 import { definePiboPlugin, PiboPluginRegistry } from "./registry.js";
 import type { PiboPlugin, PiboProfileBuildContext } from "./types.js";
@@ -329,6 +330,23 @@ export const piboCorePlugin = definePiboPlugin({
 						authMethods: [...provider.authMethods],
 						configured: statuses.get(provider.id) ?? false,
 					})),
+				};
+			},
+		});
+		api.registerGatewayAction({
+			name: "model",
+			description: "Open the interactive model selector for authenticated providers.",
+			slashCommands: ["model"],
+			async execute() {
+				const catalog = await loadModelCatalog(process.cwd());
+				return {
+					action: "show_model_menu",
+					providers: catalog.providers
+						.filter((provider) => provider.authConfigured)
+						.map((provider) => ({
+							...provider,
+							models: provider.models.filter((model) => model.authConfigured !== false),
+						})),
 				};
 			},
 		});

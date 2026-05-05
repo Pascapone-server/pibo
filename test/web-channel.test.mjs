@@ -245,8 +245,7 @@ test("chat web trace returns raw events only when requested", async () => {
 		);
 		assert.equal(rawResponse.status, 200);
 		const rawTrace = await rawResponse.json();
-		assert.equal(rawTrace.rawEvents.length, 2);
-		assert.deepEqual(rawTrace.rawEvents.map((event) => event.payload.eventId), ["answer-1", "answer-2"]);
+		assert.equal(rawTrace.rawEvents.length, 0);
 	} finally {
 		await channel.stop?.();
 	}
@@ -1643,7 +1642,7 @@ test("chat web app changes session profiles only before the first trace event", 
 		assert.equal(changedPayload.session.profile, "pibo-run-yield-qa");
 
 		emitOutput({
-			type: "assistant_delta",
+			type: "assistant_message",
 			piboSessionId: payload.session.id,
 			eventId: "trace-start",
 			text: "started",

@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { piboHomePath } from "../../core/pibo-home.js";
 import { DatabaseSync } from "node:sqlite";
 import type { PiboOutputEvent } from "../../core/events.js";
+import { isLiveOnlyOutputEvent } from "./output-event-policy.js";
 import type { PiboSession } from "../../sessions/store.js";
 import type { ChatWebStoredEvent } from "../../shared/trace-types.js";
 
@@ -138,10 +139,17 @@ export class ChatWebReadModel {
 			);
 	}
 
-	recordEvent(event: PiboOutputEvent, session?: PiboSession, streamId?: number): ChatWebStoredPiboEvent {
+	recordEvent(event: PiboOutputEvent, session?: PiboSession, streamId?: number): ChatWebStoredPiboEvent | undefined {
 		const previousStatus = this.getSession(event.piboSessionId)?.status;
 		const nextStatus = statusFromEvent(event, previousStatus);
 		if (session) this.upsertSession(session, nextStatus);
+		if (isLiveOnlyOutputEvent(event)) {
+			const updatedAt = new Date().toISOString();
+			this.db
+				.prepare("UPDATE web_chat_sessions SET status = ?, updated_at = ? WHERE pibo_session_id = ?")
+				.run(nextStatus, updatedAt, event.piboSessionId);
+			return undefined;
+		}
 
 		const id = randomUUID();
 		const createdAt = new Date().toISOString();
@@ -208,6 +216,60 @@ export class ChatWebReadModel {
 			)
 			.all(piboSessionId) as EventRow[];
 		return rows.map(eventFromRow);
+	}
+
+	listTraceEvents(input: { piboSessionId: string; limit?: number; beforeOrAtSequence?: number } | string): ChatWebStoredPiboEvent[] {
+		const piboSessionId = typeof input === "string" ? input : input.piboSessionId;
+		const limit = Math.max(1, Math.min((typeof input === "string" ? undefined : input.limit) ?? 2000, 10000));
+		const beforeOrAtSequence = typeof input === "string" ? undefined : input.beforeOrAtSequence;
+		const clauses = ["pibo_session_id = ?", "type NOT IN ('assistant_delta', 'thinking_delta', 'tool_execution_updated')"];
+		const values: Array<string | number> = [piboSessionId];
+		if (beforeOrAtSequence !== undefined) {
+			clauses.push("event_sequence <= ?");
+			values.push(beforeOrAtSequence);
+		}
+		const rows = this.db
+			.prepare(
+				`
+					SELECT * FROM (
+						SELECT rowid AS _rowid, * FROM web_chat_events
+						WHERE ${clauses.join(" AND ")}
+						ORDER BY event_sequence DESC, rowid DESC
+						LIMIT ?
+					)
+					ORDER BY event_sequence ASC, _rowid ASC
+				`,
+			)
+			.all(...values, limit) as EventRow[];
+		return rows.map(eventFromRow);
+	}
+
+	hasSessionActivity(piboSessionId: string): boolean {
+		const row = this.db
+			.prepare(
+				"SELECT 1 AS found FROM web_chat_events WHERE pibo_session_id = ? AND type NOT IN ('assistant_delta', 'thinking_delta', 'tool_execution_updated') LIMIT 1",
+			)
+			.get(piboSessionId) as { found: number } | undefined;
+		if (row) return true;
+		return this.getSession(piboSessionId)?.status === "running";
+	}
+
+	countEventsByType(input: { piboSessionId?: string; eventTypes?: string[] } = {}): Array<{ eventType: string; count: number }> {
+		const clauses: string[] = [];
+		const values: string[] = [];
+		if (input.piboSessionId) {
+			clauses.push("pibo_session_id = ?");
+			values.push(input.piboSessionId);
+		}
+		if (input.eventTypes?.length) {
+			clauses.push(`type IN (${input.eventTypes.map(() => "?").join(", ")})`);
+			values.push(...input.eventTypes);
+		}
+		const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+		const rows = this.db
+			.prepare(`SELECT type, COUNT(*) AS count FROM web_chat_events ${where} GROUP BY type ORDER BY type`)
+			.all(...values) as Array<{ type: string; count: number }>;
+		return rows.map((row) => ({ eventType: row.type, count: Number(row.count) }));
 	}
 
 	getLatestEventSequence(piboSessionId: string): number {
@@ -285,6 +347,7 @@ function statusFromEvent(
 	previousStatus: ChatWebSessionIndexItem["status"] = "idle",
 ): ChatWebSessionIndexItem["status"] {
 	if (event.type === "session_error") return "error";
+	if (event.type === "compaction_end") return event.errorMessage ? "error" : "idle";
 	if (event.type === "message_finished") return "idle";
 	if (
 		event.type === "message_queued" ||
@@ -298,7 +361,8 @@ function statusFromEvent(
 		event.type === "subagent_session" ||
 		event.type === "tool_execution_started" ||
 		event.type === "tool_execution_updated" ||
-		event.type === "tool_execution_finished"
+		event.type === "tool_execution_finished" ||
+		event.type === "compaction_start"
 	) {
 		return "running";
 	}

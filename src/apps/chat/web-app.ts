@@ -9,6 +9,8 @@ import { PiboWebHttpError, readJsonBody, responseHtml, responseJson } from "../.
 import type { PiboWebApp, PiboWebAppContext, PiboWebSession } from "../../web/types.js";
 import type { PiboSession, UpdatePiboSessionInput } from "../../sessions/store.js";
 import { ChatEventLog, createDefaultChatEventLog, type StoredChatEvent } from "./event-log.js";
+import { OutputCompactor } from "./output-compactor.js";
+import { isPersistableOutputEvent } from "./output-event-policy.js";
 import { ChatWebReadModel, createDefaultChatWebReadModel } from "./read-model.js";
 import {
 	chatRoomIdFromMetadata,
@@ -84,10 +86,12 @@ type ChatWebAppState = {
 	agentStore: CustomAgentStore;
 	reliabilityStore: PiboReliabilityStore;
 	traceCache: Map<string, PiboSessionTraceView>;
+	outputCompactor: OutputCompactor;
 	subscribedContext?: PiboWebAppContext;
 	unsubscribe?: () => void;
-	liveListeners: Set<(event: StoredChatEvent) => void>;
+	liveListeners: Set<(event: ChatLiveEvent) => void>;
 	activeEventStreams: Map<string, Set<string>>;
+	activeTraceSessions: Set<string>;
 	pendingDisconnectAborts: Map<string, ReturnType<typeof setTimeout>>;
 	userSkillManager: UserSkillManager;
 	syncedUserSkillNames?: Set<string>;
@@ -178,6 +182,15 @@ type ChatEventCursor = {
 	frameIndex: number;
 };
 
+type TransientChatEvent = {
+	roomId?: string;
+	piboSessionId?: string;
+	eventType: string;
+	payload: PiboOutputEvent;
+};
+
+type ChatLiveEvent = StoredChatEvent | TransientChatEvent;
+
 type PiboRoomNodeWithUnread = PiboRoom & {
 	unreadCount?: number;
 	children: PiboRoomNodeWithUnread[];
@@ -185,7 +198,7 @@ type PiboRoomNodeWithUnread = PiboRoom & {
 
 const CHAT_UI_DIST_DIR = resolve(fileURLToPath(new URL("../../../dist/apps/chat-ui", import.meta.url)));
 const compressedAssetCache = new Map<string, Uint8Array>();
-const TRACE_CACHE_MAX_ENTRIES = 128;
+const TRACE_CACHE_MAX_ENTRIES = 24;
 
 function writeSse(
 	controller: ReadableStreamDefaultController<Uint8Array>,
@@ -317,6 +330,7 @@ function traceCacheKey(piboSessionId: string, version: string, includeRawEvents:
 }
 
 function setTraceCache(cache: Map<string, PiboSessionTraceView>, key: string, trace: PiboSessionTraceView): void {
+	if (trace.rawEvents.length > 0) return;
 	cache.delete(key);
 	cache.set(key, trace);
 	while (cache.size > TRACE_CACHE_MAX_ENTRIES) {
@@ -697,26 +711,39 @@ function ensureEventIndexing(state: ChatWebAppState, context: PiboWebAppContext)
 	state.unsubscribe?.();
 	state.subscribedContext = context;
 	state.unsubscribe = context.channelContext.subscribe((event) => {
+		state.activeTraceSessions.add(event.piboSessionId);
 		const session = context.channelContext.getSession(event.piboSessionId);
 		const room = session ? ensureSessionRoom(state, context, session) : undefined;
-		const stored = state.eventLog.appendOutputEvent(event, {
-			roomId: room?.id,
-			actorId: session?.ownerScope,
-		});
-		state.readModel.recordEvent(event, session, stored.streamId);
-		state.reliabilityStore.append({
-			topic: "pibo.output",
-			key: event.piboSessionId,
-			eventId: `pibo.output:${event.piboSessionId}:${event.type}:${randomUUID()}`,
-			retentionClass: reliabilityRetentionClassForOutputEvent(event),
-			payload: event as PiboJsonValue,
-		});
-		for (const listener of state.liveListeners) listener(stored);
+		const result = state.outputCompactor.compact(event);
+		for (const liveEvent of result.liveEvents) {
+			if (isPersistableOutputEvent(liveEvent)) continue;
+			state.readModel.recordEvent(liveEvent, session);
+			for (const listener of state.liveListeners) {
+				listener({ roomId: room?.id, piboSessionId: liveEvent.piboSessionId, eventType: liveEvent.type, payload: liveEvent });
+			}
+		}
+		for (const persistableEvent of result.persistedEvents) {
+			if (!isPersistableOutputEvent(persistableEvent)) continue;
+			const stored = state.eventLog.appendOutputEvent(persistableEvent, {
+				roomId: room?.id,
+				actorId: session?.ownerScope,
+			});
+			if (!stored) continue;
+			state.readModel.recordEvent(persistableEvent, session, stored.streamId);
+			state.reliabilityStore.append({
+				topic: "pibo.output",
+				key: persistableEvent.piboSessionId,
+				eventId: `pibo.output:${persistableEvent.piboSessionId}:${persistableEvent.type}:${randomUUID()}`,
+				retentionClass: reliabilityRetentionClassForOutputEvent(persistableEvent),
+				payload: persistableEvent as PiboJsonValue,
+			});
+			for (const listener of state.liveListeners) listener(stored);
+		}
 	});
 }
 
 function reliabilityRetentionClassForOutputEvent(event: PiboOutputEvent): string {
-	if (event.type === "assistant_delta" || event.type === "thinking_delta") return "live_delta";
+	if (event.type === "assistant_delta" || event.type === "thinking_delta" || event.type === "tool_execution_updated") return "live_delta";
 	if (event.type === "assistant_message" || event.type === "message_started" || event.type === "message_finished") {
 		return "chat_message";
 	}
@@ -1044,7 +1071,7 @@ function metadataWithArchiveState(session: PiboSession, archived: unknown): Pibo
 function createSessionUpdate(
 	context: PiboWebAppContext,
 	session: PiboSession,
-	body: { title?: unknown; archived?: unknown; profile?: unknown },
+	body: { title?: unknown; archived?: unknown; profile?: unknown; activeModel?: unknown },
 ): UpdatePiboSessionInput {
 	const update: UpdatePiboSessionInput = {};
 	const title = normalizeSessionTitle(body.title);
@@ -1054,7 +1081,10 @@ function createSessionUpdate(
 	if (body.profile !== undefined) {
 		update.profile = resolveCreateSessionProfile(context, session.profile, body.profile);
 	}
-	if (!("title" in update) && !("metadata" in update) && !("profile" in update)) {
+	if (body.activeModel !== undefined) {
+		update.activeModel = body.activeModel === null ? null : normalizeModelProfile(body.activeModel, "activeModel");
+	}
+	if (!("title" in update) && !("metadata" in update) && !("profile" in update) && !("activeModel" in update)) {
 		throw new PiboWebHttpError("No session update fields provided", 400);
 	}
 	return update;
@@ -1528,28 +1558,31 @@ function parseSseCursor(value: string | null): ChatEventCursor | undefined {
 	return { streamId, frameIndex };
 }
 
-function isPiboOutputEvent(value: PiboJsonValue): value is PiboOutputEvent & PiboJsonValue {
-	return !!value && typeof value === "object" && !Array.isArray(value) && typeof value.type === "string";
+function isPiboOutputEvent(value: unknown): value is PiboOutputEvent {
+	return !!value && typeof value === "object" && !Array.isArray(value) && typeof (value as { type?: unknown }).type === "string";
 }
 
-function storedEventMatches(stored: StoredChatEvent, input: { roomId?: string; piboSessionId?: string }): boolean {
-	if (input.roomId && stored.roomId !== input.roomId) return false;
-	if (input.piboSessionId && stored.piboSessionId !== input.piboSessionId) return false;
+function liveEventMatches(event: ChatLiveEvent, input: { roomId?: string; piboSessionId?: string }): boolean {
+	if (input.roomId && event.roomId !== input.roomId) return false;
+	if (input.piboSessionId && event.piboSessionId !== input.piboSessionId) return false;
 	return true;
 }
 
-function writeStoredChatEventFrames(
+function writeChatEventFrames(
 	controller: ReadableStreamDefaultController<Uint8Array>,
-	stored: StoredChatEvent,
+	event: ChatLiveEvent,
 	state: ReturnType<typeof createChatStreamState>,
 	cursor?: ChatEventCursor,
 ): void {
-	if (!isPiboOutputEvent(stored.payload)) return;
-	const piboSessionId = stored.piboSessionId ?? stored.payload.piboSessionId;
-	const frames = chatStreamFramesFromOutputEvent(stored.payload, state);
+	if (!isPiboOutputEvent(event.payload)) return;
+	const piboSessionId = event.piboSessionId ?? event.payload.piboSessionId;
+	const streamId = "streamId" in event ? event.streamId : undefined;
+	const frames = chatStreamFramesFromOutputEvent(event.payload, state, {
+		includeRawEvent: streamId !== undefined && isPersistableOutputEvent(event.payload),
+	});
 	for (let index = 0; index < frames.length; index += 1) {
-		if (cursor && stored.streamId === cursor.streamId && index <= cursor.frameIndex) continue;
-		writeSse(controller, "pibo", { ...frames[index], piboSessionId }, `${stored.streamId}:${index}`);
+		if (cursor && streamId !== undefined && streamId === cursor.streamId && index <= cursor.frameIndex) continue;
+		writeSse(controller, "pibo", { ...frames[index], piboSessionId }, streamId === undefined ? undefined : `${streamId}:${index}`);
 	}
 }
 
@@ -1577,11 +1610,20 @@ function createEventStream(input: {
 				afterStreamId: input.cursor ? Math.max(0, input.cursor.streamId - 1) : undefined,
 				limit: 1000,
 			})) {
-				writeStoredChatEventFrames(controller, stored, streamState, input.cursor);
+				writeChatEventFrames(controller, stored, streamState, input.cursor);
 			}
-			const listener = (stored: StoredChatEvent) => {
-				if (!storedEventMatches(stored, input)) return;
-				writeStoredChatEventFrames(controller, stored, streamState);
+			if (input.piboSessionId) {
+				for (const snapshot of input.state.outputCompactor.snapshotsForSession(input.piboSessionId)) {
+					writeChatEventFrames(
+						controller,
+						{ piboSessionId: snapshot.piboSessionId, eventType: snapshot.type, payload: snapshot },
+						streamState,
+					);
+				}
+			}
+			const listener = (event: ChatLiveEvent) => {
+				if (!liveEventMatches(event, input)) return;
+				writeChatEventFrames(controller, event, streamState);
 			};
 			input.state.liveListeners.add(listener);
 			unsubscribe = () => {
@@ -2644,8 +2686,10 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 		agentStore: createAgentStore(options.agentStorePath ?? storagePath),
 		reliabilityStore: createReliabilityStore(options.reliabilityStorePath),
 		traceCache: new Map(),
+		outputCompactor: new OutputCompactor(),
 		liveListeners: new Set(),
 		activeEventStreams: new Map(),
+		activeTraceSessions: new Set(),
 		pendingDisconnectAborts: new Map(),
 		userSkillManager: new UserSkillManager(os.homedir()),
 	};
@@ -3173,24 +3217,13 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				requireSameOriginJsonRequest(request);
 				const webSession = await requireSession(request, context);
 				const selectedSession = resolveRequestedSession(state, context, webSession, defaultProfile, patchSessionId);
-				const body = await readJsonBody<{ title?: unknown; archived?: unknown; profile?: unknown }>(request);
+				const body = await readJsonBody<{ title?: unknown; archived?: unknown; profile?: unknown; activeModel?: unknown }>(request);
 				const updateSession = context.channelContext.updateSession;
 				if (!updateSession) {
 					throw new PiboWebHttpError("Session updates are not available", 501);
 				}
-				if (body.profile !== undefined) {
-					const ownedSessions = listOwnedSessions(context, webSession);
-					const indexedSession = state.readModel.listSessions().find((item) => item.piboSessionId === selectedSession.id);
-					const trace = await buildTraceView({
-						session: selectedSession,
-						sessions: ownedSessions,
-						events: state.readModel.listAllEvents(selectedSession.id),
-						status: indexedSession?.status,
-						includeRawEvents: false,
-					});
-					if (trace.nodes.length > 0) {
-						throw new PiboWebHttpError("Session profile can only be changed before the first message.", 400);
-					}
+				if (body.profile !== undefined && (state.activeTraceSessions.has(selectedSession.id) || state.readModel.hasSessionActivity(selectedSession.id))) {
+					throw new PiboWebHttpError("Session profile can only be changed before the first message.", 400);
 				}
 				const updated = updateSession(selectedSession.id, createSessionUpdate(context, selectedSession, body));
 				if (!updated) throw new PiboWebHttpError("Session not found", 404);
@@ -3285,12 +3318,15 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 					return new Response(null, { status: 304, headers });
 				}
 				const cacheKey = traceCacheKey(selectedSession.id, version, includeRawEvents, rawEventsLimit);
-				const cached = state.traceCache.get(cacheKey);
+				const cached = includeRawEvents ? undefined : state.traceCache.get(cacheKey);
 				if (cached) return responseJson(cached, { headers });
 				const trace = await buildTraceView({
 					session: selectedSession,
 					sessions: ownedSessions,
-					events: state.readModel.listAllEvents(selectedSession.id),
+					events: state.readModel.listTraceEvents({
+						piboSessionId: selectedSession.id,
+						limit: includeRawEvents ? rawEventsLimit : 2000,
+					}),
 					status: indexedSession?.status,
 					includeRawEvents,
 					rawEventsLimit,
@@ -3312,13 +3348,11 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				const session = context.channelContext.getSession(piboSessionId);
 				if (!session) throw new PiboWebHttpError("Session not found", 404);
 				const ownedSessions = listOwnedSessions(context, await requireSession(request, context));
-				const allEvents = state.readModel.listAllEvents(piboSessionId);
-				const filteredEvents = allEvents.filter((e) => (e.eventSequence ?? 0) <= eventSequence);
 				const indexedSession = state.readModel.listSessions().find((item) => item.piboSessionId === piboSessionId);
 				const trace = await buildTraceView({
 					session,
 					sessions: ownedSessions,
-					events: filteredEvents,
+					events: state.readModel.listTraceEvents({ piboSessionId, beforeOrAtSequence: eventSequence, limit: 2000 }),
 					status: indexedSession?.status,
 				});
 				return responseJson(trace);

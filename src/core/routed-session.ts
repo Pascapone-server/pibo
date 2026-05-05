@@ -23,6 +23,7 @@ import type { PiboThinkingLevel } from "./thinking.js";
 import type { CompactionResult } from "@mariozechner/pi-coding-agent";
 import type { ContextUsage } from "@mariozechner/pi-coding-agent";
 import { expandInlineSkills } from "./skill-expansion.js";
+import type { ModelProfile } from "./profiles.js";
 
 type PiSessionTreeNode = ReturnType<SessionManager["getTree"]>[number];
 
@@ -564,6 +565,14 @@ export class RoutedSession {
 		};
 	}
 
+	async setModel(model: ModelProfile): Promise<ModelProfile> {
+		this.assertActive();
+		const resolved = this.runtime.session.modelRegistry.find(model.provider, model.id);
+		if (!resolved) throw new Error(`Unknown model ${model.provider}/${model.id}`);
+		await this.runtime.session.setModel(resolved);
+		return { provider: resolved.provider, id: resolved.id };
+	}
+
 	setThinkingLevel(level: PiboThinkingLevel): PiboThinkingResult {
 		this.assertActive();
 		this.runtime.session.setThinkingLevel(level);
@@ -694,6 +703,7 @@ export class RoutedSession {
 				getThinkingLevel: () => this.getThinkingResult(),
 				setThinkingLevel: (level) => this.setThinkingLevel(level),
 				cycleThinkingLevel: () => this.cycleThinkingLevel(),
+				setModel: (model) => this.setModel(model),
 				compact: (customInstructions) => this.compact(customInstructions),
 				kill: async () => {
 					const killed = [await this.kill()];

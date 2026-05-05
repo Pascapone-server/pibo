@@ -2,11 +2,11 @@ import type { ReactNode } from "react";
 import type { AgentProfile, PiboSessionTraceView, ThinkingLevel, Trace } from "../types";
 import type { SessionBreadcrumbItem, SessionDerivationLink, SessionOriginLink } from "../tracing/TraceTimeline";
 
-export const chatSessionViewIds = ["trace", "terminal"] as const;
+export const chatSessionViewIds = ["terminal"] as const;
 
 export type ChatSessionViewId = (typeof chatSessionViewIds)[number];
 
-export const DEFAULT_CHAT_SESSION_VIEW_ID: ChatSessionViewId = "trace";
+export const DEFAULT_CHAT_SESSION_VIEW_ID: ChatSessionViewId = "terminal";
 
 export function isChatSessionViewId(value: unknown): value is ChatSessionViewId {
 	return typeof value === "string" && chatSessionViewIds.includes(value as ChatSessionViewId);
@@ -33,10 +33,11 @@ export type ChatSessionViewProps = {
 	onFork(entryId: string): void;
 	onOpenSession(piboSessionId: string): void;
 	onThinkingLevelChange(level: ThinkingLevel): void;
+	onModelChanged?(): Promise<void>;
 };
 
 export type ChatSessionView = {
-	id: ChatSessionViewId;
+	id: string;
 	label: string;
 	description?: string;
 	render(props: ChatSessionViewProps): ReactNode;

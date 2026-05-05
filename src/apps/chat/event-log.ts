@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { piboHomePath } from "../../core/pibo-home.js";
 import { DatabaseSync } from "node:sqlite";
 import type { PiboJsonValue, PiboOutputEvent } from "../../core/events.js";
+import { isLiveOnlyOutputEvent } from "./output-event-policy.js";
 
 export type ChatRetentionClass = "live_delta" | "trace_event" | "chat_message" | "audit_event";
 
@@ -182,7 +183,8 @@ export class ChatEventLog {
 		return eventFromRow(stored);
 	}
 
-	appendOutputEvent(event: PiboOutputEvent, input: { roomId?: string; actorId?: string } = {}): StoredChatEvent {
+	appendOutputEvent(event: PiboOutputEvent, input: { roomId?: string; actorId?: string } = {}): StoredChatEvent | undefined {
+		if (isLiveOnlyOutputEvent(event)) return undefined;
 		return this.appendEvent({
 			roomId: input.roomId,
 			piboSessionId: event.piboSessionId,
@@ -216,6 +218,24 @@ export class ChatEventLog {
 			.prepare(`SELECT * FROM chat_events ${where} ORDER BY stream_id ASC LIMIT ?`)
 			.all(...values, limit) as ChatEventRow[];
 		return rows.map(eventFromRow);
+	}
+
+	countEventsByType(input: { piboSessionId?: string; eventTypes?: string[] } = {}): Array<{ eventType: string; count: number }> {
+		const clauses: string[] = [];
+		const values: string[] = [];
+		if (input.piboSessionId) {
+			clauses.push("pibo_session_id = ?");
+			values.push(input.piboSessionId);
+		}
+		if (input.eventTypes?.length) {
+			clauses.push(`event_type IN (${input.eventTypes.map(() => "?").join(", ")})`);
+			values.push(...input.eventTypes);
+		}
+		const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+		const rows = this.db
+			.prepare(`SELECT event_type, COUNT(*) AS count FROM chat_events ${where} GROUP BY event_type ORDER BY event_type`)
+			.all(...values) as Array<{ event_type: string; count: number }>;
+		return rows.map((row) => ({ eventType: row.event_type, count: Number(row.count) }));
 	}
 
 	getEvent(streamId: number): StoredChatEvent | undefined {
@@ -278,19 +298,7 @@ export class ChatEventLog {
 	countUnreadMessages(input: ChatUnreadCountInput): number {
 		const clauses: string[] = [
 			"retention_class = 'chat_message'",
-			`(
-				event_type = 'user.message.accepted'
-				OR (
-					event_type = 'assistant_message'
-					AND event_id IS NOT NULL
-					AND EXISTS (
-						SELECT 1 FROM chat_events done
-						WHERE done.pibo_session_id = chat_events.pibo_session_id
-							AND done.event_id = chat_events.event_id
-							AND done.event_type = 'message_finished'
-					)
-				)
-			)`,
+			"event_type IN ('user.message.accepted', 'assistant_message')",
 			"(actor_type IS NULL OR actor_type != 'user' OR actor_id IS NULL OR actor_id != ?)",
 		];
 		const values: Array<string | number> = [input.principalId];
