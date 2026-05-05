@@ -35,7 +35,18 @@ if systemctl is-active --quiet pibo-web-fallback; then
 fi
 
 echo "==> Verifying public web app"
-curl -fsS https://pibo.neuralnexus.me/apps/chat >/tmp/pibo-web-app.html
+for _ in $(seq 1 30); do
+	if curl -fsS https://pibo.neuralnexus.me/apps/chat >/tmp/pibo-web-app.html; then
+		break
+	fi
+	sleep 1
+done
+
+if [[ ! -s /tmp/pibo-web-app.html ]]; then
+	echo "Public web app did not become reachable at https://pibo.neuralnexus.me/apps/chat"
+	exit 1
+fi
+
 curl -fsS http://127.0.0.1:4788/health
 echo
 echo "Deploy complete"
