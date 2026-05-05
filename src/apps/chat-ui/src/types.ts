@@ -146,7 +146,7 @@ export type UserSkill = {
 
 export type AgentCatalog = {
 	nativeTools: Array<{ name: string; description?: string; yieldable: boolean; hasDefinition: boolean; pluginId?: string; pluginName?: string }>;
-	skills: Array<{ name: string; path: string }>;
+	skills: Array<{ name: string; path: string; kind: "builtin" | "plugin" | "user"; pluginId?: string; pluginName?: string }>;
 	subagents: Array<{
 		name: string;
 		description?: string;
@@ -224,6 +224,7 @@ export type CustomAgent = {
 	builtinToolNames: string[];
 	autoContextFiles: boolean;
 	runControl: boolean;
+	brokenContextFiles?: string[];
 	createdAt: string;
 	updatedAt: string;
 	archivedAt?: string;

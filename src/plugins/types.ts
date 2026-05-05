@@ -23,6 +23,7 @@ import type {
 	InitialSessionContext,
 	ModelProfile,
 	ProviderToolProfile,
+	SkillSourceKind,
 	SkillProfile,
 	SubagentProfile,
 	ToolProfile,
@@ -77,6 +78,9 @@ export type PiboNativeToolInfo = {
 export type PiboSkillInfo = {
 	name: string;
 	path: string;
+	kind: SkillSourceKind;
+	pluginId?: string;
+	pluginName?: string;
 };
 
 export type PiboSubagentInfo = {

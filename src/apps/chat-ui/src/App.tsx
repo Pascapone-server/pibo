@@ -2564,6 +2564,10 @@ function AgentsView({
 		() => buildNativeToolGroups(catalog?.nativeTools ?? [], draft.nativeTools),
 		[catalog?.nativeTools, draft.nativeTools],
 	);
+	const skillGroups = useMemo(
+		() => buildSkillGroups(catalog?.skills ?? [], draft.skills),
+		[catalog?.skills, draft.skills],
+	);
 	const contextFileGroups = useMemo(
 		() => buildContextFileGroups(visibleContextFiles, draft.contextFiles),
 		[visibleContextFiles, draft.contextFiles],
@@ -2844,23 +2848,24 @@ function AgentsView({
 							)}
 						/>
 					</DesignerPanel>
-					<CatalogSection title="Skills">
-						{catalog?.skills.map((skill) => {
-							const isUserSkill = catalog?.userSkills.some((u) => u.name === skill.name);
-							return (
+					<DesignerPanel title="Skills">
+						<CatalogGroupGrid
+							groups={skillGroups}
+							empty={catalog ? <EmptyCatalog message="No skills registered" /> : <EmptyCatalog />}
+							renderItem={(skill) => (
 								<CatalogToggle
 									key={skill.name}
 									disabled={readOnly}
 									checked={draft.skills.includes(skill.name)}
 									title={skill.name}
 									description={skill.path}
-									meta={isUserSkill ? "user" : undefined}
-									metaClass={isUserSkill ? "border-[#a855f7]/60 text-[#d8b4fe]" : undefined}
+									meta={skillMeta(skill)}
+									metaClass={skill.kind === "user" ? "text-amber-200" : "text-[#11a4d4]"}
 									onToggle={() => setDraft((current) => ({ ...current, skills: toggleName(current.skills, skill.name) }))}
 								/>
-							);
-						}) ?? <EmptyCatalog />}
-					</CatalogSection>
+							)}
+						/>
+					</DesignerPanel>
 					<CatalogSection title="Packages"><CatalogToggle disabled={readOnly} checked={draft.runControl} title="pibo-run-control" description="Expose pibo_run_* as one package for yielded native tools and subagents." meta="package" onToggle={() => setDraft((current) => ({ ...current, runControl: !current.runControl }))} /></CatalogSection>
 					<PiPackagesDesigner
 						packages={catalog?.piPackages}
@@ -2869,6 +2874,41 @@ function AgentsView({
 						readOnly={readOnly}
 					/>
 					<DesignerPanel title="Context Files">
+						{draft.brokenContextFiles?.length ? (
+							<div className="border border-red-500/60 bg-red-500/10 rounded-sm p-3 space-y-2">
+								<div className="flex items-start gap-2 text-red-100">
+									<AlertTriangle size={14} className="mt-0.5 shrink-0" />
+									<div className="space-y-1">
+										<div className="text-sm font-medium">This agent references missing context files.</div>
+										<div className="text-xs text-red-200/90">Remove these broken links and save the agent to persist the cleanup.</div>
+									</div>
+								</div>
+								<div className="grid gap-2">
+									{draft.brokenContextFiles.map((contextFileKey) => (
+										<div key={contextFileKey} className="flex items-center gap-2 border border-red-500/40 bg-[#2a1417] rounded-sm px-3 py-2">
+											<div className="min-w-0 flex-1">
+												<div className="truncate text-sm text-red-100">{contextFileKey}</div>
+												<div className="text-[11px] uppercase tracking-wider text-red-300/80">Broken link</div>
+											</div>
+											<button
+												type="button"
+												disabled={readOnly}
+												onClick={() => setDraft((current) => ({
+													...current,
+													contextFiles: current.contextFiles.filter((item) => item !== contextFileKey),
+													brokenContextFiles: (current.brokenContextFiles ?? []).filter((item) => item !== contextFileKey),
+												}))}
+												className="h-8 w-8 inline-flex items-center justify-center border border-red-500/60 rounded-sm text-red-200 hover:border-red-400 hover:text-red-100 disabled:opacity-50"
+												title="Remove Broken Context File"
+												aria-label="Remove Broken Context File"
+											>
+												<X size={14} />
+											</button>
+										</div>
+									))}
+								</div>
+							</div>
+						) : null}
 						<div className="grid grid-cols-[1fr_auto] gap-2">
 							<input value={newContextFileName} disabled={readOnly} onChange={(event) => setNewContextFileName(event.target.value)} className="min-w-0 bg-[#0e1116] border border-slate-700 rounded-sm px-3 py-2 text-sm outline-none focus:border-[#11a4d4] disabled:opacity-60" placeholder="New context file" />
 							<button type="button" disabled={readOnly || saving || !newContextFileName.trim() || Boolean(agentNameError)} onClick={() => void createContextFileForDraft()} title="Create Context File" aria-label="Create Context File" className="h-9 w-9 inline-flex items-center justify-center border border-[#11a4d4] rounded-sm text-[#11a4d4] bg-[#11a4d4]/10 disabled:opacity-50">
@@ -2930,6 +2970,7 @@ type AgentDraft = SaveCustomAgentInput & {
 	profileName?: string;
 	archivedAt?: string;
 	hardPinnedModel?: ModelProfile;
+	brokenContextFiles?: string[];
 	source: "custom" | "profile";
 };
 
@@ -2938,7 +2979,7 @@ function createBlankAgentDraft(catalog?: AgentCatalog): AgentDraft {
 		displayName: "new-agent",
 		description: "",
 		nativeTools: [],
-		skills: catalog?.skills.some((skill) => skill.name === "pi-agent-harness") ? ["pi-agent-harness"] : [],
+		skills: hasBuiltinSkill(catalog, "pi-agent-harness") ? ["pi-agent-harness"] : [],
 		contextFiles: [],
 		subagents: [],
 		mcpServers: [],
@@ -2949,6 +2990,7 @@ function createBlankAgentDraft(catalog?: AgentCatalog): AgentDraft {
 		builtinToolNames: [...DEFAULT_BUILTIN_TOOL_NAMES],
 		autoContextFiles: true,
 		runControl: false,
+		brokenContextFiles: [],
 		hardPinnedModel: undefined,
 		source: "custom",
 	};
@@ -2972,6 +3014,7 @@ function agentToDraft(agent: CustomAgent): AgentDraft {
 		builtinToolNames: normalizeBuiltinToolNames(agent.builtinToolNames, agent.builtinTools),
 		autoContextFiles: agent.autoContextFiles ?? true,
 		runControl: agent.runControl,
+		brokenContextFiles: agent.brokenContextFiles ?? [],
 		archivedAt: agent.archivedAt,
 		hardPinnedModel: undefined,
 		source: "custom",
@@ -2983,7 +3026,7 @@ function profileToDraft(profile: BootstrapData["agents"][number], catalog?: Agen
 		displayName: profile.name,
 		description: profile.description ?? "",
 		nativeTools: profile.nativeTools ?? [],
-		skills: profile.skills ?? (catalog?.skills.some((skill) => skill.name === "pi-agent-harness") ? ["pi-agent-harness"] : []),
+		skills: profile.skills ?? (hasBuiltinSkill(catalog, "pi-agent-harness") ? ["pi-agent-harness"] : []),
 		contextFiles: profile.contextFiles ?? [],
 		subagents: profile.subagents ?? [],
 		mcpServers: profile.mcpServers ?? [],
@@ -2994,6 +3037,7 @@ function profileToDraft(profile: BootstrapData["agents"][number], catalog?: Agen
 		builtinToolNames: normalizeBuiltinToolNames(profile.builtinToolNames, profile.builtinTools),
 		autoContextFiles: profile.autoContextFiles ?? true,
 		runControl: profile.runControl ?? false,
+		brokenContextFiles: [],
 		hardPinnedModel: profile.model,
 		profileName: profile.name,
 		source: "profile",
@@ -3056,7 +3100,8 @@ function normalizeBuiltinToolNames(names: string[] | undefined, mode: "default" 
 type NativeToolCatalogItem = AgentCatalog["nativeTools"][number];
 type ContextFileCatalogItem = AgentCatalog["contextFiles"][number];
 type PiPackageCatalogItem = AgentCatalog["piPackages"][number];
-type CatalogGroupKind = "native" | "plugin" | "custom";
+type SkillCatalogItem = AgentCatalog["skills"][number];
+type CatalogGroupKind = "builtin" | "plugin" | "custom" | "user";
 const CODEX_COMPAT_TOOL_NAMES = new Set([
 	"apply_patch",
 	"web_search",
@@ -3087,17 +3132,35 @@ function buildNativeToolGroups(tools: NativeToolCatalogItem[], selectedNames: st
 		const pluginId = tool.pluginId ?? (CODEX_COMPAT_TOOL_NAMES.has(tool.name) ? "pibo.codex-compat" : undefined);
 		const pluginName = tool.pluginName ?? (pluginId === "pibo.codex-compat" ? "Codex Compat" : undefined);
 		const isNative = !pluginId || pluginId === "pibo.core";
-		const key = isNative ? "native" : `plugin:${pluginId}`;
+		const key = isNative ? "builtin" : `plugin:${pluginId}`;
 		const group = getOrCreateCatalogGroup(groups, key, {
-			title: isNative ? "Native Tools" : pluginDisplayName(pluginId, pluginName),
+			title: isNative ? "Built-in Tools" : pluginDisplayName(pluginId, pluginName),
 			description: isNative ? "Built-in Pibo tool catalog" : pluginId ?? "plugin",
-			kind: isNative ? "native" : "plugin",
+			kind: isNative ? "builtin" : "plugin",
 		});
 		group.items.push(tool);
 		if (selected.has(tool.name)) group.selectedCount += 1;
 		group.totalCount += 1;
 	}
-	return finalizeCatalogGroups(groups, ["native", "plugin"]);
+	return finalizeCatalogGroups(groups, ["builtin", "plugin"]);
+}
+
+function buildSkillGroups(skills: SkillCatalogItem[], selectedNames: string[]): CatalogGroup<SkillCatalogItem>[] {
+	const selected = new Set(selectedNames);
+	const groups = new Map<string, CatalogGroup<SkillCatalogItem>>();
+	for (const skill of skills) {
+		const kind = skill.kind;
+		const key = kind === "plugin" ? `plugin:${skill.pluginId ?? skill.name}` : kind;
+		const group = getOrCreateCatalogGroup(groups, key, {
+			title: skillGroupTitle(skill),
+			description: skillGroupDescription(skill),
+			kind: skill.kind,
+		});
+		group.items.push(skill);
+		if (selected.has(skill.name)) group.selectedCount += 1;
+		group.totalCount += 1;
+	}
+	return finalizeCatalogGroups(groups, ["builtin", "plugin", "user"]);
 }
 
 function buildContextFileGroups(files: ContextFileCatalogItem[], selectedKeys: string[]): CatalogGroup<ContextFileCatalogItem>[] {
@@ -3162,6 +3225,28 @@ function pluginDisplayName(pluginId: string | undefined, pluginName: string | un
 	if (!pluginId) return "Plugin";
 	const lastSegment = pluginId.split(".").filter(Boolean).at(-1) ?? pluginId;
 	return lastSegment.split("-").filter(Boolean).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
+}
+
+function skillGroupTitle(skill: SkillCatalogItem): string {
+	if (skill.kind === "builtin") return "Built-in Skills";
+	if (skill.kind === "user") return "User Skills";
+	return pluginDisplayName(skill.pluginId, skill.pluginName);
+}
+
+function skillGroupDescription(skill: SkillCatalogItem): string {
+	if (skill.kind === "builtin") return "Pibo-owned built-in skill catalog";
+	if (skill.kind === "user") return "User-managed skills";
+	return skill.pluginId ?? "plugin";
+}
+
+function skillMeta(skill: SkillCatalogItem): string {
+	if (skill.kind === "builtin") return "built-in skill";
+	if (skill.kind === "user") return "user skill";
+	return skill.pluginName ?? skill.pluginId ?? "plugin skill";
+}
+
+function hasBuiltinSkill(catalog: AgentCatalog | undefined, name: string): boolean {
+	return catalog?.skills.some((skill) => skill.kind === "builtin" && skill.name === name) ?? false;
 }
 
 function AgentList({ title, children }: { title: string; children: ReactNode }) {
@@ -3443,7 +3528,9 @@ function CatalogGroupCard<T>({
 	renderItem: (item: T) => ReactNode;
 }) {
 	const [open, setOpen] = useState(group.defaultOpen);
-	const accentClass = group.kind === "custom" ? "border-[#f59e0b]/70 text-amber-100 bg-[#f59e0b]/10" : "border-[#11a4d4]/70 text-sky-100 bg-[#11a4d4]/10";
+	const accentClass = group.kind === "custom" || group.kind === "user"
+		? "border-[#f59e0b]/70 text-amber-100 bg-[#f59e0b]/10"
+		: "border-[#11a4d4]/70 text-sky-100 bg-[#11a4d4]/10";
 	return (
 		<div className={`border rounded-sm ${open ? "border-slate-700 bg-[#101d22]" : "border-slate-800 bg-[#151f24] hover:border-slate-700"}`}>
 			<button type="button" onClick={() => setOpen((current) => !current)} className="flex w-full items-center gap-2 p-2 text-left">

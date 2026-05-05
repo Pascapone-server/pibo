@@ -18,12 +18,34 @@ export function createCustomAgentProfileDefinition(agent: CustomAgentDefinition)
 			if (agent.mainModel) builder.withMainModel(agent.mainModel);
 			if (agent.subagentModel) builder.withSubagentModel(agent.subagentModel);
 
-			for (const skillName of agent.skills) builder.addSkill(context.getSkill(skillName));
-			for (const contextFileKey of agent.contextFiles) builder.addContextFile(context.getContextFile(contextFileKey));
+			for (const skillName of agent.skills) {
+				try {
+					builder.addSkill(context.getSkill(skillName));
+				} catch (error) {
+					if (!isUnknownSkillError(error, skillName)) throw error;
+					console.warn(`Skipping unknown skill "${skillName}" for custom agent "${agent.profileName}"`);
+				}
+			}
+			for (const contextFileKey of agent.contextFiles) {
+				try {
+					builder.addContextFile(context.getContextFile(contextFileKey));
+				} catch (error) {
+					if (!isUnknownContextFileError(error, contextFileKey)) throw error;
+					console.warn(`Skipping unknown context file "${contextFileKey}" for custom agent "${agent.profileName}"`);
+				}
+			}
 			for (const toolName of agent.nativeTools) builder.addTool(context.getTool(toolName));
 			for (const subagent of agent.subagents) builder.addSubagent(subagent);
 
 			return builder.createSession();
 		},
 	};
+}
+
+function isUnknownContextFileError(error: unknown, contextFileKey: string): boolean {
+	return error instanceof Error && error.message === `Unknown context file "${contextFileKey}"`;
+}
+
+function isUnknownSkillError(error: unknown, skillName: string): boolean {
+	return error instanceof Error && error.message === `Unknown skill "${skillName}"`;
 }
