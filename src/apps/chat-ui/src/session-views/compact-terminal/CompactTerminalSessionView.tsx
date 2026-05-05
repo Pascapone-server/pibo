@@ -15,6 +15,7 @@ export function CompactTerminalSessionView({
 	showThinking,
 	expandThinking,
 	sessionAgentProfile,
+	sessionActiveModel,
 	sessionBreadcrumbs,
 	originSession,
 	derivedSessions,
@@ -74,6 +75,7 @@ export function CompactTerminalSessionView({
 					{runningCount > 0 ? <TerminalBadge tone="cyan">{runningCount} running</TerminalBadge> : null}
 					{errorCount > 0 ? <TerminalBadge tone="red">{errorCount} errors</TerminalBadge> : null}
 					{sessionAgentProfile ? <TerminalBadge tone="neutral">{sessionAgentProfile}</TerminalBadge> : null}
+					{sessionActiveModel ? <TerminalBadge tone="purple">Model {sessionActiveModel}</TerminalBadge> : null}
 					{originSession ? (
 						<button
 							type="button"
@@ -251,7 +253,7 @@ function TerminalBadge({
 	tone,
 	children,
 }: {
-	tone: "cyan" | "red" | "neutral";
+	tone: "cyan" | "red" | "purple" | "neutral";
 	children: ReactNode;
 }) {
 	const className =
@@ -259,7 +261,9 @@ function TerminalBadge({
 			? "border-[#1f4960] text-[#38bdf8]"
 			: tone === "red"
 				? "border-[#5f2222] text-[#ef4444]"
-				: "border-[#3a3a3a] text-[#d4d4d4]";
+				: tone === "purple"
+					? "border-purple-500/40 text-purple-300"
+					: "border-[#3a3a3a] text-[#d4d4d4]";
 	return <span className={`border px-2 py-0.5 ${className}`}>{children}</span>;
 }
 

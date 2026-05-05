@@ -7,6 +7,7 @@ export function TraceSessionView({
 	showThinking,
 	expandThinking,
 	sessionAgentProfile,
+	sessionActiveModel,
 	sessionBreadcrumbs,
 	originSession,
 	derivedSessions,
@@ -23,6 +24,7 @@ export function TraceSessionView({
 			showThinking={showThinking}
 			expandThinking={expandThinking}
 			sessionAgentProfile={sessionAgentProfile}
+			sessionActiveModel={sessionActiveModel}
 			sessionBreadcrumbs={sessionBreadcrumbs}
 			originSession={originSession}
 			derivedSessions={derivedSessions}

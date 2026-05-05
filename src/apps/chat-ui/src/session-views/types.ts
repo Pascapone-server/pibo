@@ -23,6 +23,7 @@ export type ChatSessionViewProps = {
 	showThinking: boolean;
 	expandThinking: boolean;
 	sessionAgentProfile?: string;
+	sessionActiveModel?: string;
 	sessionBreadcrumbs: readonly SessionBreadcrumbItem[];
 	originSession?: SessionOriginLink;
 	derivedSessions: readonly SessionDerivationLink[];

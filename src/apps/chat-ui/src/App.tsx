@@ -780,6 +780,10 @@ export function App({ route }: { route: ChatAppRoute }) {
 	const roomsSupported = Boolean(bootstrap.selectedRoomId || bootstrap.room || bootstrap.rooms.length);
 	const sessionGroups = splitSessionNodesByArchive(bootstrap.sessions);
 	const selectedSessionNode = selectedPiboSessionId ? findSessionNode(bootstrap.sessions, selectedPiboSessionId) : undefined;
+	const selectedSessionActiveModel = resolveSessionActiveModelLabel(bootstrap, selectedSessionNode ?? {
+		profile: bootstrap.session.profile,
+		parentId: bootstrap.session.parentId,
+	});
 	const personalRoom = findPersonalRoom(bootstrap.rooms);
 	const roomGroups = splitRoomNodes(bootstrap.rooms);
 	const contextAgentProfiles = [...new Set([...bootstrap.agents.map((agent) => agent.name), ...bootstrap.customAgents.map((agent) => agent.profileName)])];
@@ -1060,6 +1064,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 						selectedRoomId={selectedRoomId}
 						selectedRoomArchived={selectedRoomArchived}
 						selectedSessionProfile={selectedSessionNode?.profile ?? bootstrap.session.profile}
+						selectedSessionActiveModel={selectedSessionActiveModel}
 						sessionViewId={sessionViewId}
 						sessionViews={sessionViews}
 						currentSessionView={currentSessionView}
@@ -1188,6 +1193,7 @@ function SessionTracePane({
 	selectedRoomId,
 	selectedRoomArchived,
 	selectedSessionProfile,
+	selectedSessionActiveModel,
 	sessionViewId,
 	sessionViews,
 	currentSessionView,
@@ -1218,6 +1224,7 @@ function SessionTracePane({
 	selectedRoomId: string | null;
 	selectedRoomArchived: boolean;
 	selectedSessionProfile: string;
+	selectedSessionActiveModel?: string;
 	sessionViewId: ChatSessionViewId;
 	sessionViews: ReturnType<typeof listChatSessionViews>;
 	currentSessionView: ReturnType<typeof getChatSessionView>;
@@ -1532,6 +1539,7 @@ function SessionTracePane({
 						showThinking,
 						expandThinking,
 						sessionAgentProfile: selectedSessionProfile,
+						sessionActiveModel: selectedSessionActiveModel,
 						sessionBreadcrumbs,
 						originSession,
 						derivedSessions,
@@ -2178,6 +2186,27 @@ function createSessionBreadcrumbs(nodes: PiboWebSessionNode[], piboSessionId: st
 		piboSessionId: node.piboSessionId,
 		label: sessionBreadcrumbLabel(node, index),
 	}));
+}
+
+function resolveSessionActiveModelLabel(
+	bootstrap: BootstrapData,
+	session: Pick<PiboWebSessionNode, "profile" | "parentId">,
+): string | undefined {
+	const model = resolveSessionActiveModel(bootstrap, session);
+	return model ? formatModelProfile(model) : undefined;
+}
+
+function resolveSessionActiveModel(
+	bootstrap: BootstrapData,
+	session: Pick<PiboWebSessionNode, "profile" | "parentId">,
+): ModelProfile | undefined {
+	const staticAgent = bootstrap.agents.find((agent) => agent.name === session.profile);
+	if (staticAgent?.model) return staticAgent.model;
+
+	const customAgent = bootstrap.customAgents.find((agent) => agent.profileName === session.profile);
+	const profileModel = staticAgent ?? customAgent;
+	if (session.parentId) return profileModel?.subagentModel ?? bootstrap.modelDefaults?.subagent;
+	return profileModel?.mainModel ?? bootstrap.modelDefaults?.main;
 }
 
 function findSessionNode(nodes: PiboWebSessionNode[], piboSessionId: string): PiboWebSessionNode | undefined {

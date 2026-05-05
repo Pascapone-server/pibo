@@ -13,6 +13,7 @@ type TraceTimelineProps = {
 	showThinking: boolean;
 	expandThinking: boolean;
 	sessionAgentProfile?: string;
+	sessionActiveModel?: string;
 	sessionBreadcrumbs?: readonly SessionBreadcrumbItem[];
 	originSession?: SessionOriginLink;
 	derivedSessions?: readonly SessionDerivationLink[];
@@ -73,6 +74,7 @@ export function TraceTimeline({
 	showThinking,
 	expandThinking,
 	sessionAgentProfile,
+	sessionActiveModel,
 	sessionBreadcrumbs = [],
 	originSession,
 	derivedSessions = [],
@@ -187,6 +189,7 @@ export function TraceTimeline({
 						{stats.active > 0 ? <Badge color="cyan">{stats.active} Active</Badge> : null}
 						{stats.completed > 0 ? <Badge color="green">{stats.completed} Done</Badge> : null}
 						{sessionAgentProfile ? <Badge color="transparent">{sessionAgentProfile}</Badge> : null}
+						{sessionActiveModel ? <Badge color="purple">Model {sessionActiveModel}</Badge> : null}
 						{stats.error > 0 ? <Badge color="orange">{stats.error} Errors</Badge> : null}
 						{originSession ? <OriginSessionButton originSession={originSession} onOpenSession={onOpenSession} /> : null}
 						<DerivedSessionsButton sessions={derivedSessions} onOpenSession={onOpenSession} />
@@ -529,7 +532,7 @@ function Badge({
 	color,
 	children,
 }: {
-	color: "cyan" | "green" | "orange" | "transparent";
+	color: "cyan" | "green" | "orange" | "purple" | "transparent";
 	children: ReactNode;
 }) {
 	const className =
@@ -539,7 +542,9 @@ function Badge({
 				? "bg-[#0bda57]/20 text-[#0bda57]"
 				: color === "orange"
 					? "bg-[#ff6b00]/20 text-[#ff6b00]"
-					: "border border-slate-700 text-slate-300";
+					: color === "purple"
+						? "bg-purple-500/20 text-purple-300"
+						: "border border-slate-700 text-slate-300";
 	const casing = color === "transparent" ? "" : "uppercase";
 	return (
 		<span className={`max-w-52 truncate rounded-sm px-2 py-0.5 text-xs font-bold ${casing} ${className}`}>
