@@ -99,6 +99,9 @@ type LoadBootstrapOptions = {
 
 const LAST_SELECTION_STORAGE_KEY = "pibo.chat.lastSelection";
 const SESSION_VIEW_STORAGE_KEY = "pibo.chat.sessionView";
+const COMPOSER_DRAFT_STORAGE_PREFIX = "pibo.chat.composerDraft.";
+const COMPOSER_HISTORY_STORAGE_KEY = "pibo.chat.composerHistory";
+const COMPOSER_HISTORY_LIMIT = 100;
 const SESSION_DELETE_CONFIRM_TEXT = "Delete this session";
 
 type StoredSelection = {
@@ -454,6 +457,18 @@ export function App({ route }: { route: ChatAppRoute }) {
 			piboSessionId: selectedPiboSessionId ?? undefined,
 		});
 	}, [selectedPiboSessionId, selectedRoomId]);
+
+	useEffect(() => {
+		setComposerText(selectedPiboSessionId ? readStoredComposerDraft(selectedPiboSessionId) : "");
+	}, [selectedPiboSessionId]);
+
+	const updateComposerText: Dispatch<SetStateAction<string>> = useCallback((next) => {
+		setComposerText((current) => {
+			const resolved = typeof next === "function" ? next(current) : next;
+			if (selectedPiboSessionId) writeStoredComposerDraft(selectedPiboSessionId, resolved);
+			return resolved;
+		});
+	}, [selectedPiboSessionId]);
 
 	const sessionViews = useMemo(() => listChatSessionViews(), []);
 	const currentSessionView = useMemo(() => getChatSessionView(sessionViewId), [sessionViewId]);
@@ -1089,7 +1104,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 						skills={skills}
 						composerText={composerText}
 						composerFocusSignal={composerFocusSignal}
-						onComposerTextChange={setComposerText}
+						onComposerTextChange={updateComposerText}
 						onToggleRawEvents={() => {
 							const next = !showRawEvents;
 							setShowRawEvents(next);
@@ -1568,6 +1583,7 @@ function SessionTracePane({
 					})
 				)}
 				<Composer
+					sessionId={selectedPiboSessionId}
 					disabled={!selectedPiboSessionId || selectedRoomArchived}
 					commands={commands}
 					skills={skills}
@@ -2337,6 +2353,7 @@ function formatRoomSummary(room: PiboRoom): string {
 }
 
 function Composer({
+	sessionId,
 	disabled = false,
 	commands,
 	skills,
@@ -2346,6 +2363,7 @@ function Composer({
 	onCommand,
 	onSend,
 }: {
+	sessionId: string | null;
 	disabled?: boolean;
 	commands: SlashCommand[];
 	skills: Array<{ name: string; description?: string; path?: string }>;
@@ -2358,6 +2376,7 @@ function Composer({
 	const inputRef = useRef<HTMLTextAreaElement>(null);
 	const activeCommandRef = useRef<HTMLButtonElement>(null);
 	const activeSkillRef = useRef<HTMLButtonElement>(null);
+	const historyNavRef = useRef<{ entries: string[]; index: number; draft: string } | null>(null);
 	const [activeIndex, setActiveIndex] = useState(0);
 	const [activeSkillIndex, setActiveSkillIndex] = useState(0);
 	const [cursorPos, setCursorPos] = useState(0);
@@ -2403,6 +2422,10 @@ function Composer({
 	}, [activeSkillIndex, filteredSkills.length]);
 
 	useEffect(() => {
+		historyNavRef.current = null;
+	}, [sessionId]);
+
+	useEffect(() => {
 		if (focusSignal <= 0) return;
 		const input = inputRef.current;
 		if (!input) return;
@@ -2429,6 +2452,47 @@ function Composer({
 		});
 	};
 
+	const setHistoryValue = (text: string) => {
+		onValueChange(text);
+		requestAnimationFrame(() => {
+			const input = inputRef.current;
+			if (!input) return;
+			const cursorPosition = input.value.length;
+			input.setSelectionRange(cursorPosition, cursorPosition);
+			setCursorPos(cursorPosition);
+		});
+	};
+
+	const navigateHistory = (direction: "previous" | "next") => {
+		const existing = historyNavRef.current;
+		if (!existing) {
+			if (direction === "next" || value !== "") return false;
+			const entries = readStoredComposerHistory();
+			if (!entries.length) return false;
+			const index = direction === "previous" ? entries.length - 1 : 0;
+			historyNavRef.current = { entries, index, draft: value };
+			setHistoryValue(entries[index]);
+			return true;
+		}
+
+		if (direction === "previous") {
+			const index = Math.max(0, existing.index - 1);
+			historyNavRef.current = { ...existing, index };
+			setHistoryValue(existing.entries[index]);
+			return true;
+		}
+
+		const index = existing.index + 1;
+		if (index >= existing.entries.length) {
+			historyNavRef.current = null;
+			setHistoryValue(existing.draft);
+			return true;
+		}
+		historyNavRef.current = { ...existing, index };
+		setHistoryValue(existing.entries[index]);
+		return true;
+	};
+
 	const submit = async () => {
 		if (disabled) return;
 		const text = value.trim();
@@ -2441,6 +2505,8 @@ function Composer({
 			onValueChange(filtered[Math.min(activeIndex, filtered.length - 1)].slash);
 			return;
 		}
+		historyNavRef.current = null;
+		appendStoredComposerHistory(text);
 		onValueChange("");
 		if (text.startsWith("/") && (await onCommand(text))) return;
 		await onSend(text);
@@ -2490,6 +2556,7 @@ function Composer({
 					value={value}
 					disabled={disabled}
 					onChange={(event) => {
+						historyNavRef.current = null;
 						onValueChange(event.target.value);
 						setCursorPos(event.target.selectionStart);
 					}}
@@ -2507,6 +2574,12 @@ function Composer({
 								event.key === "ArrowDown" ? (current + 1) % filtered.length : (current - 1 + filtered.length) % filtered.length,
 							);
 							return;
+						}
+						if ((event.key === "ArrowUp" || event.key === "ArrowDown") && !event.altKey && !event.ctrlKey && !event.metaKey) {
+							if (navigateHistory(event.key === "ArrowUp" ? "previous" : "next")) {
+								event.preventDefault();
+								return;
+							}
 						}
 						if (event.key === "Enter" && !event.shiftKey) {
 							event.preventDefault();
@@ -5103,6 +5176,53 @@ function removeStoredRoomSelection(roomId: string): void {
 				...(Object.keys(sessionsByRoom).length ? { sessionsByRoom } : {}),
 			}),
 		);
+	} catch {
+		// Browser storage can be unavailable in private or locked-down contexts.
+	}
+}
+
+function readStoredComposerDraft(piboSessionId: string): string {
+	try {
+		return localStorage.getItem(COMPOSER_DRAFT_STORAGE_PREFIX + piboSessionId) ?? "";
+	} catch {
+		return "";
+	}
+}
+
+function writeStoredComposerDraft(piboSessionId: string, text: string): void {
+	try {
+		const key = COMPOSER_DRAFT_STORAGE_PREFIX + piboSessionId;
+		if (text) {
+			localStorage.setItem(key, text);
+		} else {
+			localStorage.removeItem(key);
+		}
+	} catch {
+		// Browser storage can be unavailable in private or locked-down contexts.
+	}
+}
+
+function readStoredComposerHistory(): string[] {
+	try {
+		const raw = localStorage.getItem(COMPOSER_HISTORY_STORAGE_KEY);
+		if (!raw) return [];
+		const parsed: unknown = JSON.parse(raw);
+		if (!Array.isArray(parsed)) return [];
+		return parsed
+			.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+			.slice(-COMPOSER_HISTORY_LIMIT);
+	} catch {
+		return [];
+	}
+}
+
+function appendStoredComposerHistory(text: string): void {
+	const entry = text.trim();
+	if (!entry) return;
+	const entries = readStoredComposerHistory();
+	if (entries.at(-1) === entry) return;
+	try {
+		localStorage.setItem(COMPOSER_HISTORY_STORAGE_KEY, JSON.stringify([...entries, entry].slice(-COMPOSER_HISTORY_LIMIT)));
 	} catch {
 		// Browser storage can be unavailable in private or locked-down contexts.
 	}
