@@ -48,7 +48,8 @@ import { type SessionBreadcrumbItem, type SessionDerivationLink, type SessionOri
 import { JsonRenderer } from "./tracing/JsonRenderer";
 import { countRender } from "./renderMetrics";
 import { parseTraceStreamFrameId } from "../../../shared/trace-order.js";
-import { buildTraceViewFromEvents, dedupeTraceEvents, latestTraceStreamId } from "../../../shared/trace-engine.js";
+import { buildTraceViewFromEvents, latestTraceStreamId } from "../../../shared/trace-engine.js";
+import { applyTraceLiveEvents } from "./traceLiveReducer";
 import { ContextFilesView } from "./context/ContextFilesView";
 import { BasePromptView } from "./context/BasePromptView";
 import { CompactionPromptView } from "./context/CompactionPromptView";
@@ -476,16 +477,15 @@ export function App({ route }: { route: ChatAppRoute }) {
 	useEffect(() => {
 		if (!bootstrap?.agents.length) return;
 		const preferredProfile = newSessionProfile || bootstrap.session.profile;
-		if (profileExists(bootstrap.agents, preferredProfile)) {
-			if (newSessionProfile !== preferredProfile) {
-				setNewSessionProfile(preferredProfile);
-				localStorage.setItem("pibo.chat.newSessionProfile", preferredProfile);
+		const matchedProfile = findAgentProfile(bootstrap.agents, preferredProfile);
+		if (matchedProfile) {
+			if (newSessionProfile !== matchedProfile.name) {
+				setNewSessionProfile(matchedProfile.name);
+				localStorage.setItem("pibo.chat.newSessionProfile", matchedProfile.name);
 			}
 			return;
 		}
-		const fallbackProfile = profileExists(bootstrap.agents, bootstrap.session.profile)
-			? bootstrap.session.profile
-			: bootstrap.agents[0].name;
+		const fallbackProfile = findAgentProfile(bootstrap.agents, bootstrap.session.profile)?.name ?? bootstrap.agents[0].name;
 		setNewSessionProfile(fallbackProfile);
 		localStorage.setItem("pibo.chat.newSessionProfile", fallbackProfile);
 	}, [bootstrap, newSessionProfile]);
@@ -807,6 +807,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 	}
 	const roomsSupported = Boolean(bootstrap.selectedRoomId || bootstrap.room || bootstrap.rooms.length);
 	const sessionGroups = splitSessionNodesByArchive(bootstrap.sessions);
+	const newSessionProfileOptions = bootstrap.agents;
 	const selectedSessionNode = selectedPiboSessionId ? findSessionNode(bootstrap.sessions, selectedPiboSessionId) : undefined;
 	const selectedSessionActiveModel = resolveSessionActiveModelLabel(bootstrap, selectedSessionNode ?? {
 		profile: bootstrap.session.profile,
@@ -1014,6 +1015,20 @@ export function App({ route }: { route: ChatAppRoute }) {
 								<div className="flex items-center justify-between gap-2 px-1 pb-1">
 									<div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Sessions</div>
 									<div className="flex items-center gap-1">
+										<select
+											value={newSessionProfile}
+											onChange={(event) => setPreferredNewSessionProfile(event.target.value)}
+											disabled={!newSessionProfileOptions.length || selectedRoomArchived}
+											title="Agent for new sessions"
+											aria-label="Agent for new sessions"
+											className="h-6 w-28 rounded-sm border border-slate-700 bg-[#101d22] px-1.5 text-[11px] font-medium normal-case tracking-normal text-slate-300 outline-none hover:border-[#11a4d4] focus:border-[#11a4d4] disabled:opacity-50"
+										>
+											{newSessionProfileOptions.map((profile) => (
+												<option key={profile.name} value={profile.name} title={profile.description ?? profile.name}>
+													{profile.name}
+												</option>
+											))}
+										</select>
 										<button
 											type="button"
 											onClick={() => void createSession()}
@@ -1289,7 +1304,7 @@ function SessionTracePane({
 	const traceQueryKey = useMemo(
 		() =>
 			selectedPiboSessionId
-				? chatTraceQueryKey(selectedPiboSessionId, { includeRawEvents: true, rawEventsLimit: 10000 })
+				? chatTraceQueryKey(selectedPiboSessionId, { includeRawEvents: true, rawEventsLimit: DEFAULT_RAW_EVENTS_LIMIT })
 				: null,
 		[selectedPiboSessionId],
 	);
@@ -1299,7 +1314,7 @@ function SessionTracePane({
 			if (!selectedPiboSessionId) throw new Error("Session is required");
 			return loadTraceQueryData(queryClient, selectedPiboSessionId, {
 				includeRawEvents: true,
-				rawEventsLimit: 10000,
+				rawEventsLimit: DEFAULT_RAW_EVENTS_LIMIT,
 			});
 		},
 		enabled: Boolean(selectedPiboSessionId),
@@ -1340,7 +1355,7 @@ function SessionTracePane({
 			status: sessionStatus,
 			latestStreamId: latestTraceStreamId(allEvents, traceQuery.data?.latestStreamId),
 			includeRawEvents: true,
-			rawEventsLimit: 10000,
+			rawEventsLimit: DEFAULT_RAW_EVENTS_LIMIT,
 		});
 		annotateLiveTraceForkEntryIds(liveTrace.nodes, traceQuery.data?.nodes ?? []);
 		return liveTrace;
@@ -1349,33 +1364,17 @@ function SessionTracePane({
 	const flushPendingStreamEvents = useCallback((piboSessionId: string) => {
 		const pending = pendingStreamEventsBySession.current.get(piboSessionId);
 		if (!pending?.length) return;
-		const rawEvents = pending.filter(
-			(e): e is Extract<ChatStreamEvent, { type: "RAW_EVENT" }> => e.type === "RAW_EVENT",
-		);
-		if (!rawEvents.length) {
-			pendingStreamEventsBySession.current.delete(piboSessionId);
-			return;
-		}
 		setSelectedTraceEvents((current) => {
 			if (current?.piboSessionId !== piboSessionId) return current;
-			const newEvents: ChatWebStoredEvent[] = rawEvents.map((e) => {
-				const streamFrame = e.streamFrameId ? parseTraceStreamFrameId(e.streamFrameId) : undefined;
-				return {
-					id: e.streamId !== undefined
-						? `stream:${e.streamId}:raw:${e.event.type}`
-						: e.streamFrameId
-							? `stream:${e.streamFrameId}`
-							: `live:${Date.now()}:${Math.random()}`,
-					piboSessionId: e.piboSessionId ?? piboSessionId,
-					eventSequence: liveEventSeqRef.current++,
-					streamId: streamFrame?.streamId,
-					streamFrameIndex: undefined,
-					type: e.event.type,
-					createdAt: new Date().toISOString(),
-					payload: e.event,
-				};
-			});
-			return { piboSessionId, events: dedupeTraceEvents([...current.events, ...newEvents]) };
+			return {
+				piboSessionId,
+				events: applyTraceLiveEvents({
+					currentEvents: current.events,
+					streamEvents: pending,
+					piboSessionId,
+					nextSequence: () => liveEventSeqRef.current++,
+				}),
+			};
 		});
 		pendingStreamEventsBySession.current.delete(piboSessionId);
 	}, []);
@@ -1429,8 +1428,11 @@ function SessionTracePane({
 				onRefreshTrace().catch((caught) => onError(errorMessage(caught)));
 			}, delayMs);
 		};
-		const scheduleBootstrapRefresh = (delayMs: number) => {
-			if (bootstrapTimer) return;
+		const scheduleBootstrapRefresh = (delayMs: number, reset = false) => {
+			if (bootstrapTimer) {
+				if (!reset) return;
+				clearTimeout(bootstrapTimer);
+			}
 			bootstrapTimer = setTimeout(() => {
 				bootstrapTimer = undefined;
 				onRefreshBootstrap().catch((caught) => onError(errorMessage(caught)));
@@ -1451,7 +1453,8 @@ function SessionTracePane({
 				scheduleTraceRefresh(1500, true);
 			}
 			if (eventShouldRefreshNavigation(event)) {
-				scheduleBootstrapRefresh(targetPiboSessionId === selectedPiboSessionId ? 0 : 150);
+				const terminal = event.type === "RUN_FINISHED" || event.type === "RUN_ERROR" || event.type === "TEXT_MESSAGE_END";
+				scheduleBootstrapRefresh(terminal ? 650 : targetPiboSessionId === selectedPiboSessionId ? 0 : 150, terminal);
 			}
 		});
 		return () => {
@@ -1582,6 +1585,10 @@ function SessionTracePane({
 						onFork,
 						onOpenSession,
 						onThinkingLevelChange,
+						onModelChanged: async () => {
+							await onRefreshBootstrap();
+							await onRefreshTrace();
+						},
 					})
 				)}
 				<Composer
@@ -2200,10 +2207,16 @@ function sessionNodeSignal(node: PiboWebSessionNode): { className: string; title
 	if (node.status === "running") {
 		return { className: `${base} session-signal-running`, title: "Runtime is working" };
 	}
-	if ((node.unreadCount ?? 0) > 0) {
+	if ((node.unreadCount ?? 0) > 0 || sessionWasRecentlyActive(node)) {
 		return { className: `${base} session-signal-unread`, title: "New completed assistant message" };
 	}
 	return { className: `${base} session-signal-idle`, title: "Idle" };
+}
+
+function sessionWasRecentlyActive(node: PiboWebSessionNode): boolean {
+	if (!node.lastActivityAt) return false;
+	const timestamp = Date.parse(node.lastActivityAt);
+	return Number.isFinite(timestamp) && Date.now() - timestamp < 30_000;
 }
 
 function sessionTreeHasSession(nodes: PiboWebSessionNode[], piboSessionId: string): boolean {
@@ -5135,8 +5148,12 @@ function compactRawEvents(events: RawEvent[]): CompactRawEvent[] {
 	return compacted;
 }
 
+function findAgentProfile(profiles: BootstrapData["agents"], name: string): BootstrapData["agents"][number] | undefined {
+	return profiles.find((profile) => profile.name === name || profile.aliases.includes(name));
+}
+
 function profileExists(profiles: BootstrapData["agents"], name: string): boolean {
-	return profiles.some((profile) => profile.name === name || profile.aliases.includes(name));
+	return Boolean(findAgentProfile(profiles, name));
 }
 
 function readStoredSelection(): StoredSelection {
