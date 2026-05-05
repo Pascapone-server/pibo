@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, GitBranch } from "lucide-react";
 import { Virtuoso } from "react-virtuoso";
 import { useStickyVirtuoso } from "../../components/useStickyVirtuoso";
 import { MarkdownRenderer } from "../../tracing/MarkdownRenderer";
@@ -205,7 +205,7 @@ export function CompactTerminalSessionView({
 													visibleLines.map((line, index) => <TerminalLine key={`${row.id}:${index}`} line={line} status={row.status} clampLines={collapseToolCallPreview && index === 0 ? 5 : undefined} />)
 												)}
 											</div>
-											<div className="flex shrink-0 items-start gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+											<div className={`flex shrink-0 items-start gap-1 transition-opacity ${row.forkEntryId ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"}`}>
 												{row.linkedPiboSessionId ? (
 													<RowAction
 														label="Open linked session"
@@ -215,7 +215,8 @@ export function CompactTerminalSessionView({
 													</RowAction>
 												) : null}
 												{row.forkEntryId ? (
-													<RowAction label="Fork from this message" onClick={() => onFork(row.forkEntryId!)}>
+													<RowAction label="Fork from this user message" onClick={() => onFork(row.forkEntryId!)}>
+														<GitBranch size={13} />
 														Fork
 													</RowAction>
 												) : null}
@@ -305,7 +306,7 @@ function RowAction({
 }: {
 	label: string;
 	onClick: () => void;
-	children: string;
+	children: ReactNode;
 }) {
 	return (
 		<button
@@ -313,7 +314,7 @@ function RowAction({
 			onClick={onClick}
 			aria-label={label}
 			title={label}
-			className="min-h-7 min-w-7 border border-[#3a3a3a] px-2 text-[11px] text-[#737373] hover:border-[#38bdf8] hover:text-[#38bdf8]"
+			className="inline-flex min-h-7 min-w-7 items-center gap-1 border border-[#3a3a3a] px-2 text-[11px] text-[#737373] hover:border-[#38bdf8] hover:text-[#38bdf8]"
 		>
 			{children}
 		</button>
