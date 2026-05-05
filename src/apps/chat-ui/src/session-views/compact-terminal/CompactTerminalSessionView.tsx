@@ -1,7 +1,8 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
-import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
+import { Virtuoso } from "react-virtuoso";
+import { useStickyVirtuoso } from "../../components/useStickyVirtuoso";
 import { MarkdownRenderer } from "../../tracing/MarkdownRenderer";
 import type { ChatSessionViewProps } from "../types";
 import { TerminalDetails } from "./TerminalDetails";
@@ -31,9 +32,7 @@ export function CompactTerminalSessionView({
 		() => buildCompactTerminalRows(traceView, { showThinking }),
 		[showThinking, traceView],
 	);
-	const virtuosoRef = useRef<VirtuosoHandle>(null);
-	const bottomLockedRef = useRef(true);
-	const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+	const stickyView = useStickyVirtuoso({ itemCount: rows.length, resetKey: traceView?.piboSessionId, contentKey: rows });
 	const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 	const runningCount = rows.filter((row) => row.status === "running").length;
 	const errorCount = rows.filter((row) => row.status === "error").length;
@@ -50,27 +49,9 @@ export function CompactTerminalSessionView({
 		});
 	}, [expandThinking, rows]);
 
-	const scrollToBottom = (behavior: "auto" | "smooth" = "smooth") => {
-		if (!rows.length) return;
-		bottomLockedRef.current = true;
-		virtuosoRef.current?.scrollToIndex({ index: rows.length - 1, align: "end", behavior });
-		setShowJumpToBottom(false);
-	};
-
-	useLayoutEffect(() => {
-		bottomLockedRef.current = true;
-		const frame = requestAnimationFrame(() => scrollToBottom("auto"));
-		return () => cancelAnimationFrame(frame);
-	}, [traceView?.piboSessionId]);
-
-	useLayoutEffect(() => {
-		if (!isStreaming || !bottomLockedRef.current) return;
-		const frame = requestAnimationFrame(() => scrollToBottom("auto"));
-		return () => cancelAnimationFrame(frame);
-	}, [isStreaming, rows]);
 
 	return (
-		<section className="min-w-0 flex-1 flex flex-col overflow-hidden bg-[#0b0b0b] text-[#d4d4d4]">
+		<section className="relative min-w-0 flex-1 flex flex-col overflow-hidden bg-[#0b0b0b] text-[#d4d4d4]">
 			<div className="border-b border-[#2a2a2a] bg-[#111111] px-4 py-2 text-[11px]">
 				<div className="flex flex-wrap items-center gap-2">
 					{isLoading ? <TerminalBadge tone="cyan">Loading</TerminalBadge> : null}
@@ -126,15 +107,16 @@ export function CompactTerminalSessionView({
 					/>
 				) : rows.length ? (
 					<Virtuoso
-						ref={virtuosoRef}
+						ref={stickyView.virtuosoRef}
 						data={rows}
 						className="min-h-0 h-full font-mono text-[12px] leading-[1.45]"
 						computeItemKey={(_, row) => row.id}
-						atBottomStateChange={(atBottom) => {
-							bottomLockedRef.current = atBottom;
-							setShowJumpToBottom(!atBottom);
-						}}
-						followOutput={isStreaming ? ((atBottom) => (atBottom ? "auto" : false)) : false}
+						scrollerRef={stickyView.scrollerRef}
+						atBottomStateChange={stickyView.atBottomStateChange}
+						atBottomThreshold={stickyView.atBottomThreshold}
+						followOutput={stickyView.followOutput}
+						totalListHeightChanged={stickyView.totalListHeightChanged}
+						alignToBottom
 						components={{
 							Footer: isStreaming ? TerminalStreamingFooter : undefined,
 						}}
@@ -238,15 +220,15 @@ export function CompactTerminalSessionView({
 				)}
 			</div>
 
-			{showJumpToBottom ? (
+			{stickyView.isSticky ? null : (
 				<button
 					type="button"
-					onClick={() => scrollToBottom()}
-					className="absolute right-4 bottom-4 border border-[#38bdf8] bg-[#111111] px-2 py-1 font-mono text-[11px] text-[#38bdf8] hover:bg-[#161616]"
+					onClick={() => stickyView.stickToBottom("auto")}
+					className="absolute right-4 bottom-4 z-30 border border-[#38bdf8] bg-[#111111]/95 px-2 py-1 font-mono text-[11px] text-[#38bdf8] shadow-lg shadow-black/30 hover:bg-[#161616]"
 				>
 					Latest
 				</button>
-			) : null}
+			)}
 		</section>
 	);
 }

@@ -1,0 +1,160 @@
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { FollowOutputScalarType, VirtuosoHandle } from "react-virtuoso";
+
+const DEFAULT_BOTTOM_THRESHOLD = 24;
+const USER_SCROLL_INTENT_MS = 700;
+
+type StickyScrollBehavior = "auto" | "smooth";
+
+type StickyVirtuosoOptions = {
+	itemCount: number;
+	/** Resets stickiness when the backing conversation/trace changes. */
+	resetKey?: unknown;
+	/** Schedules a sticky scroll when rendered content changes without changing itemCount. */
+	contentKey?: unknown;
+	atBottomThreshold?: number;
+};
+
+export function useStickyVirtuoso({
+	itemCount,
+	resetKey,
+	contentKey,
+	atBottomThreshold = DEFAULT_BOTTOM_THRESHOLD,
+}: StickyVirtuosoOptions) {
+	const virtuosoRef = useRef<VirtuosoHandle>(null);
+	const itemCountRef = useRef(itemCount);
+	const stickyRef = useRef(true);
+	const scrollFrameRef = useRef<number | undefined>(undefined);
+	const userScrollIntentRef = useRef(false);
+	const userScrollIntentTimerRef = useRef<number | undefined>(undefined);
+	const [isSticky, setIsStickyState] = useState(true);
+	const [scroller, setScroller] = useState<HTMLElement | Window | null>(null);
+
+	useLayoutEffect(() => {
+		itemCountRef.current = itemCount;
+	}, [itemCount]);
+
+	const setSticky = useCallback((next: boolean) => {
+		stickyRef.current = next;
+		setIsStickyState(next);
+	}, []);
+
+	const clearScheduledScroll = useCallback(() => {
+		if (scrollFrameRef.current !== undefined) {
+			cancelAnimationFrame(scrollFrameRef.current);
+			scrollFrameRef.current = undefined;
+		}
+	}, []);
+
+	const scheduleScrollToBottom = useCallback((behavior: StickyScrollBehavior = "auto") => {
+		clearScheduledScroll();
+		scrollFrameRef.current = requestAnimationFrame(() => {
+			scrollFrameRef.current = undefined;
+			const lastIndex = itemCountRef.current - 1;
+			if (lastIndex < 0) return;
+
+			// autoscrollToBottom catches measured height changes inside the last item;
+			// scrollToIndex catches newly appended rows.
+			virtuosoRef.current?.autoscrollToBottom();
+			virtuosoRef.current?.scrollToIndex({ index: lastIndex, align: "end", behavior });
+
+			requestAnimationFrame(() => {
+				if (stickyRef.current) virtuosoRef.current?.autoscrollToBottom();
+			});
+		});
+	}, [clearScheduledScroll]);
+
+	const stickToBottom = useCallback((behavior: StickyScrollBehavior = "auto") => {
+		setSticky(true);
+		scheduleScrollToBottom(behavior);
+	}, [scheduleScrollToBottom, setSticky]);
+
+	const markUserScrollIntent = useCallback(() => {
+		userScrollIntentRef.current = true;
+		if (userScrollIntentTimerRef.current !== undefined) window.clearTimeout(userScrollIntentTimerRef.current);
+		userScrollIntentTimerRef.current = window.setTimeout(() => {
+			userScrollIntentRef.current = false;
+			userScrollIntentTimerRef.current = undefined;
+		}, USER_SCROLL_INTENT_MS);
+	}, []);
+
+	const updateFromScrollPosition = useCallback(() => {
+		if (!scroller) return;
+		if (isAtBottom(scroller, atBottomThreshold)) {
+			setSticky(true);
+			return;
+		}
+		if (userScrollIntentRef.current) setSticky(false);
+	}, [atBottomThreshold, scroller, setSticky]);
+
+	useEffect(() => {
+		if (!scroller) return undefined;
+		const target: HTMLElement | Window = scroller;
+		const markIntentFromKey = (event: Event) => {
+			const key = event instanceof KeyboardEvent ? event.key : "";
+			if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(key)) {
+				markUserScrollIntent();
+			}
+		};
+		const markIntentFromPointer = (event: Event) => {
+			if (event.target === target) markUserScrollIntent();
+		};
+		target.addEventListener("wheel", markUserScrollIntent, { passive: true });
+		target.addEventListener("touchmove", markUserScrollIntent, { passive: true });
+		target.addEventListener("pointerdown", markIntentFromPointer, { passive: true });
+		target.addEventListener("keydown", markIntentFromKey);
+		target.addEventListener("scroll", updateFromScrollPosition, { passive: true });
+		return () => {
+			target.removeEventListener("wheel", markUserScrollIntent);
+			target.removeEventListener("touchmove", markUserScrollIntent);
+			target.removeEventListener("pointerdown", markIntentFromPointer);
+			target.removeEventListener("keydown", markIntentFromKey);
+			target.removeEventListener("scroll", updateFromScrollPosition);
+		};
+	}, [markUserScrollIntent, scroller, updateFromScrollPosition]);
+
+	useLayoutEffect(() => {
+		setSticky(true);
+		scheduleScrollToBottom("auto");
+	}, [resetKey, scheduleScrollToBottom, setSticky]);
+
+	useLayoutEffect(() => {
+		if (stickyRef.current) scheduleScrollToBottom("auto");
+	}, [contentKey, itemCount, scheduleScrollToBottom]);
+
+	useEffect(() => () => {
+		clearScheduledScroll();
+		if (userScrollIntentTimerRef.current !== undefined) window.clearTimeout(userScrollIntentTimerRef.current);
+	}, [clearScheduledScroll]);
+
+	const atBottomStateChange = useCallback((atBottom: boolean) => {
+		if (atBottom) {
+			setSticky(true);
+			return;
+		}
+		if (userScrollIntentRef.current) setSticky(false);
+	}, [setSticky]);
+
+	const followOutput = useCallback((): FollowOutputScalarType => (stickyRef.current ? "auto" : false), []);
+
+	const totalListHeightChanged = useCallback(() => {
+		if (stickyRef.current) scheduleScrollToBottom("auto");
+	}, [scheduleScrollToBottom]);
+
+	return {
+		virtuosoRef,
+		isSticky,
+		stickToBottom,
+		scrollerRef: setScroller,
+		atBottomStateChange,
+		atBottomThreshold,
+		followOutput,
+		totalListHeightChanged,
+	};
+}
+
+function isAtBottom(scroller: HTMLElement | Window, threshold: number) {
+	const element = scroller instanceof Window ? document.scrollingElement : scroller;
+	if (!element) return true;
+	return element.scrollHeight - element.scrollTop - element.clientHeight <= threshold;
+}

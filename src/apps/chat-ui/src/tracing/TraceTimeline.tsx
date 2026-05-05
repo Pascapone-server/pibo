@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { Check, ChevronDown, ChevronRight, ChevronsDown, ChevronsUp, GitBranch, GitFork, ListTree, MessageSquarePlus, RefreshCw, RotateCcw } from "lucide-react";
-import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
+import { Virtuoso } from "react-virtuoso";
+import { useStickyVirtuoso } from "../components/useStickyVirtuoso";
 import type { Span, Trace } from "../types";
 import { countRender } from "../renderMetrics";
 import { TraceSpanCard, type SpanExpansionDepth } from "./SpanNode";
@@ -85,11 +86,8 @@ export function TraceTimeline({
 	onOpenSession,
 }: TraceTimelineProps) {
 	countRender("TraceTimeline");
-	const virtuosoRef = useRef<VirtuosoHandle>(null);
-	const bottomLockedRef = useRef(true);
 	const [expansionDepth, setExpansionDepth] = useState<SpanExpansionDepth>(DEFAULT_EXPANSION_DEPTH);
 	const [levelInput, setLevelInput] = useState(String(DEFAULT_EXPANSION_DEPTH));
-	const [showJumpToBottom, setShowJumpToBottom] = useState(false);
 	const [expansionOverrides, setExpansionOverrides] = useState<Record<string, { contentExpanded: boolean; childrenExpanded: boolean }>>({});
 
 	const spanTree = useMemo(() => {
@@ -124,28 +122,12 @@ export function TraceTimeline({
 		return rows;
 	}, [expandThinking, expansionDepth, expansionOverrides, spanTree, trace?.id, trace?.status]);
 
-	const scrollToBottom = useCallback((behavior: "auto" | "smooth" = "smooth") => {
-		if (!visibleRows.length) return;
-		bottomLockedRef.current = true;
-		virtuosoRef.current?.scrollToIndex({ index: visibleRows.length - 1, align: "end", behavior });
-		setShowJumpToBottom(false);
-	}, [visibleRows.length]);
+	const stickyView = useStickyVirtuoso({ itemCount: visibleRows.length, resetKey: trace?.id, contentKey: visibleRows });
 
 	useEffect(() => {
 		setExpansionOverrides({});
 	}, [expandThinking, trace?.id]);
 
-	useEffect(() => {
-		bottomLockedRef.current = true;
-		const frame = requestAnimationFrame(() => scrollToBottom("auto"));
-		return () => cancelAnimationFrame(frame);
-	}, [scrollToBottom, trace?.id]);
-
-	useEffect(() => {
-		if (!isStreaming || !bottomLockedRef.current) return;
-		const frame = requestAnimationFrame(() => scrollToBottom("auto"));
-		return () => cancelAnimationFrame(frame);
-	}, [isStreaming, scrollToBottom, visibleRows.length]);
 
 	if (!trace) {
 		return (
@@ -251,16 +233,17 @@ export function TraceTimeline({
 			<div className="min-w-0 flex-1 overflow-hidden">
 				{visibleRows.length ? (
 					<Virtuoso
-						ref={virtuosoRef}
+						ref={stickyView.virtuosoRef}
 						data={visibleRows}
 						className="min-h-0 h-full min-w-0 overflow-x-hidden"
 						style={timelineContentStyle}
 						computeItemKey={(_, row) => row.id}
-						atBottomStateChange={(atBottom) => {
-							bottomLockedRef.current = atBottom;
-							setShowJumpToBottom(!atBottom);
-						}}
-						followOutput={isStreaming ? ((atBottom) => (atBottom ? "auto" : false)) : false}
+						scrollerRef={stickyView.scrollerRef}
+						atBottomStateChange={stickyView.atBottomStateChange}
+						atBottomThreshold={stickyView.atBottomThreshold}
+						followOutput={stickyView.followOutput}
+						totalListHeightChanged={stickyView.totalListHeightChanged}
+						alignToBottom
 						components={{
 							Footer: isStreaming ? StreamingIndicator : undefined,
 						}}
@@ -296,17 +279,17 @@ export function TraceTimeline({
 					/>
 				)}
 			</div>
-			{showJumpToBottom ? (
+			{stickyView.isSticky ? null : (
 				<button
 					type="button"
-					onClick={() => scrollToBottom()}
+					onClick={() => stickyView.stickToBottom("auto")}
 					title="Scroll to latest"
 					aria-label="Scroll to latest"
 					className="absolute right-4 bottom-4 z-30 inline-flex h-9 w-9 items-center justify-center rounded-sm border border-[#11a4d4] bg-[#151f24]/95 text-[#11a4d4] shadow-lg shadow-black/30 transition-colors hover:bg-[#11a4d4] hover:text-white"
 				>
 					<ChevronDown size={18} />
 				</button>
-			) : null}
+			)}
 		</section>
 	);
 }
