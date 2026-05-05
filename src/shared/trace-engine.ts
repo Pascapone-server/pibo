@@ -25,9 +25,18 @@ export function sortTraceNodes(nodes: PiboTraceNode[]): PiboTraceNode[] {
 }
 
 export function compareTraceNodes(left: PiboTraceNode, right: PiboTraceNode): number {
+	const byStartTime = compareOptionalIsoTime(left.startedAt, right.startedAt);
+	if (byStartTime !== 0) return byStartTime;
 	const byOrder = compareTraceOrder(left.orderKey, right.orderKey);
 	if (byOrder !== 0) return byOrder;
-	return (left.startedAt ?? "").localeCompare(right.startedAt ?? "") || left.id.localeCompare(right.id);
+	return left.id.localeCompare(right.id);
+}
+
+function compareOptionalIsoTime(left?: string, right?: string): number {
+	if (!left && !right) return 0;
+	if (!left) return 1;
+	if (!right) return -1;
+	return left.localeCompare(right);
 }
 
 export function flattenTraceNodes(nodes: PiboTraceNode[]): PiboTraceNode[] {
@@ -50,8 +59,7 @@ export function nestTraceNodes(nodes: PiboTraceNode[]): PiboTraceNode[] {
 	}
 
 	const roots = [...byId.values()].filter((node) => !nestedChildIds.has(node.id));
-	sortTraceNodes(roots);
-	return roots;
+	return sortTraceNodes(roots);
 }
 
 export function mapTraceNodesById(nodes: PiboTraceNode[]): Map<string, PiboTraceNode> {
@@ -264,9 +272,45 @@ function applySingleEventToNodes(
 		}
 	}
 	if (node.eventId && byId.has(node.id)) return;
+	attachExecutionCommandToOpenTurn(node, byId);
 	attachAsyncAgentRunNode(node, piboSessionId, storedEvent.createdAt);
 	nodes.push(node);
 	for (const indexed of flattenTraceNodes([node])) byId.set(indexed.id, indexed);
+}
+
+function attachExecutionCommandToOpenTurn(
+	node: PiboTraceNode,
+	byId: Map<string, PiboTraceNode>,
+): void {
+	if (node.type !== "execution.command") return;
+	if (node.parentId && byId.has(node.parentId)) return;
+
+	const turn = [...byId.values()]
+		.filter((candidate) => {
+			if (candidate.type !== "agent.turn") return false;
+			if (!candidate.startedAt || !node.startedAt) return false;
+			if (candidate.startedAt > node.startedAt) return false;
+			const closedAt = turnClosedAt(candidate, byId);
+			return closedAt === undefined || node.startedAt <= closedAt;
+		})
+		.sort(compareTraceNodes)
+		.at(-1);
+	if (!turn) return;
+	node.parentId = turn.id;
+}
+
+function turnClosedAt(turn: PiboTraceNode, byId: Map<string, PiboTraceNode>): string | undefined {
+	if (turn.completedAt) return turn.completedAt;
+	const error = [...byId.values()]
+		.filter((candidate) =>
+			candidate.type === "error" &&
+			candidate.eventId !== undefined &&
+			candidate.eventId === turn.eventId &&
+			candidate.startedAt !== undefined
+		)
+		.sort(compareTraceNodes)
+		.at(0);
+	return error?.startedAt;
 }
 
 export function patchTraceViewWithEvent(

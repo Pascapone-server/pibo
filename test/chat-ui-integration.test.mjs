@@ -35,6 +35,71 @@ function flatNodes(view) {
 	return view.nodes.flatMap((node) => [node, ...node.children.flatMap((child) => [child, ...child.children])]);
 }
 
+function nodeLabels(nodes) {
+	return nodes.flatMap((node) => [node.title, ...nodeLabels(node.children ?? [])]);
+}
+
+test("execution commands are sorted by wall-clock time among persisted transcript nodes", () => {
+	const view = buildTraceViewFromEvents({
+		session: { id: "chat:test", piSessionId: "pi-test" },
+		status: "idle",
+		transcriptEntries: [
+			{
+				id: "entry-user-1",
+				type: "message",
+				timestamp: "2026-04-29T08:00:00.000Z",
+				message: { role: "user", content: [{ type: "text", text: "first" }] },
+			},
+			{
+				id: "entry-assistant-1",
+				type: "message",
+				timestamp: "2026-04-29T08:00:02.000Z",
+				message: { role: "assistant", content: [{ type: "text", text: "answer" }], stopReason: "stop" },
+			},
+			{
+				id: "entry-user-2",
+				type: "message",
+				timestamp: "2026-04-29T08:00:04.000Z",
+				message: { role: "user", content: [{ type: "text", text: "second" }] },
+			},
+		],
+		events: [
+			createEvent({
+				seq: 99,
+				type: "execution_result",
+				createdAt: "2026-04-29T08:00:03.000Z",
+				payload: { type: "execution_result", eventId: "cmd-status", action: "status", result: { ok: true } },
+			}),
+		],
+	});
+
+	assert.deepEqual(nodeLabels(view.nodes), ["User Message", "Agent Message", "status", "User Message"]);
+});
+
+test("execution commands issued during streaming attach to the active turn", () => {
+	const view = createBaseView([
+		createEvent({ seq: 1, type: "message_started", createdAt: "2026-04-29T08:00:00.000Z", payload: { type: "message_started", eventId: "turn-1", text: "Hello", source: "user" } }),
+		createEvent({ seq: 2, type: "thinking_delta", createdAt: "2026-04-29T08:00:02.000Z", payload: { type: "thinking_delta", eventId: "turn-1", text: "Thinking" } }),
+		createEvent({ seq: 3, type: "execution_result", createdAt: "2026-04-29T08:00:03.000Z", payload: { type: "execution_result", eventId: "cmd-status", action: "status", result: { ok: true } } }),
+		createEvent({ seq: 4, type: "assistant_delta", createdAt: "2026-04-29T08:00:04.000Z", payload: { type: "assistant_delta", eventId: "turn-1", text: "Done" } }),
+	], "running");
+
+	const turn = view.nodes.find((node) => node.type === "agent.turn");
+	assert.ok(turn, "expected active turn");
+	assert.deepEqual(turn.children.map((node) => node.title), ["Thinking", "status", "Agent Message"]);
+});
+
+test("execution commands after an errored turn remain chronological root nodes", () => {
+	const view = createBaseView([
+		createEvent({ seq: 1, type: "message_started", createdAt: "2026-04-29T08:00:00.000Z", payload: { type: "message_started", eventId: "turn-1", text: "Hello", source: "user" } }),
+		createEvent({ seq: 2, type: "session_error", createdAt: "2026-04-29T08:00:01.000Z", payload: { type: "session_error", eventId: "turn-1", error: "boom" } }),
+		createEvent({ seq: 3, type: "execution_result", createdAt: "2026-04-29T08:00:02.000Z", payload: { type: "execution_result", eventId: "cmd-thinking", action: "thinking", result: { level: "high" } } }),
+	], "idle");
+
+	assert.deepEqual(view.nodes.map((node) => node.title), ["Agent Turn", "Error", "thinking"]);
+	assert.equal(view.nodes.find((node) => node.title === "thinking")?.parentId, "event:message:cmd-thinking");
+});
+
 test("live stream simulation: thinking -> assistant -> tool -> finish", () => {
 	const baseView = createBaseView([]);
 
