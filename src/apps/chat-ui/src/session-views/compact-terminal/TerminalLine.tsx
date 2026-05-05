@@ -4,13 +4,15 @@ import { TerminalFunctionCall } from "./TerminalInlineJson";
 type TerminalLineProps = {
 	line: CompactTerminalLine;
 	status: CompactTerminalRowStatus;
+	clampLines?: number;
 };
 
-export function TerminalLine({ line, status }: TerminalLineProps) {
+export function TerminalLine({ line, status, clampLines }: TerminalLineProps) {
+	const contentClassName = `min-w-0 whitespace-pre-wrap break-words ${clampLines ? "block overflow-hidden" : ""}`;
 	return (
 		<div className="grid grid-cols-[1.9rem_minmax(0,1fr)] gap-2 leading-[1.45]">
 			<span className={`whitespace-pre ${prefixClassName(line.prefix, status)}`}>{prefixText(line.prefix)}</span>
-			<span className="min-w-0 whitespace-pre-wrap break-words">
+			<span className={contentClassName} style={clampLines ? { maxHeight: `${clampLines * 1.45}em` } : undefined}>
 				{line.tokens.map((token, index) => (
 					<span key={`${index}:${token.text}`} className={tokenClassName(token)}>
 						{token.text}

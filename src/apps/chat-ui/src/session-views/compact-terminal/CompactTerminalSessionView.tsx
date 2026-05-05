@@ -122,6 +122,8 @@ export function CompactTerminalSessionView({
 						}}
 						itemContent={(_, row) => {
 							const expanded = expandedRows.has(row.id);
+							const collapseToolCallPreview = !expanded && isToolCallLikeRow(row);
+							const visibleLines = collapseToolCallPreview ? row.lines.slice(0, 1) : row.lines;
 							const toggleExpanded = () => {
 								if (!row.expandable) return;
 								setExpandedRows((current) => {
@@ -187,7 +189,7 @@ export function CompactTerminalSessionView({
 													</div>
 												) : row.kind === "reasoning" && row.markdown ? (
 													<>
-														{row.lines.map((line, index) => <TerminalLine key={`${row.id}:${index}`} line={line} status={row.status} />)}
+														{visibleLines.map((line, index) => <TerminalLine key={`${row.id}:${index}`} line={line} status={row.status} clampLines={collapseToolCallPreview ? 5 : undefined} />)}
 														<div className="ml-[1.9rem] min-w-0">
 															<div className="compact-terminal-markdown compact-terminal-reasoning">
 																<MarkdownRenderer>{row.markdown}</MarkdownRenderer>
@@ -195,7 +197,7 @@ export function CompactTerminalSessionView({
 														</div>
 													</>
 												) : (
-													row.lines.map((line, index) => <TerminalLine key={`${row.id}:${index}`} line={line} status={row.status} />)
+													visibleLines.map((line, index) => <TerminalLine key={`${row.id}:${index}`} line={line} status={row.status} clampLines={collapseToolCallPreview ? 5 : undefined} />)
 												)}
 											</div>
 											<div className="flex shrink-0 items-start gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
@@ -243,6 +245,17 @@ export function CompactTerminalSessionView({
 				</button>
 			)}
 		</section>
+	);
+}
+
+function isToolCallLikeRow(row: { kind: string; expandable?: boolean }) {
+	return Boolean(row.expandable) && (
+		row.kind === "tool.call" ||
+		row.kind === "tool.group.exploring" ||
+		row.kind === "agent.delegation" ||
+		row.kind === "agent.async" ||
+		row.kind === "yielded.run" ||
+		row.kind === "execution.command"
 	);
 }
 
