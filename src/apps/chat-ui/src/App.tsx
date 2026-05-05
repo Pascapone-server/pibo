@@ -4192,8 +4192,8 @@ function SettingsView({
 
 	if (activePanel === "skills") {
 		return (
-			<div className="p-6 overflow-auto">
-				<h1 className="text-sm font-bold uppercase tracking-wider mb-4 flex items-center gap-2">
+			<div className="overflow-auto p-6 max-[640px]:p-3">
+				<h1 className="mb-4 flex items-center gap-2 text-sm font-bold uppercase tracking-wider">
 					<Wrench size={16} />
 					Skills
 				</h1>
@@ -4699,7 +4699,7 @@ function UserSkillsSettings({
 		<>
 			<DesignerPanel title="Skill Management">
 				<div className="grid gap-2">
-					<div className="flex gap-2">
+					<div className="flex flex-wrap gap-2">
 						<button
 							type="button"
 							disabled={busy === "create"}
@@ -4729,16 +4729,16 @@ function UserSkillsSettings({
 						<div className="grid gap-2">
 							{skillList.map((skill) => (
 								<div key={skill.id} className={`border rounded-sm p-2 ${skill.enabled ? "border-slate-800 bg-[#151f24]" : "border-slate-800 bg-[#151f24] opacity-75"}`}>
-									<div className="flex items-center justify-between gap-2">
-										<div className="min-w-0">
-											<div className="flex items-center gap-2">
+									<div className="flex items-center justify-between gap-2 max-[640px]:items-start">
+										<div className="min-w-0 flex-1">
+											<div className="flex min-w-0 flex-wrap items-center gap-2">
 												<span className="min-w-0 truncate text-sm text-slate-200">{skill.name}</span>
 												<span className={`shrink-0 border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider ${skill.enabled ? "border-[#11a4d4]/60 text-[#7dd3fc]" : "border-slate-700 text-slate-500"}`}>{skill.enabled ? "enabled" : "disabled"}</span>
 												<span className="shrink-0 border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider border-slate-700 text-slate-500">{skill.source}</span>
 											</div>
 											<div className="truncate text-xs text-slate-500">{skill.description || skill.path}</div>
 										</div>
-										<div className="flex items-center gap-1">
+										<div className="flex shrink-0 items-center gap-1">
 											<button
 												type="button"
 												disabled={busy?.startsWith(`${skill.id}:`) ?? false}
@@ -4800,7 +4800,7 @@ function UserSkillsSettings({
 					title="Edit Skill"
 					initialName={editSkill.name}
 					initialDescription={editSkill.description}
-					initialMarkdown={undefined}
+					initialMarkdown={editMarkdown}
 					onSave={(input) => void handleEdit(editSkill.id, input)}
 					onClose={() => setEditSkill(null)}
 					busy={busy === "edit"}
@@ -4833,11 +4833,11 @@ function SkillEditModal({
 
 	return (
 		<Modal onClose={onClose}>
-			<h2 className="text-sm font-bold uppercase tracking-wider mb-3 flex items-center gap-2">
+			<h2 className="flex items-center gap-2 border-b border-slate-800 px-4 py-3 text-sm font-bold uppercase tracking-wider">
 				<Edit3 size={16} />
 				{title}
 			</h2>
-			<div className="grid gap-3">
+			<div className="grid gap-3 p-4">
 				<input
 					value={name}
 					onChange={(e) => setName(e.target.value)}
@@ -4886,11 +4886,11 @@ function SkillInstallModal({
 
 	return (
 		<Modal onClose={onClose}>
-			<h2 className="text-sm font-bold uppercase tracking-wider mb-3 flex items-center gap-2">
+			<h2 className="flex items-center gap-2 border-b border-slate-800 px-4 py-3 text-sm font-bold uppercase tracking-wider">
 				<ExternalLink size={16} />
 				Install Skill
 			</h2>
-			<div className="grid gap-3">
+			<div className="grid gap-3 p-4">
 				<input
 					value={url}
 					onChange={(e) => setUrl(e.target.value)}
