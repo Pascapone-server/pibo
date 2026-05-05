@@ -149,7 +149,7 @@ export function updateUserSkill(id: string, input: UpdateUserSkillInput, cwd = p
 	if (input.markdown !== undefined) {
 		const parsedIncoming = parseSkillMd(input.markdown);
 		const body = parsedIncoming.body || input.markdown;
-		const effectiveDescription = input.description !== undefined ? description : description || parsedIncoming.description;
+		const effectiveDescription = input.description !== undefined ? description : parsedIncoming.description || description;
 		description = effectiveDescription;
 		const markdown = buildSkillMd(name, effectiveDescription, body);
 		writeFileSync(skillPath, markdown, "utf-8");
