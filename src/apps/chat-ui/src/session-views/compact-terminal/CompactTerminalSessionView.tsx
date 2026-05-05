@@ -9,7 +9,7 @@ import { TerminalDetails } from "./TerminalDetails";
 import { TerminalLine } from "./TerminalLine";
 import { TerminalStatusCard } from "./TerminalStatusCard";
 import { TerminalThinkingCard } from "./TerminalThinkingCard";
-import { buildCompactTerminalRows } from "./terminalRows";
+import { buildCompactTerminalRows, type CompactTerminalLine } from "./terminalRows";
 
 export function CompactTerminalSessionView({
 	traceView,
@@ -123,7 +123,7 @@ export function CompactTerminalSessionView({
 						itemContent={(_, row) => {
 							const expanded = expandedRows.has(row.id);
 							const collapseToolCallPreview = !expanded && isToolCallLikeRow(row);
-							const visibleLines = collapseToolCallPreview ? row.lines.slice(0, 1) : row.lines;
+							const visibleLines = collapseToolCallPreview ? collapsedToolCallPreviewLines(row) : row.lines;
 							const toggleExpanded = () => {
 								if (!row.expandable) return;
 								setExpandedRows((current) => {
@@ -189,7 +189,7 @@ export function CompactTerminalSessionView({
 													</div>
 												) : row.kind === "reasoning" && row.markdown ? (
 													<>
-														{visibleLines.map((line, index) => <TerminalLine key={`${row.id}:${index}`} line={line} status={row.status} clampLines={collapseToolCallPreview ? 5 : undefined} />)}
+														{visibleLines.map((line, index) => <TerminalLine key={`${row.id}:${index}`} line={line} status={row.status} clampLines={collapseToolCallPreview && index === 0 ? 5 : undefined} />)}
 														<div className="ml-[1.9rem] min-w-0">
 															<div className="compact-terminal-markdown compact-terminal-reasoning">
 																<MarkdownRenderer>{row.markdown}</MarkdownRenderer>
@@ -197,7 +197,7 @@ export function CompactTerminalSessionView({
 														</div>
 													</>
 												) : (
-													visibleLines.map((line, index) => <TerminalLine key={`${row.id}:${index}`} line={line} status={row.status} clampLines={collapseToolCallPreview ? 5 : undefined} />)
+													visibleLines.map((line, index) => <TerminalLine key={`${row.id}:${index}`} line={line} status={row.status} clampLines={collapseToolCallPreview && index === 0 ? 5 : undefined} />)
 												)}
 											</div>
 											<div className="flex shrink-0 items-start gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
@@ -246,6 +246,11 @@ export function CompactTerminalSessionView({
 			)}
 		</section>
 	);
+}
+
+function collapsedToolCallPreviewLines(row: { kind: string; lines: CompactTerminalLine[] }) {
+	if (row.kind === "tool.group.exploring") return row.lines.slice(0, 1);
+	return row.lines;
 }
 
 function isToolCallLikeRow(row: { kind: string; expandable?: boolean }) {

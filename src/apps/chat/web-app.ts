@@ -1684,13 +1684,31 @@ function responseBuiltChatIndex(): Response | undefined {
 
 function responseBuiltChatAsset(request: Request, pathname: string): Response | undefined {
 	if (!pathname.startsWith(`${CHAT_WEB_MOUNT_PATH}/assets/`)) return undefined;
+	return responseBuiltChatStaticFile(request, pathname, "public, max-age=31536000, immutable");
+}
+
+function responseBuiltChatPublicFile(request: Request, pathname: string): Response | undefined {
+	const publicFilePaths = new Set([
+		`${CHAT_WEB_MOUNT_PATH}/manifest.webmanifest`,
+		`${CHAT_WEB_MOUNT_PATH}/sw.js`,
+		`${CHAT_WEB_MOUNT_PATH}/icons/pibo-icon-192.png`,
+		`${CHAT_WEB_MOUNT_PATH}/icons/pibo-icon-512.png`,
+	]);
+	if (!publicFilePaths.has(pathname)) return undefined;
+	const cacheControl = pathname.endsWith("/sw.js") || pathname.endsWith("/manifest.webmanifest")
+		? "no-cache"
+		: "public, max-age=31536000, immutable";
+	return responseBuiltChatStaticFile(request, pathname, cacheControl);
+}
+
+function responseBuiltChatStaticFile(request: Request, pathname: string, cacheControl: string): Response | undefined {
 	const relativePath = pathname.slice(`${CHAT_WEB_MOUNT_PATH}/`.length);
 	const filePath = resolve(CHAT_UI_DIST_DIR, relativePath);
 	if (!filePath.startsWith(CHAT_UI_DIST_DIR) || !existsSync(filePath)) return undefined;
 	const body = readFileSync(filePath);
 	const headers: Record<string, string> = {
 		"content-type": contentTypeFor(filePath),
-		"cache-control": "public, max-age=31536000, immutable",
+		"cache-control": cacheControl,
 	};
 	const encoding = preferredAssetEncoding(request.headers.get("accept-encoding"), filePath);
 	if (!encoding) return new Response(body, { headers });
@@ -1701,6 +1719,9 @@ function responseBuiltChatAsset(request: Request, pathname: string): Response | 
 
 function isChatAppPath(pathname: string): boolean {
 	if (pathname.startsWith(`${CHAT_WEB_MOUNT_PATH}/assets/`)) return false;
+	if (pathname === `${CHAT_WEB_MOUNT_PATH}/manifest.webmanifest`) return false;
+	if (pathname === `${CHAT_WEB_MOUNT_PATH}/sw.js`) return false;
+	if (pathname.startsWith(`${CHAT_WEB_MOUNT_PATH}/icons/`)) return false;
 	return pathname === CHAT_WEB_MOUNT_PATH || pathname.startsWith(`${CHAT_WEB_MOUNT_PATH}/`);
 }
 
@@ -1714,6 +1735,10 @@ function contentTypeFor(path: string): string {
 			return "image/svg+xml";
 		case ".png":
 			return "image/png";
+		case ".webmanifest":
+			return "application/manifest+json; charset=utf-8";
+		case ".json":
+			return "application/json; charset=utf-8";
 		default:
 			return "application/octet-stream";
 	}
@@ -1745,7 +1770,12 @@ function createChatHtml(): string {
 <html lang="de">
 <head>
 	<meta charset="utf-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+	<meta name="theme-color" content="#101d22">
+	<meta name="apple-mobile-web-app-capable" content="yes">
+	<meta name="apple-mobile-web-app-title" content="Pibo Chat">
+	<link rel="manifest" href="/apps/chat/manifest.webmanifest">
+	<link rel="apple-touch-icon" href="/apps/chat/icons/pibo-icon-192.png">
 	<title>Pibo Web Chat</title>
 	<style>
 		:root { color-scheme: dark; font-family: "Public Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #101d22; color: #d8e3e7; }
@@ -2620,6 +2650,8 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 
 			const builtAsset = responseBuiltChatAsset(request, url.pathname);
 			if (builtAsset) return builtAsset;
+			const builtPublicFile = responseBuiltChatPublicFile(request, url.pathname);
+			if (builtPublicFile) return builtPublicFile;
 
 			if (isChatAppPath(url.pathname) && request.method === "GET") {
 				return responseBuiltChatIndex() ?? responseHtml(createChatHtml());

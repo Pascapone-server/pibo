@@ -79,6 +79,8 @@ type RowCandidate = {
 	exploring?: CompactTerminalDetailItem;
 };
 
+const TOOL_OUTPUT_PREVIEW_LINES = 5;
+
 export function buildCompactTerminalRows(
 	traceView: PiboSessionTraceView | null,
 	options: BuildTerminalRowsOptions,
@@ -213,7 +215,7 @@ function createToolRowCandidate(node: PiboTraceNode, turnId?: string): RowCandid
 		const row = createCommandToolRow(node, command);
 		return { row, turnId, exploring: undefined };
 	}
-	const preview = previewLines(node.error ?? node.output, 4, node.error ? "red" : "dim");
+	const preview = previewLines(node.error ?? node.output, TOOL_OUTPUT_PREVIEW_LINES, node.error ? "red" : "dim");
 	const row: CompactTerminalRow = {
 		id: node.id,
 		kind: "tool.call",
@@ -240,7 +242,7 @@ function createToolRowCandidate(node: PiboTraceNode, turnId?: string): RowCandid
 }
 
 function createToolResultRow(node: PiboTraceNode): CompactTerminalRow {
-	const preview = previewLines(node.error ?? node.output, 4, node.error ? "red" : "dim");
+	const preview = previewLines(node.error ?? node.output, TOOL_OUTPUT_PREVIEW_LINES, node.error ? "red" : "dim");
 	return {
 		id: node.id,
 		kind: "tool.call",
@@ -287,7 +289,7 @@ function createDelegationRow(node: PiboTraceNode): CompactTerminalRow {
 }
 
 function createAsyncAgentRow(node: PiboTraceNode): CompactTerminalRow {
-	const preview = previewLines(node.error ?? node.output, 4, node.error ? "red" : "dim");
+	const preview = previewLines(node.error ?? node.output, TOOL_OUTPUT_PREVIEW_LINES, node.error ? "red" : "dim");
 	return {
 		id: node.id,
 		kind: "agent.async",
@@ -309,7 +311,7 @@ function createAsyncAgentRow(node: PiboTraceNode): CompactTerminalRow {
 }
 
 function createYieldedRunRow(node: PiboTraceNode): CompactTerminalRow {
-	const preview = previewLines(node.output, 4);
+	const preview = previewLines(node.output, TOOL_OUTPUT_PREVIEW_LINES);
 	return {
 		id: node.id,
 		kind: "yielded.run",
@@ -339,7 +341,7 @@ function createExecutionCommandRow(node: PiboTraceNode): CompactTerminalRow {
 		return createThinkingToolRow(node);
 	}
 	const command = shellCommandValue(node.output) ?? shellCommandValue(node.input) ?? node.title;
-	const preview = previewLines(node.error ?? node.output, 4, node.error ? "red" : "dim", 180);
+	const preview = previewLines(node.error ?? node.output, TOOL_OUTPUT_PREVIEW_LINES, node.error ? "red" : "dim", 180);
 	return {
 		id: node.id,
 		kind: "execution.command",
@@ -388,7 +390,7 @@ function createThinkingToolRow(node: PiboTraceNode): CompactTerminalRow {
 }
 
 function createCommandToolRow(node: PiboTraceNode, command: string): CompactTerminalRow {
-	const preview = previewLines(node.error ?? node.output, 4, node.error ? "red" : "dim", 180);
+	const preview = previewLines(node.error ?? node.output, TOOL_OUTPUT_PREVIEW_LINES, node.error ? "red" : "dim", 180);
 	return {
 		id: node.id,
 		kind: "execution.command",

@@ -1,0 +1,25 @@
+{
+  "name": "Pibo Web Chat",
+  "short_name": "Pibo Chat",
+  "description": "Pibo Chat Web App als installierbare Progressive Web App.",
+  "start_url": "/apps/chat/",
+  "scope": "/apps/chat/",
+  "display": "standalone",
+  "background_color": "#101d22",
+  "theme_color": "#101d22",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/apps/chat/icons/pibo-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/apps/chat/icons/pibo-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
