@@ -37,6 +37,7 @@ function chatRouteFromLocation(pathname: string, search: Record<string, unknown>
 	if (parts[0] === "settings") {
 		if (parts[1] === "pi-packages") return { area: "settings", panel: "pi-packages" };
 		if (parts[1] === "skills") return { area: "settings", panel: "skills" };
+		if (parts[1] === "providers") return { area: "settings", panel: "providers" };
 		return { area: "settings", panel: "general" };
 	}
 	if (parts[0] === "rooms" && parts[1] && parts[2] === "sessions" && parts[3]) {
@@ -86,8 +87,12 @@ const settingsSkillsRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: "settings/skills",
 });
+const settingsProvidersRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: "settings/providers",
+});
 const router = createRouter({
-	routeTree: rootRoute.addChildren([indexRoute, sessionRoute, roomRoute, roomSessionRoute, agentsRoute, contextRoute, settingsRoute, settingsPiPackagesRoute, settingsSkillsRoute]),
+	routeTree: rootRoute.addChildren([indexRoute, sessionRoute, roomRoute, roomSessionRoute, agentsRoute, contextRoute, settingsRoute, settingsPiPackagesRoute, settingsSkillsRoute, settingsProvidersRoute]),
 	basepath: "/apps/chat",
 });
 

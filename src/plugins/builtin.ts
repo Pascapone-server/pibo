@@ -308,7 +308,7 @@ export const piboCorePlugin = definePiboPlugin({
 		api.registerGatewayAction({
 			name: "login.start",
 			description: "Start an OAuth login flow for a provider. Returns a URL to open in a browser.",
-			slashCommands: ["login-start"],
+			slashCommands: [],
 			async execute(_context, event) {
 				const params = requireLoginStartParams(event);
 				return await startLogin(params.provider);
@@ -317,7 +317,7 @@ export const piboCorePlugin = definePiboPlugin({
 		api.registerGatewayAction({
 			name: "login.complete",
 			description: "Complete an OAuth login flow with the authorization code from the provider callback.",
-			slashCommands: ["login-complete"],
+			slashCommands: [],
 			async execute(_context, event) {
 				const params = requireLoginCompleteParams(event);
 				return await completeLogin(params.provider, params.code, params.state);
@@ -326,7 +326,7 @@ export const piboCorePlugin = definePiboPlugin({
 		api.registerGatewayAction({
 			name: "login.apikey",
 			description: "Set an API key directly for a provider.",
-			slashCommands: ["login-apikey"],
+			slashCommands: [],
 			execute(_context, event) {
 				const params = requireLoginApiKeyParams(event);
 				return setApiKey(params.provider, params.apiKey);
@@ -335,7 +335,7 @@ export const piboCorePlugin = definePiboPlugin({
 		api.registerGatewayAction({
 			name: "login.status",
 			description: "Check the authentication status for providers.",
-			slashCommands: ["login-status"],
+			slashCommands: [],
 			execute(_context, event) {
 				const params = getObjectParams(event);
 				const provider = typeof params?.provider === "string" ? params.provider : undefined;
@@ -345,7 +345,7 @@ export const piboCorePlugin = definePiboPlugin({
 		api.registerGatewayAction({
 			name: "logout",
 			description: "Remove stored credentials for a provider.",
-			slashCommands: ["logout"],
+			slashCommands: [],
 			execute(_context, event) {
 				const params = requireLogoutParams(event);
 				return removeLogin(params.provider);
