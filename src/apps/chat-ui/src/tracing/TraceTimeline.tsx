@@ -238,6 +238,7 @@ export function TraceTimeline({
 						ref={stickyView.virtuosoRef}
 						data={visibleRows}
 						initialTopMostItemIndex={INITIAL_BOTTOM_ITEM}
+						increaseViewportBy={{ top: 800, bottom: 800 }}
 						className="min-h-0 h-full min-w-0 overflow-x-hidden"
 						style={timelineContentStyle}
 						computeItemKey={(_, row) => row.id}

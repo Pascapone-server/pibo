@@ -116,6 +116,7 @@ export function CompactTerminalSessionView({
 						ref={stickyView.virtuosoRef}
 						data={rows}
 						initialTopMostItemIndex={INITIAL_BOTTOM_ITEM}
+						increaseViewportBy={{ top: 800, bottom: 800 }}
 						className="min-h-0 h-full font-mono text-[12px] leading-[1.45]"
 						computeItemKey={(_, row) => row.id}
 						scrollerRef={stickyView.scrollerRef}
