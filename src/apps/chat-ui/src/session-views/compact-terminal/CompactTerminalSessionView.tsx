@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { ChevronDown, ChevronRight, GitBranch } from "lucide-react";
-import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
+import { Virtuoso } from "react-virtuoso";
+import { useStickyVirtuoso } from "../../components/useStickyVirtuoso";
 import { MarkdownRenderer } from "../../tracing/MarkdownRenderer";
 import type { ChatSessionViewProps } from "../types";
 import { TerminalDetails } from "./TerminalDetails";
@@ -26,6 +27,7 @@ export function CompactTerminalSessionView({
 	sessionAgentProfile,
 	sessionActiveModel,
 	selectedSessionStatus,
+	selectedSessionSignal,
 	sessionBreadcrumbs,
 	originSession,
 	derivedSessions,
@@ -41,37 +43,24 @@ export function CompactTerminalSessionView({
 		() => buildCompactTerminalRows(traceView, { showThinking }),
 		[showThinking, traceView],
 	);
-	const virtuosoRef = useRef<VirtuosoHandle>(null);
-	const bottomLockedRef = useRef(true);
-	const [showJumpToBottom, setShowJumpToBottom] = useState(false);
 	const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 	const runningCount = rows.filter((row) => row.status === "running").length;
+	const signalActiveDescendantCount = (selectedSessionSignal?.activeChildren.length ?? 0) + (selectedSessionSignal?.activeRuns.length ?? 0);
+	const workingPhase = selectedSessionSignal?.phase;
 	const errorCount = rows.filter((row) => row.status === "error").length;
-	const isStreaming = selectedSessionStatus === "running" || runningCount > 0 || selectedTrace?.status === "UNSET";
+	const signalWorking = selectedSessionSignal?.isTreeActive ?? false;
+	const isStreaming = signalWorking || selectedSessionStatus === "running" || runningCount > 0 || selectedTrace?.status === "UNSET";
+
+	const stickyView = useStickyVirtuoso({
+		itemCount: rows.length,
+		resetKey: traceView?.piboSessionId,
+		contentKey: rows,
+		atBottomThreshold: SHOW_LATEST_THRESHOLD_PX,
+	});
 
 	useEffect(() => {
 		setExpandedRows((current) => retainExistingExpandedRows(current, rows, expandThinking));
 	}, [expandThinking, rows]);
-
-	const setAtBottom = useCallback((atBottom: boolean) => {
-		bottomLockedRef.current = atBottom;
-		setShowJumpToBottom(!atBottom);
-	}, []);
-
-	const scrollToBottom = useCallback((behavior: "auto" | "smooth" = "auto") => {
-		const lastIndex = rows.length - 1;
-		if (lastIndex < 0) return;
-		bottomLockedRef.current = true;
-		setShowJumpToBottom(false);
-		virtuosoRef.current?.scrollToIndex({ index: lastIndex, align: "end", behavior });
-	}, [rows.length]);
-
-	const followOutput = useCallback(() => (bottomLockedRef.current ? "auto" : false), []);
-
-	useEffect(() => {
-		bottomLockedRef.current = true;
-		setShowJumpToBottom(false);
-	}, [traceView?.piboSessionId]);
 
 	const toggleRow = (row: CompactTerminalRow) => {
 		if (!row.expandable) return;
@@ -108,6 +97,8 @@ export function CompactTerminalSessionView({
 				isLoading={isLoading}
 				runningCount={runningCount}
 				errorCount={errorCount}
+				workingPhase={workingPhase}
+				activeDescendantCount={signalActiveDescendantCount}
 				sessionAgentProfile={sessionAgentProfile}
 				sessionActiveModel={sessionActiveModel}
 				sessionBreadcrumbs={sessionBreadcrumbs}
@@ -127,16 +118,18 @@ export function CompactTerminalSessionView({
 				) : rows.length ? (
 					<Virtuoso
 						key={traceView.piboSessionId}
-						ref={virtuosoRef}
+						ref={stickyView.virtuosoRef}
 						data={rows}
 						initialTopMostItemIndex={INITIAL_BOTTOM_ITEM}
 						increaseViewportBy={VIRTUOSO_VIEWPORT}
 						defaultItemHeight={DEFAULT_ROW_HEIGHT_PX}
 						className="min-h-0 h-full overflow-x-hidden font-mono text-[12px] leading-[1.45]"
 						computeItemKey={(_, row) => row.id}
-						atBottomStateChange={setAtBottom}
-						atBottomThreshold={SHOW_LATEST_THRESHOLD_PX}
-						followOutput={followOutput}
+						scrollerRef={stickyView.scrollerRef}
+						atBottomStateChange={stickyView.atBottomStateChange}
+						atBottomThreshold={stickyView.atBottomThreshold}
+						followOutput={stickyView.followOutput}
+						totalListHeightChanged={stickyView.totalListHeightChanged}
 						alignToBottom
 						components={virtuosoComponents}
 						itemContent={renderRow}
@@ -152,10 +145,10 @@ export function CompactTerminalSessionView({
 				)}
 			</div>
 
-			{showJumpToBottom ? (
+			{!stickyView.isSticky ? (
 				<button
 					type="button"
-					onClick={() => scrollToBottom("auto")}
+					onClick={() => stickyView.stickToBottom("auto")}
 					title="Scroll to latest"
 					aria-label="Scroll to latest"
 					className="absolute right-4 bottom-4 z-30 inline-flex h-9 w-9 items-center justify-center rounded-sm border border-[#38bdf8] bg-[#111111]/95 text-[#38bdf8] shadow-lg shadow-black/30 hover:bg-[#161616]"
@@ -171,6 +164,8 @@ function TerminalHeader({
 	isLoading,
 	runningCount,
 	errorCount,
+	workingPhase,
+	activeDescendantCount,
 	sessionAgentProfile,
 	sessionActiveModel,
 	sessionBreadcrumbs,
@@ -181,6 +176,8 @@ function TerminalHeader({
 	isLoading: boolean;
 	runningCount: number;
 	errorCount: number;
+	workingPhase?: string;
+	activeDescendantCount: number;
 	sessionAgentProfile?: string;
 	sessionActiveModel?: string;
 	sessionBreadcrumbs: ChatSessionViewProps["sessionBreadcrumbs"];
@@ -192,7 +189,9 @@ function TerminalHeader({
 		<div className="border-b border-[#2a2a2a] bg-[#111111] px-4 py-2 text-[11px]">
 			<div className="flex flex-wrap items-center gap-2">
 				{isLoading ? <TerminalBadge tone="cyan">Loading</TerminalBadge> : null}
+				{workingPhase ? <TerminalBadge tone="cyan">{workingPhase}</TerminalBadge> : null}
 				{runningCount > 0 ? <TerminalBadge tone="cyan">{runningCount} running</TerminalBadge> : null}
+				{activeDescendantCount > 0 ? <TerminalBadge tone="cyan">{activeDescendantCount} active descendants/runs</TerminalBadge> : null}
 				{errorCount > 0 ? <TerminalBadge tone="red">{errorCount} errors</TerminalBadge> : null}
 				{sessionAgentProfile ? <TerminalBadge tone="neutral">{sessionAgentProfile}</TerminalBadge> : null}
 				{sessionActiveModel ? <TerminalBadge tone="purple">Model {sessionActiveModel}</TerminalBadge> : null}
