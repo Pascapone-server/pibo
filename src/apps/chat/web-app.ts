@@ -1470,11 +1470,6 @@ function markSessionsRead(state: ChatWebAppState, sessions: PiboSession[], princ
 	}
 }
 
-function markRoomRead(state: ChatWebAppState, roomId: string, principalId: string): void {
-	const latestStreamId = state.eventLog.getLatestStreamId({ roomId });
-	if (latestStreamId !== undefined) state.roomStore.updateReadCursor(roomId, principalId, latestStreamId);
-}
-
 function buildSessionUnreadCounts(
 	state: ChatWebAppState,
 	sessions: PiboSession[],
@@ -1493,43 +1488,19 @@ function buildSessionUnreadCounts(
 	return counts;
 }
 
-function runtimeStatusesForSessions(
-	context: PiboWebAppContext,
-	sessions: readonly PiboSession[],
-): Map<string, NonNullable<ReturnType<NonNullable<PiboWebAppContext["channelContext"]["getSessionRuntimeStatus"]>>>> {
-	const output = new Map<string, NonNullable<ReturnType<NonNullable<PiboWebAppContext["channelContext"]["getSessionRuntimeStatus"]>>>>();
-	const runtimeStatuses = context.channelContext.listSessionRuntimeStatuses?.();
-	if (runtimeStatuses) {
-		for (const status of runtimeStatuses) output.set(status.piboSessionId, status);
-		return output;
-	}
-	for (const session of sessions) {
-		const status = context.channelContext.getSessionRuntimeStatus?.(session.id);
-		if (status) output.set(session.id, status);
-	}
-	return output;
-}
-
 function buildRoomUnreadCounts(
-	state: ChatWebAppState,
-	rooms: PiboRoomNode[],
-	principalId: string,
+	sessions: readonly PiboSession[],
+	sessionUnreadCounts: ReadonlyMap<string, number>,
+	defaultRoomId: string,
 ): Map<string, number> {
 	const counts = new Map<string, number>();
-	for (const room of flattenRoomNodes(rooms)) {
-		const lastReadStreamId = state.roomStore.getMember(room.id, principalId)?.lastReadStreamId ?? 0;
-		const unreadCount = state.eventLog.countUnreadMessages({
-			roomId: room.id,
-			principalId,
-			afterStreamId: lastReadStreamId,
-		});
-		if (unreadCount > 0) counts.set(room.id, unreadCount);
+	for (const session of sessions) {
+		const unreadCount = sessionUnreadCounts.get(session.id) ?? 0;
+		if (unreadCount <= 0) continue;
+		const roomId = chatRoomIdFromMetadata(session.metadata) ?? defaultRoomId;
+		counts.set(roomId, (counts.get(roomId) ?? 0) + unreadCount);
 	}
 	return counts;
-}
-
-function flattenRoomNodes(rooms: PiboRoomNode[]): PiboRoomNode[] {
-	return rooms.flatMap((room) => [room, ...flattenRoomNodes(room.children ?? [])]);
 }
 
 function roomsWithUnreadCounts(
@@ -2743,13 +2714,12 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 					selectedRoomId,
 					includeArchived,
 				});
-				state.roomStore.ensureDefaultRoom({
+				const defaultRoom = state.roomStore.ensureDefaultRoom({
 					ownerScope: webSession.ownerScope,
 					principalId,
 				});
 				if (markRead) {
-					markRoomRead(state, selectedRoomId, principalId);
-					markSessionsRead(state, roomSessions, principalId);
+					markSessionsRead(state, [selectedSession], principalId);
 				}
 				indexOwnedSessions(state.readModel, roomSessions);
 				const sessionUnreadCounts = buildSessionUnreadCounts(state, ownedSessions, principalId);
@@ -2758,10 +2728,9 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 					state.readModel.listSessions(),
 					process.cwd(),
 					sessionUnreadCounts,
-					runtimeStatusesForSessions(context, roomSessions),
 				);
 				const roomTree = state.roomStore.listRoomTree(webSession.ownerScope);
-				const roomUnreadCounts = buildRoomUnreadCounts(state, roomTree, principalId);
+				const roomUnreadCounts = buildRoomUnreadCounts(ownedSessions, sessionUnreadCounts, defaultRoom.id);
 				const rooms = roomsWithUnreadCounts(roomTree, roomUnreadCounts);
 				return responseJson({
 					identity: webSession.authSession.identity,
@@ -3089,7 +3058,6 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 						state.readModel.listSessions(),
 						process.cwd(),
 						new Map(),
-						runtimeStatusesForSessions(context, roomSessions),
 					),
 				);
 			}
@@ -3152,7 +3120,6 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 						state.readModel.listSessions(),
 						process.cwd(),
 						new Map(),
-						runtimeStatusesForSessions(context, ownedSessions),
 					),
 				});
 			}

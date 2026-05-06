@@ -188,7 +188,7 @@ export class ChatEventLog {
 		return this.appendEvent({
 			roomId: input.roomId,
 			piboSessionId: event.piboSessionId,
-			eventId: "eventId" in event && event.eventId ? `pibo:${event.piboSessionId}:${event.eventId}:${event.type}` : undefined,
+			eventId: "eventId" in event && event.eventId ? `pibo:${event.piboSessionId}:${event.eventId}` : undefined,
 			eventType: event.type,
 			actorType: actorTypeForOutputEvent(event),
 			actorId: input.actorId,

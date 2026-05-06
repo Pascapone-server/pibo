@@ -49,28 +49,20 @@ test("chat event log appends monotone events and queries by cursor and scope", (
 	}
 });
 
-test("chat event log counts unread visible messages after session cursors", () => {
+test("chat event log counts only completed assistant messages as unread", () => {
 	const log = new ChatEventLog(":memory:");
 	try {
-		log.appendEvent({
-			roomId: "room_1",
-			piboSessionId: "ps_1",
-			eventType: "user.message.accepted",
-			actorType: "user",
-			actorId: "user:1",
-			retentionClass: "chat_message",
-			payload: { text: "own message" },
-		});
-		const assistant = log.appendEvent({
-			roomId: "room_1",
-			piboSessionId: "ps_1",
-			eventType: "assistant_message",
-			actorType: "assistant",
-			actorId: "user:1",
-			retentionClass: "chat_message",
-			payload: { type: "assistant_message", piboSessionId: "ps_1", text: "answer" },
-		});
+		log.appendOutputEvent({ type: "assistant_message", piboSessionId: "ps_1", eventId: "turn-1", text: "partial" }, { roomId: "room_1", actorId: "assistant" });
+		assert.equal(
+			log.countUnreadMessages({
+				piboSessionId: "ps_1",
+				principalId: "user:1",
+				afterStreamId: log.getSessionReadCursor("ps_1", "user:1") ?? 0,
+			}),
+			0,
+		);
 
+		log.appendOutputEvent({ type: "message_finished", piboSessionId: "ps_1", eventId: "turn-1" }, { roomId: "room_1", actorId: "assistant" });
 		assert.equal(
 			log.countUnreadMessages({
 				piboSessionId: "ps_1",
@@ -80,7 +72,9 @@ test("chat event log counts unread visible messages after session cursors", () =
 			1,
 		);
 
-		log.markSessionRead("ps_1", "user:1", assistant.streamId);
+		const latest = log.getLatestStreamId({ piboSessionId: "ps_1" });
+		assert.ok(latest);
+		log.markSessionRead("ps_1", "user:1", latest);
 		assert.equal(
 			log.countUnreadMessages({
 				piboSessionId: "ps_1",

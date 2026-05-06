@@ -338,6 +338,32 @@ test("session nodes order by navigation activity instead of transcript metadata"
 	}
 });
 
+test("session nodes use chat turn status instead of raw runtime processing status", async () => {
+	const readModel = new ChatWebReadModel(":memory:");
+	const cwd = mkdtempSync(join(tmpdir(), "pibo-chat-status-"));
+	try {
+		const session = createTestSession();
+		readModel.upsertSession(session);
+		readModel.recordEvent({ type: "message_started", piboSessionId: session.id, eventId: "turn-1", text: "hello" }, session);
+		readModel.recordEvent({ type: "message_finished", piboSessionId: session.id, eventId: "turn-1" }, session);
+
+		const nodes = await buildSessionNodes([session], readModel.listSessions(), cwd, new Map(), new Map([[session.id, {
+			piboSessionId: session.id,
+			queuedMessages: 0,
+			processing: true,
+			streaming: true,
+			activeTools: [],
+			cwd,
+			disposed: false,
+		}]]));
+
+		assert.equal(nodes[0].status, "idle");
+	} finally {
+		readModel.close();
+		rmSync(cwd, { recursive: true, force: true });
+	}
+});
+
 test("chat read model assigns stable per-session event sequence for durable events", () => {
 	const readModel = new ChatWebReadModel(":memory:");
 	const session = createTestSession();

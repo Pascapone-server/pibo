@@ -694,6 +694,11 @@ test("chat web app exposes unread room and session counts", async () => {
 			eventId: "turn-1",
 			text: "new answer",
 		});
+		emitOutput({
+			type: "message_finished",
+			piboSessionId: sessionPayload.session.id,
+			eventId: "turn-1",
+		});
 
 		const unreadResponse = await fetch(`${baseURL}/api/chat/bootstrap?markRead=false`, {
 			headers: { "x-test-user": "user-1" },
@@ -718,7 +723,7 @@ test("chat web app exposes unread room and session counts", async () => {
 	}
 });
 
-test("chat web app marks unread child sessions read when opening the room", async () => {
+test("chat web app marks only the selected session read during bootstrap", async () => {
 	const { channel, baseURL, emitOutput, sessions } = await startWebHostChannel({
 		auth: createFakeAuthService(),
 	});
@@ -747,10 +752,20 @@ test("chat web app marks unread child sessions read when opening the room", asyn
 			text: "child answer one",
 		});
 		emitOutput({
+			type: "message_finished",
+			piboSessionId: child.id,
+			eventId: "child-turn-1",
+		});
+		emitOutput({
 			type: "assistant_message",
 			piboSessionId: child.id,
 			eventId: "child-turn-2",
 			text: "child answer two",
+		});
+		emitOutput({
+			type: "message_finished",
+			piboSessionId: child.id,
+			eventId: "child-turn-2",
 		});
 
 		const unreadResponse = await fetch(
@@ -772,8 +787,8 @@ test("chat web app marks unread child sessions read when opening the room", asyn
 		);
 		assert.equal(readResponse.status, 200);
 		const readData = await readResponse.json();
-		assert.equal(readData.rooms[0].unreadCount, undefined);
-		assert.equal(readData.sessions[0].children[0].unreadCount, undefined);
+		assert.equal(readData.rooms[0].unreadCount, 2);
+		assert.equal(readData.sessions[0].children[0].unreadCount, 2);
 	} finally {
 		await channel.stop?.();
 	}
