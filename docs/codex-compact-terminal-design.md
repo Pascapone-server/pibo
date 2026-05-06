@@ -375,6 +375,20 @@ status/footer
 - Provide a small latest/jump affordance only when needed.
 - Keep the composer fixed while transcript scrolls.
 
+### Terminal Virtualization
+
+The compact terminal uses `react-virtuoso` for long transcripts. Do not replace it with a custom virtualizer unless there is a measured defect that Virtuoso cannot handle.
+
+Current tuning:
+
+- Use stable row ids through `computeItemKey`.
+- Start new or loaded sessions at the latest row with `initialTopMostItemIndex` aligned to the end.
+- Use generous top and bottom overscan so rapid scrolling does not expose blank rows.
+- Set `defaultItemHeight` to `84px`. This is intentionally higher than the smallest row. A low estimate makes Virtuoso correct total height while scrolling, which feels like broken virtualization.
+- Let Virtuoso keep the rolling DOM window in both directions. Browser checks should verify mounted terminal rows stay bounded while scrolling from bottom to top and back down.
+
+The scroll surface should remain visually stable. If the scrollbar jumps, first check row-height estimates, item keys, and accidental trace truncation before changing the rendering model.
+
 ### Responsive Behavior
 
 - On narrow screens, preserve the transcript first and hide secondary inspectors.
