@@ -274,7 +274,11 @@ Built Chat Web assets under `/apps/chat/assets/*` are served as immutable static
 
 When the web host sits behind a local reverse proxy, it reconstructs the public request origin from `X-Forwarded-Host` and `X-Forwarded-Proto` only for loopback proxy connections. This lets nginx map `http://4788.<lan-ip>.sslip.io` to `127.0.0.1:4788` without breaking chat mutation CSRF checks. Direct non-loopback clients cannot spoof those forwarded headers.
 
-### Chat Web Live Stream
+### Chat Web Trace And Live Stream
+
+Detailed trace and streaming documentation lives in `docs/chat-web-trace-streaming-architecture.md`.
+
+Chat Web renders the selected session from three layers: Pi transcript JSONL for completed conversation history, Chat Web event stores for durable room/session events and trace metadata, and a frontend live overlay for SSE frames that have not yet been absorbed by a refreshed server trace. The server-built `/api/chat/trace` response is the canonical render base. Raw events are a bounded debug/live tail and must not replace the complete trace nodes.
 
 The Chat Web App exposes live updates through `GET /api/chat/events?piboSessionId=...` as server-sent events. This stream is intentionally a transport adapter over normalized `PiboOutputEvent` values, not a new source of truth.
 
