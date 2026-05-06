@@ -65,6 +65,21 @@ export { createPiboRuntime, inspectPiboProfile, runPiboTui } from "./core/runtim
 export type { PiboProfileInspection, PiboRuntimeOptions } from "./core/runtime.js";
 export { PiboSessionRouter } from "./core/session-router.js";
 export { PiboReliabilityStore, createDefaultPiboReliabilityStore } from "./reliability/store.js";
+export { InMemoryPiboSignalRegistry, createPiboSignalRegistry } from "./signals/registry.js";
+export type {
+	PiboSessionSignalSnapshot,
+	PiboSignalError,
+	PiboSignalInput,
+	PiboSignalKind,
+	PiboSignalListener,
+	PiboSignalMutation,
+	PiboSignalNode,
+	PiboSignalPatch,
+	PiboSignalProducer,
+	PiboSignalRegistry,
+	PiboSignalSnapshot,
+	PiboSignalStatus,
+} from "./signals/types.js";
 export type {
 	PiboDeadJobListInput,
 	PiboDeadJobReplayInput,

@@ -322,6 +322,7 @@ export class RoutedSession {
 		private readonly forwardPiEvents: boolean,
 		private readonly onSessionOperation?: PiboSessionOperationListener,
 		private readonly onKillChildren?: (piboSessionId: string, options?: { includeRuns?: boolean }) => Promise<{ killed: string[]; cancelledRuns: string[] }>,
+		private readonly onStateChange?: (state: { processing: boolean; queuedMessages: number; disposed: boolean }) => void,
 	) {
 		this.bindRuntimeSession();
 		this.patchAgentContinue();
@@ -425,6 +426,7 @@ export class RoutedSession {
 			source: event.source,
 		};
 		this.emit(output);
+		this.onStateChange?.({ processing: this.processing, queuedMessages: this.queue.length, disposed: this.disposed });
 		void this.drain();
 		return output;
 	}
@@ -446,12 +448,14 @@ export class RoutedSession {
 	}
 
 	getStatus(): PiboSessionStatus {
+		const enabledTools = this.runtime.session.getActiveToolNames();
 		return {
 			piboSessionId: this.piboSessionId,
 			queuedMessages: this.queue.length,
 			processing: this.processing,
 			streaming: this.runtime.session.isStreaming,
-			activeTools: this.runtime.session.getActiveToolNames(),
+			activeTools: enabledTools,
+			enabledTools,
 			cwd: this.runtime.cwd,
 			disposed: this.disposed,
 		};
@@ -594,6 +598,7 @@ export class RoutedSession {
 		if (this.disposed) return;
 
 		this.queue.length = 0;
+		this.onStateChange?.({ processing: this.processing, queuedMessages: this.queue.length, disposed: true });
 		this.unsubscribe?.();
 		this.unsubscribe = undefined;
 		this.disposed = true;
@@ -602,6 +607,7 @@ export class RoutedSession {
 
 	async kill(): Promise<string> {
 		this.queue.length = 0;
+		this.onStateChange?.({ processing: this.processing, queuedMessages: this.queue.length, disposed: this.disposed });
 		await this.runtime.session.abort();
 		return this.piboSessionId;
 	}
@@ -612,6 +618,7 @@ export class RoutedSession {
 		const queuedIndex = this.queue.findIndex((event) => event.id === eventId);
 		if (queuedIndex >= 0) {
 			this.queue.splice(queuedIndex, 1);
+			this.onStateChange?.({ processing: this.processing, queuedMessages: this.queue.length, disposed: this.disposed });
 			return true;
 		}
 
@@ -627,9 +634,11 @@ export class RoutedSession {
 		if (this.processing || this.disposed) return;
 
 		this.processing = true;
+		this.onStateChange?.({ processing: this.processing, queuedMessages: this.queue.length, disposed: this.disposed });
 		try {
 			while (this.queue.length > 0 && !this.disposed) {
 				const event = this.queue.shift()!;
+				this.onStateChange?.({ processing: this.processing, queuedMessages: this.queue.length, disposed: this.disposed });
 					this.emit({
 						type: "message_started",
 						piboSessionId: this.piboSessionId,
@@ -672,6 +681,7 @@ export class RoutedSession {
 			}
 		} finally {
 			this.processing = false;
+			this.onStateChange?.({ processing: this.processing, queuedMessages: this.queue.length, disposed: this.disposed });
 		}
 	}
 
@@ -747,6 +757,7 @@ export class RoutedSession {
 	private clearQueue(): number {
 		const cleared = this.queue.length;
 		this.queue.length = 0;
+		this.onStateChange?.({ processing: this.processing, queuedMessages: this.queue.length, disposed: this.disposed });
 		return cleared;
 	}
 

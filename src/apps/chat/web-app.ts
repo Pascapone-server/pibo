@@ -215,6 +215,13 @@ function writeSseComment(controller: ReadableStreamDefaultController<Uint8Array>
 	controller.enqueue(new TextEncoder().encode(`: ${comment}\n\n`));
 }
 
+function writeJsonSse(controller: ReadableStreamDefaultController<Uint8Array>, event: string, payload: unknown, id?: string): void {
+	const encoder = new TextEncoder();
+	if (id) controller.enqueue(encoder.encode(`id: ${id}\n`));
+	controller.enqueue(encoder.encode(`event: ${event}\n`));
+	controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+}
+
 function requireSameOriginJsonRequest(request: Request): void {
 	const contentType = request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
 	if (contentType !== "application/json") {
@@ -1356,6 +1363,26 @@ function sessionDepth(session: PiboSession | undefined, sessionsById: ReadonlyMa
 		current = sessionsById.get(current.parentId);
 	}
 	return depth;
+}
+
+function requireOwnedSession(context: PiboWebAppContext, webSession: PiboWebSession, piboSessionId: string): PiboSession {
+	const session = context.channelContext.getSession(piboSessionId);
+	if (!session || session.ownerScope !== webSession.ownerScope) {
+		throw new PiboWebHttpError("Session is not available for this user", 404);
+	}
+	return canonicalizeSessionProfile(context, session);
+}
+
+function signalResource(pathname: string): { kind: "session" | "tree"; piboSessionId: string } | undefined {
+	const prefix = `${CHAT_WEB_API_PREFIX}/signals/`;
+	if (!pathname.startsWith(prefix)) return undefined;
+	const [kind, encodedId, extra] = pathname.slice(prefix.length).split("/");
+	if (extra || (kind !== "session" && kind !== "tree") || !encodedId) return undefined;
+	try {
+		return { kind, piboSessionId: decodeURIComponent(encodedId) };
+	} catch {
+		throw new PiboWebHttpError("Invalid session id", 400);
+	}
 }
 
 function resolveRequestedSession(
@@ -2712,6 +2739,44 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 					agentCatalog: await buildAgentCatalog(context, state),
 					capabilities: {
 						actions: context.channelContext.getGatewayActions(),
+					},
+				});
+			}
+
+			const requestedSignal = signalResource(url.pathname);
+			if (requestedSignal && request.method === "GET") {
+				const webSession = await requireSession(request, context);
+				requireOwnedSession(context, webSession, requestedSignal.piboSessionId);
+				const snapshot = requestedSignal.kind === "session"
+					? context.channelContext.snapshotSignalSession?.(requestedSignal.piboSessionId)
+					: context.channelContext.snapshotSignalTree?.(requestedSignal.piboSessionId);
+				if (!snapshot) throw new PiboWebHttpError("Signal registry is not available", 503);
+				return responseJson(snapshot);
+			}
+
+			if (url.pathname === `${CHAT_WEB_API_PREFIX}/signals/events` && request.method === "GET") {
+				const webSession = await requireSession(request, context);
+				const rootPiboSessionId = url.searchParams.get("rootPiboSessionId") ?? url.searchParams.get("piboSessionId");
+				if (!rootPiboSessionId) throw new PiboWebHttpError("rootPiboSessionId is required", 400);
+				requireOwnedSession(context, webSession, rootPiboSessionId);
+				if (!context.channelContext.snapshotSignalTree || !context.channelContext.subscribeSignalTree) {
+					throw new PiboWebHttpError("Signal registry is not available", 503);
+				}
+				let unsubscribe: (() => void) | undefined;
+				const stream = new ReadableStream<Uint8Array>({
+					start: (controller) => {
+						writeJsonSse(controller, "signal_snapshot", context.channelContext.snapshotSignalTree!(rootPiboSessionId));
+						unsubscribe = context.channelContext.subscribeSignalTree!(rootPiboSessionId, (patch) => {
+							writeJsonSse(controller, "signal_patch", patch, String(patch.toVersion));
+						});
+					},
+					cancel: () => unsubscribe?.(),
+				});
+				return new Response(stream, {
+					headers: {
+						"content-type": "text/event-stream; charset=utf-8",
+						"cache-control": "no-store",
+						connection: "keep-alive",
 					},
 				});
 			}

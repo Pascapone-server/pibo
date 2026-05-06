@@ -119,7 +119,9 @@ export type PiboSessionStatus = {
 	queuedMessages: number;
 	processing: boolean;
 	streaming: boolean;
+	/** @deprecated Use enabledTools. This lists configured/available tools, not currently executing tool calls. */
 	activeTools: string[];
+	enabledTools: string[];
 	cwd: string;
 	disposed: boolean;
 };

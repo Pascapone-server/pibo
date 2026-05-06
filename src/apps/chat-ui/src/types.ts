@@ -72,6 +72,77 @@ export type PiboSession = {
 
 export type { PiboSessionTraceView } from "../../../shared/trace-types.js";
 
+export type PiboSignalStatus = string;
+
+export type PiboSignalError = {
+	message: string;
+	code?: string;
+	source?: string;
+	retryable?: boolean;
+};
+
+export type PiboSignalNode = {
+	id: string;
+	kind: string;
+	status: PiboSignalStatus;
+	rootPiboSessionId: string;
+	piboSessionId?: string;
+	parentNodeId?: string;
+	parentPiboSessionId?: string;
+	childPiboSessionId?: string;
+	createdAt: string;
+	startedAt?: string;
+	updatedAt: string;
+	completedAt?: string;
+	error?: PiboSignalError;
+	metadata?: Record<string, unknown>;
+};
+
+export type PiboSessionSignalSnapshot = {
+	piboSessionId: string;
+	piSessionId?: string;
+	parentPiboSessionId?: string;
+	rootPiboSessionId: string;
+	version: number;
+	updatedAt: string;
+	localStatus: PiboSignalStatus;
+	aggregateStatus: PiboSignalStatus;
+	phase?: string;
+	queuedMessages: number;
+	currentMessageId?: string;
+	currentTurnId?: string;
+	isLocalActive: boolean;
+	hasActiveDescendant: boolean;
+	isTreeActive: boolean;
+	isSettled: boolean;
+	hasError: boolean;
+	hasErrorDescendant: boolean;
+	hasBlockedDescendant: boolean;
+	activeToolCalls: Array<Record<string, unknown>>;
+	activeRuns: Array<Record<string, unknown>>;
+	activeChildren: Array<Record<string, unknown>>;
+	errors: PiboSignalError[];
+};
+
+export type PiboSignalSnapshot = {
+	rootPiboSessionId: string;
+	version: number;
+	generatedAt: string;
+	sessions: Record<string, PiboSessionSignalSnapshot>;
+	nodes: Record<string, PiboSignalNode>;
+};
+
+export type PiboSignalPatch = {
+	type?: "signal_patch";
+	rootPiboSessionId: string;
+	fromVersion: number;
+	toVersion: number;
+	generatedAt: string;
+	upserts: PiboSignalNode[];
+	removes: string[];
+	sessionSnapshots: PiboSessionSignalSnapshot[];
+};
+
 export type BootstrapData = {
 	identity: { userId: string; email?: string; name?: string };
 	session: PiboSession;

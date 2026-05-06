@@ -40,6 +40,15 @@ export type PiboRunNotification = {
 	running: PiboRunSnapshot[];
 };
 
+export type PiboRunRegistryEvent =
+	| { type: "run_started"; run: PiboRunSnapshot }
+	| { type: "run_changed"; run: PiboRunSnapshot; previousStatus?: PiboRunStatus; reason?: string }
+	| { type: "run_consumed"; run: PiboRunSnapshot }
+	| { type: "run_acknowledged"; run: PiboRunSnapshot }
+	| { type: "run_removed"; runId: string; ownerPiboSessionId: string };
+
+export type PiboRunRegistryListener = (event: PiboRunRegistryEvent) => void;
+
 export type PiboRunRegistryOptions = {
 	consumedTerminalTtlMs?: number;
 	detachedTerminalTtlMs?: number;
@@ -106,6 +115,12 @@ function terminal(status: PiboRunStatus): boolean {
 export class PiboRunRegistry {
 	private readonly runs = new Map<string, PiboRunRecord>();
 	private readonly waiters = new Map<string, Waiter[]>();
+	private readonly listeners = new Set<PiboRunRegistryListener>();
+
+	subscribe(listener: PiboRunRegistryListener): () => void {
+		this.listeners.add(listener);
+		return () => this.listeners.delete(listener);
+	}
 
 	constructor(private readonly options: PiboRunRegistryOptions = {}) {
 		if (this.options.store) {
@@ -129,7 +144,9 @@ export class PiboRunRegistry {
 			});
 			const record = recordFromStored(stored);
 			this.runs.set(record.runId, record);
-			return snapshot(record);
+			const output = snapshot(record);
+			this.notify({ type: "run_started", run: output });
+			return output;
 		}
 		const timestamp = now();
 		const runId = `run_${randomUUID()}`;
@@ -148,33 +165,41 @@ export class PiboRunRegistry {
 			maxAttempts: Math.max(1, input.maxAttempts ?? 1),
 		};
 		this.runs.set(runId, record);
-		return snapshot(record);
+		const output = snapshot(record);
+		this.notify({ type: "run_started", run: output });
+		return output;
 	}
 
 	complete(runId: string, result: PiboToolRunResult): PiboRunSnapshot | undefined {
 		const record = this.runs.get(runId);
 		if (!record || terminal(record.status)) return undefined;
 
+		const previousStatus = record.status;
 		record.status = "completed";
 		record.result = result;
 		record.summary = `${record.toolName} run completed.`;
 		this.finish(record);
 		this.options.store?.updateRun(runId, record);
 		if (record.jobId) this.options.store?.ack(record.jobId, `run-registry:${process.pid}`);
-		return snapshot(record);
+		const output = snapshot(record);
+		this.notify({ type: "run_changed", run: output, previousStatus });
+		return output;
 	}
 
 	fail(runId: string, error: string): PiboRunSnapshot | undefined {
 		const record = this.runs.get(runId);
 		if (!record || terminal(record.status)) return undefined;
 
+		const previousStatus = record.status;
 		record.status = "failed";
 		record.error = error;
 		record.summary = `${record.toolName} run failed.`;
 		this.finish(record);
 		this.options.store?.updateRun(runId, record);
 		if (record.jobId) this.options.store?.fail(record.jobId, `run-registry:${process.pid}`, error);
-		return snapshot(record);
+		const output = snapshot(record);
+		this.notify({ type: "run_changed", run: output, previousStatus, reason: error });
+		return output;
 	}
 
 	list(ownerPiboSessionId: string, options: { includeConsumed?: boolean; includeDetached?: boolean } = {}): PiboRunSnapshot[] {
@@ -228,6 +253,7 @@ export class PiboRunRegistry {
 			record.consumed = true;
 			record.updatedAt = now();
 			this.options.store?.updateRun(runId, record);
+			this.notify({ type: "run_consumed", run: snapshot(record) });
 		}
 		const output: PiboRunReadResult = { ...snapshot(record) };
 		if (record.result) output.result = record.result;
@@ -237,6 +263,7 @@ export class PiboRunRegistry {
 
 	cancel(ownerPiboSessionId: string, runId: string): PiboRunSnapshot {
 		const record = this.requireOwned(ownerPiboSessionId, runId);
+		const previousStatus = record.status;
 		if (!terminal(record.status)) {
 			record.status = "cancelled";
 			record.summary = `${record.toolName} run cancelled.`;
@@ -246,7 +273,9 @@ export class PiboRunRegistry {
 		record.consumed = true;
 		record.updatedAt = now();
 		this.options.store?.updateRun(runId, record);
-		return snapshot(record);
+		const output = snapshot(record);
+		this.notify({ type: "run_changed", run: output, previousStatus, reason: "Run was cancelled." });
+		return output;
 	}
 
 	ack(ownerPiboSessionId: string, runId: string): PiboRunSnapshot {
@@ -255,7 +284,9 @@ export class PiboRunRegistry {
 		if (terminal(record.status)) record.consumed = true;
 		record.updatedAt = now();
 		this.options.store?.updateRun(runId, record);
-		return snapshot(record);
+		const output = snapshot(record);
+		this.notify({ type: "run_acknowledged", run: output });
+		return output;
 	}
 
 	createNotification(
@@ -308,7 +339,9 @@ export class PiboRunRegistry {
 			this.finish(record);
 			this.options.store?.updateRun(record.runId, record);
 			if (record.jobId) this.options.store?.fail(record.jobId, `run-registry:${process.pid}`, reason);
-			cancelled.push(snapshot(record));
+			const output = snapshot(record);
+			this.notify({ type: "run_changed", run: output, previousStatus: "running", reason });
+			cancelled.push(output);
 		}
 		return cancelled;
 	}
@@ -324,7 +357,9 @@ export class PiboRunRegistry {
 			this.finish(record);
 			this.options.store?.updateRun(record.runId, record);
 			if (record.jobId) this.options.store?.fail(record.jobId, `run-registry:${process.pid}`, reason);
-			cancelled.push(snapshot(record));
+			const output = snapshot(record);
+			this.notify({ type: "run_changed", run: output, previousStatus: "running", reason });
+			cancelled.push(output);
 		}
 		return cancelled;
 	}
@@ -351,6 +386,7 @@ export class PiboRunRegistry {
 			if (!shouldPrune) continue;
 
 			this.runs.delete(runId);
+			this.notify({ type: "run_removed", runId, ownerPiboSessionId: record.ownerPiboSessionId });
 			pruned += 1;
 		}
 		if (this.options.store) {
@@ -395,6 +431,10 @@ export class PiboRunRegistry {
 		for (const waiter of waiters) {
 			waiter.resolve(record);
 		}
+	}
+
+	private notify(event: PiboRunRegistryEvent): void {
+		for (const listener of this.listeners) listener(event);
 	}
 }
 

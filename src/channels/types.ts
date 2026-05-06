@@ -1,4 +1,5 @@
 import type { PiboEventListener, PiboInputEvent, PiboOutputEvent, PiboSessionStatus } from "../core/events.js";
+import type { PiboSignalPatch, PiboSignalSnapshot } from "../signals/types.js";
 import type {
 	PiboCapabilityCatalog,
 	PiboGatewayActionInfo,
@@ -37,6 +38,9 @@ export type PiboChannelContext = {
 	listSessions?(): PiboSession[];
 	getSessionRuntimeStatus?(piboSessionId: string): PiboSessionStatus | undefined;
 	listSessionRuntimeStatuses?(): PiboSessionStatus[];
+	snapshotSignalSession?(piboSessionId: string): PiboSignalSnapshot;
+	snapshotSignalTree?(rootPiboSessionId: string): PiboSignalSnapshot;
+	subscribeSignalTree?(rootPiboSessionId: string, listener: (patch: PiboSignalPatch) => void): () => void;
 	getGatewayActions(): PiboGatewayActionInfo[];
 	getProfiles?(): PiboProfileInfo[];
 	getCapabilityCatalog?(): PiboCapabilityCatalog;

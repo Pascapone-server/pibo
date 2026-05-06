@@ -1,4 +1,4 @@
-import type { AgentCatalog, BootstrapData, CreateSessionData, CustomAgent, ModelDefaults, ModelProfile, PiboRoom, PiboSession, PiboSessionTraceView, UserSkill } from "./types";
+import type { AgentCatalog, BootstrapData, CreateSessionData, CustomAgent, ModelDefaults, ModelProfile, PiboRoom, PiboSession, PiboSessionTraceView, UserSkill, PiboSignalPatch, PiboSignalSnapshot } from "./types";
 
 export type SaveState = "idle" | "saving" | "saved" | "error";
 
@@ -138,6 +138,30 @@ export async function getTrace(
 		notModified: false,
 		version: fromEtag(response.headers.get("etag")) ?? (payload as PiboSessionTraceView).version,
 	};
+}
+
+export async function fetchSessionSignals(piboSessionId: string): Promise<PiboSignalSnapshot> {
+	return requestJson<PiboSignalSnapshot>(`/api/chat/signals/session/${encodeURIComponent(piboSessionId)}`);
+}
+
+export async function fetchSignalTree(piboSessionId: string): Promise<PiboSignalSnapshot> {
+	return requestJson<PiboSignalSnapshot>(`/api/chat/signals/tree/${encodeURIComponent(piboSessionId)}`);
+}
+
+export function subscribeSignalTree(
+	rootPiboSessionId: string,
+	handlers: {
+		onSnapshot?: (snapshot: PiboSignalSnapshot) => void;
+		onPatch?: (patch: PiboSignalPatch) => void;
+		onError?: (event: Event) => void;
+	},
+): () => void {
+	const params = new URLSearchParams({ rootPiboSessionId });
+	const events = new EventSource(`/api/chat/signals/events?${params.toString()}`);
+	events.addEventListener("signal_snapshot", (message) => handlers.onSnapshot?.(JSON.parse((message as MessageEvent).data) as PiboSignalSnapshot));
+	events.addEventListener("signal_patch", (message) => handlers.onPatch?.(JSON.parse((message as MessageEvent).data) as PiboSignalPatch));
+	events.onerror = (event) => handlers.onError?.(event);
+	return () => events.close();
 }
 
 export async function postSession(profile?: string, roomId?: string): Promise<CreateSessionData> {

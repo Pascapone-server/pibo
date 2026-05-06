@@ -20,7 +20,9 @@ import type {
 	PiboSessionStatus,
 } from "./events.js";
 import { createSubagentToolName, type PiboSubagentRunner } from "../subagents/tool.js";
-import { PiboRunRegistry, type PiboRunNotification } from "../runs/registry.js";
+import { PiboRunRegistry, type PiboRunNotification, type PiboRunRegistryEvent } from "../runs/registry.js";
+import { createPiboSignalRegistry } from "../signals/registry.js";
+import type { PiboSignalPatch, PiboSignalRegistry, PiboSignalSnapshot } from "../signals/types.js";
 import type { PiboRunToolController } from "../runs/tools.js";
 import { createDefaultPiboReliabilityStore, type PiboReliabilityStore } from "../reliability/store.js";
 import {
@@ -52,6 +54,7 @@ export type PiboSessionRouterOptions = Omit<
 	sessionStore?: PiboSessionStore;
 	forwardPiEvents?: boolean;
 	reliabilityStore?: PiboReliabilityStore;
+	signalRegistry?: PiboSignalRegistry;
 	/** Product-level model defaults. Used as Chat Web main/subagent defaults before Pi fallback. */
 	modelDefaults?: PiboModelDefaults | (() => PiboModelDefaults);
 };
@@ -141,6 +144,7 @@ export class PiboSessionRouter {
 	private readonly pendingSessions = new Map<string, Promise<RoutedSession>>();
 	private readonly listeners = new Set<PiboEventListener>();
 	private readonly runRegistry: PiboRunRegistry;
+	private readonly signalRegistry: PiboSignalRegistry;
 	private readonly scheduledRunNotifications = new Map<string, boolean>();
 	private readonly baseProfile: InitialSessionContext;
 	private readonly pluginRegistry: PiboPluginRegistry;
@@ -155,7 +159,9 @@ export class PiboSessionRouter {
 			: this.pluginRegistry.getProfileNames()[0];
 		this.baseProfile = options.profile ?? this.pluginRegistry.createProfile(defaultProfileName ?? "codex-compat-openai-web");
 		this.reliabilityStore = options.reliabilityStore ?? (options.persistSession === false ? undefined : createDefaultPiboReliabilityStore());
+		this.signalRegistry = options.signalRegistry ?? createPiboSignalRegistry();
 		this.runRegistry = new PiboRunRegistry({ store: this.reliabilityStore });
+		this.runRegistry.subscribe((event) => this.projectRunRegistryEvent(event));
 	}
 
 	subscribe(listener: PiboEventListener): () => void {
@@ -175,6 +181,7 @@ export class PiboSessionRouter {
 		const output = await session.executeAction(event);
 		if (event.action === "dispose") {
 			this.runRegistry.cancelOwnerRuns(event.piboSessionId);
+			this.signalRegistry.project({ type: "session_disposed", piboSessionId: event.piboSessionId, reason: "dispose action" });
 			this.scheduledRunNotifications.delete(event.piboSessionId);
 			this.sessions.delete(event.piboSessionId);
 		}
@@ -232,6 +239,24 @@ export class PiboSessionRouter {
 		return [...this.sessions.values()].map((session) => session.getStatus());
 	}
 
+	getSignalRegistry(): PiboSignalRegistry {
+		return this.signalRegistry;
+	}
+
+	snapshotSignalSession(piboSessionId: string): PiboSignalSnapshot {
+		this.projectKnownSessionSignals();
+		return this.signalRegistry.snapshotSession(piboSessionId);
+	}
+
+	snapshotSignalTree(rootPiboSessionId: string): PiboSignalSnapshot {
+		this.projectKnownSessionSignals();
+		return this.signalRegistry.snapshotTree(rootPiboSessionId);
+	}
+
+	subscribeSignalTree(rootPiboSessionId: string, listener: (patch: PiboSignalPatch) => void): () => void {
+		return this.signalRegistry.subscribe(rootPiboSessionId, listener);
+	}
+
 	async emitMessageAndWaitForReply(
 		event: PiboMessageEvent,
 		timeoutMs = 120000,
@@ -278,6 +303,7 @@ export class PiboSessionRouter {
 		const sessions = [...this.sessions.values()];
 		this.sessions.clear();
 		this.runRegistry.cancelAll("Pibo session router was disposed.");
+		for (const session of sessions) this.signalRegistry.project({ type: "session_disposed", piboSessionId: session.getStatus().piboSessionId, reason: "router disposed" });
 		this.scheduledRunNotifications.clear();
 		await Promise.all(sessions.map((session) => session.dispose()));
 	}
@@ -300,6 +326,7 @@ export class PiboSessionRouter {
 
 	private async createRoutedSession(piboSessionId: string): Promise<RoutedSession> {
 		const piboSession = this.resolvePiboSession(piboSessionId);
+		this.signalRegistry.project({ type: "session_created", session: piboSession });
 		const profile = this.pluginRegistry.createProfile(piboSession.profile);
 		const parentPiSessionId = piboSession.parentId
 			? this.resolvePiboSession(piboSession.parentId).piSessionId
@@ -324,6 +351,7 @@ export class PiboSessionRouter {
 			this.options.forwardPiEvents ?? false,
 			(result, event) => this.handleSessionOperation(result, event),
 			(id, opts) => this.killChildSessions(id, opts),
+			(state) => this.signalRegistry.project({ type: "session_processing_changed", piboSessionId: piboSession.id, processing: state.processing, queuedMessages: state.queuedMessages }),
 		);
 		this.sessions.set(piboSession.id, session);
 		return session;
@@ -407,13 +435,15 @@ export class PiboSessionRouter {
 		const existing = this.sessionStore.get(piboSessionId);
 		if (existing) return existing;
 
-		return this.sessionStore.create({
+		const created = this.sessionStore.create({
 			id: piboSessionId,
 			channel: "pibo.runtime",
 			kind: "runtime",
 			profile: this.baseProfile.profileName,
 			workspace: this.options.cwd ?? getDefaultPiboWorkspace(),
 		});
+		this.signalRegistry.project({ type: "session_created", session: created });
+		return created;
 	}
 
 	private createSubagentRunner(parentPiboSessionId: string): PiboSubagentRunner {
@@ -575,6 +605,7 @@ export class PiboSessionRouter {
 				workspace: parent.workspace,
 				metadata,
 			});
+			this.signalRegistry.project({ type: "session_created", session: childSession });
 			const activeModel = resolvePiboSessionActiveModel({
 				profile: childProfile,
 				piboSession: childSession,
@@ -585,6 +616,7 @@ export class PiboSessionRouter {
 		}
 
 	private readonly emitOutput = (event: PiboOutputEvent): void => {
+		this.signalRegistry.project({ type: "pibo_output", event, session: this.sessionStore.get(event.piboSessionId) });
 		this.pluginRegistry.notifyEvent(event);
 		for (const listener of this.listeners) {
 			listener(event);
@@ -594,6 +626,20 @@ export class PiboSessionRouter {
 			this.scheduleRunNotification(event.piboSessionId, true);
 		}
 	};
+
+	private projectKnownSessionSignals(): void {
+		for (const session of this.sessionStore.list?.() ?? []) {
+			this.signalRegistry.project({ type: "session_created", session });
+		}
+	}
+
+	private projectRunRegistryEvent(event: PiboRunRegistryEvent): void {
+		if (event.type === "run_removed") {
+			this.signalRegistry.project({ type: "run_removed", runId: event.runId, ownerPiboSessionId: event.ownerPiboSessionId });
+			return;
+		}
+		this.signalRegistry.project({ type: "run_changed", run: event.run, previousStatus: "previousStatus" in event ? event.previousStatus : undefined, reason: "reason" in event ? event.reason : event.type });
+	}
 
 	private scheduleRunNotification(piboSessionId: string, includeAlreadyNotified: boolean): void {
 		if (!this.runRegistry.hasPendingNotification(piboSessionId, { includeAlreadyNotified })) return;

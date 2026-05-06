@@ -38,9 +38,9 @@ import {
 	Wrench,
 	X,
 } from "lucide-react";
-import { createUserSkill, deleteCustomAgent, deletePiPackage, deleteRoom, deleteSession, deleteUserSkill, getBootstrap, getTrace, getUserSkill, installUserSkill, listUserSkills, patchCustomAgent, patchModelDefaults, patchPiPackage, patchRoom, patchSession, postAction, postContextFile, postCustomAgent, postMessage, postPiPackage, postRoom, postSession, signInWithGoogle, signOut, updateUserSkill, type SaveCustomAgentInput } from "./api";
+import { createUserSkill, deleteCustomAgent, deletePiPackage, deleteRoom, deleteSession, deleteUserSkill, getBootstrap, getTrace, getUserSkill, installUserSkill, listUserSkills, patchCustomAgent, patchModelDefaults, patchPiPackage, patchRoom, patchSession, postAction, postContextFile, postCustomAgent, postMessage, postPiPackage, postRoom, postSession, signInWithGoogle, signOut, subscribeSignalTree, updateUserSkill, type SaveCustomAgentInput } from "./api";
 import { THINKING_LEVELS } from "./types";
-import type { AgentCatalog, BootstrapData, CustomAgent, CustomAgentSubagent, ModelCatalog, ModelDefaults, ModelProfile, PiboRoom, PiboSession, PiboSessionTraceView, PiboTraceNode, PiboTraceOrderKey, PiboWebSessionNode, PiboWebSessionStatus, ThinkingLevel, UserSkill } from "./types";
+import type { AgentCatalog, BootstrapData, CustomAgent, CustomAgentSubagent, ModelCatalog, ModelDefaults, ModelProfile, PiboRoom, PiboSession, PiboSessionTraceView, PiboSignalPatch, PiboSignalSnapshot, PiboTraceNode, PiboTraceOrderKey, PiboWebSessionNode, PiboWebSessionStatus, ThinkingLevel, UserSkill } from "./types";
 import type { ChatWebStoredEvent } from "../../../shared/trace-types.js";
 import { adaptTrace } from "./tracing/adapt";
 import { collectBackendNodes } from "./tracing/snapshotCollector";
@@ -196,6 +196,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 	const [deletingRoom, setDeletingRoom] = useState(false);
 	const [deleteSessionTarget, setDeleteSessionTarget] = useState<PiboWebSessionNode | null>(null);
 	const [gatewayMode, setGatewayMode] = useState<"main" | "fallback" | null>(null);
+	const [sessionSignals, setSessionSignals] = useState<PiboSignalSnapshot | null>(null);
 	const [signalNow, setSignalNow] = useState(() => Date.now());
 	const [deleteSessionConfirmText, setDeleteSessionConfirmText] = useState("");
 	const [deletingSession, setDeletingSession] = useState(false);
@@ -212,6 +213,24 @@ export function App({ route }: { route: ChatAppRoute }) {
 	useEffect(() => {
 		setSignalNow(Date.now());
 	}, [bootstrap]);
+
+	useEffect(() => {
+		if (!selectedPiboSessionId) {
+			setSessionSignals(null);
+			return;
+		}
+		return subscribeSignalTree(selectedPiboSessionId, {
+			onSnapshot: (snapshot) => {
+				setSessionSignals(snapshot);
+				setBootstrap((current) => current ? applySignalSnapshotToBootstrap(current, snapshot) : current);
+			},
+			onPatch: (patch) => {
+				setSessionSignals((current) => applySignalPatch(current, patch));
+				setBootstrap((current) => current ? applySignalPatchToBootstrap(current, patch) : current);
+			},
+			onError: () => undefined,
+		});
+	}, [selectedPiboSessionId]);
 
 	useEffect(() => {
 		const nextExpiryMs = bootstrap ? nextRecentSessionSignalExpiryMs(bootstrap.sessions, signalNow) : undefined;
@@ -425,6 +444,16 @@ export function App({ route }: { route: ChatAppRoute }) {
 			navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId, replace);
 		};
 
+		if (
+			bootstrap &&
+			route.area === "sessions" &&
+			route.piboSessionId &&
+			bootstrap.selectedPiboSessionId === route.piboSessionId &&
+			bootstrap.selectedRoomId === route.roomId
+		) {
+			return;
+		}
+
 		loadBootstrap(requestedPiboSessionId, showArchivedRef.current, requestedRoomId)
 			.then((data) => {
 				canonicalizeSessionsRoute(data);
@@ -458,7 +487,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 						setError(fallbackCaught instanceof Error ? fallbackCaught.message : String(fallbackCaught)),
 					);
 			});
-	}, [loadBootstrap, navigateToSelectedSession, route.area, routePiboSessionId, routeRoomId]);
+	}, [bootstrap, loadBootstrap, navigateToSelectedSession, route.area, routePiboSessionId, routeRoomId]);
 
 	useEffect(() => {
 		if (!selectedRoomId && !selectedPiboSessionId) return;
@@ -5892,6 +5921,59 @@ function flattenPiboTraceNodes(nodes: readonly PiboTraceNode[]): PiboTraceNode[]
 
 function traceNodeText(node: PiboTraceNode): string {
 	return typeof node.output === "string" ? node.output : typeof node.summary === "string" ? node.summary : "";
+}
+
+function applySignalSnapshotToBootstrap(bootstrap: BootstrapData, snapshot: PiboSignalSnapshot): BootstrapData {
+	return updateBootstrapSessionStatuses(bootstrap, (piboSessionId) => signalLegacyStatus(snapshot.sessions[piboSessionId]));
+}
+
+function applySignalPatchToBootstrap(bootstrap: BootstrapData, patch: PiboSignalPatch): BootstrapData {
+	const statuses = new Map(patch.sessionSnapshots.map((snapshot) => [snapshot.piboSessionId, signalLegacyStatus(snapshot)]));
+	return updateBootstrapSessionStatuses(bootstrap, (piboSessionId) => statuses.get(piboSessionId));
+}
+
+function updateBootstrapSessionStatuses(
+	bootstrap: BootstrapData,
+	statusFor: (piboSessionId: string) => PiboWebSessionNode["status"] | undefined,
+): BootstrapData {
+	return {
+		...bootstrap,
+		sessions: bootstrap.sessions.map((node) => updateSignalStatusInSessionNode(node, statusFor)),
+	};
+}
+
+function updateSignalStatusInSessionNode(
+	node: PiboWebSessionNode,
+	statusFor: (piboSessionId: string) => PiboWebSessionNode["status"] | undefined,
+): PiboWebSessionNode {
+	const status = statusFor(node.piboSessionId);
+	return {
+		...node,
+		status: status ?? node.status,
+		lastActivityAt: status && status !== node.status ? new Date().toISOString() : node.lastActivityAt,
+		children: node.children.map((child) => updateSignalStatusInSessionNode(child, statusFor)),
+		derivedSessions: node.derivedSessions.map((derived) => ({
+			...derived,
+			status: statusFor(derived.piboSessionId) ?? derived.status,
+		})),
+	};
+}
+
+function signalLegacyStatus(snapshot: PiboSignalSnapshot["sessions"][string] | undefined): PiboWebSessionNode["status"] | undefined {
+	if (!snapshot) return undefined;
+	if (snapshot.hasError || snapshot.hasErrorDescendant || snapshot.aggregateStatus === "error") return "error";
+	if (snapshot.isTreeActive) return "running";
+	return "idle";
+}
+
+function applySignalPatch(current: PiboSignalSnapshot | null, patch: PiboSignalPatch): PiboSignalSnapshot | null {
+	if (!current || current.rootPiboSessionId !== patch.rootPiboSessionId || current.version !== patch.fromVersion) return current;
+	const nodes = { ...current.nodes };
+	for (const id of patch.removes) delete nodes[id];
+	for (const node of patch.upserts) nodes[node.id] = node;
+	const sessions = { ...current.sessions };
+	for (const snapshot of patch.sessionSnapshots) sessions[snapshot.piboSessionId] = snapshot;
+	return { ...current, version: patch.toVersion, generatedAt: patch.generatedAt, nodes, sessions };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
