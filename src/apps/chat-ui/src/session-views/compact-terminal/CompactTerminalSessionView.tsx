@@ -1,6 +1,7 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { ChevronDown, ChevronRight, GitBranch } from "lucide-react";
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { MarkdownRenderer } from "../../tracing/MarkdownRenderer";
 import type { ChatSessionViewProps } from "../types";
 import { TerminalDetails } from "./TerminalDetails";
@@ -11,8 +12,10 @@ import { TerminalStatusCard } from "./TerminalStatusCard";
 import { TerminalThinkingCard } from "./TerminalThinkingCard";
 import { buildCompactTerminalRows, type CompactTerminalLine, type CompactTerminalRow } from "./terminalRows";
 
-const BOTTOM_LOCK_THRESHOLD_PX = 48;
 const SHOW_LATEST_THRESHOLD_PX = 180;
+const INITIAL_BOTTOM_ITEM = { index: "LAST", align: "end" } as const;
+const VIRTUOSO_VIEWPORT = { top: 2_400, bottom: 2_400 } as const;
+const DEFAULT_ROW_HEIGHT_PX = 56;
 
 export function CompactTerminalSessionView({
 	traceView,
@@ -36,7 +39,7 @@ export function CompactTerminalSessionView({
 		() => buildCompactTerminalRows(traceView, { showThinking }),
 		[showThinking, traceView],
 	);
-	const scrollRef = useRef<HTMLDivElement>(null);
+	const virtuosoRef = useRef<VirtuosoHandle>(null);
 	const bottomLockedRef = useRef(true);
 	const [showJumpToBottom, setShowJumpToBottom] = useState(false);
 	const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
@@ -48,32 +51,25 @@ export function CompactTerminalSessionView({
 		setExpandedRows((current) => retainExistingExpandedRows(current, rows, expandThinking));
 	}, [expandThinking, rows]);
 
-	const updateBottomLock = () => {
-		const distance = distanceFromBottom(scrollRef.current);
-		if (distance === undefined) return;
-		bottomLockedRef.current = distance < BOTTOM_LOCK_THRESHOLD_PX;
-		setShowJumpToBottom(distance > SHOW_LATEST_THRESHOLD_PX);
-	};
+	const setAtBottom = useCallback((atBottom: boolean) => {
+		bottomLockedRef.current = atBottom;
+		setShowJumpToBottom(!atBottom);
+	}, []);
 
-	const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
-		const element = scrollRef.current;
-		if (!element) return;
+	const scrollToBottom = useCallback((behavior: "auto" | "smooth" = "auto") => {
+		const lastIndex = rows.length - 1;
+		if (lastIndex < 0) return;
 		bottomLockedRef.current = true;
-		element.scrollTo({ top: element.scrollHeight, behavior });
 		setShowJumpToBottom(false);
-	};
+		virtuosoRef.current?.scrollToIndex({ index: lastIndex, align: "end", behavior });
+	}, [rows.length]);
 
-	useLayoutEffect(() => {
+	const followOutput = useCallback(() => (bottomLockedRef.current ? "auto" : false), []);
+
+	useEffect(() => {
 		bottomLockedRef.current = true;
-		const frame = requestAnimationFrame(() => scrollToBottom("auto"));
-		return () => cancelAnimationFrame(frame);
+		setShowJumpToBottom(false);
 	}, [traceView?.piboSessionId]);
-
-	useLayoutEffect(() => {
-		if (!bottomLockedRef.current) return;
-		const frame = requestAnimationFrame(() => scrollToBottom("auto"));
-		return () => cancelAnimationFrame(frame);
-	}, [isStreaming, rows]);
 
 	const toggleRow = (row: CompactTerminalRow) => {
 		if (!row.expandable) return;
@@ -84,6 +80,25 @@ export function CompactTerminalSessionView({
 			return next;
 		});
 	};
+
+	const renderRow = useCallback((_: number, row: CompactTerminalRow) => (
+		<div className="px-4">
+			<TerminalRow
+				row={row}
+				expanded={expandedRows.has(row.id)}
+				piboSessionId={traceView?.piboSessionId ?? ""}
+				onToggle={() => toggleRow(row)}
+				onFork={onFork}
+				onOpenSession={onOpenSession}
+				onThinkingLevelChange={onThinkingLevelChange}
+				onModelChanged={onModelChanged}
+			/>
+		</div>
+	), [expandedRows, onFork, onModelChanged, onOpenSession, onThinkingLevelChange, traceView?.piboSessionId]);
+
+	const virtuosoComponents = useMemo(() => ({
+		Footer: isStreaming ? TerminalStreamingFooter : undefined,
+	}), [isStreaming]);
 
 	return (
 		<section className="relative min-w-0 flex-1 flex flex-col overflow-hidden bg-[#0b0b0b] text-[#d4d4d4]">
@@ -108,27 +123,22 @@ export function CompactTerminalSessionView({
 						onSelectAgentProfile={onSessionAgentProfileChange}
 					/>
 				) : rows.length ? (
-					<div
-						ref={scrollRef}
-						onScroll={updateBottomLock}
-						className="min-h-0 h-full overflow-y-auto overflow-x-hidden font-mono text-[12px] leading-[1.45]"
-					>
-						{rows.map((row) => (
-							<div key={row.id} className="px-4">
-								<TerminalRow
-									row={row}
-									expanded={expandedRows.has(row.id)}
-									piboSessionId={traceView.piboSessionId}
-									onToggle={() => toggleRow(row)}
-									onFork={onFork}
-									onOpenSession={onOpenSession}
-									onThinkingLevelChange={onThinkingLevelChange}
-									onModelChanged={onModelChanged}
-								/>
-							</div>
-						))}
-						{isStreaming ? <TerminalStreamingFooter /> : null}
-					</div>
+					<Virtuoso
+						key={traceView.piboSessionId}
+						ref={virtuosoRef}
+						data={rows}
+						initialTopMostItemIndex={INITIAL_BOTTOM_ITEM}
+						increaseViewportBy={VIRTUOSO_VIEWPORT}
+						defaultItemHeight={DEFAULT_ROW_HEIGHT_PX}
+						className="min-h-0 h-full overflow-x-hidden font-mono text-[12px] leading-[1.45]"
+						computeItemKey={(_, row) => row.id}
+						atBottomStateChange={setAtBottom}
+						atBottomThreshold={SHOW_LATEST_THRESHOLD_PX}
+						followOutput={followOutput}
+						alignToBottom
+						components={virtuosoComponents}
+						itemContent={renderRow}
+					/>
 				) : (
 					<EmptyTerminalState
 						isLoading={isLoading}
@@ -394,11 +404,6 @@ function retainExistingExpandedRows(
 		if (expandThinking && row.kind === "reasoning" && row.expandable) next.add(row.id);
 	}
 	return sameSet(current, next) ? current : next;
-}
-
-function distanceFromBottom(element: HTMLElement | null): number | undefined {
-	if (!element) return undefined;
-	return element.scrollHeight - element.scrollTop - element.clientHeight;
 }
 
 function collapsedToolCallPreviewLines(row: { kind: string; lines: CompactTerminalLine[] }) {
