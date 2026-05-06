@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
-import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
 	Archive,
@@ -40,7 +40,7 @@ import {
 } from "lucide-react";
 import { createUserSkill, deleteCustomAgent, deletePiPackage, deleteRoom, deleteSession, deleteUserSkill, getBootstrap, getTrace, getUserSkill, installUserSkill, listUserSkills, patchCustomAgent, patchModelDefaults, patchPiPackage, patchRoom, patchSession, postAction, postContextFile, postCustomAgent, postMessage, postPiPackage, postRoom, postSession, signInWithGoogle, signOut, updateUserSkill, type SaveCustomAgentInput } from "./api";
 import { THINKING_LEVELS } from "./types";
-import type { AgentCatalog, BootstrapData, CustomAgent, CustomAgentSubagent, ModelCatalog, ModelDefaults, ModelProfile, PiboRoom, PiboSessionTraceView, PiboTraceNode, PiboTraceOrderKey, PiboWebSessionNode, ThinkingLevel, UserSkill } from "./types";
+import type { AgentCatalog, BootstrapData, CustomAgent, CustomAgentSubagent, ModelCatalog, ModelDefaults, ModelProfile, PiboRoom, PiboSession, PiboSessionTraceView, PiboTraceNode, PiboTraceOrderKey, PiboWebSessionNode, ThinkingLevel, UserSkill } from "./types";
 import type { ChatWebStoredEvent } from "../../../shared/trace-types.js";
 import { adaptTrace } from "./tracing/adapt";
 import { collectBackendNodes } from "./tracing/snapshotCollector";
@@ -513,6 +513,74 @@ export function App({ route }: { route: ChatAppRoute }) {
 		[loadBootstrap, selectedPiboSessionId, selectedRoomId],
 	);
 
+	const updateBootstrapCache = useCallback((updater: (data: BootstrapData) => BootstrapData) => {
+		setBootstrap((current) => current ? updater(current) : current);
+		queryClient.setQueriesData<BootstrapData>({ queryKey: ["chat", "bootstrap"] }, (current) => current ? updater(current) : current);
+	}, [queryClient]);
+
+	const restoreBootstrapSnapshot = useCallback((snapshot: BootstrapMutationSnapshot | undefined) => {
+		if (!snapshot) return;
+		setBootstrap(snapshot.localBootstrap);
+		for (const [queryKey, data] of snapshot.queryData) queryClient.setQueryData(queryKey, data);
+	}, [queryClient]);
+
+	const createSessionMutation = useMutation({
+		mutationFn: ({ profile, roomId }: { profile: string; roomId?: string }) => postSession(profile || undefined, roomId),
+		onMutate: async ({ profile }) => {
+			await queryClient.cancelQueries({ queryKey: ["chat", "bootstrap"] });
+			const snapshot = createBootstrapMutationSnapshot(queryClient, bootstrap);
+			const tempId = `optimistic-session-${createClientTxnId()}`;
+			setBootstrap((current) => current ? addSessionNodeToBootstrap(current, createOptimisticSessionNode(tempId, profile || current.session.profile)) : current);
+			return { snapshot, tempId };
+		},
+		onError: (_error, _variables, context) => restoreBootstrapSnapshot(context?.snapshot),
+		onSuccess: (created, _variables, context) => {
+			setBootstrap((current) => current ? replaceOptimisticSessionNode(current, context?.tempId, sessionNodeFromSession(created.session)) : current);
+		},
+	});
+
+	const renameSessionMutation = useMutation({
+		mutationFn: ({ piboSessionId, title }: { piboSessionId: string; title: string | null }) => patchSession(piboSessionId, { title }),
+		onMutate: async ({ piboSessionId, title }) => {
+			await queryClient.cancelQueries({ queryKey: ["chat", "bootstrap"] });
+			const snapshot = createBootstrapMutationSnapshot(queryClient, bootstrap);
+			updateBootstrapCache((data) => updateSessionNodeInBootstrap(data, piboSessionId, (node) => ({ ...node, title: title || "Untitled Session" })));
+			return { snapshot };
+		},
+		onError: (_error, _variables, context) => restoreBootstrapSnapshot(context?.snapshot),
+		onSuccess: ({ session }) => updateBootstrapCache((data) => updateSessionFromPiboSession(data, session)),
+	});
+
+	const archiveSessionMutation = useMutation({
+		mutationFn: ({ piboSessionId, archived }: { piboSessionId: string; archived: boolean }) => patchSession(piboSessionId, { archived }),
+		onMutate: async ({ piboSessionId, archived }) => {
+			await queryClient.cancelQueries({ queryKey: ["chat", "bootstrap"] });
+			const snapshot = createBootstrapMutationSnapshot(queryClient, bootstrap);
+			updateBootstrapCache((data) => updateSessionNodeInBootstrap(data, piboSessionId, (node) => ({ ...node, archived, unreadCount: archived ? 0 : node.unreadCount })));
+			return { snapshot };
+		},
+		onError: (_error, _variables, context) => restoreBootstrapSnapshot(context?.snapshot),
+		onSuccess: ({ session }) => updateBootstrapCache((data) => updateSessionFromPiboSession(data, session)),
+	});
+
+	const sendMessageMutation = useMutation({
+		mutationFn: ({ piboSessionId, text, clientTxnId, roomId }: { piboSessionId: string; text: string; clientTxnId: string; roomId?: string }) =>
+			postMessage(piboSessionId, text, clientTxnId, roomId),
+		onMutate: async ({ piboSessionId, text, clientTxnId }) => {
+			await queryClient.cancelQueries({ queryKey: traceQueriesForSession(piboSessionId) });
+			const queryData = queryClient.getQueriesData<PiboSessionTraceView>({ queryKey: traceQueriesForSession(piboSessionId) });
+			queryClient.setQueriesData<PiboSessionTraceView>({ queryKey: traceQueriesForSession(piboSessionId) }, (current) =>
+				current ? appendOptimisticUserMessageToTrace(current, piboSessionId, text, clientTxnId) : current,
+			);
+			updateBootstrapCache((data) => updateSessionNodeInBootstrap(data, piboSessionId, (node) => ({ ...node, status: "running", lastActivityAt: new Date().toISOString() })));
+			return { queryData };
+		},
+		onError: (_error, variables, context) => {
+			for (const [queryKey, data] of context?.queryData ?? []) queryClient.setQueryData(queryKey, data);
+			updateBootstrapCache((data) => updateSessionNodeInBootstrap(data, variables.piboSessionId, (node) => ({ ...node, status: "error" })));
+		},
+	});
+
 	const updateSelectedSessionProfile = useCallback(async (profile: string) => {
 		if (!selectedPiboSessionId || !bootstrap || profile === bootstrap.session.profile) return;
 		try {
@@ -596,9 +664,9 @@ export function App({ route }: { route: ChatAppRoute }) {
 		if (creatingSession || selectedRoomArchived) return;
 		setCreatingSession(true);
 		try {
-			const created = await postSession(profile || undefined, selectedRoomId ?? undefined);
+			const created = await createSessionMutation.mutateAsync({ profile, roomId: selectedRoomId ?? undefined });
 			setSelectedPiboSessionId(created.session.id);
-			const data = await loadBootstrap(created.session.id, showArchivedRef.current, selectedRoomId ?? undefined);
+			const data = await loadBootstrap(created.session.id, showArchivedRef.current, selectedRoomId ?? undefined, { force: true });
 			navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
 			setError(null);
 		} catch (caught) {
@@ -623,8 +691,8 @@ export function App({ route }: { route: ChatAppRoute }) {
 
 	const renameSession = async (piboSessionId: string, title: string | null) => {
 		try {
-			await patchSession(piboSessionId, { title });
-			const data = await loadBootstrap(selectedPiboSessionId ?? undefined, showArchivedRef.current, selectedRoomId ?? undefined);
+			await renameSessionMutation.mutateAsync({ piboSessionId, title });
+			const data = await loadBootstrap(selectedPiboSessionId ?? undefined, showArchivedRef.current, selectedRoomId ?? undefined, { force: true });
 			if (area === "sessions") await refreshTrace(data.selectedPiboSessionId);
 			if (area === "sessions") navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
 			setError(null);
@@ -635,12 +703,13 @@ export function App({ route }: { route: ChatAppRoute }) {
 
 	const setSessionArchived = async (piboSessionId: string, archived: boolean) => {
 		try {
-			await patchSession(piboSessionId, { archived });
+			await archiveSessionMutation.mutateAsync({ piboSessionId, archived });
 			const keepSelected = !(archived && !showArchived && selectedPiboSessionId === piboSessionId);
 			const data = await loadBootstrap(
 				keepSelected ? (selectedPiboSessionId ?? undefined) : undefined,
 				showArchivedRef.current,
 				selectedRoomId ?? undefined,
+				{ force: true },
 			);
 			if (area === "sessions") navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
 			setError(null);
@@ -1153,8 +1222,13 @@ export function App({ route }: { route: ChatAppRoute }) {
 						onSend={async (text) => {
 							if (!selectedPiboSessionId || selectedRoomArchived) return;
 							try {
-								await postMessage(selectedPiboSessionId, text, createClientTxnId(), selectedRoomId ?? undefined);
-								await loadBootstrap(selectedPiboSessionId, showArchivedRef.current, selectedRoomId ?? undefined);
+								await sendMessageMutation.mutateAsync({
+									piboSessionId: selectedPiboSessionId,
+									text,
+									clientTxnId: createClientTxnId(),
+									roomId: selectedRoomId ?? undefined,
+								});
+								await loadBootstrap(selectedPiboSessionId, showArchivedRef.current, selectedRoomId ?? undefined, { force: true });
 								setError(null);
 							} catch (caught) {
 								setError(caught instanceof Error ? caught.message : String(caught));
@@ -1640,6 +1714,159 @@ function patchTraceViewWithEvents(
 	sessionStatus: PiboWebSessionNode["status"],
 ): PiboSessionTraceView {
 	return events.reduce((current, event) => patchTraceViewWithEvent(current, event, sessionStatus), view);
+}
+
+type BootstrapMutationSnapshot = {
+	localBootstrap: BootstrapData | null;
+	queryData: Array<[readonly unknown[], BootstrapData | undefined]>;
+};
+
+function createBootstrapMutationSnapshot(queryClient: QueryClient, localBootstrap: BootstrapData | null): BootstrapMutationSnapshot {
+	return {
+		localBootstrap,
+		queryData: queryClient.getQueriesData<BootstrapData>({ queryKey: ["chat", "bootstrap"] }),
+	};
+}
+
+function addSessionNodeToBootstrap(data: BootstrapData, node: PiboWebSessionNode): BootstrapData {
+	if (findSessionNode(data.sessions, node.piboSessionId)) return data;
+	return { ...data, sessions: [node, ...data.sessions] };
+}
+
+function replaceOptimisticSessionNode(
+	data: BootstrapData,
+	tempId: string | undefined,
+	node: PiboWebSessionNode,
+): BootstrapData {
+	if (!tempId) return addSessionNodeToBootstrap(data, node);
+	let replaced = false;
+	const sessions = replaceSessionNode(data.sessions, tempId, () => {
+		replaced = true;
+		return node;
+	});
+	return {
+		...data,
+		selectedPiboSessionId: data.selectedPiboSessionId === tempId ? node.piboSessionId : data.selectedPiboSessionId,
+		session: data.session.id === tempId ? piboSessionFromSessionNode(node, data.session) : data.session,
+		sessions: replaced ? sessions : [node, ...sessions],
+	};
+}
+
+function updateSessionFromPiboSession(data: BootstrapData, session: PiboSession): BootstrapData {
+	const archived = typeof session.metadata?.chatWebArchivedAt === "string";
+	return {
+		...data,
+		session: data.session.id === session.id ? session : data.session,
+		sessions: replaceSessionNode(data.sessions, session.id, (node) => ({
+			...node,
+			profile: session.profile,
+			activeModel: session.activeModel,
+			title: session.title || node.title || "Untitled Session",
+			archived,
+		})),
+	};
+}
+
+function updateSessionNodeInBootstrap(
+	data: BootstrapData,
+	piboSessionId: string,
+	updater: (node: PiboWebSessionNode) => PiboWebSessionNode,
+): BootstrapData {
+	const session = data.session.id === piboSessionId ? piboSessionFromSessionNode(updater(sessionNodeFromSession(data.session)), data.session) : data.session;
+	return { ...data, session, sessions: replaceSessionNode(data.sessions, piboSessionId, updater) };
+}
+
+function replaceSessionNode(
+	nodes: PiboWebSessionNode[],
+	piboSessionId: string,
+	updater: (node: PiboWebSessionNode) => PiboWebSessionNode,
+): PiboWebSessionNode[] {
+	let changed = false;
+	const next = nodes.map((node) => {
+		if (node.piboSessionId === piboSessionId) {
+			changed = true;
+			return updater(node);
+		}
+		const children = replaceSessionNode(node.children, piboSessionId, updater);
+		if (children === node.children) return node;
+		changed = true;
+		return { ...node, children };
+	});
+	return changed ? next : nodes;
+}
+
+function createOptimisticSessionNode(piboSessionId: string, profile: string): PiboWebSessionNode {
+	return {
+		piboSessionId,
+		piSessionId: "pending",
+		profile,
+		title: "New Session",
+		status: "idle",
+		lastActivityAt: new Date().toISOString(),
+		derivedSessions: [],
+		children: [],
+	};
+}
+
+function sessionNodeFromSession(session: PiboSession): PiboWebSessionNode {
+	return {
+		piboSessionId: session.id,
+		piSessionId: session.piSessionId,
+		profile: session.profile,
+		activeModel: session.activeModel,
+		title: session.title || "Untitled Session",
+		archived: typeof session.metadata?.chatWebArchivedAt === "string",
+		status: "idle",
+		lastActivityAt: session.updatedAt,
+		derivedSessions: [],
+		children: [],
+	};
+}
+
+function piboSessionFromSessionNode(node: PiboWebSessionNode, base: PiboSession): PiboSession {
+	return {
+		...base,
+		id: node.piboSessionId,
+		piSessionId: node.piSessionId,
+		profile: node.profile,
+		activeModel: node.activeModel,
+		title: node.title,
+		updatedAt: node.lastActivityAt ?? base.updatedAt,
+	};
+}
+
+function appendOptimisticUserMessageToTrace(
+	view: PiboSessionTraceView,
+	piboSessionId: string,
+	text: string,
+	clientTxnId: string,
+): PiboSessionTraceView {
+	if (view.piboSessionId !== piboSessionId) return view;
+	const now = new Date().toISOString();
+	const id = `optimistic:user-message:${clientTxnId}`;
+	if (traceHasNode(view.nodes, id)) return view;
+	const node: PiboTraceNode = {
+		id,
+		piboSessionId,
+		type: "user.message",
+		title: "User Message",
+		status: "done",
+		startedAt: now,
+		summary: text,
+		output: text,
+		source: "event-log",
+		stableKey: id,
+		children: [],
+	};
+	return {
+		...view,
+		version: `${view.version}:optimistic:${clientTxnId}`,
+		nodes: [...view.nodes, node],
+	};
+}
+
+function traceHasNode(nodes: PiboTraceNode[], nodeId: string): boolean {
+	return nodes.some((node) => node.id === nodeId || traceHasNode(node.children, nodeId));
 }
 
 function trimLiveOverlayForBaseTrace(overlay: LiveTraceOverlay | null, baseTrace: PiboSessionTraceView): LiveTraceOverlay | null {
