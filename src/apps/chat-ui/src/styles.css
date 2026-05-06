@@ -81,19 +81,19 @@ pre {
 	vertical-align: baseline;
 	background: linear-gradient(
 		90deg,
-		#737373 0%,
-		#737373 20%,
+		#0bda57 0%,
+		#0bda57 20%,
 		#22c55e 36%,
-		#d4d4d4 50%,
+		#86efac 50%,
 		#22c55e 64%,
-		#737373 80%,
-		#737373 100%
+		#0bda57 80%,
+		#0bda57 100%
 	);
 	background-size: 24ch 100%;
 	background-position: -12ch 0;
 	-webkit-background-clip: text;
 	background-clip: text;
-	text-shadow: 0 0 5px rgba(34, 197, 94, 0.12);
+	text-shadow: 0 0 5px rgba(11, 218, 87, 0.18);
 	animation: compact-terminal-working-binary 1.65s linear infinite;
 }
 
@@ -104,7 +104,7 @@ pre {
 @media (prefers-reduced-motion: reduce) {
 	.compact-terminal-working-binary {
 		animation: none;
-		color: #d4d4d4;
+		color: #0bda57;
 		background: none;
 		text-shadow: none;
 	}
