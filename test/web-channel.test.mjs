@@ -794,6 +794,86 @@ test("chat web app marks only the selected session read during bootstrap", async
 	}
 });
 
+test("chat web app keeps active session completions read while preserving unfocused unread", async () => {
+	const { channel, baseURL, emitOutput, sessions } = await startWebHostChannel({
+		auth: createFakeAuthService(),
+	});
+
+	try {
+		const sessionResponse = await fetch(`${baseURL}/api/chat/session`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(sessionResponse.status, 200);
+		const sessionPayload = await sessionResponse.json();
+		const parent = sessionPayload.session;
+		const room = sessionPayload.room;
+		const child = sessions.create({
+			channel: parent.channel,
+			kind: parent.kind,
+			profile: parent.profile,
+			ownerScope: parent.ownerScope,
+			parentId: parent.id,
+			metadata: { chatRoomId: room.id },
+		});
+
+		const controller = new AbortController();
+		const eventsResponse = await fetch(
+			`${baseURL}/api/chat/events?roomId=${encodeURIComponent(room.id)}&piboSessionId=${encodeURIComponent(parent.id)}&since=0`,
+			{
+				headers: { "x-test-user": "user-1" },
+				signal: controller.signal,
+			},
+		);
+		assert.equal(eventsResponse.status, 200);
+		const reader = eventsResponse.body.getReader();
+		await reader.read();
+
+		emitOutput({
+			type: "assistant_message",
+			piboSessionId: parent.id,
+			eventId: "active-turn",
+			text: "visible answer",
+		});
+		emitOutput({
+			type: "message_finished",
+			piboSessionId: parent.id,
+			eventId: "active-turn",
+		});
+
+		let bootstrapResponse = await fetch(`${baseURL}/api/chat/bootstrap?markRead=false&piboSessionId=${encodeURIComponent(parent.id)}`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(bootstrapResponse.status, 200);
+		let bootstrap = await bootstrapResponse.json();
+		assert.equal(bootstrap.rooms[0].unreadCount, undefined);
+		assert.equal(bootstrap.sessions[0].unreadCount, undefined);
+
+		emitOutput({
+			type: "assistant_message",
+			piboSessionId: child.id,
+			eventId: "unfocused-turn",
+			text: "background answer",
+		});
+		emitOutput({
+			type: "message_finished",
+			piboSessionId: child.id,
+			eventId: "unfocused-turn",
+		});
+
+		bootstrapResponse = await fetch(`${baseURL}/api/chat/bootstrap?markRead=false&piboSessionId=${encodeURIComponent(parent.id)}`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(bootstrapResponse.status, 200);
+		bootstrap = await bootstrapResponse.json();
+		assert.equal(bootstrap.rooms[0].unreadCount, 1);
+		assert.equal(bootstrap.sessions[0].children[0].unreadCount, 1);
+
+		controller.abort();
+	} finally {
+		await channel.stop?.();
+	}
+});
+
 test("chat web app makes message sends idempotent by client transaction id", async () => {
 	const { channel, baseURL, emitted } = await startWebHostChannel({
 		auth: createFakeAuthService(),

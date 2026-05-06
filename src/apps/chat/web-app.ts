@@ -90,7 +90,7 @@ type ChatWebAppState = {
 	subscribedContext?: PiboWebAppContext;
 	unsubscribe?: () => void;
 	liveListeners: Set<(event: ChatLiveEvent) => void>;
-	activeEventStreams: Map<string, Set<string>>;
+	activeEventStreams: Map<string, Map<string, string>>;
 	activeTraceSessions: Set<string>;
 	pendingDisconnectAborts: Map<string, ReturnType<typeof setTimeout>>;
 	userSkillManager: UserSkillManager;
@@ -729,6 +729,9 @@ function ensureEventIndexing(state: ChatWebAppState, context: PiboWebAppContext)
 				actorId: session?.ownerScope,
 			});
 			if (!stored) continue;
+			if (persistableEvent.type === "assistant_message" || persistableEvent.type === "message_finished") {
+				markActiveSessionRead(state, persistableEvent.piboSessionId, stored.streamId);
+			}
 			state.readModel.recordEvent(persistableEvent, session, stored.streamId);
 			state.reliabilityStore.append({
 				topic: "pibo.output",
@@ -779,9 +782,9 @@ function clearPendingDisconnectAbort(
 	appendDisconnectAbortEvent(state, piboSessionId, "disconnect_abort_cancelled", { reason });
 }
 
-function markEventStreamConnected(state: ChatWebAppState, piboSessionId: string, streamId: string): void {
-	const streams = state.activeEventStreams.get(piboSessionId) ?? new Set<string>();
-	streams.add(streamId);
+function markEventStreamConnected(state: ChatWebAppState, piboSessionId: string, streamId: string, principalId: string): void {
+	const streams = state.activeEventStreams.get(piboSessionId) ?? new Map<string, string>();
+	streams.set(streamId, principalId);
 	state.activeEventStreams.set(piboSessionId, streams);
 	clearPendingDisconnectAbort(state, piboSessionId, "reconnected");
 }
@@ -816,6 +819,14 @@ function markEventStreamDisconnected(input: {
 		void abortDisconnectedSession(input);
 	}, EVENT_STREAM_ABORT_GRACE_MS);
 	input.state.pendingDisconnectAborts.set(input.piboSessionId, timer);
+}
+
+function markActiveSessionRead(state: ChatWebAppState, piboSessionId: string, streamId: number): void {
+	const streams = state.activeEventStreams.get(piboSessionId);
+	if (!streams) return;
+	for (const principalId of new Set(streams.values())) {
+		state.eventLog.markSessionRead(piboSessionId, principalId, streamId);
+	}
 }
 
 async function abortDisconnectedSession(input: {
@@ -1560,6 +1571,8 @@ function writeChatEventFrames(
 function createEventStream(input: {
 	roomId?: string;
 	piboSessionId?: string;
+	activePiboSessionId?: string;
+	principalId: string;
 	context: PiboWebAppContext;
 	state: ChatWebAppState;
 	cursor?: ChatEventCursor;
@@ -1569,7 +1582,7 @@ function createEventStream(input: {
 	const streamId = randomUUID();
 	const stream = new ReadableStream<Uint8Array>({
 		start(controller) {
-			if (input.piboSessionId) markEventStreamConnected(input.state, input.piboSessionId, streamId);
+			if (input.activePiboSessionId) markEventStreamConnected(input.state, input.activePiboSessionId, streamId, input.principalId);
 			const streamState = createChatStreamState();
 			writeSse(controller, "pibo", {
 				type: "ready",
@@ -1607,11 +1620,11 @@ function createEventStream(input: {
 			unsubscribe = undefined;
 			if (heartbeat) clearInterval(heartbeat);
 			heartbeat = undefined;
-			if (input.piboSessionId) {
+			if (input.activePiboSessionId) {
 				markEventStreamDisconnected({
 					state: input.state,
 					context: input.context,
-					piboSessionId: input.piboSessionId,
+					piboSessionId: input.activePiboSessionId,
 					streamId,
 				});
 			}
@@ -3381,6 +3394,8 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				return createEventStream({
 					roomId: url.searchParams.has("roomId") ? roomId : undefined,
 					piboSessionId: url.searchParams.has("roomId") ? undefined : selectedSession.id,
+					activePiboSessionId: selectedSession.id,
+					principalId: principalIdFor(webSession),
 					context,
 					state,
 					cursor,

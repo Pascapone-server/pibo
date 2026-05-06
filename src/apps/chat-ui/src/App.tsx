@@ -1420,7 +1420,7 @@ function SessionTracePane({
 		if (!selectedPiboSessionId || !traceQueryKey) return;
 		if (!currentTraceView || currentTraceView.piboSessionId !== selectedPiboSessionId) return;
 		const params = selectedRoomId
-			? new URLSearchParams({ roomId: selectedRoomId })
+			? new URLSearchParams({ roomId: selectedRoomId, piboSessionId: selectedPiboSessionId })
 			: new URLSearchParams({ piboSessionId: selectedPiboSessionId });
 		if (currentTraceView?.latestStreamId !== undefined) {
 			params.set("since", `${currentTraceView.latestStreamId}:999999`);
@@ -2155,7 +2155,6 @@ function SessionNode({
 								<span className={`block text-sm truncate ${node.archived ? "text-slate-500" : "text-slate-200"}`}>{node.title}</span>
 								<span className="block text-[10px] font-mono truncate text-slate-500">{node.piboSessionId}</span>
 							</span>
-							<UnreadBadge count={node.unreadCount} />
 						</button>
 						<span className="grid grid-rows-[16px_16px] place-items-center gap-0.5">
 							<span className={signal.className} title={signal.title} aria-label={signal.title} />
