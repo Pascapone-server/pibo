@@ -459,13 +459,15 @@ function TerminalStreamingFooter() {
 }
 
 function useWorkingScramble(target: string) {
-	const [chars, setChars] = useState(() => randomAsciiChars(target.length));
+	const targetChars = useMemo(() => Array.from(target), [target]);
+	const [chars, setChars] = useState(() => targetChars);
 	const [activeIndex, setActiveIndex] = useState(0);
 
 	useEffect(() => {
 		let index = 0;
 		let rotationsRemaining = randomRotationCount();
 		let pauseTicks = 0;
+		setChars(targetChars);
 
 		const interval = window.setInterval(() => {
 			if (pauseTicks > 0) {
@@ -473,10 +475,10 @@ function useWorkingScramble(target: string) {
 				return;
 			}
 
-			if (index >= target.length) {
+			if (index >= targetChars.length) {
 				index = 0;
 				rotationsRemaining = randomRotationCount();
-				setChars(randomAsciiChars(target.length));
+				setChars(targetChars);
 				setActiveIndex(0);
 				return;
 			}
@@ -488,17 +490,18 @@ function useWorkingScramble(target: string) {
 				return;
 			}
 
-			setChars((current) => replaceChar(current, index, target[index] ?? " "));
+			setChars((current) => replaceChar(current, index, targetChars[index] ?? " "));
 			index++;
 			rotationsRemaining = randomRotationCount();
-			if (index >= target.length) {
+			if (index >= targetChars.length) {
+				setChars(targetChars);
 				setActiveIndex(-1);
 				pauseTicks = 12;
 			}
 		}, 55);
 
 		return () => window.clearInterval(interval);
-	}, [target]);
+	}, [targetChars]);
 
 	return { chars, activeIndex };
 }
@@ -507,10 +510,6 @@ function replaceChar(chars: string[], index: number, char: string): string[] {
 	const next = [...chars];
 	next[index] = char;
 	return next;
-}
-
-function randomAsciiChars(length: number): string[] {
-	return Array.from({ length }, randomAsciiChar);
 }
 
 function randomAsciiChar(): string {
