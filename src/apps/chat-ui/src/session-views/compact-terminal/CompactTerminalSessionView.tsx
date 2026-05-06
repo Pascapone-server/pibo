@@ -19,6 +19,7 @@ const DEFAULT_ROW_HEIGHT_PX = 84;
 
 export function CompactTerminalSessionView({
 	traceView,
+	selectedTrace,
 	isLoading,
 	showThinking,
 	expandThinking,
@@ -45,7 +46,7 @@ export function CompactTerminalSessionView({
 	const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 	const runningCount = rows.filter((row) => row.status === "running").length;
 	const errorCount = rows.filter((row) => row.status === "error").length;
-	const isStreaming = runningCount > 0;
+	const isStreaming = runningCount > 0 || selectedTrace?.status === "UNSET";
 
 	useEffect(() => {
 		setExpandedRows((current) => retainExistingExpandedRows(current, rows, expandThinking));
@@ -431,7 +432,16 @@ function isInteractiveEventTarget(event: MouseEvent<HTMLElement> | KeyboardEvent
 }
 
 function TerminalStreamingFooter() {
-	return <div className="px-4 py-3 text-[#737373]">• Working</div>;
+	return (
+		<div className="border-t border-[#141414] px-4 py-2" role="status" aria-live="polite" aria-label="Working">
+			<div className="grid grid-cols-[1.9rem_minmax(0,1fr)] gap-2 whitespace-pre-wrap break-words">
+				<span className="whitespace-pre text-[#38bdf8]">•</span>
+				<span className="compact-terminal-working-binary" aria-hidden="true">
+					<span>0</span><span>1</span><span>0</span><span>1</span><span>1</span><span>0</span><span>1</span><span>0</span><span>0</span><span>1</span><span>1</span><span>0</span><span>1</span><span>0</span><span>1</span><span>1</span>
+				</span>
+			</div>
+		</div>
+	);
 }
 
 function TerminalCompactionLine() {
