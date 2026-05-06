@@ -1123,7 +1123,7 @@ function syncUserSkills(state: ChatWebAppState, context: PiboWebAppContext): voi
 	// skill would trip the registry duplicate-skill guard and break the web UI.
 	for (const skill of userSkills) {
 		if (skill.enabled && !previouslySyncedNames.has(skill.name)) {
-			registerSkill({ name: skill.name, path: skill.path, enabled: true });
+			registerSkill({ name: skill.name, path: skill.path, enabled: true, kind: "user" });
 		}
 	}
 

@@ -201,6 +201,23 @@ test("capability catalog exposes installed pibo tool context hints", async () =>
 	});
 });
 
+test("capability catalog keeps user skills separate from plugin skills", () => {
+	const registry = createDefaultPiboPluginRegistry();
+
+	registry.registerSkill({ name: "personal-helper", path: "/tmp/personal-helper/SKILL.md", kind: "user" });
+
+	assert.deepEqual(
+		registry.getCapabilityCatalog().skills.find((skill) => skill.name === "personal-helper"),
+		{
+			name: "personal-helper",
+			path: "/tmp/personal-helper/SKILL.md",
+			kind: "user",
+			pluginId: undefined,
+			pluginName: undefined,
+		},
+	);
+});
+
 test("capability catalog exposes registered Pi packages without activating them", async () => {
 	const cwd = join(tmpdir(), `pibo-plugin-registry-pi-packages-${Math.random().toString(36).slice(2)}`);
 	mkdirSync(cwd, { recursive: true });
