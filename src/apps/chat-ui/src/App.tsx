@@ -726,9 +726,15 @@ export function App({ route }: { route: ChatAppRoute }) {
 	const permanentlyDeleteSession = async () => {
 		if (!deleteSessionTarget) return;
 		setDeletingSession(true);
+		await queryClient.cancelQueries({ queryKey: ["chat", "bootstrap"] });
+		const snapshot = createBootstrapMutationSnapshot(queryClient, bootstrap);
+		const optimisticDeletedIds = sessionSubtreeIds(deleteSessionTarget);
+		const optimisticDeletedSelected = selectedPiboSessionId ? optimisticDeletedIds.has(selectedPiboSessionId) : false;
+		if (optimisticDeletedSelected) setSelectedPiboSessionId(null);
+		updateBootstrapCache((data) => removeSessionsFromBootstrap(data, optimisticDeletedIds));
 		try {
 			const deleted = await deleteSession(deleteSessionTarget.piboSessionId, deleteSessionConfirmText);
-			const deletedSelected = selectedPiboSessionId ? deleted.deletedSessionIds.includes(selectedPiboSessionId) : false;
+			const deletedSelected = selectedPiboSessionId ? deleted.deletedSessionIds.includes(selectedPiboSessionId) : optimisticDeletedSelected;
 			if (deletedSelected) {
 				setSelectedPiboSessionId(null);
 			}
@@ -736,6 +742,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 				deletedSelected ? undefined : (selectedPiboSessionId ?? undefined),
 				showArchivedRef.current,
 				selectedRoomId ?? undefined,
+				{ force: true },
 			);
 			if (area === "sessions") {
 				navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
@@ -744,6 +751,8 @@ export function App({ route }: { route: ChatAppRoute }) {
 			setDeleteSessionConfirmText("");
 			setError(null);
 		} catch (caught) {
+			restoreBootstrapSnapshot(snapshot);
+			if (optimisticDeletedSelected) setSelectedPiboSessionId(selectedPiboSessionId);
 			setError(caught instanceof Error ? caught.message : String(caught));
 		} finally {
 			setDeletingSession(false);
@@ -753,11 +762,22 @@ export function App({ route }: { route: ChatAppRoute }) {
 	const createRoom = async () => {
 		if (creatingRoom) return;
 		setCreatingRoom(true);
+		await queryClient.cancelQueries({ queryKey: ["chat", "bootstrap"] });
+		const snapshot = createBootstrapMutationSnapshot(queryClient, bootstrap);
+		const tempId = `optimistic-room-${createClientTxnId()}`;
+		const optimisticRoom = createOptimisticRoom(tempId, bootstrap?.identity.userId ?? "user", "New Chat");
+		setSelectedRoomId(tempId);
+		setSelectedPiboSessionId(null);
+		updateBootstrapCache((data) => addRoomToBootstrap(data, optimisticRoom));
 		try {
 			const created = await postRoom({ name: "New Chat" });
+			updateBootstrapCache((data) => replaceRoomInBootstrap(data, tempId, created.room));
 			await selectRoom(created.room.id);
 			setError(null);
 		} catch (caught) {
+			restoreBootstrapSnapshot(snapshot);
+			setSelectedRoomId(selectedRoomId);
+			setSelectedPiboSessionId(selectedPiboSessionId);
 			setError(caught instanceof Error ? caught.message : String(caught));
 		} finally {
 			setCreatingRoom(false);
@@ -765,27 +785,43 @@ export function App({ route }: { route: ChatAppRoute }) {
 	};
 
 	const updateRoom = async (roomId: string, input: { name?: string; topic?: string | null; workspace?: string | null }) => {
+		await queryClient.cancelQueries({ queryKey: ["chat", "bootstrap"] });
+		const snapshot = createBootstrapMutationSnapshot(queryClient, bootstrap);
+		updateBootstrapCache((data) => updateRoomInBootstrap(data, roomId, (room) => ({
+			...room,
+			...(input.name !== undefined ? { name: input.name } : {}),
+			...(input.topic !== undefined ? { topic: input.topic ?? undefined } : {}),
+			...(input.workspace !== undefined ? { workspace: input.workspace ?? undefined } : {}),
+			updatedAt: new Date().toISOString(),
+		})));
 		try {
-			await patchRoom(roomId, input);
-			const data = await loadBootstrap(selectedPiboSessionId ?? undefined, showArchivedRef.current, roomId);
+			const { room } = await patchRoom(roomId, input);
+			updateBootstrapCache((data) => updateRoomInBootstrap(data, roomId, () => room));
+			const data = await loadBootstrap(selectedPiboSessionId ?? undefined, showArchivedRef.current, roomId, { force: true });
 			if (area === "sessions") navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
 			setError(null);
 		} catch (caught) {
+			restoreBootstrapSnapshot(snapshot);
 			setError(caught instanceof Error ? caught.message : String(caught));
 		}
 	};
 
 	const setRoomArchived = async (roomId: string, archived: boolean) => {
+		await queryClient.cancelQueries({ queryKey: ["chat", "bootstrap"] });
+		const snapshot = createBootstrapMutationSnapshot(queryClient, bootstrap);
+		if (archived) {
+			setShowArchivedRooms(true);
+			localStorage.setItem("pibo.chat.showArchivedRooms", "true");
+		}
+		updateBootstrapCache((data) => updateRoomInBootstrap(data, roomId, (room) => roomWithArchivedState(room, archived)));
 		try {
-			await patchRoom(roomId, { archived });
-			if (archived) {
-				setShowArchivedRooms(true);
-				localStorage.setItem("pibo.chat.showArchivedRooms", "true");
-			}
-			const data = await loadBootstrap(selectedPiboSessionId ?? undefined, showArchivedRef.current, selectedRoomId ?? undefined);
+			const { room } = await patchRoom(roomId, { archived });
+			updateBootstrapCache((data) => updateRoomInBootstrap(data, roomId, () => room));
+			const data = await loadBootstrap(selectedPiboSessionId ?? undefined, showArchivedRef.current, selectedRoomId ?? undefined, { force: true });
 			if (area === "sessions") navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
 			setError(null);
 		} catch (caught) {
+			restoreBootstrapSnapshot(snapshot);
 			setError(caught instanceof Error ? caught.message : String(caught));
 		}
 	};
@@ -798,18 +834,32 @@ export function App({ route }: { route: ChatAppRoute }) {
 	const permanentlyDeleteRoom = async () => {
 		if (!deleteRoomTarget) return;
 		setDeletingRoom(true);
+		await queryClient.cancelQueries({ queryKey: ["chat", "bootstrap"] });
+		const snapshot = createBootstrapMutationSnapshot(queryClient, bootstrap);
+		const optimisticDeletedRoomIds = roomSubtreeIds(deleteRoomTarget);
+		const optimisticDeletedSelected = selectedRoomId ? optimisticDeletedRoomIds.has(selectedRoomId) : false;
+		if (optimisticDeletedSelected) {
+			setSelectedRoomId(null);
+			setSelectedPiboSessionId(null);
+		}
+		updateBootstrapCache((data) => removeRoomsFromBootstrap(data, optimisticDeletedRoomIds));
 		try {
 			await deleteRoom(deleteRoomTarget.id, deleteRoomConfirmName);
 			if (selectedRoomId === deleteRoomTarget.id) {
 				setSelectedRoomId(null);
 				setSelectedPiboSessionId(null);
 			}
-			const data = await loadBootstrap(undefined, showArchivedRef.current);
+			const data = await loadBootstrap(undefined, showArchivedRef.current, undefined, { force: true });
 			if (area === "sessions") navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
 			setDeleteRoomTarget(null);
 			setDeleteRoomConfirmName("");
 			setError(null);
 		} catch (caught) {
+			restoreBootstrapSnapshot(snapshot);
+			if (optimisticDeletedSelected) {
+				setSelectedRoomId(selectedRoomId);
+				setSelectedPiboSessionId(selectedPiboSessionId);
+			}
 			setError(caught instanceof Error ? caught.message : String(caught));
 		} finally {
 			setDeletingRoom(false);
@@ -1737,6 +1787,43 @@ function addSessionNodeToBootstrap(data: BootstrapData, node: PiboWebSessionNode
 	return { ...data, sessions: [node, ...data.sessions] };
 }
 
+function removeSessionsFromBootstrap(data: BootstrapData, piboSessionIds: ReadonlySet<string>): BootstrapData {
+	const sessions = removeSessionNodes(data.sessions, piboSessionIds);
+	const selectedDeleted = piboSessionIds.has(data.selectedPiboSessionId);
+	return {
+		...data,
+		selectedPiboSessionId: selectedDeleted ? "" : data.selectedPiboSessionId,
+		sessions,
+	};
+}
+
+function removeSessionNodes(nodes: PiboWebSessionNode[], piboSessionIds: ReadonlySet<string>): PiboWebSessionNode[] {
+	let changed = false;
+	const next: PiboWebSessionNode[] = [];
+	for (const node of nodes) {
+		if (piboSessionIds.has(node.piboSessionId)) {
+			changed = true;
+			continue;
+		}
+		const children = removeSessionNodes(node.children, piboSessionIds);
+		if (children !== node.children) {
+			changed = true;
+			next.push({ ...node, children });
+		} else {
+			next.push(node);
+		}
+	}
+	return changed ? next : nodes;
+}
+
+function sessionSubtreeIds(node: PiboWebSessionNode): Set<string> {
+	const ids = new Set<string>([node.piboSessionId]);
+	for (const child of node.children) {
+		for (const id of sessionSubtreeIds(child)) ids.add(id);
+	}
+	return ids;
+}
+
 function replaceOptimisticSessionNode(
 	data: BootstrapData,
 	tempId: string | undefined,
@@ -1778,6 +1865,110 @@ function updateSessionNodeInBootstrap(
 ): BootstrapData {
 	const session = data.session.id === piboSessionId ? piboSessionFromSessionNode(updater(sessionNodeFromSession(data.session)), data.session) : data.session;
 	return { ...data, session, sessions: replaceSessionNode(data.sessions, piboSessionId, updater) };
+}
+
+function addRoomToBootstrap(data: BootstrapData, room: PiboRoom): BootstrapData {
+	if (findRoomById(data.rooms, room.id)) return data;
+	return {
+		...data,
+		room,
+		selectedRoomId: room.id,
+		selectedPiboSessionId: "",
+		rooms: [room, ...data.rooms],
+	};
+}
+
+function replaceRoomInBootstrap(data: BootstrapData, roomId: string, room: PiboRoom): BootstrapData {
+	return {
+		...data,
+		room: data.room?.id === roomId ? room : data.room,
+		selectedRoomId: data.selectedRoomId === roomId ? room.id : data.selectedRoomId,
+		rooms: replaceRoomNode(data.rooms, roomId, () => room),
+	};
+}
+
+function updateRoomInBootstrap(data: BootstrapData, roomId: string, updater: (room: PiboRoom) => PiboRoom): BootstrapData {
+	return {
+		...data,
+		room: data.room?.id === roomId ? updater(data.room) : data.room,
+		rooms: replaceRoomNode(data.rooms, roomId, updater),
+	};
+}
+
+function removeRoomsFromBootstrap(data: BootstrapData, roomIds: ReadonlySet<string>): BootstrapData {
+	const selectedDeleted = roomIds.has(data.selectedRoomId);
+	return {
+		...data,
+		room: data.room && roomIds.has(data.room.id) ? undefined : data.room,
+		selectedRoomId: selectedDeleted ? "" : data.selectedRoomId,
+		selectedPiboSessionId: selectedDeleted ? "" : data.selectedPiboSessionId,
+		rooms: removeRoomNodes(data.rooms, roomIds),
+	};
+}
+
+function replaceRoomNode(nodes: PiboRoom[], roomId: string, updater: (room: PiboRoom) => PiboRoom): PiboRoom[] {
+	let changed = false;
+	const next = nodes.map((node) => {
+		if (node.id === roomId) {
+			changed = true;
+			return updater(node);
+		}
+		const originalChildren = node.children ?? [];
+		const children = replaceRoomNode(originalChildren, roomId, updater);
+		if (children === originalChildren) return node;
+		changed = true;
+		return { ...node, children };
+	});
+	return changed ? next : nodes;
+}
+
+function removeRoomNodes(nodes: PiboRoom[], roomIds: ReadonlySet<string>): PiboRoom[] {
+	let changed = false;
+	const next: PiboRoom[] = [];
+	for (const node of nodes) {
+		if (roomIds.has(node.id)) {
+			changed = true;
+			continue;
+		}
+		const originalChildren = node.children ?? [];
+		const children = removeRoomNodes(originalChildren, roomIds);
+		if (children !== originalChildren) {
+			changed = true;
+			next.push({ ...node, children });
+		} else {
+			next.push(node);
+		}
+	}
+	return changed ? next : nodes;
+}
+
+function createOptimisticRoom(id: string, userId: string, name: string): PiboRoom {
+	const now = new Date().toISOString();
+	return {
+		id,
+		ownerScope: `user:${userId}`,
+		name,
+		type: "chat",
+		createdAt: now,
+		updatedAt: now,
+		metadata: {},
+		children: [],
+	};
+}
+
+function roomWithArchivedState(room: PiboRoom, archived: boolean): PiboRoom {
+	const metadata = { ...room.metadata };
+	if (archived) metadata.chatRoomArchivedAt = new Date().toISOString();
+	else delete metadata.chatRoomArchivedAt;
+	return { ...room, metadata, updatedAt: new Date().toISOString() };
+}
+
+function roomSubtreeIds(room: PiboRoom): Set<string> {
+	const ids = new Set<string>([room.id]);
+	for (const child of room.children ?? []) {
+		for (const id of roomSubtreeIds(child)) ids.add(id);
+	}
+	return ids;
 }
 
 function replaceSessionNode(
