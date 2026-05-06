@@ -13,7 +13,8 @@ export function TerminalModelCard({
 	piboSessionId?: string;
 	onModelChanged?: () => Promise<void>;
 }) {
-	const menu = isModelMenuResult(unwrapActionResult(row.output)) ? unwrapActionResult(row.output) : undefined;
+	const output = unwrapActionResult(row.output);
+	const menu = isModelMenuResult(output) ? output : undefined;
 	const providers = menu?.providers ?? [];
 	const models = useMemo(
 		() => providers.flatMap((provider) => provider.models.map((model) => ({ ...model, providerLabel: provider.label }))),
@@ -80,7 +81,7 @@ export function TerminalModelCard({
 										<span className="block truncate text-[#d4d4d4]">{model.label}</span>
 										<span className="block truncate text-[11px] text-[#737373]">{model.provider}/{model.id}</span>
 									</span>
-									{selected?.provider === model.provider && selected.id === model.id ? <Check size={14} className="text-[#22c55e]" /> : null}
+									{selected?.provider === model.provider && selected?.id === model.id ? <Check size={14} className="text-[#22c55e]" /> : null}
 								</button>
 							)) : <div className="px-3 py-2 text-[#737373]">No matching models.</div>}
 						</div>

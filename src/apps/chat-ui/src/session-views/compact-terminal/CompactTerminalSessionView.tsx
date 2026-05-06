@@ -1,8 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { ChevronDown, ChevronRight, GitBranch } from "lucide-react";
-import { Virtuoso } from "react-virtuoso";
-import { useStickyVirtuoso } from "../../components/useStickyVirtuoso";
 import { MarkdownRenderer } from "../../tracing/MarkdownRenderer";
 import type { ChatSessionViewProps } from "../types";
 import { TerminalDetails } from "./TerminalDetails";
@@ -11,9 +9,10 @@ import { TerminalLoginCard } from "./TerminalLoginCard";
 import { TerminalModelCard } from "./TerminalModelCard";
 import { TerminalStatusCard } from "./TerminalStatusCard";
 import { TerminalThinkingCard } from "./TerminalThinkingCard";
-import { buildCompactTerminalRows, type CompactTerminalLine } from "./terminalRows";
+import { buildCompactTerminalRows, type CompactTerminalLine, type CompactTerminalRow } from "./terminalRows";
 
-const INITIAL_BOTTOM_ITEM = { index: "LAST", align: "end" } as const;
+const BOTTOM_LOCK_THRESHOLD_PX = 48;
+const SHOW_LATEST_THRESHOLD_PX = 180;
 
 export function CompactTerminalSessionView({
 	traceView,
@@ -37,70 +36,68 @@ export function CompactTerminalSessionView({
 		() => buildCompactTerminalRows(traceView, { showThinking }),
 		[showThinking, traceView],
 	);
-	const stickyView = useStickyVirtuoso({ itemCount: rows.length, resetKey: traceView?.piboSessionId, contentKey: rows });
+	const scrollRef = useRef<HTMLDivElement>(null);
+	const bottomLockedRef = useRef(true);
+	const [showJumpToBottom, setShowJumpToBottom] = useState(false);
 	const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 	const runningCount = rows.filter((row) => row.status === "running").length;
 	const errorCount = rows.filter((row) => row.status === "error").length;
 	const isStreaming = runningCount > 0;
 
 	useEffect(() => {
-		setExpandedRows((current) => {
-			const next = new Set<string>();
-			for (const row of rows) {
-				if (current.has(row.id)) next.add(row.id);
-				if (expandThinking && row.kind === "reasoning" && row.expandable) next.add(row.id);
-			}
-			return sameSet(current, next) ? current : next;
-		});
+		setExpandedRows((current) => retainExistingExpandedRows(current, rows, expandThinking));
 	}, [expandThinking, rows]);
 
+	const updateBottomLock = () => {
+		const distance = distanceFromBottom(scrollRef.current);
+		if (distance === undefined) return;
+		bottomLockedRef.current = distance < BOTTOM_LOCK_THRESHOLD_PX;
+		setShowJumpToBottom(distance > SHOW_LATEST_THRESHOLD_PX);
+	};
+
+	const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
+		const element = scrollRef.current;
+		if (!element) return;
+		bottomLockedRef.current = true;
+		element.scrollTo({ top: element.scrollHeight, behavior });
+		setShowJumpToBottom(false);
+	};
+
+	useLayoutEffect(() => {
+		bottomLockedRef.current = true;
+		const frame = requestAnimationFrame(() => scrollToBottom("auto"));
+		return () => cancelAnimationFrame(frame);
+	}, [traceView?.piboSessionId]);
+
+	useLayoutEffect(() => {
+		if (!bottomLockedRef.current) return;
+		const frame = requestAnimationFrame(() => scrollToBottom("auto"));
+		return () => cancelAnimationFrame(frame);
+	}, [isStreaming, rows]);
+
+	const toggleRow = (row: CompactTerminalRow) => {
+		if (!row.expandable) return;
+		setExpandedRows((current) => {
+			const next = new Set(current);
+			if (next.has(row.id)) next.delete(row.id);
+			else next.add(row.id);
+			return next;
+		});
+	};
 
 	return (
 		<section className="relative min-w-0 flex-1 flex flex-col overflow-hidden bg-[#0b0b0b] text-[#d4d4d4]">
-			<div className="border-b border-[#2a2a2a] bg-[#111111] px-4 py-2 text-[11px]">
-				<div className="flex flex-wrap items-center gap-2">
-					{isLoading ? <TerminalBadge tone="cyan">Loading</TerminalBadge> : null}
-					{runningCount > 0 ? <TerminalBadge tone="cyan">{runningCount} running</TerminalBadge> : null}
-					{errorCount > 0 ? <TerminalBadge tone="red">{errorCount} errors</TerminalBadge> : null}
-					{sessionAgentProfile ? <TerminalBadge tone="neutral">{sessionAgentProfile}</TerminalBadge> : null}
-					{sessionActiveModel ? <TerminalBadge tone="purple">Model {sessionActiveModel}</TerminalBadge> : null}
-					{originSession ? (
-						<button
-							type="button"
-							onClick={() => onOpenSession(originSession.piboSessionId)}
-							className="border border-[#3a3a3a] px-2 py-0.5 text-[#38bdf8] hover:border-[#38bdf8]"
-						>
-							Origin {originSession.label}
-						</button>
-					) : null}
-					{derivedSessions.map((session) => (
-						<button
-							key={session.piboSessionId}
-							type="button"
-							onClick={() => onOpenSession(session.piboSessionId)}
-							className="border border-[#3a3a3a] px-2 py-0.5 text-[#38bdf8] hover:border-[#38bdf8]"
-						>
-							Derived {session.label}
-						</button>
-					))}
-				</div>
-				{sessionBreadcrumbs.length ? (
-					<div className="mt-2 flex flex-wrap items-center gap-1 text-[#737373]">
-						{sessionBreadcrumbs.map((item, index) => (
-							<div key={item.piboSessionId} className="flex items-center gap-1">
-								{index > 0 ? <ChevronRight size={12} className="text-[#525252]" /> : null}
-								<button
-									type="button"
-									onClick={() => onOpenSession(item.piboSessionId)}
-									className="hover:text-[#38bdf8]"
-								>
-									{item.label}
-								</button>
-							</div>
-						))}
-					</div>
-				) : null}
-			</div>
+			<TerminalHeader
+				isLoading={isLoading}
+				runningCount={runningCount}
+				errorCount={errorCount}
+				sessionAgentProfile={sessionAgentProfile}
+				sessionActiveModel={sessionActiveModel}
+				sessionBreadcrumbs={sessionBreadcrumbs}
+				originSession={originSession}
+				derivedSessions={derivedSessions}
+				onOpenSession={onOpenSession}
+			/>
 
 			<div className="min-h-0 flex-1 overflow-hidden">
 				{!traceView ? (
@@ -111,136 +108,27 @@ export function CompactTerminalSessionView({
 						onSelectAgentProfile={onSessionAgentProfileChange}
 					/>
 				) : rows.length ? (
-					<Virtuoso
-						key={traceView.piboSessionId}
-						ref={stickyView.virtuosoRef}
-						data={rows}
-						initialTopMostItemIndex={INITIAL_BOTTOM_ITEM}
-						increaseViewportBy={{ top: 800, bottom: 800 }}
-						className="min-h-0 h-full font-mono text-[12px] leading-[1.45]"
-						computeItemKey={(_, row) => row.id}
-						scrollerRef={stickyView.scrollerRef}
-						atBottomStateChange={stickyView.atBottomStateChange}
-						atBottomThreshold={stickyView.atBottomThreshold}
-						followOutput={stickyView.followOutput}
-						totalListHeightChanged={stickyView.totalListHeightChanged}
-						alignToBottom
-						components={{
-							Footer: isStreaming ? TerminalStreamingFooter : undefined,
-						}}
-						itemContent={(_, row) => {
-							const expanded = expandedRows.has(row.id);
-							const collapseToolCallPreview = !expanded && isToolCallLikeRow(row);
-							const visibleLines = collapseToolCallPreview ? collapsedToolCallPreviewLines(row) : row.lines;
-							const toggleExpanded = () => {
-								if (!row.expandable) return;
-								setExpandedRows((current) => {
-									const next = new Set(current);
-									if (next.has(row.id)) next.delete(row.id);
-									else next.add(row.id);
-									return next;
-								});
-							};
-							const handleRowDoubleClick = (event: MouseEvent<HTMLDivElement>) => {
-								if (isInteractiveEventTarget(event)) return;
-								toggleExpanded();
-							};
-							const handleRowKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-								if (!row.expandable || isInteractiveEventTarget(event)) return;
-								if (event.key === "Enter" || event.key === " ") {
-									event.preventDefault();
-									toggleExpanded();
-								}
-							};
-							const rowClassName =
-								(row.kind === "message.user"
-									? "group border-b border-[#141414] bg-[#11a4d4]/10 py-2 last:border-b-0 hover:bg-[#11a4d4]/15"
-									: row.kind === "execution.command"
-										? "group border-b border-[#141414] bg-[#f59e0b]/5 py-2 last:border-b-0 hover:bg-[#f59e0b]/10"
-										: "group border-b border-[#141414] py-2 last:border-b-0 hover:bg-[#161616]") +
-								(row.expandable ? " focus:outline-none focus:ring-1 focus:ring-[#38bdf8]/50" : "");
-							return (
-								<div className="px-4">
-									<div
-										className={rowClassName}
-										data-pibo-terminal-row="true"
-										data-row-id={row.id}
-										data-row-kind={row.kind}
-										data-row-status={row.status}
-										data-trace-node-id={row.sourceNodeIds.join(" ")}
-										data-event-id={row.eventId}
-										data-run-id={row.runId}
-										data-order-source={row.orderSource}
-										data-order-stream-id={row.orderStreamId}
-										data-order-frame-index={row.orderStreamFrameIndex}
-										onDoubleClick={row.expandable ? handleRowDoubleClick : undefined}
-										onKeyDown={row.expandable ? handleRowKeyDown : undefined}
-										role={row.expandable ? "button" : undefined}
-										tabIndex={row.expandable ? 0 : undefined}
-										aria-expanded={row.expandable ? expanded : undefined}
-									>
-										<div className="flex gap-3">
-											<div className="min-w-0 flex-1">
-												{row.kind === "message.assistant" ? (
-													<div className="ml-[1.9rem] min-w-0">
-														<div className="compact-terminal-markdown">
-															<MarkdownRenderer>{typeof row.output === "string" ? row.output : ""}</MarkdownRenderer>
-														</div>
-													</div>
-												) : row.kind === "tool.status" ? (
-													<div className="min-w-0">
-														<TerminalStatusCard row={row} />
-													</div>
-												) : row.kind === "tool.thinking" ? (
-													<div className="min-w-0">
-														<TerminalThinkingCard row={row} onLevelSelect={onThinkingLevelChange} />
-													</div>
-												) : row.kind === "tool.login" ? (
-													<div className="min-w-0">
-														<TerminalLoginCard row={row} piboSessionId={traceView?.piboSessionId} />
-													</div>
-												) : row.kind === "tool.model" ? (
-											<div className="min-w-0">
-												<TerminalModelCard row={row} piboSessionId={traceView?.piboSessionId} onModelChanged={onModelChanged} />
-											</div>
-										) : row.kind === "execution.compaction" && row.status === "running" ? (
-											<TerminalCompactionLine />
-										) : row.kind === "reasoning" && row.markdown ? (
-													<>
-														{visibleLines.map((line, index) => <TerminalLine key={`${row.id}:${index}`} line={line} status={row.status} clampLines={collapseToolCallPreview && index === 0 ? 5 : undefined} />)}
-														<div className="ml-[1.9rem] min-w-0">
-															<div className="compact-terminal-markdown compact-terminal-reasoning">
-																<MarkdownRenderer>{row.markdown}</MarkdownRenderer>
-															</div>
-														</div>
-													</>
-												) : (
-													visibleLines.map((line, index) => <TerminalLine key={`${row.id}:${index}`} line={line} status={row.status} clampLines={collapseToolCallPreview && index === 0 ? 5 : undefined} />)
-												)}
-											</div>
-											<div className={`flex shrink-0 items-start gap-1 transition-opacity ${row.forkEntryId ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"}`}>
-												{row.linkedPiboSessionId ? (
-													<RowAction
-														label="Open linked session"
-														onClick={() => onOpenSession(row.linkedPiboSessionId!)}
-													>
-														Open
-													</RowAction>
-												) : null}
-												{row.forkEntryId ? (
-													<RowAction label="Fork from this user message" onClick={() => onFork(row.forkEntryId!)}>
-														<GitBranch size={13} />
-														Fork
-													</RowAction>
-												) : null}
-											</div>
-										</div>
-										{expanded ? <TerminalDetails row={row} onOpenSession={onOpenSession} /> : null}
-									</div>
-								</div>
-							);
-						}}
-					/>
+					<div
+						ref={scrollRef}
+						onScroll={updateBottomLock}
+						className="min-h-0 h-full overflow-y-auto overflow-x-hidden font-mono text-[12px] leading-[1.45]"
+					>
+						{rows.map((row) => (
+							<div key={row.id} className="px-4">
+								<TerminalRow
+									row={row}
+									expanded={expandedRows.has(row.id)}
+									piboSessionId={traceView.piboSessionId}
+									onToggle={() => toggleRow(row)}
+									onFork={onFork}
+									onOpenSession={onOpenSession}
+									onThinkingLevelChange={onThinkingLevelChange}
+									onModelChanged={onModelChanged}
+								/>
+							</div>
+						))}
+						{isStreaming ? <TerminalStreamingFooter /> : null}
+					</div>
 				) : (
 					<EmptyTerminalState
 						isLoading={isLoading}
@@ -252,19 +140,265 @@ export function CompactTerminalSessionView({
 				)}
 			</div>
 
-			{stickyView.isSticky ? null : (
+			{showJumpToBottom ? (
 				<button
 					type="button"
-					onClick={() => stickyView.stickToBottom("auto")}
+					onClick={() => scrollToBottom("auto")}
 					title="Scroll to latest"
 					aria-label="Scroll to latest"
 					className="absolute right-4 bottom-4 z-30 inline-flex h-9 w-9 items-center justify-center rounded-sm border border-[#38bdf8] bg-[#111111]/95 text-[#38bdf8] shadow-lg shadow-black/30 hover:bg-[#161616]"
 				>
 					<ChevronDown size={18} />
 				</button>
-			)}
+			) : null}
 		</section>
 	);
+}
+
+function TerminalHeader({
+	isLoading,
+	runningCount,
+	errorCount,
+	sessionAgentProfile,
+	sessionActiveModel,
+	sessionBreadcrumbs,
+	originSession,
+	derivedSessions,
+	onOpenSession,
+}: {
+	isLoading: boolean;
+	runningCount: number;
+	errorCount: number;
+	sessionAgentProfile?: string;
+	sessionActiveModel?: string;
+	sessionBreadcrumbs: ChatSessionViewProps["sessionBreadcrumbs"];
+	originSession: ChatSessionViewProps["originSession"];
+	derivedSessions: ChatSessionViewProps["derivedSessions"];
+	onOpenSession: ChatSessionViewProps["onOpenSession"];
+}) {
+	return (
+		<div className="border-b border-[#2a2a2a] bg-[#111111] px-4 py-2 text-[11px]">
+			<div className="flex flex-wrap items-center gap-2">
+				{isLoading ? <TerminalBadge tone="cyan">Loading</TerminalBadge> : null}
+				{runningCount > 0 ? <TerminalBadge tone="cyan">{runningCount} running</TerminalBadge> : null}
+				{errorCount > 0 ? <TerminalBadge tone="red">{errorCount} errors</TerminalBadge> : null}
+				{sessionAgentProfile ? <TerminalBadge tone="neutral">{sessionAgentProfile}</TerminalBadge> : null}
+				{sessionActiveModel ? <TerminalBadge tone="purple">Model {sessionActiveModel}</TerminalBadge> : null}
+				{originSession ? (
+					<SessionLinkButton onClick={() => onOpenSession(originSession.piboSessionId)}>
+						Origin {originSession.label}
+					</SessionLinkButton>
+				) : null}
+				{derivedSessions.map((session) => (
+					<SessionLinkButton key={session.piboSessionId} onClick={() => onOpenSession(session.piboSessionId)}>
+						Derived {session.label}
+					</SessionLinkButton>
+				))}
+			</div>
+			{sessionBreadcrumbs.length ? (
+				<div className="mt-2 flex flex-wrap items-center gap-1 text-[#737373]">
+					{sessionBreadcrumbs.map((item, index) => (
+						<div key={item.piboSessionId} className="flex items-center gap-1">
+							{index > 0 ? <ChevronRight size={12} className="text-[#525252]" /> : null}
+							<button type="button" onClick={() => onOpenSession(item.piboSessionId)} className="hover:text-[#38bdf8]">
+								{item.label}
+							</button>
+						</div>
+					))}
+				</div>
+			) : null}
+		</div>
+	);
+}
+
+function SessionLinkButton({ children, onClick }: { children: ReactNode; onClick: () => void }) {
+	return (
+		<button type="button" onClick={onClick} className="border border-[#3a3a3a] px-2 py-0.5 text-[#38bdf8] hover:border-[#38bdf8]">
+			{children}
+		</button>
+	);
+}
+
+function TerminalRow({
+	row,
+	expanded,
+	piboSessionId,
+	onToggle,
+	onFork,
+	onOpenSession,
+	onThinkingLevelChange,
+	onModelChanged,
+}: {
+	row: CompactTerminalRow;
+	expanded: boolean;
+	piboSessionId: string;
+	onToggle: () => void;
+	onFork: ChatSessionViewProps["onFork"];
+	onOpenSession: ChatSessionViewProps["onOpenSession"];
+	onThinkingLevelChange: ChatSessionViewProps["onThinkingLevelChange"];
+	onModelChanged: ChatSessionViewProps["onModelChanged"];
+}) {
+	const collapseToolCallPreview = !expanded && isToolCallLikeRow(row);
+	const visibleLines = collapseToolCallPreview ? collapsedToolCallPreviewLines(row) : row.lines;
+	const handleRowDoubleClick = (event: MouseEvent<HTMLDivElement>) => {
+		if (!row.expandable || isInteractiveEventTarget(event)) return;
+		onToggle();
+	};
+	const handleRowKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+		if (!row.expandable || isInteractiveEventTarget(event)) return;
+		if (event.key === "Enter" || event.key === " ") {
+			event.preventDefault();
+			onToggle();
+		}
+	};
+
+	return (
+		<div
+			className={terminalRowClassName(row)}
+			data-pibo-terminal-row="true"
+			data-row-id={row.id}
+			data-row-kind={row.kind}
+			data-row-status={row.status}
+			data-trace-node-id={row.sourceNodeIds.join(" ")}
+			data-event-id={row.eventId}
+			data-run-id={row.runId}
+			data-order-source={row.orderSource}
+			data-order-stream-id={row.orderStreamId}
+			data-order-frame-index={row.orderStreamFrameIndex}
+			onDoubleClick={row.expandable ? handleRowDoubleClick : undefined}
+			onKeyDown={row.expandable ? handleRowKeyDown : undefined}
+			role={row.expandable ? "button" : undefined}
+			tabIndex={row.expandable ? 0 : undefined}
+			aria-expanded={row.expandable ? expanded : undefined}
+		>
+			<div className="flex gap-3">
+				<div className="min-w-0 flex-1">
+					<TerminalRowContent
+						row={row}
+						visibleLines={visibleLines}
+						collapseToolCallPreview={collapseToolCallPreview}
+						piboSessionId={piboSessionId}
+						onThinkingLevelChange={onThinkingLevelChange}
+						onModelChanged={onModelChanged}
+					/>
+				</div>
+				<TerminalRowActions row={row} onFork={onFork} onOpenSession={onOpenSession} />
+			</div>
+			{expanded ? <TerminalDetails row={row} onOpenSession={onOpenSession} /> : null}
+		</div>
+	);
+}
+
+function TerminalRowContent({
+	row,
+	visibleLines,
+	collapseToolCallPreview,
+	piboSessionId,
+	onThinkingLevelChange,
+	onModelChanged,
+}: {
+	row: CompactTerminalRow;
+	visibleLines: CompactTerminalLine[];
+	collapseToolCallPreview: boolean;
+	piboSessionId: string;
+	onThinkingLevelChange: ChatSessionViewProps["onThinkingLevelChange"];
+	onModelChanged: ChatSessionViewProps["onModelChanged"];
+}) {
+	if (row.kind === "message.assistant") {
+		return (
+			<div className="ml-[1.9rem] min-w-0">
+				<div className="compact-terminal-markdown">
+					<MarkdownRenderer>{typeof row.output === "string" ? row.output : ""}</MarkdownRenderer>
+				</div>
+			</div>
+		);
+	}
+	if (row.kind === "tool.status") return <TerminalStatusCard row={row} />;
+	if (row.kind === "tool.thinking") return <TerminalThinkingCard row={row} onLevelSelect={onThinkingLevelChange} />;
+	if (row.kind === "tool.login") return <TerminalLoginCard row={row} piboSessionId={piboSessionId} />;
+	if (row.kind === "tool.model") return <TerminalModelCard row={row} piboSessionId={piboSessionId} onModelChanged={onModelChanged} />;
+	if (row.kind === "execution.compaction" && row.status === "running") return <TerminalCompactionLine />;
+	if (row.kind === "reasoning" && row.markdown) {
+		return (
+			<>
+				<TerminalLines lines={visibleLines} status={row.status} clampPreview={collapseToolCallPreview} />
+				<div className="ml-[1.9rem] min-w-0">
+					<div className="compact-terminal-markdown compact-terminal-reasoning">
+						<MarkdownRenderer>{row.markdown}</MarkdownRenderer>
+					</div>
+				</div>
+			</>
+		);
+	}
+	return <TerminalLines lines={visibleLines} status={row.status} clampPreview={collapseToolCallPreview} />;
+}
+
+function TerminalLines({
+	lines,
+	status,
+	clampPreview,
+}: {
+	lines: CompactTerminalLine[];
+	status: CompactTerminalRow["status"];
+	clampPreview: boolean;
+}) {
+	return lines.map((line, index) => (
+		<TerminalLine key={index} line={line} status={status} clampLines={clampPreview && index === 0 ? 5 : undefined} />
+	));
+}
+
+function TerminalRowActions({
+	row,
+	onFork,
+	onOpenSession,
+}: {
+	row: CompactTerminalRow;
+	onFork: ChatSessionViewProps["onFork"];
+	onOpenSession: ChatSessionViewProps["onOpenSession"];
+}) {
+	return (
+		<div className={`flex shrink-0 items-start gap-1 transition-opacity ${row.forkEntryId ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"}`}>
+			{row.linkedPiboSessionId ? (
+				<RowAction label="Open linked session" onClick={() => onOpenSession(row.linkedPiboSessionId!)}>
+					Open
+				</RowAction>
+			) : null}
+			{row.forkEntryId ? (
+				<RowAction label="Fork from this user message" onClick={() => onFork(row.forkEntryId!)}>
+					<GitBranch size={13} />
+					Fork
+				</RowAction>
+			) : null}
+		</div>
+	);
+}
+
+function terminalRowClassName(row: CompactTerminalRow): string {
+	const base =
+		row.kind === "message.user"
+			? "group border-b border-[#141414] bg-[#11a4d4]/10 py-2 last:border-b-0 hover:bg-[#11a4d4]/15"
+			: row.kind === "execution.command"
+				? "group border-b border-[#141414] bg-[#f59e0b]/5 py-2 last:border-b-0 hover:bg-[#f59e0b]/10"
+				: "group border-b border-[#141414] py-2 last:border-b-0 hover:bg-[#161616]";
+	return row.expandable ? `${base} focus:outline-none focus:ring-1 focus:ring-[#38bdf8]/50` : base;
+}
+
+function retainExistingExpandedRows(
+	current: Set<string>,
+	rows: readonly CompactTerminalRow[],
+	expandThinking: boolean,
+): Set<string> {
+	const next = new Set<string>();
+	for (const row of rows) {
+		if (current.has(row.id)) next.add(row.id);
+		if (expandThinking && row.kind === "reasoning" && row.expandable) next.add(row.id);
+	}
+	return sameSet(current, next) ? current : next;
+}
+
+function distanceFromBottom(element: HTMLElement | null): number | undefined {
+	if (!element) return undefined;
+	return element.scrollHeight - element.scrollTop - element.clientHeight;
 }
 
 function collapsedToolCallPreviewLines(row: { kind: string; lines: CompactTerminalLine[] }) {
