@@ -69,14 +69,16 @@ export function useStickyVirtuoso({
 		scheduleScrollToBottom(behavior);
 	}, [scheduleScrollToBottom, setSticky]);
 
-	const markUserScrollIntent = useCallback(() => {
+	const markUserScrollIntent = useCallback((event?: Event) => {
 		userScrollIntentRef.current = true;
+		const scrollingAwayFromBottom = event instanceof WheelEvent && event.deltaY < 0;
+		if (scrollingAwayFromBottom || (scroller && !isAtBottom(scroller, atBottomThreshold))) setSticky(false);
 		if (userScrollIntentTimerRef.current !== undefined) window.clearTimeout(userScrollIntentTimerRef.current);
 		userScrollIntentTimerRef.current = window.setTimeout(() => {
 			userScrollIntentRef.current = false;
 			userScrollIntentTimerRef.current = undefined;
 		}, USER_SCROLL_INTENT_MS);
-	}, []);
+	}, [atBottomThreshold, scroller, setSticky]);
 
 	const updateFromScrollPosition = useCallback(() => {
 		if (!scroller) return;
