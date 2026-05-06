@@ -324,6 +324,8 @@ function requestMatchesVersion(request: Request, version: string): boolean {
 		.some((value) => value === "*" || value === etagForVersion(version) || value === `W/${etagForVersion(version)}`);
 }
 
+const TRACE_RENDER_EVENTS_LIMIT = 10_000;
+
 function traceCacheKey(piboSessionId: string, version: string, includeRawEvents: boolean, rawEventsLimit: number): string {
 	return [piboSessionId, version, includeRawEvents ? "raw" : "compact", rawEventsLimit].join(":");
 }
@@ -3258,7 +3260,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 					sessions: ownedSessions,
 					events: state.readModel.listTraceEvents({
 						piboSessionId: selectedSession.id,
-						limit: includeRawEvents ? rawEventsLimit : 2000,
+						limit: TRACE_RENDER_EVENTS_LIMIT,
 					}),
 					status: indexedSession?.status,
 					includeRawEvents,
@@ -3285,7 +3287,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				const trace = await buildTraceView({
 					session,
 					sessions: ownedSessions,
-					events: state.readModel.listTraceEvents({ piboSessionId, beforeOrAtSequence: eventSequence, limit: 2000 }),
+					events: state.readModel.listTraceEvents({ piboSessionId, beforeOrAtSequence: eventSequence, limit: TRACE_RENDER_EVENTS_LIMIT }),
 					status: indexedSession?.status,
 				});
 				return responseJson(trace);
