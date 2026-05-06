@@ -460,14 +460,14 @@ function TerminalStreamingFooter() {
 
 function useWorkingScramble(target: string) {
 	const targetChars = useMemo(() => Array.from(target), [target]);
-	const [chars, setChars] = useState(() => randomAsciiChars(targetChars.length));
+	const [chars, setChars] = useState(() => randomAsciiChars(targetChars));
 	const [activeIndex, setActiveIndex] = useState(0);
 
 	useEffect(() => {
 		let index = 0;
 		let rotationsRemaining = randomRotationCount();
 		let pauseTicks = 0;
-		setChars(randomAsciiChars(targetChars.length));
+		setChars(randomAsciiChars(targetChars));
 
 		const interval = window.setInterval(() => {
 			if (pauseTicks > 0) {
@@ -478,14 +478,14 @@ function useWorkingScramble(target: string) {
 			if (index >= targetChars.length) {
 				index = 0;
 				rotationsRemaining = randomRotationCount();
-				setChars(randomAsciiChars(targetChars.length));
+				setChars(randomAsciiChars(targetChars));
 				setActiveIndex(0);
 				return;
 			}
 
 			setActiveIndex(index);
 			if (rotationsRemaining > 1) {
-				setChars((current) => replaceChar(current, index, randomAsciiChar()));
+				setChars((current) => replaceChar(current, index, randomAsciiChar(targetChars[index])));
 				rotationsRemaining--;
 				return;
 			}
@@ -512,13 +512,17 @@ function replaceChar(chars: string[], index: number, char: string): string[] {
 	return next;
 }
 
-function randomAsciiChars(length: number): string[] {
-	return Array.from({ length }, randomAsciiChar);
+function randomAsciiChars(targetChars: string[]): string[] {
+	return targetChars.map((targetChar) => randomAsciiChar(targetChar));
 }
 
-function randomAsciiChar(): string {
-	const code = WORKING_SCRAMBLE_ASCII_START + Math.floor(Math.random() * (WORKING_SCRAMBLE_ASCII_END - WORKING_SCRAMBLE_ASCII_START + 1));
-	return String.fromCharCode(code);
+function randomAsciiChar(exclude?: string): string {
+	let char = "";
+	do {
+		const code = WORKING_SCRAMBLE_ASCII_START + Math.floor(Math.random() * (WORKING_SCRAMBLE_ASCII_END - WORKING_SCRAMBLE_ASCII_START + 1));
+		char = String.fromCharCode(code);
+	} while (char === exclude);
+	return char;
 }
 
 function randomRotationCount(): number {
