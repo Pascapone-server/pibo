@@ -889,6 +889,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 	});
 	const personalRoom = findPersonalRoom(bootstrap.rooms);
 	const roomGroups = splitRoomNodes(bootstrap.rooms);
+	const totalRoomUnreadCount = countUnreadRooms(bootstrap.rooms);
 	const contextAgentProfiles = [...new Set([...bootstrap.agents.map((agent) => agent.name), ...bootstrap.customAgents.map((agent) => agent.profileName)])];
 
 	return (
@@ -930,7 +931,10 @@ export function App({ route }: { route: ChatAppRoute }) {
 								area === item ? "border-[#11a4d4] text-[#11a4d4] bg-[#11a4d4]/10" : "border-slate-700 text-slate-400"
 							}`}
 						>
-							{item}
+							<span className="inline-flex items-center gap-1.5">
+								<span>{item}</span>
+								{item === "sessions" ? <MobileUnreadBadge count={totalRoomUnreadCount} /> : null}
+							</span>
 						</button>
 					))}
 				</nav>
@@ -2126,16 +2130,32 @@ function DeleteRoomModal({
 	);
 }
 
+function unreadBadgeLabel(count: number): string {
+	return count > 99 ? "99+" : String(count);
+}
+
 function UnreadBadge({ count }: { count?: number }) {
 	if (!count || count <= 0) return null;
-	const label = count > 99 ? "99+" : String(count);
 	return (
 		<span
-			className="min-w-5 h-5 px-1.5 inline-flex items-center justify-center rounded-full bg-[#0bda57] text-[#0e1116] text-[10px] font-bold tabular-nums leading-none"
+			className="min-w-5 h-5 px-1.5 inline-flex items-center justify-center rounded-full bg-[#38bdf8] text-[#0e1116] text-[10px] font-bold tabular-nums leading-none"
 			aria-label={`${count} unread messages`}
 			title={`${count} unread messages`}
 		>
-			{label}
+			{unreadBadgeLabel(count)}
+		</span>
+	);
+}
+
+function MobileUnreadBadge({ count }: { count?: number }) {
+	if (!count || count <= 0) return null;
+	return (
+		<span
+			className="min-w-5 h-5 px-1.5 inline-flex items-center justify-center rounded-full bg-[#38bdf8] text-[#0e1116] text-[10px] font-bold tabular-nums leading-none"
+			aria-label={`${count} unread messages across all rooms`}
+			title={`${count} unread messages across all rooms`}
+		>
+			{unreadBadgeLabel(count)}
 		</span>
 	);
 }
@@ -2658,6 +2678,10 @@ function findRoomById(rooms: PiboRoom[], roomId: string): PiboRoom | undefined {
 		if (child) return child;
 	}
 	return undefined;
+}
+
+function countUnreadRooms(rooms: readonly PiboRoom[]): number {
+	return rooms.reduce((sum, room) => sum + (room.unreadCount ?? 0), 0);
 }
 
 function splitRoomNodes(nodes: PiboRoom[]): {
