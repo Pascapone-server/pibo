@@ -484,7 +484,7 @@ function useWorkingScramble(target: string) {
 			}
 
 			setActiveIndex(index);
-			if (rotationsRemaining > 0) {
+			if (rotationsRemaining > 1) {
 				setChars((current) => replaceChar(current, index, randomAsciiChar()));
 				rotationsRemaining--;
 				return;
