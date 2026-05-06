@@ -392,14 +392,6 @@ export function App({ route }: { route: ChatAppRoute }) {
 	) => {
 		const requestId = bootstrapRequestId.current + 1;
 		bootstrapRequestId.current = requestId;
-		const queryKey = chatBootstrapQueryKey(piboSessionId, includeArchived, roomId);
-		const cached = queryClient.getQueryData<BootstrapData>(queryKey);
-		if (cached && requestId === bootstrapRequestId.current) {
-			setChatNavigationCache(queryClient.setQueryData.bind(queryClient), cached, includeArchived, roomId);
-			setBootstrap(cached);
-			if (options.selectSession !== false) setSelectedPiboSessionId(cached.selectedPiboSessionId);
-			setSelectedRoomId(cached.selectedRoomId);
-		}
 		const data = await loadBootstrapQueryData(queryClient, {
 			piboSessionId,
 			includeArchived,
