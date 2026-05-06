@@ -167,10 +167,27 @@ export interface PiboSignalProducer {
 	project(input: PiboSignalInput, context: PiboSignalProjectorContext): PiboSignalMutation[];
 }
 
+export type PiboSignalRegistryPruneOptions = {
+	nowMs?: number;
+	terminalSuccessTtlMs?: number;
+	terminalErrorTtlMs?: number;
+};
+
+export type PiboSignalRegistryDiagnostics = {
+	nodeCount: number;
+	sessionCount: number;
+	rootCount: number;
+	subscriberCount: number;
+	subscribersByRootId: Record<string, number>;
+	stuckActiveNodes: PiboSignalNode[];
+};
+
 export interface PiboSignalRegistry {
 	project(event: PiboSignalInput): PiboSignalPatch | undefined;
 	snapshotSession(piboSessionId: string): PiboSignalSnapshot;
 	snapshotTree(rootPiboSessionId: string): PiboSignalSnapshot;
 	subscribe(rootPiboSessionId: string, listener: PiboSignalListener): () => void;
 	registerProducer(producer: PiboSignalProducer): void;
+	pruneTerminalNodes?(options?: PiboSignalRegistryPruneOptions): number;
+	diagnostics?(options?: { stuckActiveMs?: number; nowMs?: number }): PiboSignalRegistryDiagnostics;
 }

@@ -211,6 +211,14 @@ export class PiboRunRegistry {
 			.map(snapshot);
 	}
 
+	listAll(options: { includeConsumed?: boolean; includeDetached?: boolean } = {}): PiboRunSnapshot[] {
+		this.prune();
+		return [...this.runs.values()]
+			.filter((record) => options.includeConsumed || !record.consumed)
+			.filter((record) => options.includeDetached || record.completionPolicy !== "detached")
+			.map(snapshot);
+	}
+
 	status(ownerPiboSessionId: string, runId: string): PiboRunSnapshot {
 		return snapshot(this.requireOwned(ownerPiboSessionId, runId));
 	}

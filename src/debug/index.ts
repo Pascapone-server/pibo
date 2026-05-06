@@ -53,6 +53,10 @@ export async function runDebugCli(argv = process.argv): Promise<void> {
 			await runDebugRuns(args.slice(1));
 			return;
 		}
+		if (args[0] === "signals") {
+			await runDebugSignals(args.slice(1));
+			return;
+		}
 		throw new Error(`Unknown pibo debug command "${args[0]}". Run pibo debug --help.`);
 	} catch (error) {
 		console.error(error instanceof Error ? error.message : String(error));
@@ -126,6 +130,31 @@ async function runDebugSession(args: string[]): Promise<void> {
 	});
 	if (options.json) console.log(formatJson(summary));
 	else console.log(formatDebugSessionSummary(summary));
+}
+
+async function runDebugSignals(args: string[]): Promise<void> {
+	if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
+		printDebugSignalsDiscovery();
+		return;
+	}
+	const command = args[0];
+	const options = parseOptions(args.slice(1));
+	const piboSessionId = options.positionals[0];
+	if ((command !== "session" && command !== "tree") || !piboSessionId) {
+		throw new Error("pibo debug signals requires session <pibo-session-id> or tree <root-pibo-session-id>");
+	}
+	const baseUrl = process.env.PIBO_GATEWAY_URL ?? process.env.PIBO_WEB_URL;
+	if (!baseUrl) throw new Error("Set PIBO_GATEWAY_URL to inspect live signal state through Chat Web APIs.");
+	const url = new URL(`/api/chat/signals/${command}/${encodeURIComponent(piboSessionId)}`, baseUrl);
+	const response = await fetch(url);
+	const payload = await response.json().catch(() => undefined);
+	if (!response.ok) throw new Error(payload && typeof payload === "object" && "error" in payload ? String(payload.error) : `Request failed: ${response.status}`);
+	if (options.json) {
+		const { formatJson } = await import("./sql.js");
+		console.log(formatJson(payload));
+	} else {
+		console.log(formatSignalSnapshotText(payload as any));
+	}
 }
 
 async function runDebugTrace(args: string[]): Promise<void> {
@@ -503,6 +532,22 @@ function compactRunRow(run: { runId: string; ownerPiboSessionId: string; status:
 	};
 }
 
+function formatSignalSnapshotText(snapshot: { rootPiboSessionId?: string; version?: number; sessions?: Record<string, any>; nodes?: Record<string, any> }): string {
+	const sessions = Object.values(snapshot.sessions ?? {});
+	const nodes = Object.values(snapshot.nodes ?? {});
+	const activeNodes = nodes.filter((node: any) => ["queued", "starting", "running", "streaming", "waiting", "blocked", "retrying", "compacting", "pausing"].includes(node.status));
+	const errors = sessions.filter((session: any) => session.hasError || session.hasErrorDescendant);
+	return [
+		`root\t${snapshot.rootPiboSessionId ?? "unknown"}`,
+		`version\t${snapshot.version ?? 0}`,
+		`sessions\t${sessions.length}`,
+		`nodes\t${nodes.length}`,
+		`active_nodes\t${activeNodes.length}`,
+		`error_sessions\t${errors.length}`,
+		...sessions.map((session: any) => `${session.piboSessionId}\tlocal=${session.localStatus}\taggregate=${session.aggregateStatus}\tphase=${session.phase ?? "-"}\tactive=${session.isTreeActive}`),
+	].join("\n");
+}
+
 function payloadType(payload: unknown): string | undefined {
 	if (!payload || typeof payload !== "object" || Array.isArray(payload)) return undefined;
 	const candidate = payload as { type?: unknown };
@@ -519,12 +564,29 @@ Commands:
   events   Inspect compact event payload fields for one Pibo Session
   jobs     Inspect durable Pibo jobs and DLQ
   runs     Inspect durable yielded runs
+  signals  Inspect live session signal snapshots through Chat Web APIs
 
 Next:
   pibo debug db
   pibo debug session <url-or-pibo-session-id>
   pibo debug trace <pibo-session-id> --running-only
   pibo debug events stream --topic pibo.output
+  pibo debug signals tree ps_...
+`);
+}
+
+function printDebugSignalsDiscovery(): void {
+	console.log(`pibo debug signals - inspect live Session Signal snapshots
+
+Usage:
+  pibo debug signals session <pibo-session-id> [--json]
+  pibo debug signals tree <root-pibo-session-id> [--json]
+
+Environment:
+  PIBO_GATEWAY_URL=http://127.0.0.1:4788
+
+Next:
+  pibo debug signals tree ps_...
 `);
 }
 

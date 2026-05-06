@@ -88,7 +88,7 @@ function profileForSession(
 	return new InitialSessionContext(options);
 }
 
-function formatRunNotification(notification: PiboRunNotification): string {
+function formatRunReminderMessage(notification: PiboRunNotification): string {
 	return [
 		"<pibo_run_notification>",
 		JSON.stringify({
@@ -127,7 +127,7 @@ function formatRunNotification(notification: PiboRunNotification): string {
 	].join("\n");
 }
 
-function isRunNotificationServiceMessage(event: PiboMessageEvent): boolean {
+function isRunReminderServiceMessage(event: PiboMessageEvent): boolean {
 	return event.source === "service" && event.text.startsWith("<pibo_run_notification>");
 }
 
@@ -145,7 +145,7 @@ export class PiboSessionRouter {
 	private readonly listeners = new Set<PiboEventListener>();
 	private readonly runRegistry: PiboRunRegistry;
 	private readonly signalRegistry: PiboSignalRegistry;
-	private readonly scheduledRunNotifications = new Map<string, boolean>();
+	private readonly scheduledRunReminders = new Map<string, boolean>();
 	private readonly baseProfile: InitialSessionContext;
 	private readonly pluginRegistry: PiboPluginRegistry;
 	private readonly sessionStore: PiboSessionStore;
@@ -162,6 +162,9 @@ export class PiboSessionRouter {
 		this.signalRegistry = options.signalRegistry ?? createPiboSignalRegistry();
 		this.runRegistry = new PiboRunRegistry({ store: this.reliabilityStore });
 		this.runRegistry.subscribe((event) => this.projectRunRegistryEvent(event));
+		for (const run of this.runRegistry.listAll({ includeConsumed: true, includeDetached: true })) {
+			this.signalRegistry.project({ type: "run_changed", run, reason: "recovered" });
+		}
 	}
 
 	subscribe(listener: PiboEventListener): () => void {
@@ -179,11 +182,11 @@ export class PiboSessionRouter {
 		}
 
 		const output = await session.executeAction(event);
+		if (event.action === "abort") {
+			this.signalRegistry.project({ type: "session_interrupted", piboSessionId: event.piboSessionId, reason: "abort action" });
+		}
 		if (event.action === "dispose") {
-			this.runRegistry.cancelOwnerRuns(event.piboSessionId);
-			this.signalRegistry.project({ type: "session_disposed", piboSessionId: event.piboSessionId, reason: "dispose action" });
-			this.scheduledRunNotifications.delete(event.piboSessionId);
-			this.sessions.delete(event.piboSessionId);
+			this.disposeSignalSubtree(event.piboSessionId, "dispose action");
 		}
 		return output;
 	}
@@ -198,11 +201,31 @@ export class PiboSessionRouter {
 				const runs = this.runRegistry.cancelOwnerRuns(piboSessionId);
 				cancelledRuns.push(...runs.map((r) => r.runId));
 			}
+			this.signalRegistry.project({ type: "session_interrupted", piboSessionId, reason: "kill" });
 			const children = await this.killChildSessions(piboSessionId, options);
 			killed.push(...children.killed);
 			cancelledRuns.push(...children.cancelledRuns);
 		}
 		return { killed, cancelledRuns };
+	}
+
+	private disposeSignalSubtree(piboSessionId: string, reason: string): void {
+		const descendants = this.descendantSessionIds(piboSessionId);
+		for (const id of [piboSessionId, ...descendants]) {
+			this.runRegistry.cancelOwnerRuns(id);
+			this.signalRegistry.project({ type: "session_disposed", piboSessionId: id, reason });
+			this.scheduledRunReminders.delete(id);
+			this.sessions.delete(id);
+		}
+	}
+
+	private descendantSessionIds(parentId: string): string[] {
+		const output: string[] = [];
+		for (const session of this.sessionStore.list?.() ?? []) {
+			if (session.parentId !== parentId) continue;
+			output.push(session.id, ...this.descendantSessionIds(session.id));
+		}
+		return output;
 	}
 
 	private async killChildSessions(parentId: string, options?: { includeRuns?: boolean }): Promise<{ killed: string[]; cancelledRuns: string[] }> {
@@ -304,7 +327,7 @@ export class PiboSessionRouter {
 		this.sessions.clear();
 		this.runRegistry.cancelAll("Pibo session router was disposed.");
 		for (const session of sessions) this.signalRegistry.project({ type: "session_disposed", piboSessionId: session.getStatus().piboSessionId, reason: "router disposed" });
-		this.scheduledRunNotifications.clear();
+		this.scheduledRunReminders.clear();
 		await Promise.all(sessions.map((session) => session.dispose()));
 	}
 
@@ -496,13 +519,13 @@ export class PiboSessionRouter {
 					try {
 						const result = await execute();
 						const completed = this.runRegistry.complete(run.runId, result);
-						if (completed) this.scheduleRunNotification(parentPiboSessionId, false);
+						if (completed) this.scheduleRunReminder(parentPiboSessionId, false);
 					} catch (error) {
 						const failed = this.runRegistry.fail(
 							run.runId,
 							error instanceof Error ? error.message : String(error),
 						);
-						if (failed) this.scheduleRunNotification(parentPiboSessionId, false);
+						if (failed) this.scheduleRunReminder(parentPiboSessionId, false);
 					}
 				})();
 
@@ -514,18 +537,18 @@ export class PiboSessionRouter {
 			readRun: (runId) => {
 				const run = this.runRegistry.read(parentPiboSessionId, runId);
 				if (run.consumed && isTerminalRunStatus(run.status)) {
-					this.refreshQueuedRunNotifications(parentPiboSessionId);
+					this.refreshQueuedRunReminders(parentPiboSessionId);
 				}
 				return run;
 			},
 			cancelRun: async (runId) => {
 				const cancelled = this.runRegistry.cancel(parentPiboSessionId, runId);
-				this.refreshQueuedRunNotifications(parentPiboSessionId);
+				this.refreshQueuedRunReminders(parentPiboSessionId);
 				return cancelled;
 			},
 			ackRun: (runId) => {
 				const run = this.runRegistry.ack(parentPiboSessionId, runId);
-				this.refreshQueuedRunNotifications(parentPiboSessionId);
+				this.refreshQueuedRunReminders(parentPiboSessionId);
 				return run;
 			},
 		};
@@ -623,7 +646,7 @@ export class PiboSessionRouter {
 		}
 
 		if (event.type === "message_finished" && event.source !== "service") {
-			this.scheduleRunNotification(event.piboSessionId, true);
+			this.scheduleRunReminder(event.piboSessionId, true);
 		}
 	};
 
@@ -641,28 +664,28 @@ export class PiboSessionRouter {
 		this.signalRegistry.project({ type: "run_changed", run: event.run, previousStatus: "previousStatus" in event ? event.previousStatus : undefined, reason: "reason" in event ? event.reason : event.type });
 	}
 
-	private scheduleRunNotification(piboSessionId: string, includeAlreadyNotified: boolean): void {
+	private scheduleRunReminder(piboSessionId: string, includeAlreadyNotified: boolean): void {
 		if (!this.runRegistry.hasPendingNotification(piboSessionId, { includeAlreadyNotified })) return;
-		const previous = this.scheduledRunNotifications.get(piboSessionId);
+		const previous = this.scheduledRunReminders.get(piboSessionId);
 		if (previous !== undefined) {
-			this.scheduledRunNotifications.set(piboSessionId, previous || includeAlreadyNotified);
+			this.scheduledRunReminders.set(piboSessionId, previous || includeAlreadyNotified);
 			return;
 		}
 
-		this.scheduledRunNotifications.set(piboSessionId, includeAlreadyNotified);
+		this.scheduledRunReminders.set(piboSessionId, includeAlreadyNotified);
 		queueMicrotask(() => {
-			void this.deliverRunNotification(piboSessionId);
+			void this.deliverRunReminder(piboSessionId);
 		});
 	}
 
-	private refreshQueuedRunNotifications(piboSessionId: string): void {
-		const removed = this.sessions.get(piboSessionId)?.removeQueuedMessages(isRunNotificationServiceMessage) ?? 0;
-		if (removed > 0) this.scheduleRunNotification(piboSessionId, true);
+	private refreshQueuedRunReminders(piboSessionId: string): void {
+		const removed = this.sessions.get(piboSessionId)?.removeQueuedMessages(isRunReminderServiceMessage) ?? 0;
+		if (removed > 0) this.scheduleRunReminder(piboSessionId, true);
 	}
 
-	private async deliverRunNotification(piboSessionId: string): Promise<void> {
-		const includeAlreadyNotified = this.scheduledRunNotifications.get(piboSessionId) ?? false;
-		this.scheduledRunNotifications.delete(piboSessionId);
+	private async deliverRunReminder(piboSessionId: string): Promise<void> {
+		const includeAlreadyNotified = this.scheduledRunReminders.get(piboSessionId) ?? false;
+		this.scheduledRunReminders.delete(piboSessionId);
 		const notification = this.runRegistry.createNotification(piboSessionId, { includeAlreadyNotified });
 		if (!notification) return;
 
@@ -671,7 +694,7 @@ export class PiboSessionRouter {
 			session.enqueueMessage({
 				type: "message",
 				piboSessionId,
-				text: formatRunNotification(notification),
+				text: formatRunReminderMessage(notification),
 				source: "service",
 				id: randomUUID(),
 			});

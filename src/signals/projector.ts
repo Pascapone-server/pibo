@@ -1,4 +1,5 @@
 import type { PiboRunStatus } from "../runs/registry.js";
+import { isTerminalSignalStatus } from "./aggregate.js";
 import type {
 	PiboSignalInput,
 	PiboSignalMutation,
@@ -27,7 +28,7 @@ function runStatus(status: PiboRunStatus): PiboSignalStatus {
 
 export const sessionLifecycleSignalProducer: PiboSignalProducer = {
 	name: "session-lifecycle",
-	accepts: (input) => ["session_created", "session_disposed", "session_processing_changed", "queue_changed", "recovery"].includes(input.type),
+	accepts: (input) => ["session_created", "session_disposed", "session_processing_changed", "queue_changed", "recovery", "session_interrupted", "signal_node_pruned"].includes(input.type),
 	project(input, context) {
 		const data = input as any;
 		if (data.type === "session_created") {
@@ -45,9 +46,14 @@ export const sessionLifecycleSignalProducer: PiboSignalProducer = {
 		if (data.type === "session_disposed") {
 			return [{ type: "patch_node", nodeId: `session:${data.piboSessionId}`, patch: { status: "disposed", completedAt: context.now(), metadata: { reason: data.reason } } }];
 		}
+		if (data.type === "session_interrupted") {
+			return [{ type: "patch_node", nodeId: `session:${data.piboSessionId}`, patch: { status: "interrupted", completedAt: context.now(), metadata: { reason: data.reason } } }];
+		}
 		if (data.type === "session_processing_changed") {
+			const existing = context.getNode(`session:${data.piboSessionId}`);
+			const status = data.processing ? "running" : existing && isTerminalSignalStatus(existing.status) ? existing.status : "idle";
 			return [
-				{ type: "patch_node", nodeId: `session:${data.piboSessionId}`, patch: { status: data.processing ? "running" : "idle" } },
+				{ type: "patch_node", nodeId: `session:${data.piboSessionId}`, patch: { status } },
 				{ type: "set_session_queue", piboSessionId: data.piboSessionId, queuedMessages: data.queuedMessages },
 			];
 		}
@@ -59,6 +65,9 @@ export const sessionLifecycleSignalProducer: PiboSignalProducer = {
 		}
 		if (data.type === "recovery") {
 			return [{ type: "patch_node", nodeId: `session:${data.piboSessionId}`, patch: { status: "unknown", metadata: { reason: data.reason } } }];
+		}
+		if (data.type === "signal_node_pruned") {
+			return [{ type: "remove_node", nodeId: data.nodeId }];
 		}
 		return [];
 	},
@@ -79,7 +88,10 @@ export const outputSignalProducer: PiboSignalProducer = {
 		}
 		if (event.type === "message_started") {
 			mutations.push({ type: "patch_node", nodeId: `session:${piboSessionId}`, patch: { status: "running" } });
-			if (event.eventId) mutations.push({ type: "upsert_node", node: node({ id: `turn:${piboSessionId}:${event.eventId}`, kind: "turn", status: "running", piboSessionId, startedAt: context.now(), metadata: { source: event.source } }, context) });
+			if (event.eventId) {
+				mutations.push({ type: "patch_node", nodeId: `message:${piboSessionId}:${event.eventId}`, patch: { status: "done", completedAt: context.now() } });
+				mutations.push({ type: "upsert_node", node: node({ id: `turn:${piboSessionId}:${event.eventId}`, kind: "turn", status: "running", piboSessionId, startedAt: context.now(), metadata: { source: event.source } }, context) });
+			}
 		}
 		if (event.type === "assistant_delta") {
 			mutations.push({ type: "upsert_node", node: node({ id: `assistant_stream:${piboSessionId}:${event.eventId ?? "current"}:${event.assistantIndex ?? 0}`, kind: "assistant_stream", status: "streaming", piboSessionId, parentNodeId: event.eventId ? `turn:${piboSessionId}:${event.eventId}` : undefined }, context) });
@@ -109,11 +121,17 @@ export const outputSignalProducer: PiboSignalProducer = {
 			mutations.push({ type: "patch_node", nodeId: `compaction:${piboSessionId}:${event.reason}`, patch: { status: event.aborted ? "cancelled" : event.errorMessage ? "error" : "done", completedAt: context.now(), error: event.errorMessage ? { message: event.errorMessage, source: "pi" } : undefined } });
 		}
 		if (event.type === "message_finished") {
-			if (event.eventId) mutations.push({ type: "patch_node", nodeId: `turn:${piboSessionId}:${event.eventId}`, patch: { status: "done", completedAt: context.now() } });
+			if (event.eventId) {
+				mutations.push({ type: "patch_node", nodeId: `message:${piboSessionId}:${event.eventId}`, patch: { status: "done", completedAt: context.now() } });
+				mutations.push({ type: "patch_node", nodeId: `turn:${piboSessionId}:${event.eventId}`, patch: { status: "done", completedAt: context.now() } });
+			}
 		}
 		if (event.type === "session_error") {
-			mutations.push({ type: "patch_node", nodeId: `session:${piboSessionId}`, patch: { status: "error", error: { message: event.error, source: "pi" } } });
-			if (event.eventId) mutations.push({ type: "patch_node", nodeId: `turn:${piboSessionId}:${event.eventId}`, patch: { status: "error", completedAt: context.now(), error: { message: event.error, source: "pi" } } });
+			mutations.push({ type: "patch_node", nodeId: `session:${piboSessionId}`, patch: { status: "error", completedAt: context.now(), error: { message: event.error, source: "pi" } } });
+			if (event.eventId) {
+				mutations.push({ type: "patch_node", nodeId: `message:${piboSessionId}:${event.eventId}`, patch: { status: "error", completedAt: context.now(), error: { message: event.error, source: "pi" } } });
+				mutations.push({ type: "patch_node", nodeId: `turn:${piboSessionId}:${event.eventId}`, patch: { status: "error", completedAt: context.now(), error: { message: event.error, source: "pi" } } });
+			}
 		}
 		return mutations;
 	},

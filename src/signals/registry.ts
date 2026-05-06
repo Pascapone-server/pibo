@@ -1,4 +1,4 @@
-import { errorFromNode, isActiveSignalStatus, phaseForStatus, strongestStatus } from "./aggregate.js";
+import { errorFromNode, isActiveSignalStatus, isTerminalSignalStatus, phaseForStatus, strongestStatus } from "./aggregate.js";
 import { createDefaultSignalProducers } from "./projector.js";
 import type {
 	ChildSessionSignalSummary,
@@ -11,12 +11,22 @@ import type {
 	PiboSignalProducer,
 	PiboSignalProjectorContext,
 	PiboSignalRegistry,
+	PiboSignalRegistryDiagnostics,
+	PiboSignalRegistryPruneOptions,
 	PiboSignalSnapshot,
 	RunSignalSummary,
 	ToolCallSignalSummary,
 } from "./types.js";
 
 function now(): string { return new Date().toISOString(); }
+
+export type InMemoryPiboSignalRegistryOptions = {
+	terminalSuccessTtlMs?: number;
+	terminalErrorTtlMs?: number;
+};
+
+const DEFAULT_TERMINAL_SUCCESS_TTL_MS = 60_000;
+const DEFAULT_TERMINAL_ERROR_TTL_MS = 10 * 60_000;
 
 function shallowEqual(a: unknown, b: unknown): boolean {
 	return JSON.stringify(a) === JSON.stringify(b);
@@ -34,8 +44,40 @@ export class InMemoryPiboSignalRegistry implements PiboSignalRegistry {
 	private readonly subscribersByRootId = new Map<string, Set<PiboSignalListener>>();
 	private readonly producers: PiboSignalProducer[] = createDefaultSignalProducers();
 
+	constructor(private readonly options: InMemoryPiboSignalRegistryOptions = {}) {}
+
 	registerProducer(producer: PiboSignalProducer): void {
 		this.producers.push(producer);
+	}
+
+	pruneTerminalNodes(options: PiboSignalRegistryPruneOptions = {}): number {
+		const nowMs = options.nowMs ?? Date.now();
+		const successTtlMs = options.terminalSuccessTtlMs ?? this.options.terminalSuccessTtlMs ?? DEFAULT_TERMINAL_SUCCESS_TTL_MS;
+		const errorTtlMs = options.terminalErrorTtlMs ?? this.options.terminalErrorTtlMs ?? DEFAULT_TERMINAL_ERROR_TTL_MS;
+		let pruned = 0;
+		for (const node of [...this.nodesById.values()]) {
+			if (node.kind === "session" || isActiveSignalStatus(node.status)) continue;
+			const completedMs = Date.parse(node.completedAt ?? node.updatedAt);
+			if (!Number.isFinite(completedMs)) continue;
+			const ttlMs = node.status === "error" ? errorTtlMs : successTtlMs;
+			if (nowMs - completedMs < ttlMs) continue;
+			if (this.project({ type: "signal_node_pruned", nodeId: node.id })) pruned += 1;
+		}
+		return pruned;
+	}
+
+	diagnostics(options: { stuckActiveMs?: number; nowMs?: number } = {}): PiboSignalRegistryDiagnostics {
+		const nowMs = options.nowMs ?? Date.now();
+		const thresholdMs = options.stuckActiveMs ?? 10 * 60_000;
+		const subscribersByRootId = Object.fromEntries([...this.subscribersByRootId].map(([rootId, listeners]) => [rootId, listeners.size]));
+		return {
+			nodeCount: this.nodesById.size,
+			sessionCount: this.rootSessionIdBySessionId.size,
+			rootCount: this.versionByRootId.size,
+			subscriberCount: [...this.subscribersByRootId.values()].reduce((sum, listeners) => sum + listeners.size, 0),
+			subscribersByRootId,
+			stuckActiveNodes: [...this.nodesById.values()].filter((node) => isActiveSignalStatus(node.status) && nowMs - Date.parse(node.startedAt ?? node.createdAt) >= thresholdMs),
+		};
 	}
 
 	project(input: PiboSignalInput): PiboSignalPatch | undefined {
@@ -62,7 +104,7 @@ export class InMemoryPiboSignalRegistry implements PiboSignalRegistry {
 				toVersion: before + 1,
 				generatedAt: now(),
 				upserts: upserts.filter((node) => node.rootPiboSessionId === rootId),
-				removes,
+				removes: removes.filter((id) => this.removedNodeBelongsToRoot(id, rootId, upserts)),
 				sessionSnapshots: changedSnapshots,
 			};
 			this.versionByRootId.set(rootId, patch.toVersion);
@@ -120,6 +162,7 @@ export class InMemoryPiboSignalRegistry implements PiboSignalRegistry {
 			const existing = this.nodesById.get(mutation.nodeId);
 			if (existing?.piboSessionId) changedSessionIds.add(existing.piboSessionId);
 			this.nodesById.delete(mutation.nodeId);
+			if (existing?.piboSessionId) this.nodeIdsBySessionId.get(existing.piboSessionId)?.delete(mutation.nodeId);
 			removes.push(mutation.nodeId);
 			return;
 		}
@@ -139,7 +182,7 @@ export class InMemoryPiboSignalRegistry implements PiboSignalRegistry {
 		if (shallowEqual(existing, merged)) return;
 		this.nodesById.set(merged.id, merged);
 		if (merged.piboSessionId) {
-			this.ensureSession(merged.piboSessionId, merged.parentPiboSessionId, merged.rootPiboSessionId);
+			this.ensureSession(merged.piboSessionId, merged.kind === "session" ? merged.parentPiboSessionId : undefined, merged.rootPiboSessionId);
 			const ids = this.nodeIdsBySessionId.get(merged.piboSessionId) ?? new Set<string>();
 			ids.add(merged.id);
 			this.nodeIdsBySessionId.set(merged.piboSessionId, ids);
@@ -233,7 +276,9 @@ export class InMemoryPiboSignalRegistry implements PiboSignalRegistry {
 		const localStatuses = [...activeLocalNodes.map((node) => node.status)];
 		if (queuedMessages > 0) localStatuses.push("queued");
 		if (sessionNode && isActiveSignalStatus(sessionNode.status)) localStatuses.push(sessionNode.status);
-		const localStatus = sessionNode?.status === "disposed" ? "disposed" : strongestStatus(localStatuses);
+		const localStatus = sessionNode && (sessionNode.status === "unknown" || isTerminalSignalStatus(sessionNode.status))
+			? sessionNode.status
+			: strongestStatus(localStatuses);
 		const childSnapshots = [...(this.childSessionIdsByParentId.get(piboSessionId) ?? [])].map((id) => this.sessionSnapshotById.get(id) ?? this.computeSessionSnapshot(id, version));
 		const aggregateStatus = strongestStatus([localStatus, ...childSnapshots.map((snapshot) => snapshot.aggregateStatus)]);
 		const activeToolCalls: ToolCallSignalSummary[] = nodes.filter((node) => node.kind === "tool_call" && isActiveSignalStatus(node.status)).map((node) => ({ nodeId: node.id, toolCallId: typeof node.metadata?.toolCallId === "string" ? node.metadata.toolCallId : undefined, toolName: typeof node.metadata?.toolName === "string" ? node.metadata.toolName : undefined, status: node.status, startedAt: node.startedAt, updatedAt: node.updatedAt }));
@@ -269,11 +314,17 @@ export class InMemoryPiboSignalRegistry implements PiboSignalRegistry {
 		};
 	}
 
+	private removedNodeBelongsToRoot(_id: string, _rootId: string, _upserts: PiboSignalNode[]): boolean {
+		// Remove patches are already scoped by affected root. This method exists so the
+		// patch construction keeps the same shape if per-root removal metadata is added later.
+		return true;
+	}
+
 	private notify(rootId: string, patch: PiboSignalPatch): void {
 		for (const listener of this.subscribersByRootId.get(rootId) ?? []) queueMicrotask(() => listener(patch));
 	}
 }
 
-export function createPiboSignalRegistry(): PiboSignalRegistry {
-	return new InMemoryPiboSignalRegistry();
+export function createPiboSignalRegistry(options?: InMemoryPiboSignalRegistryOptions): PiboSignalRegistry {
+	return new InMemoryPiboSignalRegistry(options);
 }

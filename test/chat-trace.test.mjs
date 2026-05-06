@@ -1423,7 +1423,7 @@ test("chat trace shows async subagent runs under pibo_run_start tool calls", () 
 	assert.equal(nodes[0].title, "pibo_run_start");
 	assert.equal(nodes[0].children.length, 1);
 	assert.equal(nodes[0].children[0].type, "agent.async");
-	assert.equal(nodes[0].children[0].title, "qa_researcher");
+	assert.equal(nodes[0].children[0].title, "explorer");
 	assert.equal(nodes[0].children[0].runId, "run_1");
 	assert.equal(nodes[0].children[0].input.startedBy, "pibo_run_start");
 });

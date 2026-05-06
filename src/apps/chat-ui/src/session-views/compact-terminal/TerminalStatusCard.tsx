@@ -7,6 +7,7 @@ type StatusData = {
 	queuedMessages?: number;
 	processing?: boolean;
 	streaming?: boolean;
+	enabledTools?: string[];
 	activeTools?: string[];
 	cwd?: string;
 	disposed?: boolean;
@@ -45,6 +46,11 @@ function parseStatusData(output: unknown): StatusData | undefined {
 			typeof obj.processing === "boolean" ? obj.processing : undefined,
 		streaming:
 			typeof obj.streaming === "boolean" ? obj.streaming : undefined,
+		enabledTools: Array.isArray(obj.enabledTools)
+			? obj.enabledTools.filter((t): t is string => typeof t === "string")
+			: Array.isArray(obj.activeTools)
+				? obj.activeTools.filter((t): t is string => typeof t === "string")
+				: undefined,
 		activeTools: Array.isArray(obj.activeTools)
 			? obj.activeTools.filter((t): t is string => typeof t === "string")
 			: undefined,
@@ -92,6 +98,7 @@ export function TerminalStatusCard({ row }: { row: CompactTerminalRow }) {
 				: "bg-[#22c55e]";
 	const tokens = data.contextUsage?.tokens ?? 0;
 	const maxTokens = data.contextUsage?.contextWindow ?? 0;
+	const enabledTools = data.enabledTools ?? data.activeTools ?? [];
 
 	return (
 		<div className="mt-2 border border-[#2a2a2a] bg-[#111111] px-3 py-2 text-[12px] text-[#d4d4d4]">
@@ -168,7 +175,7 @@ export function TerminalStatusCard({ row }: { row: CompactTerminalRow }) {
 			) : null}
 
 			{/* Foldable Tools */}
-			{data.activeTools && data.activeTools.length > 0 ? (
+			{enabledTools.length > 0 ? (
 				<div className="mt-3">
 					<button
 						type="button"
@@ -178,11 +185,11 @@ export function TerminalStatusCard({ row }: { row: CompactTerminalRow }) {
 						<span className="text-[#d4d4d4]">
 							{toolsExpanded ? "▾" : "▸"}
 						</span>
-						<span>Tools ({data.activeTools.length})</span>
+						<span>Enabled tools ({enabledTools.length})</span>
 					</button>
 					{toolsExpanded ? (
 						<div className="mt-1.5 flex flex-wrap gap-1">
-							{data.activeTools.map((tool) => (
+							{enabledTools.map((tool) => (
 								<span
 									key={tool}
 									className="inline-block rounded-sm border border-[#2a2a2a] bg-[#0b0b0b] px-1.5 py-0.5 font-mono text-[11px] text-[#a3a3a3]"

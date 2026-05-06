@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { AgentProfile, PiboSessionTraceView, PiboWebSessionStatus, ThinkingLevel, Trace } from "../types";
+import type { AgentProfile, PiboSessionSignalSnapshot, PiboSessionTraceView, PiboWebSessionStatus, ThinkingLevel, Trace } from "../types";
 import type { SessionBreadcrumbItem, SessionDerivationLink, SessionOriginLink } from "../tracing/TraceTimeline";
 
 export const chatSessionViewIds = ["terminal"] as const;
@@ -25,6 +25,7 @@ export type ChatSessionViewProps = {
 	sessionAgentProfile?: string;
 	sessionActiveModel?: string;
 	selectedSessionStatus?: PiboWebSessionStatus;
+	selectedSessionSignal?: PiboSessionSignalSnapshot;
 	sessionBreadcrumbs: readonly SessionBreadcrumbItem[];
 	originSession?: SessionOriginLink;
 	derivedSessions: readonly SessionDerivationLink[];
