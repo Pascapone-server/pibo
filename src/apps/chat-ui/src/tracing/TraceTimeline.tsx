@@ -175,7 +175,7 @@ export function TraceTimeline({
 						{stats.active > 0 ? <Badge color="cyan">{stats.active} Active</Badge> : null}
 						{stats.completed > 0 ? <Badge color="green">{stats.completed} Done</Badge> : null}
 						{sessionAgentProfile ? <Badge color="transparent">{sessionAgentProfile}</Badge> : null}
-						{sessionActiveModel ? <Badge color="purple">Model {sessionActiveModel}</Badge> : null}
+						{sessionActiveModel ? <Badge color="purple">{sessionActiveModel}</Badge> : null}
 						{stats.error > 0 ? <Badge color="orange">{stats.error} Errors</Badge> : null}
 						{originSession ? <OriginSessionButton originSession={originSession} onOpenSession={onOpenSession} /> : null}
 						<DerivedSessionsButton sessions={derivedSessions} onOpenSession={onOpenSession} />

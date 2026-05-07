@@ -194,7 +194,7 @@ function TerminalHeader({
 				{activeDescendantCount > 0 ? <TerminalBadge tone="cyan">{activeDescendantCount} active descendants/runs</TerminalBadge> : null}
 				{errorCount > 0 ? <TerminalBadge tone="red">{errorCount} errors</TerminalBadge> : null}
 				{sessionAgentProfile ? <TerminalBadge tone="neutral">{sessionAgentProfile}</TerminalBadge> : null}
-				{sessionActiveModel ? <TerminalBadge tone="purple">Model {sessionActiveModel}</TerminalBadge> : null}
+				{sessionActiveModel ? <TerminalBadge tone="purple">{sessionActiveModel}</TerminalBadge> : null}
 				{originSession ? (
 					<SessionLinkButton onClick={() => onOpenSession(originSession.piboSessionId)}>
 						Origin {originSession.label}
