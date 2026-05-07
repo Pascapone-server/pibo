@@ -2066,7 +2066,7 @@ function createChatHtml(): string {
 				<div class="composer-wrap" id="composer-wrap">
 					<div class="command-menu hidden" id="command-menu"></div>
 					<form class="composer" id="composer">
-						<textarea id="message" name="message" placeholder="Message selected session or type /"></textarea>
+						<textarea id="message" name="message" placeholder="Send Message (/ for commands or $ for skills)"></textarea>
 						<button class="primary" type="submit">Send</button>
 					</form>
 				</div>
