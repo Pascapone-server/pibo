@@ -188,6 +188,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 	const [composerText, setComposerText] = useState("");
 	const [composerFocusSignal, setComposerFocusSignal] = useState(0);
 	const [creatingSession, setCreatingSession] = useState(false);
+	const [autoRenameSessionId, setAutoRenameSessionId] = useState<string | null>(null);
 	const [contextPanel, setContextPanel] = useState<ContextPanel>("context-files");
 	const [selectedContextFileKey, setSelectedContextFileKey] = useState<string | null>(null);
 	const [selectedMcpServerName, setSelectedMcpServerName] = useState<string | null>(null);
@@ -729,6 +730,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 		try {
 			const created = await createSessionMutation.mutateAsync({ profile, roomId: selectedRoomId ?? undefined });
 			setSelectedPiboSessionId(created.session.id);
+			setAutoRenameSessionId(created.session.id);
 			const data = await loadBootstrap(created.session.id, showArchivedRef.current, selectedRoomId ?? undefined, { force: true });
 			navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
 			setError(null);
@@ -1276,6 +1278,8 @@ export function App({ route }: { route: ChatAppRoute }) {
 										onRename={(piboSessionId, title) => void renameSession(piboSessionId, title)}
 										onArchive={(piboSessionId, archived) => void setSessionArchived(piboSessionId, archived)}
 										onDelete={requestSessionDelete}
+										autoRename={autoRenameSessionId === session.piboSessionId}
+										onAutoRenameConsumed={() => setAutoRenameSessionId(null)}
 									/>
 								))}
 								{sessionGroups.active.length === 0 ? <div className="px-2 py-3 text-xs text-slate-500 border border-dashed border-slate-700 rounded-sm">No active sessions</div> : null}
@@ -1292,6 +1296,8 @@ export function App({ route }: { route: ChatAppRoute }) {
 											onRename={(piboSessionId, title) => void renameSession(piboSessionId, title)}
 											onArchive={(piboSessionId, archived) => void setSessionArchived(piboSessionId, archived)}
 											onDelete={requestSessionDelete}
+											autoRenameSessionId={autoRenameSessionId}
+											onAutoRenameConsumed={() => setAutoRenameSessionId(null)}
 										/>
 									) : <div className="px-2 py-3 text-xs text-slate-500 border border-dashed border-slate-700 rounded-sm">No archived sessions</div>}
 								</div>
@@ -2523,6 +2529,8 @@ function VirtualizedArchivedSessionsList({
 	onRename,
 	onArchive,
 	onDelete,
+	autoRenameSessionId,
+	onAutoRenameConsumed,
 }: {
 	sessions: PiboWebSessionNode[];
 	signalNow: number;
@@ -2531,6 +2539,8 @@ function VirtualizedArchivedSessionsList({
 	onRename: (piboSessionId: string, title: string | null) => void;
 	onArchive: (piboSessionId: string, archived: boolean) => void;
 	onDelete: (node: PiboWebSessionNode) => void;
+	autoRenameSessionId?: string | null;
+	onAutoRenameConsumed?: () => void;
 }) {
 	return (
 		<Virtuoso
@@ -2548,6 +2558,8 @@ function VirtualizedArchivedSessionsList({
 					onRename={onRename}
 					onArchive={onArchive}
 					onDelete={onDelete}
+					autoRename={autoRenameSessionId === session.piboSessionId}
+					onAutoRenameConsumed={onAutoRenameConsumed}
 				/>
 			)}
 		/>
@@ -2809,6 +2821,8 @@ function SessionNode({
 	onArchive,
 	onDelete,
 	depth = 0,
+	autoRename = false,
+	onAutoRenameConsumed,
 }: {
 	node: PiboWebSessionNode;
 	signalNow: number;
@@ -2818,9 +2832,12 @@ function SessionNode({
 	onArchive: (piboSessionId: string, archived: boolean) => void;
 	onDelete: (node: PiboWebSessionNode) => void;
 	depth?: number;
+	autoRename?: boolean;
+	onAutoRenameConsumed?: () => void;
 }) {
 	const [editing, setEditing] = useState(false);
 	const [draftTitle, setDraftTitle] = useState(node.title);
+	const titleInputRef = useRef<HTMLInputElement>(null);
 	const hasChildren = node.children.length > 0;
 	const hasSelectedDescendant = selectedPiboSessionId ? sessionTreeHasSession(node.children, selectedPiboSessionId) : false;
 	const [expanded, setExpanded] = useState(hasSelectedDescendant);
@@ -2839,6 +2856,19 @@ function SessionNode({
 	useEffect(() => {
 		if (!editing) setDraftTitle(node.title);
 	}, [editing, node.title]);
+
+	useEffect(() => {
+		if (!autoRename) return;
+		setDraftTitle(node.title === "Untitled Session" ? "" : node.title);
+		setEditing(true);
+		onAutoRenameConsumed?.();
+	}, [autoRename, node.title, onAutoRenameConsumed]);
+
+	useLayoutEffect(() => {
+		if (!editing) return;
+		titleInputRef.current?.focus();
+		titleInputRef.current?.select();
+	}, [editing]);
 
 	useEffect(() => {
 		if (hasSelectedDescendant) setExpanded(true);
@@ -2869,6 +2899,7 @@ function SessionNode({
 						}}
 					>
 						<input
+							ref={titleInputRef}
 							value={draftTitle}
 							onChange={(event) => setDraftTitle(event.target.value)}
 							onKeyDown={(event) => {
