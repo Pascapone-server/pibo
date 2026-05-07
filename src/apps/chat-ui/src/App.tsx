@@ -40,7 +40,7 @@ import {
 	Wrench,
 	X,
 } from "lucide-react";
-import { createUserSkill, deleteCustomAgent, deletePiPackage, deleteRoom, deleteSession, deleteUserSkill, fetchSignalTree, getBootstrap, getTrace, getUserSkill, installUserSkill, listUserSkills, patchCustomAgent, patchModelDefaults, patchPiPackage, patchRoom, patchSession, postAction, postContextFile, postCustomAgent, postMessage, postPiPackage, postRoom, postSession, signInWithGoogle, signOut, subscribeSignalTree, updateUserSkill, type SaveCustomAgentInput } from "./api";
+import { createUserSkill, deleteCustomAgent, deletePiPackage, deleteRoom, deleteSession, deleteUserSkill, fetchSignalTree, downloadChatFile, getBootstrap, getTrace, getUserSkill, installUserSkill, listUserSkills, patchCustomAgent, patchModelDefaults, patchPiPackage, patchRoom, patchSession, postAction, postContextFile, postCustomAgent, postMessage, postPiPackage, postRoom, postSession, signInWithGoogle, signOut, subscribeSignalTree, updateUserSkill, type SaveCustomAgentInput } from "./api";
 import { THINKING_LEVELS } from "./types";
 import type { AgentCatalog, BootstrapData, CustomAgent, CustomAgentSubagent, ModelCatalog, ModelDefaults, ModelProfile, PiboRoom, PiboSession, PiboSessionTraceView, PiboSignalPatch, PiboSignalSnapshot, PiboTraceNode, PiboTraceOrderKey, PiboWebSessionNode, PiboWebSessionStatus, ThinkingLevel, UserSkill } from "./types";
 import type { ChatWebStoredEvent } from "../../../shared/trace-types.js";
@@ -664,11 +664,18 @@ export function App({ route }: { route: ChatAppRoute }) {
 						: action.description ?? action.name,
 				})),
 		);
-		commands.push({
-			slash: "/thinking-show",
-			action: "thinking-show",
-			description: "Toggle historical thinking display in this browser.",
-		});
+		commands.push(
+			{
+				slash: "/download",
+				action: "download",
+				description: "Download a file by absolute path or relative to the current working directory.",
+			},
+			{
+				slash: "/thinking-show",
+				action: "thinking-show",
+				description: "Toggle historical thinking display in this browser.",
+			},
+		);
 		return commands;
 	}, [bootstrap]);
 
@@ -931,6 +938,23 @@ export function App({ route }: { route: ChatAppRoute }) {
 			const next = !showThinking;
 			setShowThinking(next);
 			localStorage.setItem("pibo.chat.showThinking", String(next));
+			return true;
+		}
+		if (command.action === "download") {
+			const path = normalizeDownloadCommandPath(text.slice(commandText.length));
+			if (!path) {
+				setError("Usage: /download <path>");
+				return true;
+			}
+			try {
+				await downloadChatFile(path, {
+					piboSessionId: selectedPiboSessionId,
+					roomId: selectedRoomId ?? undefined,
+				});
+				setError(null);
+			} catch (caught) {
+				setError(caught instanceof Error ? caught.message : String(caught));
+			}
 			return true;
 		}
 		const level = text.match(/^\/thinking\s+(\S+)/)?.[1];
@@ -6151,6 +6175,18 @@ function textFromPayload(payload: unknown): string {
 
 function eventKeyFromPayload(payload: Record<string, unknown>): unknown {
 	return payload.eventId ?? payload.messageId;
+}
+
+function normalizeDownloadCommandPath(value: string): string {
+	const path = value.trim();
+	if (path.length >= 2) {
+		const first = path[0];
+		const last = path[path.length - 1];
+		if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+			return path.slice(1, -1).trim();
+		}
+	}
+	return path;
 }
 
 function parseForkActionResponse(value: unknown): ForkActionResponse | null {

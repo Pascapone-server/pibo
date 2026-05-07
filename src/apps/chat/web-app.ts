@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { extname, isAbsolute, resolve } from "node:path";
+import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
+import { basename, extname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 import os from "node:os";
+import { Readable } from "node:stream";
 import type { PiboJsonObject, PiboJsonValue, PiboOutputEvent } from "../../core/events.js";
 import { PiboWebHttpError, readJsonBody, responseHtml, responseJson } from "../../web/http.js";
 import type { PiboWebApp, PiboWebAppContext, PiboWebSession } from "../../web/types.js";
@@ -1061,6 +1062,35 @@ function createPersonalChatSession(
 		workspace: roomWorkspaceFromMetadata(room.metadata) ?? getDefaultPiboWorkspace(),
 		metadata: withChatRoomId(undefined, room.id),
 	});
+}
+
+function resolveDownloadPath(path: string, basePath: string): string {
+	return isAbsolute(path) ? resolve(path) : resolve(basePath, path);
+}
+
+function contentTypeForDownload(path: string): string {
+	switch (extname(path).toLowerCase()) {
+		case ".html":
+		case ".htm":
+			return "text/html; charset=utf-8";
+		case ".json":
+			return "application/json; charset=utf-8";
+		case ".md":
+		case ".txt":
+		case ".log":
+			return "text/plain; charset=utf-8";
+		case ".pdf":
+			return "application/pdf";
+		case ".png":
+			return "image/png";
+		case ".jpg":
+		case ".jpeg":
+			return "image/jpeg";
+		case ".webp":
+			return "image/webp";
+		default:
+			return "application/octet-stream";
+	}
 }
 
 function parseBooleanSearchParam(url: URL, name: string): boolean {
@@ -2766,6 +2796,38 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 
 			if (isChatAppPath(url.pathname) && request.method === "GET") {
 				return responseBuiltChatIndex() ?? responseHtml(createChatHtml());
+			}
+
+			if (url.pathname === CHAT_WEB_API_PREFIX + "/download" && request.method === "GET") {
+				const webSession = await requireSession(request, context);
+				const path = url.searchParams.get("path")?.trim();
+				if (!path) throw new PiboWebHttpError("Download path is required", 400);
+				const selectedSession = resolveRequestedSession(
+					state,
+					context,
+					webSession,
+					defaultProfile,
+					url.searchParams.get("piboSessionId") || undefined,
+					url.searchParams.get("roomId") || undefined,
+				);
+				const room = ensureSessionRoom(state, context, selectedSession, webSession);
+				const basePath = roomWorkspaceFromMetadata(room.metadata) ?? selectedSession.workspace ?? getDefaultPiboWorkspace();
+				const absolutePath = resolveDownloadPath(path, basePath);
+				let stat;
+				try {
+					stat = statSync(absolutePath);
+				} catch {
+					throw new PiboWebHttpError("File not found: " + absolutePath, 404);
+				}
+				if (!stat.isFile()) throw new PiboWebHttpError("Path is not a file: " + absolutePath, 400);
+				return new Response(Readable.toWeb(createReadStream(absolutePath)) as any, {
+					headers: {
+						"content-type": contentTypeForDownload(absolutePath),
+						"content-length": String(stat.size),
+						"content-disposition": "attachment; filename*=UTF-8''" + encodeURIComponent(basename(absolutePath)),
+						"cache-control": "no-store",
+					},
+				});
 			}
 
 			if (url.pathname === `${CHAT_WEB_API_PREFIX}/bootstrap` && request.method === "GET") {
