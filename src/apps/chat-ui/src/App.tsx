@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Virtuoso } from "react-virtuoso";
 import {
 	Archive,
 	ArchiveRestore,
@@ -1214,7 +1213,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 											<div className="mt-3">
 												<div className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Archived Rooms</div>
 												{roomGroups.archived.length ? (
-													<VirtualizedArchivedRoomsList
+													<ArchivedRoomsList
 														rooms={roomGroups.archived}
 														selectedRoomId={selectedRoomId}
 														onSelect={(roomId) => void selectRoom(roomId)}
@@ -1288,7 +1287,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 								<div>
 									<div className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Archived Sessions</div>
 									{sessionGroups.archived.length ? (
-										<VirtualizedArchivedSessionsList
+										<ArchivedSessionsList
 											sessions={sessionGroups.archived}
 											signalNow={signalNow}
 											selectedPiboSessionId={selectedPiboSessionId}
@@ -2477,15 +2476,7 @@ function MobileUnreadBadge({ count }: { count?: number }) {
 	);
 }
 
-const ARCHIVED_LIST_MAX_HEIGHT = 384;
-const ARCHIVED_ROOM_ESTIMATED_HEIGHT = 72;
-const ARCHIVED_SESSION_ESTIMATED_HEIGHT = 64;
-
-function archivedListHeight(itemCount: number, estimatedItemHeight: number): number {
-	return Math.min(ARCHIVED_LIST_MAX_HEIGHT, Math.max(estimatedItemHeight, itemCount * estimatedItemHeight));
-}
-
-function VirtualizedArchivedRoomsList({
+function ArchivedRoomsList({
 	rooms,
 	selectedRoomId,
 	onSelect,
@@ -2501,14 +2492,10 @@ function VirtualizedArchivedRoomsList({
 	onDelete: (room: PiboRoom) => void;
 }) {
 	return (
-		<Virtuoso
-			data={rooms}
-			style={{ height: archivedListHeight(rooms.length, ARCHIVED_ROOM_ESTIMATED_HEIGHT) }}
-			className="overflow-x-hidden"
-			increaseViewportBy={{ top: 240, bottom: 240 }}
-			computeItemKey={(_, room) => room.id}
-			itemContent={(_, room) => (
+		<div>
+			{rooms.map((room) => (
 				<RoomNode
+					key={room.id}
 					room={room}
 					selectedRoomId={selectedRoomId}
 					onSelect={onSelect}
@@ -2516,12 +2503,12 @@ function VirtualizedArchivedRoomsList({
 					onArchive={onArchive}
 					onDelete={onDelete}
 				/>
-			)}
-		/>
+			))}
+		</div>
 	);
 }
 
-function VirtualizedArchivedSessionsList({
+function ArchivedSessionsList({
 	sessions,
 	signalNow,
 	selectedPiboSessionId,
@@ -2543,14 +2530,10 @@ function VirtualizedArchivedSessionsList({
 	onAutoRenameConsumed?: () => void;
 }) {
 	return (
-		<Virtuoso
-			data={sessions}
-			style={{ height: archivedListHeight(sessions.length, ARCHIVED_SESSION_ESTIMATED_HEIGHT) }}
-			className="overflow-x-hidden"
-			increaseViewportBy={{ top: 240, bottom: 240 }}
-			computeItemKey={(_, session) => session.piboSessionId}
-			itemContent={(_, session) => (
+		<div>
+			{sessions.map((session) => (
 				<SessionNode
+					key={session.piboSessionId}
 					node={session}
 					signalNow={signalNow}
 					selectedPiboSessionId={selectedPiboSessionId}
@@ -2561,8 +2544,8 @@ function VirtualizedArchivedSessionsList({
 					autoRename={autoRenameSessionId === session.piboSessionId}
 					onAutoRenameConsumed={onAutoRenameConsumed}
 				/>
-			)}
-		/>
+			))}
+		</div>
 	);
 }
 
