@@ -12,8 +12,10 @@ import {
 	encodeFrame,
 	errorResponse,
 	isGatewayRequestFrame,
+	isGatewaySubscribeFrame,
 	type GatewayFrame,
 	type GatewayResponseFrame,
+	type GatewaySubscription,
 } from "./protocol.js";
 import { clearFallbackPidFile, clearPidFile, writeFallbackGatewayPid, writeGatewayPid } from "./pidfile.js";
 
@@ -25,12 +27,43 @@ export type GatewayServerOptions = {
 	sessionStore?: PiboSessionStore;
 	sessionDbPath?: string;
 	startChannels?: boolean;
+	maxBackpressureFrames?: number;
+	maxBackpressureBytes?: number;
+};
+
+type GatewayQueuedFrame = {
+	frame: GatewayFrame;
+	bytes: number;
+	droppable: boolean;
+};
+
+export type GatewayConnectionDiagnostics = {
+	slow: boolean;
+	queuedFrames: number;
+	queuedBytes: number;
+	droppedEvents: number;
+	closedForBackpressure: boolean;
+	subscription: GatewaySubscription;
+};
+
+export type GatewayDiagnostics = {
+	connections: number;
+	slowConnections: number;
+	droppedEvents: number;
+	closedSlowClients: number;
+	connectionDetails: GatewayConnectionDiagnostics[];
 };
 
 type GatewayConnection = {
 	socket: Socket;
-	send: (frame: GatewayFrame) => void;
+	subscription: GatewaySubscription;
+	readonly diagnostics: GatewayConnectionDiagnostics;
+	send: (frame: GatewayFrame, options?: { droppable?: boolean }) => void;
+	matches: (event: PiboOutputEvent) => boolean;
 };
+
+const DEFAULT_MAX_BACKPRESSURE_FRAMES = 1_000;
+const DEFAULT_MAX_BACKPRESSURE_BYTES = 4 * 1024 * 1024;
 
 function parseJsonLine(line: string): unknown {
 	try {
@@ -40,14 +73,115 @@ function parseJsonLine(line: string): unknown {
 	}
 }
 
-function createConnection(socket: Socket): GatewayConnection {
-	return {
+function classifyGatewayEvent(event: PiboOutputEvent): "critical" | "structural" | "live-delta" | "debug" {
+	if (event.type === "assistant_delta" || event.type === "thinking_delta" || event.type === "tool_execution_updated") {
+		return "live-delta";
+	}
+	if (event.type === "pi_event") return "debug";
+	if (event.type === "session_error" || event.type === "execution_result" || event.type.endsWith("_finished")) {
+		return "critical";
+	}
+	return "structural";
+}
+
+function isDroppableRouterEvent(event: PiboOutputEvent): boolean {
+	const eventClass = classifyGatewayEvent(event);
+	return eventClass === "live-delta" || eventClass === "debug";
+}
+
+function createConnection(
+	socket: Socket,
+	options: {
+		maxBackpressureFrames: number;
+		maxBackpressureBytes: number;
+		onDroppedEvent: () => void;
+		onClosedForBackpressure: () => void;
+	},
+): GatewayConnection {
+	const queue: GatewayQueuedFrame[] = [];
+	const diagnostics: GatewayConnectionDiagnostics = {
+		slow: false,
+		queuedFrames: 0,
+		queuedBytes: 0,
+		droppedEvents: 0,
+		closedForBackpressure: false,
+		subscription: { type: "legacy-all" },
+	};
+
+	function syncDiagnostics(): void {
+		diagnostics.queuedFrames = queue.length;
+		diagnostics.queuedBytes = queue.reduce((sum, item) => sum + item.bytes, 0);
+	}
+
+	function recordDroppedEvent(): void {
+		diagnostics.droppedEvents += 1;
+		options.onDroppedEvent();
+	}
+
+	function closeForBackpressure(): void {
+		if (!diagnostics.closedForBackpressure) {
+			diagnostics.closedForBackpressure = true;
+			options.onClosedForBackpressure();
+		}
+		socket.destroy(new Error("Gateway client closed because its send backlog exceeded the backpressure limit"));
+	}
+
+	function tryFlush(): void {
+		if (socket.destroyed) return;
+		diagnostics.slow = false;
+		while (queue.length > 0) {
+			const next = queue[0]!;
+			const accepted = socket.write(encodeFrame(next.frame));
+			queue.shift();
+			syncDiagnostics();
+			if (!accepted) {
+				diagnostics.slow = true;
+				return;
+			}
+		}
+	}
+
+	socket.on("drain", tryFlush);
+
+	const connection: GatewayConnection = {
 		socket,
-		send(frame) {
+		subscription: diagnostics.subscription,
+		diagnostics,
+		send(frame, sendOptions = {}) {
 			if (socket.destroyed) return;
-			socket.write(encodeFrame(frame));
+			const encoded = encodeFrame(frame);
+			if (!diagnostics.slow && queue.length === 0) {
+				const accepted = socket.write(encoded);
+				if (accepted) return;
+				diagnostics.slow = true;
+			}
+
+			const queued: GatewayQueuedFrame = { frame, bytes: Buffer.byteLength(encoded), droppable: sendOptions.droppable === true };
+			if (queued.droppable && (queue.length >= options.maxBackpressureFrames || diagnostics.queuedBytes + queued.bytes > options.maxBackpressureBytes)) {
+				recordDroppedEvent();
+				return;
+			}
+			queue.push(queued);
+			syncDiagnostics();
+
+			if (queue.length > options.maxBackpressureFrames || diagnostics.queuedBytes > options.maxBackpressureBytes) {
+				const dropIndex = queue.findIndex((item) => item.droppable);
+				if (dropIndex >= 0) {
+					queue.splice(dropIndex, 1);
+					recordDroppedEvent();
+					syncDiagnostics();
+				} else {
+					closeForBackpressure();
+				}
+			}
+		},
+		matches(event) {
+			if (connection.subscription.type === "legacy-all") return true;
+			return event.piboSessionId === connection.subscription.piboSessionId;
 		},
 	};
+
+	return connection;
 }
 
 async function createGatewaySessionStore(options: GatewayServerOptions): Promise<PiboSessionStore> {
@@ -66,6 +200,8 @@ export class PiboGatewayServer {
 	private router?: PiboSessionRouter;
 	private readonly startedChannels: PiboChannel[] = [];
 	private readonly connections = new Set<GatewayConnection>();
+	private droppedRouterEvents = 0;
+	private closedSlowClients = 0;
 	private server?: Server;
 	private unsubscribe?: () => void;
 
@@ -131,7 +267,16 @@ export class PiboGatewayServer {
 	}
 
 	private handleSocket(socket: Socket): void {
-		const connection = createConnection(socket);
+		const connection = createConnection(socket, {
+			maxBackpressureFrames: this.options.maxBackpressureFrames ?? DEFAULT_MAX_BACKPRESSURE_FRAMES,
+			maxBackpressureBytes: this.options.maxBackpressureBytes ?? DEFAULT_MAX_BACKPRESSURE_BYTES,
+			onDroppedEvent: () => {
+				this.droppedRouterEvents += 1;
+			},
+			onClosedForBackpressure: () => {
+				this.closedSlowClients += 1;
+			},
+		});
 		this.connections.add(connection);
 
 		let buffer = "";
@@ -162,11 +307,20 @@ export class PiboGatewayServer {
 		let frame: unknown;
 		try {
 			frame = parseJsonLine(line);
-			if (!isGatewayRequestFrame(frame)) {
-				throw new Error("Invalid request frame");
-			}
 		} catch (error) {
 			connection.send(errorResponse("invalid", error));
+			return;
+		}
+
+		if (isGatewaySubscribeFrame(frame)) {
+			connection.subscription = frame.subscription;
+			connection.diagnostics.subscription = frame.subscription;
+			connection.send({ type: "res", id: frame.id, ok: true, payload: { subscription: frame.subscription } });
+			return;
+		}
+
+		if (!isGatewayRequestFrame(frame)) {
+			connection.send(errorResponse("invalid", new Error("Invalid request frame")));
 			return;
 		}
 
@@ -186,8 +340,20 @@ export class PiboGatewayServer {
 
 	private broadcastRouterEvent(event: PiboOutputEvent): void {
 		for (const connection of this.connections) {
-			connection.send({ type: "event", event: "router", payload: event });
+			if (!connection.matches(event)) continue;
+			connection.send({ type: "event", event: "router", payload: event }, { droppable: isDroppableRouterEvent(event) });
 		}
+	}
+
+	getDiagnostics(): GatewayDiagnostics {
+		const connectionDetails = [...this.connections].map((connection) => ({ ...connection.diagnostics }));
+		return {
+			connections: connectionDetails.length,
+			slowConnections: connectionDetails.filter((connection) => connection.slow).length,
+			droppedEvents: this.droppedRouterEvents,
+			closedSlowClients: this.closedSlowClients,
+			connectionDetails,
+		};
 	}
 
 	private async startChannels(): Promise<void> {

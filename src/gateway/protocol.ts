@@ -9,6 +9,16 @@ export type GatewayRequestFrame = {
 	event: PiboInputEvent;
 };
 
+export type GatewaySubscription =
+	| { type: "legacy-all" }
+	| { type: "session"; piboSessionId: string };
+
+export type GatewaySubscribeFrame = {
+	type: "subscribe";
+	id: string;
+	subscription: GatewaySubscription;
+};
+
 export type GatewayResponseFrame = {
 	type: "res";
 	id: string;
@@ -23,7 +33,7 @@ export type GatewayEventFrame = {
 	payload: PiboOutputEvent;
 };
 
-export type GatewayFrame = GatewayRequestFrame | GatewayResponseFrame | GatewayEventFrame;
+export type GatewayFrame = GatewayRequestFrame | GatewaySubscribeFrame | GatewayResponseFrame | GatewayEventFrame;
 
 function isJsonValue(value: unknown): boolean {
 	if (
@@ -64,6 +74,21 @@ export function isGatewayRequestFrame(value: unknown): value is GatewayRequestFr
 	if (event.type === "message") return typeof event.text === "string";
 	if (event.type === "execution") {
 		return typeof event.action === "string" && (event.params === undefined || isJsonValue(event.params));
+	}
+	return false;
+}
+
+export function isGatewaySubscribeFrame(value: unknown): value is GatewaySubscribeFrame {
+	if (!value || typeof value !== "object") return false;
+
+	const frame = value as { type?: unknown; id?: unknown; subscription?: unknown };
+	if (frame.type !== "subscribe" || typeof frame.id !== "string") return false;
+	if (!frame.subscription || typeof frame.subscription !== "object") return false;
+
+	const subscription = frame.subscription as { type?: unknown; piboSessionId?: unknown };
+	if (subscription.type === "legacy-all") return true;
+	if (subscription.type === "session") {
+		return typeof subscription.piboSessionId === "string" && subscription.piboSessionId.length > 0;
 	}
 	return false;
 }
