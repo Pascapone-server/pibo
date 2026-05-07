@@ -95,6 +95,7 @@ export type PiboSessionSignalSnapshot = {
 	parentPiboSessionId?: string;
 	rootPiboSessionId: string;
 	version: number;
+	/** Time of the last semantic snapshot change. Patch generatedAt carries recompute time. */
 	updatedAt: string;
 	localStatus: PiboSignalStatus;
 	aggregateStatus: PiboSignalStatus;

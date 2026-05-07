@@ -28,8 +28,104 @@ export type InMemoryPiboSignalRegistryOptions = {
 const DEFAULT_TERMINAL_SUCCESS_TTL_MS = 60_000;
 const DEFAULT_TERMINAL_ERROR_TTL_MS = 10 * 60_000;
 
-function shallowEqual(a: unknown, b: unknown): boolean {
-	return JSON.stringify(a) === JSON.stringify(b);
+function jsonValueEqual(a: unknown, b: unknown): boolean {
+	if (Object.is(a, b)) return true;
+	if (typeof a !== typeof b) return false;
+	if (a === null || b === null) return false;
+	if (Array.isArray(a) || Array.isArray(b)) {
+		if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+		return a.every((value, index) => jsonValueEqual(value, b[index]));
+	}
+	if (typeof a === "object") {
+		const aRecord = a as Record<string, unknown>;
+		const bRecord = b as Record<string, unknown>;
+		const aKeys = Object.keys(aRecord).sort();
+		const bKeys = Object.keys(bRecord).sort();
+		if (!arrayEqual(aKeys, bKeys, Object.is)) return false;
+		return aKeys.every((key) => jsonValueEqual(aRecord[key], bRecord[key]));
+	}
+	return false;
+}
+
+function arrayEqual<T>(a: readonly T[] | undefined, b: readonly T[] | undefined, equal: (a: T, b: T) => boolean): boolean {
+	if (a === b) return true;
+	if (!a || !b || a.length !== b.length) return false;
+	return a.every((value, index) => equal(value, b[index]!));
+}
+
+function errorEqual(a: unknown, b: unknown): boolean {
+	return jsonValueEqual(a, b);
+}
+
+function signalNodeEqual(a: PiboSignalNode | undefined, b: PiboSignalNode): boolean {
+	if (!a) return false;
+	return a.id === b.id
+		&& a.kind === b.kind
+		&& a.status === b.status
+		&& a.rootPiboSessionId === b.rootPiboSessionId
+		&& a.piboSessionId === b.piboSessionId
+		&& a.parentNodeId === b.parentNodeId
+		&& a.parentPiboSessionId === b.parentPiboSessionId
+		&& a.childPiboSessionId === b.childPiboSessionId
+		&& a.createdAt === b.createdAt
+		&& a.startedAt === b.startedAt
+		&& a.completedAt === b.completedAt
+		&& errorEqual(a.error, b.error)
+		&& jsonValueEqual(a.metadata, b.metadata);
+}
+
+function toolCallSummaryEqual(a: ToolCallSignalSummary, b: ToolCallSignalSummary): boolean {
+	return a.nodeId === b.nodeId
+		&& a.toolCallId === b.toolCallId
+		&& a.toolName === b.toolName
+		&& a.status === b.status
+		&& a.startedAt === b.startedAt
+		&& a.updatedAt === b.updatedAt;
+}
+
+function runSummaryEqual(a: RunSignalSummary, b: RunSignalSummary): boolean {
+	return a.nodeId === b.nodeId
+		&& a.runId === b.runId
+		&& a.toolName === b.toolName
+		&& a.status === b.status
+		&& a.completionPolicy === b.completionPolicy
+		&& a.consumed === b.consumed
+		&& a.startedAt === b.startedAt
+		&& a.updatedAt === b.updatedAt;
+}
+
+function childSummaryEqual(a: ChildSessionSignalSummary, b: ChildSessionSignalSummary): boolean {
+	return a.nodeId === b.nodeId
+		&& a.piboSessionId === b.piboSessionId
+		&& a.status === b.status
+		&& a.isTreeActive === b.isTreeActive
+		&& a.hasError === b.hasError
+		&& a.updatedAt === b.updatedAt;
+}
+
+function sessionSnapshotSemanticallyEqual(a: PiboSessionSignalSnapshot | undefined, b: PiboSessionSignalSnapshot): boolean {
+	if (!a) return false;
+	return a.piboSessionId === b.piboSessionId
+		&& a.piSessionId === b.piSessionId
+		&& a.parentPiboSessionId === b.parentPiboSessionId
+		&& a.rootPiboSessionId === b.rootPiboSessionId
+		&& a.localStatus === b.localStatus
+		&& a.aggregateStatus === b.aggregateStatus
+		&& a.phase === b.phase
+		&& a.queuedMessages === b.queuedMessages
+		&& a.currentMessageId === b.currentMessageId
+		&& a.currentTurnId === b.currentTurnId
+		&& a.isLocalActive === b.isLocalActive
+		&& a.hasActiveDescendant === b.hasActiveDescendant
+		&& a.isTreeActive === b.isTreeActive
+		&& a.isSettled === b.isSettled
+		&& a.hasError === b.hasError
+		&& a.hasErrorDescendant === b.hasErrorDescendant
+		&& a.hasBlockedDescendant === b.hasBlockedDescendant
+		&& arrayEqual(a.activeToolCalls, b.activeToolCalls, toolCallSummaryEqual)
+		&& arrayEqual(a.activeRuns, b.activeRuns, runSummaryEqual)
+		&& arrayEqual(a.activeChildren, b.activeChildren, childSummaryEqual)
+		&& arrayEqual(a.errors, b.errors, errorEqual);
 }
 
 export class InMemoryPiboSignalRegistry implements PiboSignalRegistry {
@@ -38,6 +134,7 @@ export class InMemoryPiboSignalRegistry implements PiboSignalRegistry {
 	private readonly childSessionIdsByParentId = new Map<string, Set<string>>();
 	private readonly parentSessionIdByChildId = new Map<string, string>();
 	private readonly rootSessionIdBySessionId = new Map<string, string>();
+	private readonly sessionDepthById = new Map<string, number>();
 	private readonly versionByRootId = new Map<string, number>();
 	private readonly sessionSnapshotById = new Map<string, PiboSessionSignalSnapshot>();
 	private readonly queuedMessagesBySessionId = new Map<string, number>();
@@ -153,22 +250,25 @@ export class InMemoryPiboSignalRegistry implements PiboSignalRegistry {
 
 	private applyMutation(mutation: PiboSignalMutation, changedSessionIds: Set<string>, upserts: PiboSignalNode[], removes: string[]): void {
 		if (mutation.type === "set_session_queue") {
-			this.queuedMessagesBySessionId.set(mutation.piboSessionId, mutation.queuedMessages);
+			const previous = this.queuedMessagesBySessionId.get(mutation.piboSessionId) ?? 0;
 			this.ensureSession(mutation.piboSessionId);
+			if (previous === mutation.queuedMessages) return;
+			this.queuedMessagesBySessionId.set(mutation.piboSessionId, mutation.queuedMessages);
 			changedSessionIds.add(mutation.piboSessionId);
 			return;
 		}
 		if (mutation.type === "remove_node") {
 			const existing = this.nodesById.get(mutation.nodeId);
-			if (existing?.piboSessionId) changedSessionIds.add(existing.piboSessionId);
+			if (!existing) return;
+			if (existing.piboSessionId) changedSessionIds.add(existing.piboSessionId);
 			this.nodesById.delete(mutation.nodeId);
-			if (existing?.piboSessionId) this.nodeIdsBySessionId.get(existing.piboSessionId)?.delete(mutation.nodeId);
+			if (existing.piboSessionId) this.nodeIdsBySessionId.get(existing.piboSessionId)?.delete(mutation.nodeId);
 			removes.push(mutation.nodeId);
 			return;
 		}
 		if (mutation.type === "link_parent") {
 			const existing = this.nodesById.get(mutation.nodeId);
-			if (!existing) return;
+			if (!existing || existing.parentNodeId === mutation.parentNodeId) return;
 			this.nodesById.set(existing.id, { ...existing, parentNodeId: mutation.parentNodeId, updatedAt: now() });
 			if (existing.piboSessionId) changedSessionIds.add(existing.piboSessionId);
 			return;
@@ -179,7 +279,7 @@ export class InMemoryPiboSignalRegistry implements PiboSignalRegistry {
 		if (!incoming) return;
 		const existing = this.nodesById.get(incoming.id);
 		const merged = existing ? { ...existing, ...incoming, metadata: incoming.metadata ?? existing.metadata } : incoming;
-		if (shallowEqual(existing, merged)) return;
+		if (signalNodeEqual(existing, merged)) return;
 		this.nodesById.set(merged.id, merged);
 		if (merged.piboSessionId) {
 			this.ensureSession(merged.piboSessionId, merged.kind === "session" ? merged.parentPiboSessionId : undefined, merged.rootPiboSessionId);
@@ -200,14 +300,18 @@ export class InMemoryPiboSignalRegistry implements PiboSignalRegistry {
 	}
 
 	private ensureSession(piboSessionId: string, parentPiboSessionId?: string, rootPiboSessionId?: string): void {
-		if (parentPiboSessionId) {
+		const previousParent = this.parentSessionIdByChildId.get(piboSessionId);
+		if (parentPiboSessionId && previousParent !== parentPiboSessionId) {
+			if (previousParent) this.childSessionIdsByParentId.get(previousParent)?.delete(piboSessionId);
 			this.parentSessionIdByChildId.set(piboSessionId, parentPiboSessionId);
 			const children = this.childSessionIdsByParentId.get(parentPiboSessionId) ?? new Set<string>();
 			children.add(piboSessionId);
 			this.childSessionIdsByParentId.set(parentPiboSessionId, children);
 		}
-		const rootId = rootPiboSessionId ?? (parentPiboSessionId ? this.getSessionRoot(parentPiboSessionId) : piboSessionId);
+		const effectiveParent = parentPiboSessionId ?? this.parentSessionIdByChildId.get(piboSessionId);
+		const rootId = rootPiboSessionId ?? (effectiveParent ? this.getSessionRoot(effectiveParent) : piboSessionId);
 		this.rootSessionIdBySessionId.set(piboSessionId, rootId);
+		this.refreshSessionDepth(piboSessionId);
 		if (!this.versionByRootId.has(rootId)) this.versionByRootId.set(rootId, 0);
 		if (!this.nodesById.has(`session:${piboSessionId}`)) {
 			const timestamp = now();
@@ -249,8 +353,10 @@ export class InMemoryPiboSignalRegistry implements PiboSignalRegistry {
 		const ordered = [...toRecompute].sort((a, b) => this.depth(b) - this.depth(a));
 		const changed: PiboSessionSignalSnapshot[] = [];
 		for (const sessionId of ordered) {
-			const snapshot = this.computeSessionSnapshot(sessionId, version);
-			if (!shallowEqual(this.sessionSnapshotById.get(sessionId), snapshot)) {
+			const previous = this.sessionSnapshotById.get(sessionId);
+			const candidate = this.computeSessionSnapshot(sessionId, version, previous?.updatedAt);
+			if (!sessionSnapshotSemanticallyEqual(previous, candidate)) {
+				const snapshot = { ...candidate, version, updatedAt: now() };
 				this.sessionSnapshotById.set(sessionId, snapshot);
 				changed.push(snapshot);
 			}
@@ -259,13 +365,20 @@ export class InMemoryPiboSignalRegistry implements PiboSignalRegistry {
 	}
 
 	private depth(sessionId: string): number {
-		let depth = 0;
-		let current = this.parentSessionIdByChildId.get(sessionId);
-		while (current) { depth += 1; current = this.parentSessionIdByChildId.get(current); }
+		const cached = this.sessionDepthById.get(sessionId);
+		if (cached !== undefined) return cached;
+		return this.refreshSessionDepth(sessionId);
+	}
+
+	private refreshSessionDepth(sessionId: string): number {
+		const parentId = this.parentSessionIdByChildId.get(sessionId);
+		const depth = parentId ? this.depth(parentId) + 1 : 0;
+		this.sessionDepthById.set(sessionId, depth);
+		for (const childId of this.childSessionIdsByParentId.get(sessionId) ?? []) this.refreshSessionDepth(childId);
 		return depth;
 	}
 
-	private computeSessionSnapshot(piboSessionId: string, version: number): PiboSessionSignalSnapshot {
+	private computeSessionSnapshot(piboSessionId: string, version: number, updatedAt: string = now()): PiboSessionSignalSnapshot {
 		this.ensureSession(piboSessionId);
 		const rootPiboSessionId = this.getSessionRoot(piboSessionId);
 		const nodes = this.nodesForSession(piboSessionId);
@@ -293,7 +406,7 @@ export class InMemoryPiboSignalRegistry implements PiboSignalRegistry {
 			parentPiboSessionId: this.parentSessionIdByChildId.get(piboSessionId),
 			rootPiboSessionId,
 			version,
-			updatedAt: now(),
+			updatedAt,
 			localStatus,
 			aggregateStatus,
 			phase: phaseForStatus(aggregateStatus, nodes),
