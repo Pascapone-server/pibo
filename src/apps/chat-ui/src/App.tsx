@@ -1054,7 +1054,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 				</div>
 			</header>
 
-			{error ? <AppErrorBanner message={error} onDismiss={() => setError(null)} /> : null}
+			<div>{error ? <AppErrorBanner message={error} onDismiss={() => setError(null)} /> : null}</div>
 
 			<div
 				className={`min-h-0 ${
