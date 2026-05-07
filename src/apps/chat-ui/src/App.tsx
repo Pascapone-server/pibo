@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
+import { Virtuoso } from "react-virtuoso";
 import {
 	Archive,
 	ArchiveRestore,
@@ -1186,18 +1187,16 @@ export function App({ route }: { route: ChatAppRoute }) {
 										{showArchivedRooms ? (
 											<div className="mt-3">
 												<div className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Archived Rooms</div>
-												{roomGroups.archived.map((room) => (
-													<RoomNode
-														key={room.id}
-														room={room}
+												{roomGroups.archived.length ? (
+													<VirtualizedArchivedRoomsList
+														rooms={roomGroups.archived}
 														selectedRoomId={selectedRoomId}
 														onSelect={(roomId) => void selectRoom(roomId)}
 														onUpdate={(roomId, input) => void updateRoom(roomId, input)}
 														onArchive={(roomId, archived) => void setRoomArchived(roomId, archived)}
 														onDelete={requestRoomDelete}
 													/>
-												))}
-												{roomGroups.archived.length === 0 ? <div className="px-2 py-3 text-xs text-slate-500 border border-dashed border-slate-700 rounded-sm">No archived rooms</div> : null}
+												) : <div className="px-2 py-3 text-xs text-slate-500 border border-dashed border-slate-700 rounded-sm">No archived rooms</div>}
 											</div>
 										) : null}
 									</div>
@@ -1260,10 +1259,9 @@ export function App({ route }: { route: ChatAppRoute }) {
 							{showArchived ? (
 								<div>
 									<div className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Archived Sessions</div>
-									{sessionGroups.archived.map((session) => (
-										<SessionNode
-											key={session.piboSessionId}
-											node={session}
+									{sessionGroups.archived.length ? (
+										<VirtualizedArchivedSessionsList
+											sessions={sessionGroups.archived}
 											signalNow={signalNow}
 											selectedPiboSessionId={selectedPiboSessionId}
 											onSelect={(piboSessionId) => void selectSession(piboSessionId)}
@@ -1271,8 +1269,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 											onArchive={(piboSessionId, archived) => void setSessionArchived(piboSessionId, archived)}
 											onDelete={requestSessionDelete}
 										/>
-									))}
-									{sessionGroups.archived.length === 0 ? <div className="px-2 py-3 text-xs text-slate-500 border border-dashed border-slate-700 rounded-sm">No archived sessions</div> : null}
+									) : <div className="px-2 py-3 text-xs text-slate-500 border border-dashed border-slate-700 rounded-sm">No archived sessions</div>}
 								</div>
 							) : null}
 						</div>
@@ -2447,6 +2444,89 @@ function MobileUnreadBadge({ count }: { count?: number }) {
 		>
 			{unreadBadgeLabel(count)}
 		</span>
+	);
+}
+
+const ARCHIVED_LIST_MAX_HEIGHT = 384;
+const ARCHIVED_ROOM_ESTIMATED_HEIGHT = 72;
+const ARCHIVED_SESSION_ESTIMATED_HEIGHT = 64;
+
+function archivedListHeight(itemCount: number, estimatedItemHeight: number): number {
+	return Math.min(ARCHIVED_LIST_MAX_HEIGHT, Math.max(estimatedItemHeight, itemCount * estimatedItemHeight));
+}
+
+function VirtualizedArchivedRoomsList({
+	rooms,
+	selectedRoomId,
+	onSelect,
+	onUpdate,
+	onArchive,
+	onDelete,
+}: {
+	rooms: PiboRoom[];
+	selectedRoomId: string | null;
+	onSelect: (roomId: string) => void;
+	onUpdate: (roomId: string, input: { name?: string; topic?: string | null; workspace?: string | null }) => void;
+	onArchive: (roomId: string, archived: boolean) => void;
+	onDelete: (room: PiboRoom) => void;
+}) {
+	return (
+		<Virtuoso
+			data={rooms}
+			style={{ height: archivedListHeight(rooms.length, ARCHIVED_ROOM_ESTIMATED_HEIGHT) }}
+			className="overflow-x-hidden"
+			increaseViewportBy={{ top: 240, bottom: 240 }}
+			computeItemKey={(_, room) => room.id}
+			itemContent={(_, room) => (
+				<RoomNode
+					room={room}
+					selectedRoomId={selectedRoomId}
+					onSelect={onSelect}
+					onUpdate={onUpdate}
+					onArchive={onArchive}
+					onDelete={onDelete}
+				/>
+			)}
+		/>
+	);
+}
+
+function VirtualizedArchivedSessionsList({
+	sessions,
+	signalNow,
+	selectedPiboSessionId,
+	onSelect,
+	onRename,
+	onArchive,
+	onDelete,
+}: {
+	sessions: PiboWebSessionNode[];
+	signalNow: number;
+	selectedPiboSessionId: string | null;
+	onSelect: (piboSessionId: string) => void;
+	onRename: (piboSessionId: string, title: string | null) => void;
+	onArchive: (piboSessionId: string, archived: boolean) => void;
+	onDelete: (node: PiboWebSessionNode) => void;
+}) {
+	return (
+		<Virtuoso
+			data={sessions}
+			style={{ height: archivedListHeight(sessions.length, ARCHIVED_SESSION_ESTIMATED_HEIGHT) }}
+			className="overflow-x-hidden"
+			increaseViewportBy={{ top: 240, bottom: 240 }}
+			computeItemKey={(_, session) => session.piboSessionId}
+			itemContent={(_, session) => (
+				<SessionNode
+					node={session}
+					signalNow={signalNow}
+					selectedPiboSessionId={selectedPiboSessionId}
+					onSelect={onSelect}
+					onRename={onRename}
+					onArchive={onArchive}
+					onDelete={onDelete}
+				/>
+			)}
+		/>
 	);
 }
 
