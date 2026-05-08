@@ -606,7 +606,8 @@ export function App({ route }: { route: ChatAppRoute }) {
 
 	useEffect(() => {
 		if (!bootstrap?.agents.length) return;
-		const preferredProfile = newSessionProfile || bootstrap.session.profile;
+		const sessionProfile = defaultProfileFromBootstrap(bootstrap);
+		const preferredProfile = newSessionProfile || sessionProfile;
 		const matchedProfile = findAgentProfile(bootstrap.agents, preferredProfile);
 		if (matchedProfile) {
 			if (newSessionProfile !== matchedProfile.name) {
@@ -615,7 +616,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 			}
 			return;
 		}
-		const fallbackProfile = findAgentProfile(bootstrap.agents, bootstrap.session.profile)?.name ?? bootstrap.agents[0].name;
+		const fallbackProfile = findAgentProfile(bootstrap.agents, sessionProfile)?.name ?? bootstrap.agents[0].name;
 		setNewSessionProfile(fallbackProfile);
 		localStorage.setItem("pibo.chat.newSessionProfile", fallbackProfile);
 	}, [bootstrap, newSessionProfile]);
@@ -658,7 +659,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 			const tempId = `optimistic-session-${createClientTxnId()}`;
 			setSelectedPiboSessionId(tempId);
 			updateBootstrapCache((current) => {
-				const optimisticNode = createOptimisticSessionNode(tempId, profile || current.session.profile);
+				const optimisticNode = createOptimisticSessionNode(tempId, profile || defaultProfileFromBootstrap(current));
 				const next = addSessionNodeToBootstrap(current, optimisticNode);
 				return { ...next, selectedPiboSessionId: tempId };
 			});
@@ -717,7 +718,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 	});
 
 	const updateSelectedSessionProfile = useCallback(async (profile: string) => {
-		if (!selectedPiboSessionId || !bootstrap || profile === bootstrap.session.profile) return;
+		if (!selectedPiboSessionId || !bootstrap || profile === defaultProfileFromBootstrap(bootstrap)) return;
 		try {
 			await patchSession(selectedPiboSessionId, { profile });
 			setPreferredNewSessionProfile(profile);
@@ -764,9 +765,10 @@ export function App({ route }: { route: ChatAppRoute }) {
 		const userSkills = bootstrap.agentCatalog?.userSkills ?? [];
 		const allSkills = [...catalogSkills, ...userSkills];
 
+		const fallbackProfile = defaultProfileFromBootstrap(bootstrap);
 		const selectedSessionProfile = selectedPiboSessionId
-			? findSessionNode(bootstrap.sessions, selectedPiboSessionId)?.profile ?? bootstrap.session.profile
-			: bootstrap.session.profile;
+			? findSessionNode(bootstrap.sessions, selectedPiboSessionId)?.profile ?? fallbackProfile
+			: fallbackProfile;
 
 		const agentSkills = [
 			...bootstrap.agents.map((agent) => ({ name: agent.name, skills: agent.skills })),
@@ -1112,8 +1114,8 @@ export function App({ route }: { route: ChatAppRoute }) {
 	const selectedSessionSignal = selectedPiboSessionId ? sessionSignals?.sessions[selectedPiboSessionId] : undefined;
 	const selectedRootSignal = sessionSignals?.rootPiboSessionId ? sessionSignals.sessions[sessionSignals.rootPiboSessionId] : undefined;
 	const selectedSessionActiveModel = resolveSessionActiveModelLabel(bootstrap, selectedSessionNode ?? {
-		profile: bootstrap.session.profile,
-		parentId: bootstrap.session.parentId,
+		profile: defaultProfileFromBootstrap(bootstrap),
+		parentId: bootstrap.session?.parentId,
 	});
 	const personalRoom = findPersonalRoom(bootstrap.rooms);
 	const roomGroups = splitRoomNodes(bootstrap.rooms);
@@ -1426,7 +1428,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 						selectedPiboSessionId={selectedPiboSessionId}
 						selectedRoomId={selectedRoomId}
 						selectedRoomArchived={selectedRoomArchived}
-						selectedSessionProfile={selectedSessionNode?.profile ?? bootstrap.session.profile}
+						selectedSessionProfile={selectedSessionNode?.profile ?? defaultProfileFromBootstrap(bootstrap)}
 						selectedSessionActiveModel={selectedSessionActiveModel}
 						selectedSessionStatus={signalLegacyStatus(selectedSessionSignal ?? selectedRootSignal) ?? selectedSessionNode?.status}
 						selectedSessionSignal={selectedSessionSignal}
@@ -3236,6 +3238,10 @@ function createSessionBreadcrumbs(nodes: PiboWebSessionNode[], piboSessionId: st
 		piboSessionId: node.piboSessionId,
 		label: sessionBreadcrumbLabel(node, index),
 	}));
+}
+
+function defaultProfileFromBootstrap(bootstrap: BootstrapData): string {
+	return bootstrap.session?.profile ?? bootstrap.agents[0]?.name ?? bootstrap.customAgents[0]?.profileName ?? "";
 }
 
 function resolveSessionActiveModelLabel(
