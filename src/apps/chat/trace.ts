@@ -121,15 +121,18 @@ export async function buildSessionNodes(
 	const piSessionsByCwd = new Map<string, Promise<PiboSessionListItem[]>>();
 
 	for (const session of sessions) {
-		const sessionCwd = session.workspace ?? cwd;
-		let piSessions = piSessionsByCwd.get(sessionCwd);
-		if (!piSessions) {
-			piSessions = listPiSessions(sessionCwd);
-			piSessionsByCwd.set(sessionCwd, piSessions);
+		let metadata: SessionMetadata = {};
+		if (!session.title) {
+			const sessionCwd = session.workspace ?? cwd;
+			let piSessions = piSessionsByCwd.get(sessionCwd);
+			if (!piSessions) {
+				piSessions = listPiSessions(sessionCwd);
+				piSessionsByCwd.set(sessionCwd, piSessions);
+			}
+			metadata = metadataFromPiSession(
+				(await piSessions).find((piSession) => piSession.id === session.piSessionId),
+			);
 		}
-		const metadata = metadataFromPiSession(
-			(await piSessions).find((piSession) => piSession.id === session.piSessionId),
-		);
 		const indexed = indexByKey.get(session.id);
 		nodes.set(session.id, {
 			piboSessionId: session.id,

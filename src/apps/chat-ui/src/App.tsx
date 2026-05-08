@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
+import { flushSync } from "react-dom";
 import {
 	Archive,
 	ArchiveRestore,
@@ -20,6 +21,7 @@ import {
 	FolderPlus,
 	Key,
 	Layers,
+	Loader2,
 	Lock,
 	LogOut,
 	Menu,
@@ -187,6 +189,8 @@ export function App({ route }: { route: ChatAppRoute }) {
 	const [composerText, setComposerText] = useState("");
 	const [composerFocusSignal, setComposerFocusSignal] = useState(0);
 	const [creatingSession, setCreatingSession] = useState(false);
+	const [loadingArchivedSessions, setLoadingArchivedSessions] = useState(false);
+	const [loadingPiboSessionId, setLoadingPiboSessionId] = useState<string | null>(null);
 	const [autoRenameSessionId, setAutoRenameSessionId] = useState<string | null>(null);
 	const [contextPanel, setContextPanel] = useState<ContextPanel>("context-files");
 	const [selectedContextFileKey, setSelectedContextFileKey] = useState<string | null>(null);
@@ -700,11 +704,19 @@ export function App({ route }: { route: ChatAppRoute }) {
 	}, [bootstrap, selectedPiboSessionId]);
 
 	const selectSession = useCallback(async (piboSessionId: string) => {
-		setSelectedPiboSessionId(piboSessionId);
-		setMobileSidebarOpen(false);
-		const data = await loadBootstrap(piboSessionId);
-		navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId);
-	}, [loadBootstrap, navigateToSelectedSession]);
+		flushSync(() => {
+			setSelectedPiboSessionId(piboSessionId);
+			setLoadingPiboSessionId(piboSessionId);
+			setMobileSidebarOpen(false);
+		});
+		navigateToSelectedSession(selectedRoomId ?? bootstrap?.selectedRoomId, piboSessionId, false, { closeMobileSidebar: false });
+		try {
+			const data = await loadBootstrap(piboSessionId);
+			navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId, true, { closeMobileSidebar: false });
+		} finally {
+			setLoadingPiboSessionId((current) => current === piboSessionId ? null : current);
+		}
+	}, [bootstrap?.selectedRoomId, loadBootstrap, navigateToSelectedSession, selectedRoomId]);
 
 	const selectRoom = useCallback(async (roomId: string) => {
 		setMobileSidebarOpen(false);
@@ -743,6 +755,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 	const toggleArchivedSessions = async () => {
 		const next = !showArchived;
 		setShowArchived(next);
+		setLoadingArchivedSessions(true);
 		localStorage.setItem("pibo.chat.showArchived", String(next));
 		try {
 			const data = await loadBootstrap(selectedPiboSessionId ?? undefined, next, selectedRoomId ?? undefined);
@@ -750,6 +763,8 @@ export function App({ route }: { route: ChatAppRoute }) {
 			setError(null);
 		} catch (caught) {
 			setError(caught instanceof Error ? caught.message : String(caught));
+		} finally {
+			setLoadingArchivedSessions(false);
 		}
 	};
 
@@ -1257,13 +1272,14 @@ export function App({ route }: { route: ChatAppRoute }) {
 										<button
 											type="button"
 											onClick={() => void toggleArchivedSessions()}
+											disabled={loadingArchivedSessions}
 											title={showArchived ? "Hide Archived Sessions" : "Show Archived Sessions"}
 											aria-label={showArchived ? "Hide Archived Sessions" : "Show Archived Sessions"}
-											className={`h-6 w-6 max-[980px]:h-8 max-[980px]:w-8 inline-flex items-center justify-center border rounded-sm hover:border-[#11a4d4] hover:text-[#11a4d4] ${
+											className={`h-6 w-6 max-[980px]:h-8 max-[980px]:w-8 inline-flex items-center justify-center border rounded-sm hover:border-[#11a4d4] hover:text-[#11a4d4] disabled:opacity-70 ${
 												showArchived ? "border-[#11a4d4] text-[#11a4d4]" : "border-slate-700 text-slate-400"
 											}`}
 										>
-											{showArchived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
+											{loadingArchivedSessions ? <Loader2 size={14} className="animate-spin" /> : showArchived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
 										</button>
 									</div>
 								</div>
@@ -1277,6 +1293,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 										onRename={(piboSessionId, title) => void renameSession(piboSessionId, title)}
 										onArchive={(piboSessionId, archived) => void setSessionArchived(piboSessionId, archived)}
 										onDelete={requestSessionDelete}
+										loadingPiboSessionId={loadingPiboSessionId}
 										autoRename={autoRenameSessionId === session.piboSessionId}
 										onAutoRenameConsumed={() => setAutoRenameSessionId(null)}
 									/>
@@ -1285,8 +1302,15 @@ export function App({ route }: { route: ChatAppRoute }) {
 							</div>
 							{showArchived ? (
 								<div>
-									<div className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Archived Sessions</div>
-									{sessionGroups.archived.length ? (
+									<div className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+										<span>Archived Sessions</span>
+										{loadingArchivedSessions ? <Loader2 size={12} className="text-[#11a4d4] animate-spin" aria-label="Loading archived sessions" /> : null}
+									</div>
+									{loadingArchivedSessions ? (
+										<div className="px-2 py-3 text-xs text-slate-500 border border-dashed border-slate-700 rounded-sm flex items-center gap-2">
+											<Loader2 size={13} className="text-[#11a4d4] animate-spin" /> Loading archived sessions
+										</div>
+									) : sessionGroups.archived.length ? (
 										<ArchivedSessionsList
 											sessions={sessionGroups.archived}
 											signalNow={signalNow}
@@ -1295,6 +1319,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 											onRename={(piboSessionId, title) => void renameSession(piboSessionId, title)}
 											onArchive={(piboSessionId, archived) => void setSessionArchived(piboSessionId, archived)}
 											onDelete={requestSessionDelete}
+											loadingPiboSessionId={loadingPiboSessionId}
 											autoRenameSessionId={autoRenameSessionId}
 											onAutoRenameConsumed={() => setAutoRenameSessionId(null)}
 										/>
@@ -2516,6 +2541,7 @@ function ArchivedSessionsList({
 	onRename,
 	onArchive,
 	onDelete,
+	loadingPiboSessionId,
 	autoRenameSessionId,
 	onAutoRenameConsumed,
 }: {
@@ -2526,6 +2552,7 @@ function ArchivedSessionsList({
 	onRename: (piboSessionId: string, title: string | null) => void;
 	onArchive: (piboSessionId: string, archived: boolean) => void;
 	onDelete: (node: PiboWebSessionNode) => void;
+	loadingPiboSessionId?: string | null;
 	autoRenameSessionId?: string | null;
 	onAutoRenameConsumed?: () => void;
 }) {
@@ -2541,6 +2568,7 @@ function ArchivedSessionsList({
 					onRename={onRename}
 					onArchive={onArchive}
 					onDelete={onDelete}
+					loadingPiboSessionId={loadingPiboSessionId}
 					autoRename={autoRenameSessionId === session.piboSessionId}
 					onAutoRenameConsumed={onAutoRenameConsumed}
 				/>
@@ -2804,6 +2832,7 @@ function SessionNode({
 	onArchive,
 	onDelete,
 	depth = 0,
+	loadingPiboSessionId,
 	autoRename = false,
 	onAutoRenameConsumed,
 }: {
@@ -2815,6 +2844,7 @@ function SessionNode({
 	onArchive: (piboSessionId: string, archived: boolean) => void;
 	onDelete: (node: PiboWebSessionNode) => void;
 	depth?: number;
+	loadingPiboSessionId?: string | null;
 	autoRename?: boolean;
 	onAutoRenameConsumed?: () => void;
 }) {
@@ -2863,6 +2893,7 @@ function SessionNode({
 		setEditing(false);
 	};
 	const signal = sessionNodeSignal(node, signalNow);
+	const loading = loadingPiboSessionId === node.piboSessionId;
 
 	return (
 		<div>
@@ -2935,7 +2966,11 @@ function SessionNode({
 							</span>
 						</button>
 						<span className="grid grid-rows-[16px_16px] place-items-center gap-0.5">
-							<span className={signal.className} title={signal.title} aria-label={signal.title} />
+							{loading ? (
+								<Loader2 size={13} className="text-[#11a4d4] animate-spin" aria-label="Loading session" />
+							) : (
+								<span className={signal.className} title={signal.title} aria-label={signal.title} />
+							)}
 							{hasChildren ? (
 								<button
 									type="button"
@@ -3052,6 +3087,7 @@ function SessionNode({
 					onArchive={onArchive}
 					onDelete={onDelete}
 					depth={depth + 1}
+					loadingPiboSessionId={loadingPiboSessionId}
 				/>
 			)) : null}
 		</div>
