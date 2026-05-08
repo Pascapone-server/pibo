@@ -85,21 +85,39 @@ type RowCandidate = {
 };
 
 const TOOL_OUTPUT_PREVIEW_LINES = 5;
+const TERMINAL_TRACE_NODE_LIMIT = 800;
 
 export function buildCompactTerminalRows(
 	traceView: PiboSessionTraceView | null,
 	options: BuildTerminalRowsOptions,
 ): CompactTerminalRow[] {
 	if (!traceView) return [];
-	const candidates = flattenTraceNodes(traceView.nodes)
+	const flatNodes = flattenTraceNodes(traceView.nodes)
 		.sort((left, right) => compareTraceNodes(left.node, right.node))
-		.flatMap((item) => {
-			if (item.node.type === "agent.turn") return [];
-			if (item.node.type === "model.reasoning" && !options.showThinking) return [];
-			return [createRowCandidate(item.node, item.turnId)];
-		});
+		.filter((item) => item.node.type !== "agent.turn" && (options.showThinking || item.node.type !== "model.reasoning"));
+	const hiddenNodeCount = Math.max(0, flatNodes.length - TERMINAL_TRACE_NODE_LIMIT);
+	const visibleNodes = hiddenNodeCount ? flatNodes.slice(-TERMINAL_TRACE_NODE_LIMIT) : flatNodes;
+	const candidates = visibleNodes.map((item) => createRowCandidate(item.node, item.turnId));
+	const rows = groupExploringCandidates(candidates).map((candidate) => candidate.row);
+	if (!hiddenNodeCount) return rows;
+	return [createHistoryTruncatedRow(hiddenNodeCount), ...rows];
+}
 
-	return groupExploringCandidates(candidates).map((candidate) => candidate.row);
+function createHistoryTruncatedRow(hiddenNodeCount: number): CompactTerminalRow {
+	return {
+		id: "terminal-history-truncated",
+		kind: "tool.status",
+		status: "neutral",
+		lines: [
+			{
+				prefix: "bullet",
+				tokens: [
+					token(`${hiddenNodeCount} older trace entries hidden for performance`, "dim"),
+				],
+			},
+		],
+		sourceNodeIds: [],
+	};
 }
 
 function flattenTraceNodes(nodes: readonly PiboTraceNode[], turnId?: string): FlatTraceNode[] {

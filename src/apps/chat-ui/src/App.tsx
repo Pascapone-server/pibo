@@ -45,7 +45,6 @@ import { createUserSkill, deleteCustomAgent, deletePiPackage, deleteRoom, delete
 import { THINKING_LEVELS } from "./types";
 import type { AgentCatalog, BootstrapData, CustomAgent, CustomAgentSubagent, ModelCatalog, ModelDefaults, ModelProfile, NavigationData, PiboRoom, PiboSession, PiboSessionTraceView, PiboSignalPatch, PiboSignalSnapshot, PiboTraceNode, PiboTraceOrderKey, PiboWebSessionNode, PiboWebSessionStatus, ThinkingLevel, UserSkill } from "./types";
 import type { ChatWebStoredEvent } from "../../../shared/trace-types.js";
-import { adaptTrace } from "./tracing/adapt";
 import { collectBackendNodes, isTraceSnapshotCollectionEnabled } from "./tracing/snapshotCollector";
 import { type SessionBreadcrumbItem, type SessionDerivationLink, type SessionOriginLink } from "./tracing/TraceTimeline";
 import { JsonRenderer } from "./tracing/JsonRenderer";
@@ -1860,10 +1859,7 @@ function SessionTracePane({
 		};
 	}, [currentTraceView?.latestStreamId, currentTraceView?.piboSessionId, enqueueStreamEvent, onError, onRefreshBootstrap, onRefreshTrace, selectedPiboSessionId, selectedRoomId, traceQueryKey]);
 
-	const selectedTrace = useMemo(() => {
-		if (!currentTraceView) return null;
-		return adaptTrace(currentTraceView.piboSessionId, currentTraceView.title, currentTraceView.nodes);
-	}, [currentTraceView]);
+	const selectedTrace = null;
 	const sessionBreadcrumbs = useMemo(
 		() => selectedPiboSessionId ? createSessionBreadcrumbs(bootstrap.sessions, selectedPiboSessionId) : [],
 		[bootstrap.sessions, selectedPiboSessionId],
