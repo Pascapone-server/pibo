@@ -27,6 +27,7 @@ export function useStickyVirtuoso({
 	const scrollFrameRef = useRef<number | undefined>(undefined);
 	const userScrollIntentRef = useRef(false);
 	const userScrollIntentTimerRef = useRef<number | undefined>(undefined);
+	const lastScrollTopRef = useRef<number | undefined>(undefined);
 	const [isSticky, setIsStickyState] = useState(true);
 	const [scroller, setScroller] = useState<HTMLElement | Window | null>(null);
 
@@ -82,11 +83,15 @@ export function useStickyVirtuoso({
 
 	const updateFromScrollPosition = useCallback(() => {
 		if (!scroller) return;
+		const scrollTop = getScrollTop(scroller);
+		const previousScrollTop = lastScrollTopRef.current;
+		lastScrollTopRef.current = scrollTop;
 		if (isAtBottom(scroller, atBottomThreshold)) {
 			setSticky(true);
 			return;
 		}
-		if (userScrollIntentRef.current) setSticky(false);
+		const scrollingAwayFromBottom = previousScrollTop !== undefined && scrollTop < previousScrollTop - 1;
+		if (userScrollIntentRef.current || scrollingAwayFromBottom) setSticky(false);
 	}, [atBottomThreshold, scroller, setSticky]);
 
 	useEffect(() => {
@@ -116,6 +121,7 @@ export function useStickyVirtuoso({
 	}, [markUserScrollIntent, scroller, updateFromScrollPosition]);
 
 	useLayoutEffect(() => {
+		lastScrollTopRef.current = undefined;
 		setSticky(true);
 		scheduleScrollToBottom("auto");
 	}, [resetKey, scheduleScrollToBottom, setSticky]);
@@ -159,4 +165,9 @@ function isAtBottom(scroller: HTMLElement | Window, threshold: number) {
 	const element = scroller instanceof Window ? document.scrollingElement : scroller;
 	if (!element) return true;
 	return element.scrollHeight - element.scrollTop - element.clientHeight <= threshold;
+}
+
+function getScrollTop(scroller: HTMLElement | Window) {
+	const element = scroller instanceof Window ? document.scrollingElement : scroller;
+	return element?.scrollTop ?? 0;
 }
