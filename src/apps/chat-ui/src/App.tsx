@@ -263,7 +263,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 	}, [bootstrap]);
 
 	useEffect(() => {
-		if (!selectedPiboSessionId) {
+		if (area !== "sessions" || !selectedPiboSessionId) {
 			setSessionSignals(null);
 			return;
 		}
@@ -289,7 +289,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 			},
 			onError: () => undefined,
 		});
-	}, [selectedPiboSessionId]);
+	}, [area, selectedPiboSessionId]);
 
 	useEffect(() => {
 		const nextExpiryMs = bootstrap ? nextRecentSessionSignalExpiryMs(bootstrap.sessions, signalNow) : undefined;
@@ -534,6 +534,10 @@ export function App({ route }: { route: ChatAppRoute }) {
 			if (route.roomId === data.selectedRoomId && route.piboSessionId === data.selectedPiboSessionId) return;
 			navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId, replace);
 		};
+
+		if (bootstrap && route.area !== "sessions") {
+			return;
+		}
 
 		if (
 			bootstrap &&
