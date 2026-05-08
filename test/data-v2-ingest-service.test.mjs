@@ -134,6 +134,52 @@ test("chat data ingest shadows assistant messages and observations idempotently"
 	}
 });
 
+test("chat data ingest keeps progressive tool call argument snapshots", () => {
+	const store = new PiboDataStore(":memory:", { payloadRootDir: mkdtempSync(join(tmpdir(), "pibo-ingest-payloads-")) });
+	try {
+		const ingest = new ChatDataIngestService(store);
+		const session = makeSession({ id: "ps_tool_args", piSessionId: "pi_tool_args" });
+		const baseInput = {
+			session,
+			roomId: "room_tool_args",
+			legacyStreamId: 12,
+			createdAt: "2026-05-08T12:02:00.000Z",
+		};
+
+		ingest.ingestOutputEvent({
+			...baseInput,
+			event: {
+				type: "tool_call",
+				piboSessionId: session.id,
+				eventId: "run-tool-args",
+				toolCallId: "tool-args-1",
+				toolName: "read",
+				args: { path: "READ" },
+				argsComplete: false,
+			},
+		});
+		ingest.ingestOutputEvent({
+			...baseInput,
+			legacyStreamId: 13,
+			event: {
+				type: "tool_call",
+				piboSessionId: session.id,
+				eventId: "run-tool-args",
+				toolCallId: "tool-args-1",
+				toolName: "read",
+				args: { path: "README.md" },
+				argsComplete: true,
+			},
+		});
+
+		const events = store.eventLog.listEvents({ sessionId: session.id });
+		assert.equal(events.length, 2);
+		assert.deepEqual(events.map((event) => event.attributes.argsComplete), [false, true]);
+	} finally {
+		store.close();
+	}
+});
+
 test("chat data ingest shadows tool output into observations", () => {
 	const store = new PiboDataStore(":memory:", { payloadRootDir: mkdtempSync(join(tmpdir(), "pibo-ingest-payloads-")) });
 	try {

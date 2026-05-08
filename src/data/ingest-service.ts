@@ -268,6 +268,10 @@ function deterministicId(prefix: string, value: string): string {
 	return `${prefix}_${createHash("sha256").update(value).digest("hex").slice(0, 32)}`;
 }
 
+function hashJson(value: unknown): string {
+	return createHash("sha256").update(JSON.stringify(value) ?? "null").digest("hex").slice(0, 16);
+}
+
 function previewText(text: string): string | undefined {
 	const normalized = text.replace(/\s+/g, " ").trim();
 	return normalized ? normalized.slice(0, 512) : undefined;
@@ -284,6 +288,7 @@ function outputIdempotencyKey(event: PiboOutputEvent): string | undefined {
 }
 
 function outputPartKey(event: PiboOutputEvent): string {
+	if (event.type === "tool_call") return `${event.toolCallId}:${event.argsComplete ? "complete" : "partial"}:${hashJson(event.args)}`;
 	if ("toolCallId" in event) return event.toolCallId ?? "main";
 	if (event.type === "assistant_message") return String(event.assistantIndex ?? event.contentIndex ?? 0);
 	if (event.type === "assistant_delta") return String(event.assistantIndex ?? event.contentIndex ?? 0);
