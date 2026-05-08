@@ -253,6 +253,10 @@ function normalizePiEvent(piboSessionId: string, event: unknown): PiboOutputEven
  * This is a conservative fallback when getContextUsage() returns null because
  * no post-compaction assistant usage exists yet.
  */
+type RoutedQueueItem =
+	| { kind: "message"; event: PiboMessageEvent }
+	| { kind: "compact"; event: PiboExecutionEvent };
+
 function estimateContextTokens(messages: unknown[]): number {
 	let chars = 0;
 	for (const msg of messages) {
@@ -303,7 +307,7 @@ function estimateContextTokens(messages: unknown[]): number {
 }
 
 export class RoutedSession {
-	private readonly queue: PiboMessageEvent[] = [];
+	private readonly queue: RoutedQueueItem[] = [];
 	private processing = false;
 	private disposed = false;
 	private activeMessage?: PiboMessageEvent;
@@ -415,7 +419,7 @@ export class RoutedSession {
 
 	enqueueMessage(event: PiboMessageEvent): PiboOutputEvent {
 		this.assertActive();
-		this.queue.push(event);
+		this.queue.push({ kind: "message", event });
 
 		const output: PiboOutputEvent = {
 			type: "message_queued",
@@ -433,6 +437,10 @@ export class RoutedSession {
 
 	async executeAction(event: PiboExecutionEvent): Promise<PiboOutputEvent> {
 		this.assertActive();
+
+		if (event.action === "compact") {
+			return this.enqueueCompactAction(event);
+		}
 
 		const result = await this.runAction(event);
 		if (isSessionOperationResult(result)) await this.onSessionOperation?.(result, event);
@@ -470,7 +478,8 @@ export class RoutedSession {
 
 		let removed = 0;
 		for (let index = this.queue.length - 1; index >= 0; index -= 1) {
-			if (!predicate(this.queue[index])) continue;
+			const item = this.queue[index];
+			if (item.kind !== "message" || !predicate(item.event)) continue;
 			this.queue.splice(index, 1);
 			removed += 1;
 		}
@@ -615,7 +624,7 @@ export class RoutedSession {
 	async cancelMessage(eventId: string): Promise<boolean> {
 		this.assertActive();
 
-		const queuedIndex = this.queue.findIndex((event) => event.id === eventId);
+		const queuedIndex = this.queue.findIndex((item) => item.event.id === eventId);
 		if (queuedIndex >= 0) {
 			this.queue.splice(queuedIndex, 1);
 			this.onStateChange?.({ processing: this.processing, queuedMessages: this.queue.length, disposed: this.disposed });
@@ -637,52 +646,95 @@ export class RoutedSession {
 		this.onStateChange?.({ processing: this.processing, queuedMessages: this.queue.length, disposed: this.disposed });
 		try {
 			while (this.queue.length > 0 && !this.disposed) {
-				const event = this.queue.shift()!;
+				const item = this.queue.shift()!;
 				this.onStateChange?.({ processing: this.processing, queuedMessages: this.queue.length, disposed: this.disposed });
-					this.emit({
-						type: "message_started",
-						piboSessionId: this.piboSessionId,
-					eventId: event.id,
-					text: event.text,
-					source: event.source,
-				});
-
-				try {
-					this.activeMessage = event;
-					this.activeAssistantIndex = undefined;
-					this.nextAssistantIndex = 0;
-					this.activeThinkingIndex = undefined;
-					this.nextThinkingIndex = 0;
-					const expandedText = expandInlineSkills(
-						event.text,
-						this.runtime.session.resourceLoader.getSkills().skills,
-					);
-					await this.runtime.session.prompt(expandedText, { source: promptSource(event.source) });
-					this.emit({
-						type: "message_finished",
-						piboSessionId: this.piboSessionId,
-						eventId: event.id,
-						source: event.source,
-					});
-				} catch (error) {
-					this.emit({
-						type: "session_error",
-						piboSessionId: this.piboSessionId,
-						eventId: event.id,
-						error: errorMessage(error),
-					});
-				} finally {
-					this.activeMessage = undefined;
-					this.activeAssistantIndex = undefined;
-					this.nextAssistantIndex = 0;
-					this.activeThinkingIndex = undefined;
-					this.nextThinkingIndex = 0;
+				if (item.kind === "compact") {
+					await this.processQueuedCompact(item.event);
+				} else {
+					await this.processQueuedMessage(item.event);
 				}
 			}
 		} finally {
 			this.processing = false;
 			this.onStateChange?.({ processing: this.processing, queuedMessages: this.queue.length, disposed: this.disposed });
 		}
+	}
+
+	private async processQueuedMessage(event: PiboMessageEvent): Promise<void> {
+		this.emit({
+			type: "message_started",
+			piboSessionId: this.piboSessionId,
+			eventId: event.id,
+			text: event.text,
+			source: event.source,
+		});
+
+		try {
+			this.activeMessage = event;
+			this.activeAssistantIndex = undefined;
+			this.nextAssistantIndex = 0;
+			this.activeThinkingIndex = undefined;
+			this.nextThinkingIndex = 0;
+			const expandedText = expandInlineSkills(
+				event.text,
+				this.runtime.session.resourceLoader.getSkills().skills,
+			);
+			await this.runtime.session.prompt(expandedText, { source: promptSource(event.source) });
+			this.emit({
+				type: "message_finished",
+				piboSessionId: this.piboSessionId,
+				eventId: event.id,
+				source: event.source,
+			});
+		} catch (error) {
+			this.emit({
+				type: "session_error",
+				piboSessionId: this.piboSessionId,
+				eventId: event.id,
+				error: errorMessage(error),
+			});
+		} finally {
+			this.activeMessage = undefined;
+			this.activeAssistantIndex = undefined;
+			this.nextAssistantIndex = 0;
+			this.activeThinkingIndex = undefined;
+			this.nextThinkingIndex = 0;
+		}
+	}
+
+	private async processQueuedCompact(event: PiboExecutionEvent): Promise<void> {
+		try {
+			const result = await this.runAction(event);
+			this.emit({
+				type: "execution_result",
+				piboSessionId: this.piboSessionId,
+				eventId: event.id,
+				action: event.action,
+				result,
+			});
+		} catch (error) {
+			this.emit({
+				type: "session_error",
+				piboSessionId: this.piboSessionId,
+				eventId: event.id,
+				error: errorMessage(error),
+			});
+		}
+	}
+
+	private enqueueCompactAction(event: PiboExecutionEvent): PiboOutputEvent {
+		this.queue.push({ kind: "compact", event });
+		const output: PiboOutputEvent = {
+			type: "execution_result",
+			piboSessionId: this.piboSessionId,
+			eventId: event.id,
+			action: event.action,
+			result: { queued: true, queuedMessages: this.queue.length },
+		};
+		this.emit(output);
+		this.onStateChange?.({ processing: this.processing, queuedMessages: this.queue.length, disposed: this.disposed });
+		void this.drain();
+		return output;
 	}
 
 	private async runAction(event: PiboExecutionEvent): Promise<unknown> {

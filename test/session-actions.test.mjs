@@ -491,6 +491,149 @@ test("session tree navigation moves the active leaf inside the current Pi sessio
 	}
 });
 
+
+function deferred() {
+	let resolve;
+	let reject;
+	const promise = new Promise((res, rej) => {
+		resolve = res;
+		reject = rej;
+	});
+	return { promise, resolve, reject };
+}
+
+function createQueuedCompactRuntime(order, promptBlocks, compactBlock) {
+	return {
+		cwd: process.cwd(),
+		session: {
+			async prompt(text) {
+				order.push(`prompt:${text}`);
+				const block = promptBlocks.shift();
+				if (block) await block.promise;
+			},
+			async compact() {
+				order.push("compact");
+				await compactBlock.promise;
+				return { summary: "summary", firstKeptEntryId: "kept", tokensBefore: 123 };
+			},
+			subscribe() { return () => {}; },
+			isStreaming: false,
+			getActiveToolNames() { return []; },
+			getContextUsage() { return undefined; },
+			getAllTools() { return []; },
+			getAvailableThinkingLevels() { return []; },
+			supportsThinking() { return false; },
+			thinkingLevel: "off",
+			resourceLoader: {
+				getSkills() { return { skills: [] }; },
+			},
+			sessionManager: {
+				getPiSessionId() { return "session-id"; },
+				getSessionFile() { return undefined; },
+				getLeafId() { return null; },
+				getHeader() { return undefined; },
+			},
+			sessionId: "pi:test",
+			sessionFile: undefined,
+			sessionName: undefined,
+		},
+		setRebindSession() {},
+		async dispose() {},
+	};
+}
+
+test("compact action is serialized between queued messages", async () => {
+	const events = [];
+	const order = [];
+	const firstPrompt = deferred();
+	const secondPrompt = deferred();
+	const compactBlock = deferred();
+	const runtime = createQueuedCompactRuntime(order, [firstPrompt, secondPrompt], compactBlock);
+	const registry = PiboPluginRegistry.create({ plugins: [piboCorePlugin] });
+	const routed = new RoutedSession("route:test", runtime, (event) => events.push(event), registry, false);
+
+	routed.enqueueMessage({
+		type: "message",
+		piboSessionId: "route:test",
+		id: "message-a",
+		text: "A",
+		source: "user",
+	});
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.deepEqual(order, ["prompt:A"]);
+
+	const queuedCompact = await routed.executeAction({
+		type: "execution",
+		piboSessionId: "route:test",
+		id: "compact-1",
+		action: "compact",
+	});
+	assert.deepEqual(queuedCompact.result, { queued: true, queuedMessages: 1 });
+
+	routed.enqueueMessage({
+		type: "message",
+		piboSessionId: "route:test",
+		id: "message-b",
+		text: "B",
+		source: "user",
+	});
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.deepEqual(order, ["prompt:A"], "compact and B must wait for A");
+
+	firstPrompt.resolve();
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.deepEqual(order, ["prompt:A", "compact"], "compact starts after A finishes");
+
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.deepEqual(order, ["prompt:A", "compact"], "B must wait for compact");
+
+	compactBlock.resolve();
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.deepEqual(order, ["prompt:A", "compact", "prompt:B"]);
+
+	secondPrompt.resolve();
+	await new Promise((resolve) => setImmediate(resolve));
+	const compactResults = events.filter((event) => event.type === "execution_result" && event.action === "compact");
+	assert.equal(compactResults.length, 2);
+	assert.deepEqual(compactResults[1].result, { summary: "summary", firstKeptEntryId: "kept", tokensBefore: 123 });
+
+	await routed.dispose();
+});
+
+test("non-compact actions still execute immediately while a message is active", async () => {
+	const events = [];
+	const order = [];
+	const firstPrompt = deferred();
+	const compactBlock = deferred();
+	const runtime = createQueuedCompactRuntime(order, [firstPrompt], compactBlock);
+	const registry = PiboPluginRegistry.create({ plugins: [piboCorePlugin] });
+	const routed = new RoutedSession("route:test", runtime, (event) => events.push(event), registry, false);
+
+	routed.enqueueMessage({
+		type: "message",
+		piboSessionId: "route:test",
+		id: "message-a",
+		text: "A",
+		source: "user",
+	});
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.deepEqual(order, ["prompt:A"]);
+
+	const status = await routed.executeAction({
+		type: "execution",
+		piboSessionId: "route:test",
+		id: "status-1",
+		action: "status",
+	});
+	assert.equal(status.type, "execution_result");
+	assert.equal(status.result.processing, true);
+	assert.deepEqual(order, ["prompt:A"]);
+
+	firstPrompt.resolve();
+	await new Promise((resolve) => setImmediate(resolve));
+	await routed.dispose();
+});
+
 test("routed session patches agent.continue to trigger preemptive compaction", async () => {
 	const events = [];
 	let compactCalled = false;
