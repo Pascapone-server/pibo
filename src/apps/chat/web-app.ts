@@ -1601,11 +1601,14 @@ function buildRoomUnreadCounts(
 	const counts = new Map<string, number>();
 	const sessionsById = new Map(sessions.map((session) => [session.id, session]));
 	for (const session of sessions) {
-		if (session.parentId) continue;
 		if (hasArchivedSessionInPath(session, sessionsById)) continue;
 		const unreadCount = sessionUnreadCounts.get(session.id) ?? 0;
 		if (unreadCount <= 0) continue;
-		const roomId = chatRoomIdFromMetadata(session.metadata) ?? defaultRoomId;
+		let root = session;
+		while (root.parentId && sessionsById.has(root.parentId)) {
+			root = sessionsById.get(root.parentId)!;
+		}
+		const roomId = chatRoomIdFromMetadata(root.metadata) ?? chatRoomIdFromMetadata(session.metadata) ?? defaultRoomId;
 		counts.set(roomId, (counts.get(roomId) ?? 0) + unreadCount);
 	}
 	return counts;
@@ -2831,6 +2834,56 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				});
 			}
 
+			if (url.pathname === `${CHAT_WEB_API_PREFIX}/navigation` && request.method === "GET") {
+				const webSession = await requireSession(request, context);
+				const includeArchived = parseBooleanSearchParam(url, "includeArchived");
+				const requestedRoomId = url.searchParams.get("roomId") || undefined;
+				const principalId = principalIdFor(webSession);
+				const selectedSession = resolveRequestedSession(
+					state,
+					context,
+					webSession,
+					defaultProfile,
+					url.searchParams.get("piboSessionId") || undefined,
+					requestedRoomId,
+				);
+				const selectedRoomId = selectedRoomIdForSession(state, context, selectedSession);
+				const ownedSessions = listOwnedSessions(context, webSession);
+				const roomSessions = visibleSessionsInRoom({
+					state,
+					context,
+					webSession,
+					sessions: ownedSessions,
+					selectedSession,
+					selectedRoomId,
+					includeArchived,
+				});
+				const defaultRoom = state.roomStore.ensureDefaultRoom({
+					ownerScope: webSession.ownerScope,
+					principalId,
+				});
+				indexOwnedSessions(state.readModel, roomSessions);
+				const sessions = await buildSessionNodes(
+					roomSessions,
+					state.readModel.listSessions(),
+					process.cwd(),
+					new Map(),
+					{ skipPiMetadataFallback: true },
+				);
+				const roomTree = state.roomStore.listRoomTree(webSession.ownerScope);
+				const rooms = roomsWithUnreadCounts(roomTree, new Map());
+				return responseJson({
+					identity: webSession.authSession.identity,
+					session: selectedSession,
+					room: state.roomStore.getRoom(selectedRoomId),
+					defaultRoomId: defaultRoom.id,
+					selectedRoomId,
+					selectedPiboSessionId: selectedSession.id,
+					rooms,
+					sessions,
+				}, { headers: { "server-timing": "navigation;desc=\"no_catalog_no_unread_no_jsonl\"" } });
+			}
+
 			if (url.pathname === `${CHAT_WEB_API_PREFIX}/bootstrap` && request.method === "GET") {
 				const webSession = await requireSession(request, context);
 				const includeArchived = parseBooleanSearchParam(url, "includeArchived");
@@ -2861,7 +2914,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 					principalId,
 				});
 				if (markRead) {
-					markSessionsRead(state, sessionSubtree(ownedSessions, selectedSession.id), principalId);
+					markSessionsRead(state, [selectedSession], principalId);
 				}
 				indexOwnedSessions(state.readModel, roomSessions);
 				const sessionUnreadCounts = buildSessionUnreadCounts(state, ownedSessions, principalId);
@@ -2927,8 +2980,11 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				});
 			}
 
-			if (url.pathname === `${CHAT_WEB_API_PREFIX}/agent-catalog` && request.method === "GET") {
-				await requireSession(request, context);
+			if ((url.pathname === `${CHAT_WEB_API_PREFIX}/agent-catalog` || url.pathname === `${CHAT_WEB_API_PREFIX}/catalog`) && request.method === "GET") {
+				const webSession = await requireSession(request, context);
+				if (url.pathname === `${CHAT_WEB_API_PREFIX}/catalog`) {
+					return responseJson(await loadBootstrapCatalog(state, context, webSession));
+				}
 				return responseJson({
 					catalog: await buildAgentCatalog(context, state),
 					profiles: context.channelContext.getProfiles?.() ?? [],
