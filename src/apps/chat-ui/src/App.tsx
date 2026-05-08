@@ -4291,6 +4291,8 @@ const BUILTIN_TOOL_DESCRIPTIONS: Record<(typeof DEFAULT_BUILTIN_TOOL_NAMES)[numb
 	edit: "Edit existing files.",
 	write: "Create or overwrite files.",
 };
+const CATALOG_GROUP_RENDER_LIMIT = 100;
+
 type CatalogGroup<T> = {
 	key: string;
 	title: string;
@@ -4390,9 +4392,9 @@ function finalizeCatalogGroups<T>(
 		if (leftOrder !== rightOrder) return leftOrder - rightOrder;
 		return left.title.localeCompare(right.title);
 	});
-	return sorted.map((group, index) => ({
+	return sorted.map((group) => ({
 		...group,
-		defaultOpen: group.kind !== "plugin" && (group.selectedCount > 0 || (index === 0 && sorted.length === 1)),
+		defaultOpen: false,
 	}));
 }
 
@@ -4705,6 +4707,8 @@ function CatalogGroupCard<T>({
 	renderItem: (item: T) => ReactNode;
 }) {
 	const [open, setOpen] = useState(group.defaultOpen);
+	const visibleItems = group.items.slice(0, CATALOG_GROUP_RENDER_LIMIT);
+	const hiddenCount = group.items.length - visibleItems.length;
 	const accentClass = group.kind === "custom" || group.kind === "user"
 		? "border-[#f59e0b]/70 text-amber-100 bg-[#f59e0b]/10"
 		: "border-[#11a4d4]/70 text-sky-100 bg-[#11a4d4]/10";
@@ -4725,7 +4729,8 @@ function CatalogGroupCard<T>({
 			</button>
 			{open ? (
 				<div className="border-t border-slate-800 p-2">
-					<div className="grid grid-cols-2 max-[1100px]:grid-cols-1 gap-2">{group.items.map(renderItem)}</div>
+					<div className="grid grid-cols-2 max-[1100px]:grid-cols-1 gap-2">{visibleItems.map(renderItem)}</div>
+					{hiddenCount > 0 ? <div className="mt-2 text-xs text-slate-500">Showing first {CATALOG_GROUP_RENDER_LIMIT} of {group.items.length} items. Use Context to manage the full catalog.</div> : null}
 				</div>
 			) : null}
 		</div>
