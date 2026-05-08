@@ -327,6 +327,7 @@ function createYieldedRunRow(node: PiboTraceNode): CompactTerminalRow {
 		id: node.id,
 		kind: "yielded.run",
 		status: mapStatus(node.status),
+		errorKind: node.status === "error" ? "tool" : undefined,
 		lines: [
 			{
 				prefix: "bullet",

@@ -87,6 +87,25 @@ test("yielded run keeps session tree active and completion removes active run", 
 	assert.equal(snapshot.sessions.root.activeRuns.length, 0);
 });
 
+test("failed yielded run does not mark session as runtime error", () => {
+	const registry = createPiboSignalRegistry();
+	registry.project({ type: "session_created", session: session("root") });
+	registry.project({
+		type: "run_changed",
+		run: run("run_1", "failed", {
+			completedAt: new Date().toISOString(),
+			summary: "bash run failed.",
+			error: "Command exited with code 1",
+		}),
+	});
+
+	const snapshot = registry.snapshotTree("root");
+	assert.equal(snapshot.sessions.root.hasError, false);
+	assert.equal(snapshot.sessions.root.hasErrorDescendant, false);
+	assert.equal(snapshot.sessions.root.localStatus, "idle");
+	assert.equal(snapshot.nodes["run:run_1"].status, "error");
+});
+
 test("queue count changes local status and repeated count is ignored", () => {
 	const registry = createPiboSignalRegistry();
 	registry.project({ type: "session_created", session: session("root") });
