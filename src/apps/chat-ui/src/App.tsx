@@ -842,12 +842,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 
 		if (!next) {
 			setLoadingArchivedSessions(false);
-			void loadNavigation(selectedPiboSessionId ?? undefined, false, selectedRoomId ?? undefined).then((data) => {
-				if (area === "sessions") navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId, false, { closeMobileSidebar: false });
-				setError(null);
-			}).catch((caught) => {
-				setError(caught instanceof Error ? caught.message : String(caught));
-			});
+			setError(null);
 			return;
 		}
 
