@@ -113,6 +113,7 @@ const COMPOSER_HISTORY_STORAGE_KEY = "pibo.chat.composerHistory";
 const COMPOSER_HISTORY_LIMIT = 100;
 const SESSION_DELETE_CONFIRM_TEXT = "Delete this session";
 const RECENT_SESSION_ACTIVITY_SIGNAL_MS = 3_000;
+const ACTIVE_SESSION_RENDER_LIMIT = 300;
 const ARCHIVED_SESSION_RENDER_LIMIT = 100;
 
 type StoredSelection = {
@@ -1113,6 +1114,10 @@ export function App({ route }: { route: ChatAppRoute }) {
 	);
 
 	const sessionGroups = useMemo(() => bootstrap ? splitSessionNodesByArchive(bootstrap.sessions, showArchived) : { active: [], archived: [] }, [bootstrap?.sessions, showArchived]);
+	const visibleActiveSessions = useMemo(
+		() => limitSessionNodesForSidebar(sessionGroups.active, ACTIVE_SESSION_RENDER_LIMIT, selectedPiboSessionId),
+		[sessionGroups.active, selectedPiboSessionId],
+	);
 	const visibleArchivedSessions = showArchived ? sessionGroups.archived.slice(0, ARCHIVED_SESSION_RENDER_LIMIT) : [];
 
 	if (error && !bootstrap) {
@@ -1376,7 +1381,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 										</button>
 									</div>
 								</div>
-								{sessionGroups.active.map((session) => (
+								{visibleActiveSessions.map((session) => (
 									<SessionNode
 										key={session.piboSessionId}
 										node={session}
@@ -1392,6 +1397,11 @@ export function App({ route }: { route: ChatAppRoute }) {
 									/>
 								))}
 								{sessionGroups.active.length === 0 ? <div className="px-2 py-3 text-xs text-slate-500 border border-dashed border-slate-700 rounded-sm">No active sessions</div> : null}
+								{sessionGroups.active.length > visibleActiveSessions.length ? (
+									<div className="mt-2 px-2 py-2 text-[11px] text-slate-500 border border-dashed border-slate-700 rounded-sm">
+										Showing first {ACTIVE_SESSION_RENDER_LIMIT} of {sessionGroups.active.length} active sessions.
+									</div>
+								) : null}
 							</div>
 							{showArchived ? (
 								<div>
@@ -3342,6 +3352,19 @@ function splitSessionNodesByArchive(nodes: PiboWebSessionNode[], includeArchived
 		if (includeArchived) archived.push(...children.archived);
 	}
 	return { active, archived };
+}
+
+function limitSessionNodesForSidebar(
+	nodes: PiboWebSessionNode[],
+	limit: number,
+	selectedPiboSessionId: string | null,
+): PiboWebSessionNode[] {
+	if (nodes.length <= limit) return nodes;
+	const visible = nodes.slice(0, limit);
+	if (!selectedPiboSessionId) return visible;
+	const selectedTopLevel = nodes.find((node) => node.piboSessionId === selectedPiboSessionId || sessionTreeHasSession(node.children, selectedPiboSessionId));
+	if (!selectedTopLevel || visible.some((node) => node.piboSessionId === selectedTopLevel.piboSessionId)) return visible;
+	return [...visible, selectedTopLevel];
 }
 
 function findPersonalRoom(rooms: PiboRoom[]): PiboRoom | undefined {
