@@ -60,17 +60,12 @@ import { McpToolsView } from "./context/McpToolsView";
 import { getChatSessionView, listChatSessionViews } from "./session-views/registry";
 import { DEFAULT_CHAT_SESSION_VIEW_ID, type ChatSessionViewId } from "./session-views/types";
 import {
-	BOOTSTRAP_GC_TIME_MS,
-	BOOTSTRAP_STALE_TIME_MS,
 	DEFAULT_RAW_EVENTS_LIMIT,
 	DEFAULT_TRACE_EVENTS_PAGE_SIZE,
-	TRACE_GC_TIME_MS,
-	TRACE_STALE_TIME_MS,
 	chatBootstrapQueryKey,
 	chatSessionNavigationQueryKey,
 	chatTraceQueryKey,
 	isTraceView,
-	setChatNavigationCache,
 	traceQueriesForSession,
 } from "./cache";
 
@@ -136,17 +131,8 @@ async function loadBootstrapQueryData(
 	},
 ): Promise<BootstrapData> {
 	const queryKey = chatBootstrapQueryKey(input.piboSessionId, input.includeArchived, input.roomId);
-	if (input.force || input.markRead) await queryClient.invalidateQueries({ queryKey, exact: true });
-	return queryClient.fetchQuery({
-		queryKey,
-		queryFn: async () => {
-			const data = await getBootstrap(input.piboSessionId, input.includeArchived, input.roomId, Boolean(input.markRead));
-			setChatNavigationCache(queryClient.setQueryData.bind(queryClient), data, input.includeArchived, input.roomId);
-			return data;
-		},
-		staleTime: input.force || input.markRead ? 0 : BOOTSTRAP_STALE_TIME_MS,
-		gcTime: BOOTSTRAP_GC_TIME_MS,
-	});
+	await queryClient.removeQueries({ queryKey, exact: true });
+	return getBootstrap(input.piboSessionId, input.includeArchived, input.roomId, Boolean(input.markRead));
 }
 
 async function loadNavigationQueryData(
@@ -159,17 +145,8 @@ async function loadNavigationQueryData(
 	},
 ): Promise<NavigationData> {
 	const queryKey = chatSessionNavigationQueryKey(input.includeArchived, input.roomId, input.piboSessionId);
-	if (input.force) await queryClient.invalidateQueries({ queryKey, exact: true });
-	return queryClient.fetchQuery({
-		queryKey,
-		queryFn: async () => {
-			const data = await getNavigation(input.piboSessionId, input.includeArchived, input.roomId);
-			setChatNavigationCache(queryClient.setQueryData.bind(queryClient), data, input.includeArchived, input.roomId);
-			return data;
-		},
-		staleTime: input.force ? 0 : BOOTSTRAP_STALE_TIME_MS,
-		gcTime: BOOTSTRAP_GC_TIME_MS,
-	});
+	await queryClient.removeQueries({ queryKey, exact: true });
+	return getNavigation(input.piboSessionId, input.includeArchived, input.roomId);
 }
 
 function mergeNavigationIntoBootstrap(current: BootstrapData, navigation: NavigationData): BootstrapData {
@@ -186,19 +163,15 @@ function mergeNavigationIntoBootstrap(current: BootstrapData, navigation: Naviga
 }
 
 async function loadTraceQueryData(
-	queryClient: QueryClient,
 	piboSessionId: string,
-	options: { includeRawEvents?: boolean; rawEventsLimit?: number; eventLimit?: number; force?: boolean } = {},
+	options: { includeRawEvents?: boolean; rawEventsLimit?: number; eventLimit?: number } = {},
 ): Promise<PiboSessionTraceView> {
-	const queryKey = chatTraceQueryKey(piboSessionId, options);
-	const cached = queryClient.getQueryData<PiboSessionTraceView>(queryKey);
 	const response = await getTrace(piboSessionId, {
 		includeRawEvents: options.includeRawEvents,
 		rawEventsLimit: options.rawEventsLimit,
 		eventLimit: options.eventLimit,
-		knownVersion: options.force ? undefined : cached?.version,
 	});
-	if (response.notModified && cached) return cached;
+	if (response.notModified) throw new Error("Trace response unexpectedly returned not modified without a cache.");
 	if (!response.trace) throw new Error("Trace response missing payload.");
 	return response.trace;
 }
@@ -1722,16 +1695,16 @@ function SessionTracePane({
 		queryKey: traceQueryKey ?? ["chat", "trace", "idle", "compact", rawEventLimit, DEFAULT_TRACE_EVENTS_PAGE_SIZE],
 		queryFn: () => {
 			if (!selectedPiboSessionId) throw new Error("Session is required");
-			return loadTraceQueryData(queryClient, selectedPiboSessionId, {
+			return loadTraceQueryData(selectedPiboSessionId, {
 				includeRawEvents: showRawEvents,
 				rawEventsLimit: rawEventLimit,
 				eventLimit: traceEventLimit,
 			});
 		},
 		enabled: Boolean(selectedPiboSessionId),
-		staleTime: TRACE_STALE_TIME_MS,
-		gcTime: TRACE_GC_TIME_MS,
-		refetchOnMount: false,
+		staleTime: 0,
+		gcTime: 0,
+		refetchOnMount: "always",
 		refetchOnWindowFocus: false,
 		retry: 1,
 	});
