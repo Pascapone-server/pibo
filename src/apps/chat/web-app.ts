@@ -27,7 +27,7 @@ import {
 	type PiboRoomNode,
 } from "./rooms.js";
 import { chatStreamFramesFromOutputEvent, createChatStreamState, type ChatStreamEvent } from "./stream.js";
-import { buildSessionNodes, buildTraceView, createTraceViewVersion, loadPiSessionMetadata, type PiboSessionTraceView } from "./trace.js";
+import { buildSessionNodes, buildTraceView, createTraceViewVersion, loadPiSessionMetadata, type PiboSessionTraceView, type PiboWebSessionNode } from "./trace.js";
 import type { PiboSessionTraceSummary } from "../../shared/trace-types.js";
 import { isChatWebSessionArchived, withChatWebArchived } from "./session-metadata.js";
 import {
@@ -404,6 +404,29 @@ function traceCacheKey(piboSessionId: string, version: string): string {
 function withRawTraceTail(trace: PiboSessionTraceView, rawEvents: PiboSessionTraceView["rawEvents"]): PiboSessionTraceView {
 	if (rawEvents.length === 0) return trace;
 	return { ...trace, rawEvents };
+}
+
+function annotateTracePage(
+	trace: PiboSessionTraceView,
+	events: PiboSessionTraceView["rawEvents"],
+	input: { lastEventSequence: number; pageSize: number; beforeSequence?: number },
+): PiboSessionTraceView {
+	const sequences = events
+		.map((event) => event.eventSequence)
+		.filter((sequence): sequence is number => typeof sequence === "number");
+	const firstEventSequence = sequences.length ? Math.min(...sequences) : undefined;
+	const lastEventSequence = sequences.length ? Math.max(...sequences) : undefined;
+	return {
+		...trace,
+		eventCount: input.lastEventSequence,
+		eventLimit: input.pageSize,
+		pageSize: input.pageSize,
+		beforeSequence: input.beforeSequence,
+		firstEventSequence,
+		lastEventSequence,
+		nextBeforeSequence: firstEventSequence,
+		hasOlderEvents: firstEventSequence !== undefined ? firstEventSequence > 1 : false,
+	};
 }
 
 function setTraceCache(cache: Map<string, PiboSessionTraceView>, key: string, trace: PiboSessionTraceView): void {
@@ -999,6 +1022,24 @@ function roomSessionWithRoom(session: PiboSession, roomId: string): PiboSession 
 		: { ...session, metadata: withChatRoomId(session.metadata, roomId) };
 }
 
+function paginateSessionNodes(
+	nodes: PiboWebSessionNode[],
+	input: { archived: boolean; cursor?: string; limit: number },
+): { sessions: PiboWebSessionNode[]; nextCursor?: string; totalCount: number } {
+	const filtered = nodes.filter((node) => Boolean(node.archived) === input.archived);
+	const startIndex = input.cursor ? filtered.findIndex((node) => node.piboSessionId === input.cursor) + 1 : 0;
+	const safeStartIndex = Math.max(0, startIndex);
+	const sessions = filtered.slice(safeStartIndex, safeStartIndex + input.limit);
+	const nextCursor = safeStartIndex + sessions.length < filtered.length ? sessions.at(-1)?.piboSessionId : undefined;
+	return { sessions, nextCursor, totalCount: filtered.length };
+}
+
+function sessionTreeVersion(nodes: PiboWebSessionNode[]): string {
+	return nodes
+		.map((node) => `${node.piboSessionId}:${node.lastActivityAt ?? ""}:${node.status}:${node.archived ? "1" : "0"}`)
+		.join("|");
+}
+
 function selectedRoomIdForSession(state: ChatWebAppState, context: PiboWebAppContext, session: PiboSession): string {
 	return ensureSessionRoom(state, context, session).id;
 }
@@ -1136,6 +1177,14 @@ function parsePositiveIntSearchParam(url: URL, name: string, fallback: number, m
 	const parsed = Number.parseInt(raw, 10);
 	if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
 	return Math.min(parsed, max);
+}
+
+function parseOptionalPositiveIntSearchParam(url: URL, name: string): number | undefined {
+	const raw = url.searchParams.get(name);
+	if (!raw) return undefined;
+	const parsed = Number.parseInt(raw, 10);
+	if (!Number.isFinite(parsed) || parsed <= 0) throw new PiboWebHttpError(`${name} must be a positive integer`, 400);
+	return parsed;
 }
 
 function sessionResourceId(pathname: string): string | undefined {
@@ -3330,9 +3379,20 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 
 			if (url.pathname === `${CHAT_WEB_API_PREFIX}/sessions` && request.method === "GET") {
 				const webSession = await requireSession(request, context);
-				const includeArchived = parseBooleanSearchParam(url, "includeArchived");
+				const archivedPage = parseBooleanSearchParam(url, "archived");
+				const includeArchived = archivedPage || parseBooleanSearchParam(url, "includeArchived");
 				const roomId = url.searchParams.get("roomId") || undefined;
-				const selectedSession = ensureDefaultChatSession(state, context, webSession, defaultProfile, roomId);
+				const cursor = url.searchParams.get("cursor") || undefined;
+				const limit = parsePositiveIntSearchParam(url, "limit", archivedPage ? 60 : 120, 500);
+				const wantsPage = url.searchParams.has("limit") || url.searchParams.has("cursor") || url.searchParams.has("archived");
+				const selectedSession = resolveRequestedSession(
+					state,
+					context,
+					webSession,
+					defaultProfile,
+					url.searchParams.get("piboSessionId") || undefined,
+					roomId,
+				);
 				const selectedRoomId = selectedRoomIdForSession(state, context, selectedSession);
 				const ownedSessions = listOwnedSessions(context, webSession);
 				const roomSessions = visibleSessionsInRoom({
@@ -3345,14 +3405,22 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 					includeArchived,
 				});
 				indexOwnedSessions(state.readModel, roomSessions);
-				return responseJson(
-					await buildSessionNodes(
-						roomSessions,
-						state.readModel.listSessions(),
-						process.cwd(),
-						new Map(),
-					),
+				const nodes = await buildSessionNodes(
+					roomSessions,
+					state.readModel.listSessions(),
+					process.cwd(),
+					new Map(),
 				);
+				if (!wantsPage) return responseJson(nodes);
+				const page = paginateSessionNodes(nodes, { archived: archivedPage, cursor, limit });
+				return responseJson({
+					roomId: selectedRoomId,
+					archived: archivedPage,
+					sessions: page.sessions,
+					nextCursor: page.nextCursor,
+					totalCount: page.totalCount,
+					version: sessionTreeVersion(nodes),
+				});
 			}
 
 			if (url.pathname === `${CHAT_WEB_API_PREFIX}/sessions` && request.method === "POST") {
@@ -3617,7 +3685,10 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				const webSession = await requireSession(request, context);
 				const includeRawEvents = parseBooleanSearchParam(url, "includeRawEvents");
 				const rawEventsLimit = parsePositiveIntSearchParam(url, "rawEventsLimit", 80, 1000);
-				const eventLimit = parsePositiveIntSearchParam(url, "eventLimit", DEFAULT_TRACE_EVENTS_PAGE_SIZE, MAX_TRACE_EVENTS_PER_REQUEST);
+				const beforeSequence = parseOptionalPositiveIntSearchParam(url, "beforeSequence");
+				const eventLimit = url.searchParams.has("pageSize")
+					? parsePositiveIntSearchParam(url, "pageSize", DEFAULT_TRACE_EVENTS_PAGE_SIZE, MAX_TRACE_EVENTS_PER_REQUEST)
+					: parsePositiveIntSearchParam(url, "eventLimit", DEFAULT_TRACE_EVENTS_PAGE_SIZE, MAX_TRACE_EVENTS_PER_REQUEST);
 				const selectedSession = resolveRequestedSession(
 					state,
 					context,
@@ -3643,7 +3714,8 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 					metadata,
 					latestStreamId,
 				});
-				const cacheKey = traceCacheKey(selectedSession.id, `${version}:limit:${eventLimit}`);
+				const pageCursorKey = beforeSequence === undefined ? "tail" : `before:${beforeSequence}`;
+				const cacheKey = traceCacheKey(selectedSession.id, `${version}:limit:${eventLimit}:${pageCursorKey}`);
 				const cached = state.traceCache.get(cacheKey);
 				const serverTiming = (cacheState: "hit" | "miss", eventCount = 0) => ({
 					"server-timing": [
@@ -3654,7 +3726,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 					].join(", "),
 				});
 				const baseHeaders = { etag: etagForVersion(version), "x-pibo-trace-version": version };
-				if (!includeRawEvents && requestMatchesVersion(request, version)) {
+				if (!includeRawEvents && beforeSequence === undefined && requestMatchesVersion(request, version)) {
 					return new Response(null, { status: 304, headers: { ...baseHeaders, ...serverTiming(cached ? "hit" : "miss") } });
 				}
 				let trace = cached;
@@ -3663,6 +3735,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 					const events = state.readModel.listTraceEvents({
 						piboSessionId: selectedSession.id,
 						limit: eventLimit,
+						...(beforeSequence !== undefined ? { beforeSequence } : {}),
 					});
 					eventCount = events.length;
 					trace = await buildTraceView({
@@ -3674,13 +3747,14 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 						includeRawEvents: false,
 						latestStreamId,
 					});
-					trace = { ...trace, eventCount: lastEventSequence, eventLimit, hasOlderEvents: lastEventSequence > events.length };
+					trace = annotateTracePage(trace, events, { lastEventSequence, pageSize: eventLimit, beforeSequence });
 					setTraceCache(state.traceCache, cacheKey, trace);
 				}
 				if (includeRawEvents) {
 					const rawEvents = state.readModel.listTraceEvents({
 						piboSessionId: selectedSession.id,
 						limit: rawEventsLimit,
+						...(beforeSequence !== undefined ? { beforeSequence } : {}),
 					});
 					eventCount = eventCount || rawEvents.length;
 					return responseJson(withRawTraceTail(trace, rawEvents), { headers: { ...baseHeaders, ...serverTiming(cached ? "hit" : "miss", eventCount) } });

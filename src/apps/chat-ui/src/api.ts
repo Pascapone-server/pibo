@@ -1,4 +1,4 @@
-import type { AgentCatalog, BootstrapData, CreateSessionData, CustomAgent, ModelDefaults, ModelProfile, NavigationData, PiboRoom, PiboSession, PiboSessionTraceSummary, PiboSessionTraceView, UserSkill, PiboSignalPatch, PiboSignalSnapshot } from "./types";
+import type { AgentCatalog, BootstrapData, ChatSessionPage, CreateSessionData, CustomAgent, ModelDefaults, ModelProfile, NavigationData, PiboRoom, PiboSession, PiboSessionTraceSummary, PiboSessionTraceView, UserSkill, PiboSignalPatch, PiboSignalSnapshot } from "./types";
 
 const DOWNLOAD_FILENAME_RE = /filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i;
 
@@ -120,6 +120,23 @@ export async function getNavigation(
 	return requestJson<Partial<NavigationData>>(`/api/chat/navigation${suffix}`).then(normalizeNavigation);
 }
 
+export async function getSessionPage(input: {
+	roomId?: string;
+	piboSessionId?: string;
+	archived?: boolean;
+	cursor?: string;
+	limit?: number;
+}): Promise<ChatSessionPage> {
+	const params = new URLSearchParams();
+	if (input.roomId) params.set("roomId", input.roomId);
+	if (input.piboSessionId) params.set("piboSessionId", input.piboSessionId);
+	if (input.archived) params.set("archived", "true");
+	if (input.cursor) params.set("cursor", input.cursor);
+	if (input.limit) params.set("limit", String(input.limit));
+	const suffix = params.size ? `?${params.toString()}` : "";
+	return requestJson<ChatSessionPage>(`/api/chat/sessions${suffix}`);
+}
+
 export async function getTraceSummary(piboSessionId: string, knownVersion?: string): Promise<{ summary?: PiboSessionTraceSummary; notModified: boolean; version?: string }> {
 	const params = new URLSearchParams({ piboSessionId });
 	const response = await fetch(`/api/chat/trace/summary?${params.toString()}`, {
@@ -146,12 +163,14 @@ export async function getTraceSummary(piboSessionId: string, knownVersion?: stri
 
 export async function getTrace(
 	piboSessionId: string,
-	options: { includeRawEvents?: boolean; rawEventsLimit?: number; eventLimit?: number; knownVersion?: string } = {},
+	options: { includeRawEvents?: boolean; rawEventsLimit?: number; eventLimit?: number; beforeSequence?: number; pageSize?: number; knownVersion?: string } = {},
 ): Promise<{ trace?: PiboSessionTraceView; notModified: boolean; version?: string }> {
 	const params = new URLSearchParams({ piboSessionId });
 	if (options.includeRawEvents) params.set("includeRawEvents", "true");
 	if (options.rawEventsLimit) params.set("rawEventsLimit", String(options.rawEventsLimit));
-	if (options.eventLimit) params.set("eventLimit", String(options.eventLimit));
+	if (options.pageSize) params.set("pageSize", String(options.pageSize));
+	if (options.beforeSequence !== undefined) params.set("beforeSequence", String(options.beforeSequence));
+	else if (options.eventLimit) params.set("eventLimit", String(options.eventLimit));
 	const response = await fetch(`/api/chat/trace?${params.toString()}`, {
 		headers: options.knownVersion ? { "if-none-match": toEtag(options.knownVersion) } : undefined,
 	});

@@ -264,6 +264,99 @@ test("chat web trace returns raw events only when requested", async () => {
 	}
 });
 
+test("chat web trace supports cursor pages", async () => {
+	const { channel, baseURL, emitOutput } = await startWebHostChannel({
+		auth: createFakeAuthService(),
+	});
+
+	try {
+		const sessionResponse = await fetch(`${baseURL}/api/chat/session`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(sessionResponse.status, 200);
+		const sessionPayload = await sessionResponse.json();
+		for (let index = 1; index <= 5; index += 1) {
+			emitOutput({
+				type: "assistant_message",
+				piboSessionId: sessionPayload.session.id,
+				eventId: `answer-${index}`,
+				text: `message ${index}`,
+			});
+		}
+
+		const tailResponse = await fetch(
+			`${baseURL}/api/chat/trace?piboSessionId=${encodeURIComponent(sessionPayload.session.id)}&pageSize=2`,
+			{ headers: { "x-test-user": "user-1" } },
+		);
+		assert.equal(tailResponse.status, 200);
+		const tail = await tailResponse.json();
+		assert.equal(tail.pageSize, 2);
+		assert.equal(tail.firstEventSequence, 4);
+		assert.equal(tail.lastEventSequence, 5);
+		assert.equal(tail.nextBeforeSequence, 4);
+		assert.equal(tail.hasOlderEvents, true);
+
+		const olderResponse = await fetch(
+			`${baseURL}/api/chat/trace?piboSessionId=${encodeURIComponent(sessionPayload.session.id)}&pageSize=2&beforeSequence=${tail.nextBeforeSequence}`,
+			{ headers: { "x-test-user": "user-1" } },
+		);
+		assert.equal(olderResponse.status, 200);
+		const older = await olderResponse.json();
+		assert.equal(older.beforeSequence, 4);
+		assert.equal(older.firstEventSequence, 2);
+		assert.equal(older.lastEventSequence, 3);
+		assert.equal(older.nextBeforeSequence, 2);
+		assert.equal(older.hasOlderEvents, true);
+	} finally {
+		await channel.stop?.();
+	}
+});
+
+test("chat web sessions supports cursor pages", async () => {
+	const { channel, baseURL } = await startWebHostChannel({
+		auth: createFakeAuthService(),
+	});
+
+	try {
+		const bootstrapResponse = await fetch(`${baseURL}/api/chat/bootstrap`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(bootstrapResponse.status, 200);
+		const bootstrap = await bootstrapResponse.json();
+		for (let index = 0; index < 3; index += 1) {
+			const created = await fetch(`${baseURL}/api/chat/sessions`, {
+				method: "POST",
+				headers: { "x-test-user": "user-1", "content-type": "application/json", origin: baseURL },
+				body: JSON.stringify({ roomId: bootstrap.selectedRoomId }),
+			});
+			assert.equal(created.status, 201);
+		}
+
+		const firstResponse = await fetch(
+			`${baseURL}/api/chat/sessions?roomId=${encodeURIComponent(bootstrap.selectedRoomId)}&limit=2`,
+			{ headers: { "x-test-user": "user-1" } },
+		);
+		assert.equal(firstResponse.status, 200);
+		const first = await firstResponse.json();
+		assert.equal(first.roomId, bootstrap.selectedRoomId);
+		assert.equal(first.archived, false);
+		assert.equal(first.sessions.length, 2);
+		assert.equal(typeof first.nextCursor, "string");
+		assert.equal(first.totalCount >= 3, true);
+		assert.equal(typeof first.version, "string");
+
+		const secondResponse = await fetch(
+			`${baseURL}/api/chat/sessions?roomId=${encodeURIComponent(bootstrap.selectedRoomId)}&limit=2&cursor=${encodeURIComponent(first.nextCursor)}`,
+			{ headers: { "x-test-user": "user-1" } },
+		);
+		assert.equal(secondResponse.status, 200);
+		const second = await secondResponse.json();
+		assert.equal(second.sessions.some((session) => session.piboSessionId === first.sessions[0].piboSessionId), false);
+	} finally {
+		await channel.stop?.();
+	}
+});
+
 test("chat web trace summary is small and cacheable", async () => {
 	const { channel, baseURL, emitOutput } = await startWebHostChannel({
 		auth: createFakeAuthService(),

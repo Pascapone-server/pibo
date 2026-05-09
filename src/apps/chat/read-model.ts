@@ -302,13 +302,17 @@ export class ChatWebReadModel {
 		return rows.map(eventFromRow);
 	}
 
-	listTraceEvents(input: { piboSessionId: string; limit?: number; beforeOrAtSequence?: number } | string): ChatWebStoredPiboEvent[] {
+	listTraceEvents(input: { piboSessionId: string; limit?: number; beforeOrAtSequence?: number; beforeSequence?: number } | string): ChatWebStoredPiboEvent[] {
 		const piboSessionId = typeof input === "string" ? input : input.piboSessionId;
 		const limit = Math.max(1, Math.min((typeof input === "string" ? undefined : input.limit) ?? 2000, 10000));
 		const beforeOrAtSequence = typeof input === "string" ? undefined : input.beforeOrAtSequence;
+		const beforeSequence = typeof input === "string" ? undefined : input.beforeSequence;
 		const clauses = ["pibo_session_id = ?", "type NOT IN ('assistant_delta', 'thinking_delta', 'tool_execution_updated')"];
 		const values: Array<string | number> = [piboSessionId];
-		if (beforeOrAtSequence !== undefined) {
+		if (beforeSequence !== undefined) {
+			clauses.push("event_sequence < ?");
+			values.push(beforeSequence);
+		} else if (beforeOrAtSequence !== undefined) {
 			clauses.push("event_sequence <= ?");
 			values.push(beforeOrAtSequence);
 		}

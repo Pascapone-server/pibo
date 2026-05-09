@@ -77,6 +77,11 @@ export type PiboSessionTraceView = {
 	latestStreamId?: number;
 	eventCount?: number;
 	eventLimit?: number;
+	pageSize?: number;
+	beforeSequence?: number;
+	firstEventSequence?: number;
+	lastEventSequence?: number;
+	nextBeforeSequence?: number;
 	hasOlderEvents?: boolean;
 	nodes: PiboTraceNode[];
 	rawEvents: ChatWebStoredEvent[];

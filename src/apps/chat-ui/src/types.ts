@@ -143,6 +143,15 @@ export type PiboSignalPatch = {
 	sessionSnapshots: PiboSessionSignalSnapshot[];
 };
 
+export type ChatSessionPage = {
+	roomId: string;
+	archived: boolean;
+	sessions: PiboWebSessionNode[];
+	nextCursor?: string;
+	totalCount?: number;
+	version?: string;
+};
+
 export type NavigationData = {
 	identity: { userId: string; email?: string; name?: string };
 	session: PiboSession;

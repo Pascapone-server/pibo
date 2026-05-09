@@ -1,10 +1,12 @@
-import type { BootstrapData, NavigationData, PiboWebSessionNode } from "./types";
+import type { BootstrapData, ChatSessionPage, NavigationData, PiboWebSessionNode } from "./types";
 
 export const BOOTSTRAP_STALE_TIME_MS = 30_000;
 export const BOOTSTRAP_GC_TIME_MS = 30 * 60_000;
 export const TRACE_STALE_TIME_MS = 10_000;
 export const TRACE_GC_TIME_MS = 30 * 60_000;
 export const DEFAULT_TRACE_EVENTS_PAGE_SIZE = 2_000;
+export const DEFAULT_SESSION_PAGE_SIZE = 120;
+export const DEFAULT_ARCHIVED_SESSION_PAGE_SIZE = 60;
 export const DEFAULT_RAW_EVENTS_LIMIT = 80;
 
 export type SessionNavigationData = {
@@ -34,17 +36,28 @@ export function chatTraceSummaryQueryKey(piboSessionId: string): readonly [strin
 	return ["chat", "trace-summary", piboSessionId];
 }
 
+export function chatSessionPageQueryKey(
+	roomId: string,
+	archived = false,
+	cursor?: string,
+	limit = archived ? DEFAULT_ARCHIVED_SESSION_PAGE_SIZE : DEFAULT_SESSION_PAGE_SIZE,
+): readonly [string, string, string, string, string, number] {
+	return ["chat", "session-page", roomId, archived ? "archived" : "active", cursor ?? "", limit];
+}
+
 export function chatTracePageQueryKey(
 	piboSessionId: string,
-	options: { includeRawEvents?: boolean; rawEventsLimit?: number; eventLimit?: number } = {},
-): readonly [string, string, string, string, number, number] {
+	options: { includeRawEvents?: boolean; rawEventsLimit?: number; eventLimit?: number; beforeSequence?: number; pageSize?: number } = {},
+): readonly [string, string, string, string, number, number, string] {
+	const pageSize = options.pageSize ?? options.eventLimit ?? DEFAULT_TRACE_EVENTS_PAGE_SIZE;
 	return [
 		"chat",
 		"trace-page",
 		piboSessionId,
 		options.includeRawEvents ? "raw" : "compact",
 		options.rawEventsLimit ?? DEFAULT_RAW_EVENTS_LIMIT,
-		options.eventLimit ?? DEFAULT_TRACE_EVENTS_PAGE_SIZE,
+		pageSize,
+		options.beforeSequence === undefined ? "tail" : String(options.beforeSequence),
 	];
 }
 
@@ -70,9 +83,15 @@ export function traceSummaryQueriesForSession(piboSessionId: string): readonly [
 	return ["chat", "trace-summary", piboSessionId];
 }
 
+export function sessionPageQueriesForRoom(roomId: string): readonly [string, string, string] {
+	return ["chat", "session-page", roomId];
+}
+
 export function tracePageQueriesForSession(piboSessionId: string): readonly [string, string, string] {
 	return ["chat", "trace-page", piboSessionId];
 }
+
+export type CachedChatSessionPage = ChatSessionPage;
 
 export type ChatCacheMutation =
 	| "send-message"
