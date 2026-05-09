@@ -31,10 +31,14 @@ async function startSignalWebHost() {
 	const dataStorePath = join(storageDir, "pibo-chat-v2.sqlite");
 	const agentStorePath = join(storageDir, "agents.sqlite");
 	const channel = createWebHostChannel({ port: 0, announce: false });
+	const listeners = new Set();
 	await channel.start({
 		auth: createFakeAuthService(),
 		emit() { throw new Error("not used"); },
-		subscribe() { return () => undefined; },
+		subscribe(listener) {
+			listeners.add(listener);
+			return () => listeners.delete(listener);
+		},
 		getSession: (id) => sessions.get(id),
 		createSession: (input) => sessions.create(input),
 		updateSession: (id, input) => sessions.update(id, input),
@@ -52,7 +56,16 @@ async function startSignalWebHost() {
 		},
 	});
 	const address = channel.getAddress();
-	return { channel, baseURL: `http://${address.host}:${address.port}`, sessions, signals };
+	return {
+		channel,
+		baseURL: `http://${address.host}:${address.port}`,
+		sessions,
+		signals,
+		emitOutput(event) {
+			signals.project({ type: "pibo_output", event, session: sessions.get(event.piboSessionId) });
+			for (const listener of listeners) listener(event);
+		},
+	};
 }
 
 function createSession(store, id, ownerScope = "user:user-1", parentId) {
@@ -131,6 +144,42 @@ test("chat signal SSE sends snapshot then monotonic patches", async () => {
 		assert.equal(events[0].event, "signal_snapshot");
 		assert.equal(events[1].event, "signal_patch");
 		assert.equal(events[1].data.fromVersion + 1, events[1].data.toVersion);
+	} finally {
+		await channel.stop?.();
+	}
+});
+
+
+test("chat bootstrap overlays live signal running status", async () => {
+	const { channel, baseURL, sessions, signals } = await startSignalWebHost();
+	try {
+		const session = createSession(sessions, "ps_bootstrap_signal_running");
+		signals.project({ type: "session_created", session });
+		signals.project({ type: "session_processing_changed", piboSessionId: session.id, processing: true, queuedMessages: 0 });
+
+		const response = await fetch(`${baseURL}/api/chat/bootstrap?piboSessionId=${session.id}`, { headers: { "x-test-user": "user-1" } });
+		assert.equal(response.status, 200);
+		const body = await response.json();
+		assert.equal(body.sessions.find((node) => node.piboSessionId === session.id)?.status, "running");
+	} finally {
+		await channel.stop?.();
+	}
+});
+
+test("chat navigation clears stale indexed running status from settled signal state", async () => {
+	const { channel, baseURL, sessions, signals, emitOutput } = await startSignalWebHost();
+	try {
+		const session = createSession(sessions, "ps_navigation_signal_idle");
+		signals.project({ type: "session_created", session });
+		await fetch(`${baseURL}/api/chat/bootstrap?piboSessionId=${session.id}`, { headers: { "x-test-user": "user-1" } });
+		emitOutput({ type: "message_started", piboSessionId: session.id, eventId: "m1", text: "hi" });
+		signals.project({ type: "pibo_output", event: { type: "message_finished", piboSessionId: session.id, eventId: "m1" }, session });
+		signals.project({ type: "session_processing_changed", piboSessionId: session.id, processing: false, queuedMessages: 0 });
+
+		const response = await fetch(`${baseURL}/api/chat/navigation?piboSessionId=${session.id}`, { headers: { "x-test-user": "user-1" } });
+		assert.equal(response.status, 200);
+		const body = await response.json();
+		assert.equal(body.sessions.find((node) => node.piboSessionId === session.id)?.status, "idle");
 	} finally {
 		await channel.stop?.();
 	}

@@ -29,7 +29,7 @@ import {
 	type UpdatePiboRoomInput,
 } from "./types/rooms.js";
 import { chatStreamFramesFromOutputEvent, createChatStreamState, type ChatStreamEvent } from "./stream.js";
-import { buildSessionNodes, buildTraceView, createTraceViewVersion, loadPiSessionMetadata, type PiboSessionTraceView, type PiboWebSessionNode } from "./trace.js";
+import { buildSessionNodes, buildTraceView, createTraceViewVersion, loadPiSessionMetadata, type PiboSessionTraceView, type PiboWebSessionNode, type PiboWebSessionStatus } from "./trace.js";
 import type { PiboSessionTraceSummary } from "../../shared/trace-types.js";
 import { isChatWebSessionArchived, withChatWebArchived } from "./session-metadata.js";
 import {
@@ -1724,6 +1724,47 @@ function buildSessionUnreadCounts(
 	});
 }
 
+function signalStatusFromSnapshot(snapshot: ReturnType<NonNullable<PiboWebAppContext["channelContext"]["snapshotSignalSession"]>> | undefined, piboSessionId: string): { status?: PiboWebSessionStatus; updatedAt?: string } | undefined {
+	const session = snapshot?.sessions[piboSessionId];
+	if (!session) return undefined;
+	if (session.hasError || session.hasErrorDescendant || session.aggregateStatus === "error") return { status: "error", updatedAt: session.updatedAt };
+	if (session.isTreeActive) return { status: "running", updatedAt: session.updatedAt };
+	return { status: "idle", updatedAt: session.updatedAt };
+}
+
+function sessionIndexItemsWithSignalState(
+	context: PiboWebAppContext,
+	sessions: readonly PiboSession[],
+	indexItems: readonly ChatWebSessionIndexItem[],
+): ChatWebSessionIndexItem[] {
+	const snapshotSignalSession = context.channelContext.snapshotSignalSession;
+	if (!snapshotSignalSession) return [...indexItems];
+	const bySessionId = new Map(indexItems.map((item) => [item.piboSessionId, item]));
+	for (const session of sessions) {
+		const existing = bySessionId.get(session.id);
+		const signal = signalStatusFromSnapshot(snapshotSignalSession(session.id), session.id);
+		if (!signal?.status) continue;
+		if (signal.status === "idle" && existing?.status !== "running") continue;
+		bySessionId.set(session.id, {
+			...(existing ?? {
+				piboSessionId: session.id,
+				piSessionId: session.piSessionId,
+				parentId: session.parentId,
+				profile: session.profile,
+				channel: session.channel,
+				kind: session.kind,
+				createdAt: session.createdAt,
+				updatedAt: session.updatedAt,
+				lastActivityAt: session.updatedAt,
+				status: "idle" as const,
+			}),
+			status: signal.status,
+			lastActivityAt: signal.updatedAt ?? existing?.lastActivityAt ?? session.updatedAt,
+		});
+	}
+	return [...bySessionId.values()];
+}
+
 function buildRoomUnreadCounts(
 	sessions: readonly PiboSession[],
 	sessionUnreadCounts: ReadonlyMap<string, number>,
@@ -3010,7 +3051,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				indexOwnedSessions(state.sessionQuery, roomSessions);
 				const sessions = await buildSessionNodes(
 					roomSessions,
-					state.sessionQuery.listSessions(),
+					sessionIndexItemsWithSignalState(context, roomSessions, state.sessionQuery.listSessions()),
 					process.cwd(),
 					new Map(),
 					{ skipPiMetadataFallback: true },
@@ -3067,7 +3108,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				const [sessions, catalog] = await Promise.all([
 					buildSessionNodes(
 						roomSessions,
-						state.sessionQuery.listSessions(),
+						sessionIndexItemsWithSignalState(context, roomSessions, state.sessionQuery.listSessions()),
 						process.cwd(),
 						sessionUnreadCounts,
 					),
