@@ -2421,7 +2421,7 @@ function piboSessionFromSessionNode(node: PiboWebSessionNode, base: PiboSession)
 		piSessionId: node.piSessionId,
 		profile: node.profile,
 		activeModel: node.activeModel,
-		title: node.title,
+		title: sessionNodeTitle(node),
 		updatedAt: node.lastActivityAt ?? base.updatedAt,
 	};
 }
@@ -3065,8 +3065,9 @@ function SessionNode({
 	autoRename?: boolean;
 	onAutoRenameConsumed?: () => void;
 }) {
+	const safeTitle = sessionNodeTitle(node);
 	const [editing, setEditing] = useState(false);
-	const [draftTitle, setDraftTitle] = useState(node.title);
+	const [draftTitle, setDraftTitle] = useState(safeTitle);
 	const titleInputRef = useRef<HTMLInputElement>(null);
 	const hasChildren = node.children.length > 0;
 	const hasSelectedDescendant = selectedPiboSessionId !== null && node.piboSessionId !== selectedPiboSessionId && selectedSessionPathIds.has(node.piboSessionId);
@@ -3084,15 +3085,15 @@ function SessionNode({
 	}, [menuOpen]);
 
 	useEffect(() => {
-		if (!editing) setDraftTitle(node.title);
-	}, [editing, node.title]);
+		if (!editing) setDraftTitle(safeTitle);
+	}, [editing, safeTitle]);
 
 	useEffect(() => {
 		if (!autoRename) return;
-		setDraftTitle(node.title === "Untitled Session" ? "" : node.title);
+		setDraftTitle(safeTitle === "Untitled Session" ? "" : safeTitle);
 		setEditing(true);
 		onAutoRenameConsumed?.();
-	}, [autoRename, node.title, onAutoRenameConsumed]);
+	}, [autoRename, safeTitle, onAutoRenameConsumed]);
 
 	useLayoutEffect(() => {
 		if (!editing) return;
@@ -3137,7 +3138,7 @@ function SessionNode({
 								if (event.key === "Escape") {
 									event.preventDefault();
 									setEditing(false);
-									setDraftTitle(node.title);
+									setDraftTitle(safeTitle);
 								}
 							}}
 							autoFocus
@@ -3155,7 +3156,7 @@ function SessionNode({
 							type="button"
 							onClick={() => {
 								setEditing(false);
-								setDraftTitle(node.title);
+								setDraftTitle(safeTitle);
 							}}
 							title="Cancel Rename"
 							aria-label="Cancel Rename"
@@ -3178,7 +3179,7 @@ function SessionNode({
 							className="min-w-0 text-left px-1 py-1 grid grid-cols-[minmax(0,1fr)_auto] gap-2 items-center"
 						>
 							<span className="min-w-0">
-								<span className={`block text-sm truncate ${node.archived ? "text-slate-500" : "text-slate-200"}`}>{node.title}</span>
+								<span className={`block text-sm truncate ${node.archived ? "text-slate-500" : "text-slate-200"}`}>{safeTitle}</span>
 								<span className="block text-[10px] font-mono truncate text-slate-500">{node.piboSessionId}</span>
 							</span>
 						</button>
@@ -3310,6 +3311,10 @@ function SessionNode({
 			)) : null}
 		</div>
 	);
+}
+
+function sessionNodeTitle(node: PiboWebSessionNode): string {
+	return typeof node.title === "string" && node.title ? node.title : "Untitled Session";
 }
 
 function sessionNodeSignal(node: PiboWebSessionNode, now: number): { className: string; title: string } {
