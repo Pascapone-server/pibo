@@ -152,9 +152,16 @@ export type ChatSessionPage = {
 	version?: string;
 };
 
+export type PiboRuntimeStatus = {
+	piboSessionId: string;
+	thinkingLevel?: ThinkingLevel;
+	fastMode?: boolean;
+};
+
 export type NavigationData = {
 	identity: { userId: string; email?: string; name?: string };
 	session: PiboSession;
+	runtimeStatus?: PiboRuntimeStatus;
 	room?: PiboRoom;
 	selectedRoomId: string;
 	selectedPiboSessionId: string;

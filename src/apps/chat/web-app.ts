@@ -3063,6 +3063,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				return responseJson({
 					identity: webSession.authSession.identity,
 					session: selectedSession,
+					runtimeStatus: context.channelContext.getSessionRuntimeStatus?.(selectedSession.id),
 					room: state.roomService.getRoom(selectedRoomId),
 					defaultRoomId: defaultRoom.id,
 					selectedRoomId,
@@ -3122,6 +3123,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				return responseJson({
 					identity: webSession.authSession.identity,
 					session: selectedSession,
+					runtimeStatus: context.channelContext.getSessionRuntimeStatus?.(selectedSession.id),
 					room: state.roomService.getRoom(selectedRoomId),
 					selectedRoomId,
 					selectedPiboSessionId: selectedSession.id,

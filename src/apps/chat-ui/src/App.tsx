@@ -2109,6 +2109,12 @@ function SessionTracePane({
 	}, [currentTraceView?.latestStreamId, currentTraceView?.piboSessionId, enqueueStreamEvent, onError, onRefreshBootstrap, onRefreshTrace, selectedPiboSessionId, tracePageQueryKey]);
 
 	const selectedTrace = null;
+	const traceThinkingState = resolveTraceThinkingState(currentTraceView);
+	const sessionActiveModelBadge = formatSessionModelBadge(
+		selectedSessionActiveModel,
+		bootstrap.runtimeStatus?.thinkingLevel ?? traceThinkingState.level ?? resolveSessionThinkingLevel(bootstrap, selectedSessionProfile),
+		bootstrap.runtimeStatus?.fastMode ?? traceThinkingState.fast,
+	);
 	const sessionBreadcrumbs = useMemo(
 		() => selectedPiboSessionId ? createSessionBreadcrumbs(bootstrap.sessions, selectedPiboSessionId) : [],
 		[bootstrap.sessions, selectedPiboSessionId],
@@ -2239,7 +2245,7 @@ function SessionTracePane({
 						showThinking,
 						expandThinking,
 						sessionAgentProfile: selectedSessionProfile,
-						sessionActiveModel: selectedSessionActiveModel,
+						sessionActiveModel: sessionActiveModelBadge,
 						selectedSessionStatus,
 						selectedSessionSignal,
 						sessionBreadcrumbs,
@@ -3555,6 +3561,40 @@ function resolveSessionActiveModel(
 	const profileModel = staticAgent ?? customAgent;
 	if (session.parentId) return profileModel?.subagentModel ?? bootstrap.modelDefaults?.subagent;
 	return profileModel?.mainModel ?? bootstrap.modelDefaults?.main;
+}
+
+function resolveSessionThinkingLevel(bootstrap: BootstrapData, profileName: string): ThinkingLevel | undefined {
+	const staticAgent = bootstrap.agents.find((agent) => agent.name === profileName);
+	const customAgent = bootstrap.customAgents.find((agent) => agent.profileName === profileName);
+	return staticAgent?.thinkingLevel ?? customAgent?.thinkingLevel ?? bootstrap.modelDefaults?.thinking;
+}
+
+function formatSessionModelBadge(modelLabel: string | undefined, thinkingLevel: ThinkingLevel | undefined, fast: boolean): string | undefined {
+	if (!modelLabel) return undefined;
+	return [modelLabel, thinkingLevel, fast ? "fast" : undefined].filter(Boolean).join(" ");
+}
+
+function resolveTraceThinkingState(traceView: PiboSessionTraceView | null): { level?: ThinkingLevel; fast: boolean } {
+	let state: { level?: ThinkingLevel; fast: boolean } = { fast: false };
+	if (!traceView) return state;
+	for (const node of flattenTraceNodes(traceView.nodes)) {
+		if (node.type !== "execution.command" || (node.title !== "thinking" && node.title !== "fast_mode")) continue;
+		const output = node.output && typeof node.output === "object" ? node.output as Record<string, unknown> : undefined;
+		const level = typeof output?.level === "string" && isThinkingLevel(output.level) ? output.level : undefined;
+		state = {
+			level: level ?? state.level,
+			fast: node.title === "fast_mode" ? output?.mode === "fast" : false,
+		};
+	}
+	return state;
+}
+
+function flattenTraceNodes(nodes: readonly PiboTraceNode[]): PiboTraceNode[] {
+	return nodes.flatMap((node) => [node, ...flattenTraceNodes(node.children)]);
+}
+
+function isThinkingLevel(value: string): value is ThinkingLevel {
+	return THINKING_LEVELS.includes(value as ThinkingLevel);
 }
 
 function copyTextToClipboard(text: string): Promise<void> {

@@ -458,6 +458,7 @@ export class RoutedSession {
 
 	getStatus(): PiboSessionStatus {
 		const enabledTools = this.runtime.session.getActiveToolNames();
+		const thinkingLevel = this.runtime.session.thinkingLevel as PiboThinkingLevel;
 		return {
 			piboSessionId: this.piboSessionId,
 			queuedMessages: this.queue.length,
@@ -467,6 +468,8 @@ export class RoutedSession {
 			enabledTools,
 			cwd: this.runtime.cwd,
 			disposed: this.disposed,
+			thinkingLevel,
+			fastMode: thinkingLevel === "off" && this.runtime.session.supportsThinking(),
 		};
 	}
 

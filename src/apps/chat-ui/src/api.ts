@@ -674,6 +674,7 @@ function normalizeNavigation(payload: Partial<NavigationData>): NavigationData {
 	return {
 		identity: payload.identity ?? { userId: "" },
 		session: payload.session,
+		runtimeStatus: payload.runtimeStatus,
 		room: payload.room,
 		selectedRoomId: payload.selectedRoomId ?? "",
 		selectedPiboSessionId,
