@@ -1,0 +1,32 @@
+{
+  "legacyRoot": "/root/.pibo",
+  "v2Path": "/root/.pibo/pibo.sqlite",
+  "inputs": {
+    "sessions": {
+      "path": "/root/.pibo/pibo-sessions.sqlite",
+      "exists": true
+    },
+    "chat": {
+      "path": "/root/.pibo/web-chat.sqlite",
+      "exists": true
+    }
+  },
+  "imported": {
+    "rooms": 8,
+    "roomMembers": 8,
+    "sessions": 262,
+    "events": 175755,
+    "messages": 2497,
+    "observations": 87357,
+    "navigation": 262
+  },
+  "skipped": {
+    "rooms": 0,
+    "roomMembers": 0,
+    "sessions": 0,
+    "events": 0,
+    "messages": 0,
+    "observations": 0,
+    "navigation": 0
+  }
+}

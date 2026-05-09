@@ -48,7 +48,6 @@ async function startWebHostChannel(options = {}) {
 	const sessions = new InMemoryPiboSessionStore();
 	let profiles = [...(options.profiles ?? [])];
 	const storageDir = mkdtempSync(join(tmpdir(), "pibo-web-channel-"));
-	const storagePath = join(storageDir, "chat.sqlite");
 	const agentStorePath = join(storageDir, "agents.sqlite");
 	const dataStorePath = join(storageDir, "pibo-chat-v2.sqlite");
 	const dataPayloadRootDir = join(storageDir, "payloads");
@@ -122,14 +121,9 @@ async function startWebHostChannel(options = {}) {
 		},
 		getWebApps() {
 			return [createChatWebApp({
-				readModelPath: storagePath,
-				eventLogPath: storagePath,
-				roomStorePath: storagePath,
 				agentStorePath,
-				dataStorePath: options.dataV2Write || options.dataMode === "v2" ? dataStorePath : undefined,
+				dataStorePath,
 				dataPayloadRootDir,
-				dataV2Write: options.dataV2Write,
-				dataMode: options.dataMode,
 			})];
 		},
 	});
@@ -545,8 +539,8 @@ test("chat web app maps authenticated users to chat sessions", async () => {
 	}
 });
 
-test("chat web app v2 mode runs without creating the legacy web-chat store", async () => {
-	const { channel, baseURL, dataStorePath, storageDir } = await startWebHostChannel({ auth: createFakeAuthService(), dataMode: "v2" });
+test("chat web app default data path runs without creating the legacy web-chat store", async () => {
+	const { channel, baseURL, dataStorePath, storageDir } = await startWebHostChannel({ auth: createFakeAuthService() });
 
 	try {
 		const createResponse = await fetch(`${baseURL}/api/chat/sessions`, {
@@ -1144,10 +1138,9 @@ test("chat web app makes message sends idempotent by client transaction id", asy
 	}
 });
 
-test("chat web app shadows user messages into the V2 data store", async () => {
+test("chat web app writes user messages into the V2 data store", async () => {
 	const { channel, baseURL, dataStorePath } = await startWebHostChannel({
 		auth: createFakeAuthService(),
-		dataV2Write: true,
 	});
 
 	try {
@@ -1158,8 +1151,8 @@ test("chat web app shadows user messages into the V2 data store", async () => {
 		const sessionPayload = await sessionResponse.json();
 		const body = JSON.stringify({
 			piboSessionId: sessionPayload.session.id,
-			text: "shadow me",
-			clientTxnId: "txn-shadow-1",
+			text: "persist me",
+			clientTxnId: "txn-persist-1",
 		});
 
 		for (let index = 0; index < 2; index += 1) {
@@ -1183,9 +1176,9 @@ test("chat web app shadows user messages into the V2 data store", async () => {
 			const navigation = db.prepare("SELECT * FROM session_navigation WHERE session_id = ?").get(sessionPayload.session.id);
 			assert.equal(eventCount, 1);
 			assert.equal(messageCount, 1);
-			assert.equal(message.content_preview, "shadow me");
-			assert.equal(JSON.parse(message.attributes_json).inlineText, "shadow me");
-			assert.equal(navigation.last_message_preview, "shadow me");
+			assert.equal(message.content_preview, "persist me");
+			assert.equal(JSON.parse(message.attributes_json).inlineText, "persist me");
+			assert.equal(navigation.last_message_preview, "persist me");
 		} finally {
 			db.close();
 		}
@@ -1194,10 +1187,9 @@ test("chat web app shadows user messages into the V2 data store", async () => {
 	}
 });
 
-test("chat web app shadows assistant and tool output into the V2 data store", async () => {
+test("chat web app writes assistant and tool output into the V2 data store", async () => {
 	const { channel, baseURL, emitOutput, dataStorePath } = await startWebHostChannel({
 		auth: createFakeAuthService(),
-		dataV2Write: true,
 	});
 
 	try {
@@ -1211,15 +1203,15 @@ test("chat web app shadows assistant and tool output into the V2 data store", as
 			emitOutput({
 				type: "assistant_message",
 				piboSessionId: sessionPayload.session.id,
-				eventId: "shadow-run-1",
-				text: "assistant v2 shadow",
+				eventId: "persist-run-1",
+				text: "assistant v2 persist",
 			});
 		}
 		emitOutput({
 			type: "tool_execution_finished",
 			piboSessionId: sessionPayload.session.id,
-			eventId: "shadow-run-1",
-			toolCallId: "tool-shadow-1",
+			eventId: "persist-run-1",
+			toolCallId: "tool-persist-1",
 			toolName: "read",
 			result: { ok: true },
 			isError: false,
@@ -1231,7 +1223,7 @@ test("chat web app shadows assistant and tool output into the V2 data store", as
 			const messageRows = db.prepare("SELECT role, content_preview FROM chat_messages WHERE session_id = ? ORDER BY sequence ASC").all(sessionPayload.session.id);
 			const observationRows = db.prepare("SELECT kind, name, status FROM observations WHERE session_id = ? ORDER BY sequence ASC").all(sessionPayload.session.id);
 			assert.deepEqual(eventRows.map((row) => row.type), ["assistant_message", "tool_execution_finished"]);
-			assert.deepEqual(messageRows.map((row) => ({ role: row.role, content_preview: row.content_preview })), [{ role: "assistant", content_preview: "assistant v2 shadow" }]);
+			assert.deepEqual(messageRows.map((row) => ({ role: row.role, content_preview: row.content_preview })), [{ role: "assistant", content_preview: "assistant v2 persist" }]);
 			assert.deepEqual(observationRows.map((row) => row.kind), ["message", "tool"]);
 			assert.equal(observationRows[1].name, "read");
 		} finally {

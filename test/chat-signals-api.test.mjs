@@ -28,7 +28,7 @@ async function startSignalWebHost() {
 	const sessions = new InMemoryPiboSessionStore();
 	const signals = createPiboSignalRegistry();
 	const storageDir = mkdtempSync(join(tmpdir(), "pibo-chat-signals-"));
-	const storagePath = join(storageDir, "chat.sqlite");
+	const dataStorePath = join(storageDir, "pibo-chat-v2.sqlite");
 	const agentStorePath = join(storageDir, "agents.sqlite");
 	const channel = createWebHostChannel({ port: 0, announce: false });
 	await channel.start({
@@ -48,7 +48,7 @@ async function startSignalWebHost() {
 		snapshotSignalTree: (id) => signals.snapshotTree(id),
 		subscribeSignalTree: (id, listener) => signals.subscribe(id, listener),
 		getWebApps() {
-			return [createChatWebApp({ readModelPath: storagePath, eventLogPath: storagePath, roomStorePath: storagePath, agentStorePath })];
+			return [createChatWebApp({ dataStorePath, agentStorePath })];
 		},
 	});
 	const address = channel.getAddress();

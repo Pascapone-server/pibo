@@ -9,22 +9,21 @@ import type { PiboJsonObject, PiboJsonValue, PiboOutputEvent } from "../../core/
 import { PiboWebHttpError, readJsonBody, responseHtml, responseJson } from "../../web/http.js";
 import type { PiboWebApp, PiboWebAppContext, PiboWebSession } from "../../web/types.js";
 import type { PiboSession, UpdatePiboSessionInput } from "../../sessions/store.js";
-import { ChatEventLog, createDefaultChatEventLog, type StoredChatEvent } from "./event-log.js";
+import type { ChatEventLog, StoredChatEvent } from "./event-log.js";
 import { OutputCompactor } from "./output-compactor.js";
 import { isPersistableOutputEvent } from "./output-event-policy.js";
-import { ChatWebReadModel, createDefaultChatWebReadModel } from "./read-model.js";
+import type { ChatWebReadModel } from "./read-model.js";
 import {
 	chatRoomIdFromMetadata,
-	createDefaultPiboRoomStore,
 	isDefaultPiboRoom,
 	isPiboRoomArchived,
-	PiboRoomStore,
 	roomWorkspaceFromMetadata,
 	withChatRoomId,
 	withPiboRoomArchived,
 	withPiboRoomWorkspace,
 	type PiboRoom,
 	type PiboRoomNode,
+	type PiboRoomStore,
 } from "./rooms.js";
 import { chatStreamFramesFromOutputEvent, createChatStreamState, type ChatStreamEvent } from "./stream.js";
 import { buildSessionNodes, buildTraceView, createTraceViewVersion, loadPiSessionMetadata, type PiboSessionTraceView, type PiboWebSessionNode } from "./trace.js";
@@ -75,19 +74,12 @@ export const CHAT_WEB_CHANNEL = "pibo.chat-web";
 export const CHAT_WEB_MOUNT_PATH = "/apps/chat";
 export const CHAT_WEB_API_PREFIX = "/api/chat";
 
-export type ChatDataMode = "legacy" | "v2";
-
 export type ChatWebAppOptions = {
 	defaultProfile?: string;
-	readModelPath?: string;
-	eventLogPath?: string;
-	roomStorePath?: string;
 	agentStorePath?: string;
 	reliabilityStorePath?: string;
 	dataStorePath?: string;
 	dataPayloadRootDir?: string;
-	dataV2Write?: boolean;
-	dataMode?: ChatDataMode;
 };
 
 type ChatPersistenceMetrics = {
@@ -150,8 +142,8 @@ type ChatWebAppState = {
 	roomStore: ChatRoomStore;
 	agentStore: CustomAgentStore;
 	reliabilityStore: PiboReliabilityStore;
-	dataStore?: PiboDataStore;
-	ingestService?: ChatDataIngestService;
+	dataStore: PiboDataStore;
+	ingestService: ChatDataIngestService;
 	traceCache: Map<string, PiboSessionTraceView>;
 	bootstrapCatalogCache?: { expiresAt: number; value: Promise<ChatBootstrapCatalog> };
 	outputCompactor: OutputCompactor;
@@ -822,18 +814,6 @@ function accessDenied(error: unknown): never {
 	throw new PiboWebHttpError("Room is not available for this user", 404);
 }
 
-function createReadModel(path?: string): ChatWebReadModel {
-	return path ? new ChatWebReadModel(path) : createDefaultChatWebReadModel();
-}
-
-function createEventLog(path?: string): ChatEventLog {
-	return path ? new ChatEventLog(path) : createDefaultChatEventLog();
-}
-
-function createRoomStore(path?: string): PiboRoomStore {
-	return path ? new PiboRoomStore(path) : createDefaultPiboRoomStore();
-}
-
 function createAgentStore(path?: string): CustomAgentStore {
 	return path ? new CustomAgentStore(path) : createDefaultCustomAgentStore();
 }
@@ -854,19 +834,7 @@ function createReliabilityStore(path?: string): PiboReliabilityStore {
 	return path ? new PiboReliabilityStore(path) : createDefaultPiboReliabilityStore();
 }
 
-function resolveChatDataMode(options: ChatWebAppOptions): ChatDataMode {
-	if (options.dataMode) return options.dataMode;
-	return process.env.PIBO_CHAT_DATA_MODE === "v2" ? "v2" : "legacy";
-}
-
-function isDataV2WriteEnabled(options: ChatWebAppOptions): boolean {
-	if (resolveChatDataMode(options) === "v2") return true;
-	if (options.dataV2Write !== undefined) return options.dataV2Write;
-	return process.env.PIBO_DATA_V2_WRITE === "1" || process.env.PIBO_DATA_V2_WRITE === "user" || process.env.PIBO_DATA_V2_WRITE === "all";
-}
-
-function createDataStore(options: ChatWebAppOptions): PiboDataStore | undefined {
-	if (!isDataV2WriteEnabled(options)) return undefined;
+function createDataStore(options: ChatWebAppOptions): PiboDataStore {
 	return new PiboDataStore(options.dataStorePath, { payloadRootDir: options.dataPayloadRootDir });
 }
 
@@ -914,29 +882,41 @@ function ensureEventIndexing(state: ChatWebAppState, context: PiboWebAppContext)
 			}
 			for (const persistableEvent of result.persistedEvents) {
 				if (!isPersistableOutputEvent(persistableEvent)) continue;
-				const stored = state.eventLog.appendOutputEvent(persistableEvent, {
+				let stored = state.eventLog.appendOutputEvent(persistableEvent, {
 					roomId: room?.id,
 					actorId: session?.ownerScope,
 				});
+				if (!stored && session) {
+					try {
+						const createdAt = new Date().toISOString();
+						const ingested = state.ingestService.ingestOutputEvent({
+							session,
+							roomId: room?.id,
+							actorId: session.ownerScope,
+							event: persistableEvent,
+							createdAt,
+						});
+						stored = {
+							streamId: ingested.streamId,
+							roomId: room?.id,
+							piboSessionId: persistableEvent.piboSessionId,
+							eventId: "eventId" in persistableEvent && typeof persistableEvent.eventId === "string" ? persistableEvent.eventId : `pibo.output:${persistableEvent.type}:${ingested.streamId}`,
+							eventType: persistableEvent.type,
+							actorType: "assistant",
+							actorId: session.ownerScope,
+							createdAt,
+							retentionClass: reliabilityRetentionClassForOutputEvent(persistableEvent) as StoredChatEvent["retentionClass"],
+							payload: persistableEvent as unknown as PiboJsonValue,
+						};
+					} catch (error) {
+						console.warn("[chat-web] failed to write output event into V2", error);
+					}
+				}
 				if (!stored) continue;
 				if (persistableEvent.type === "assistant_message" || persistableEvent.type === "message_finished") {
 					markActiveSessionRead(state, persistableEvent.piboSessionId, stored.streamId);
 				}
 				state.readModel.recordEvent(persistableEvent, session, stored.streamId);
-				if (state.ingestService && session) {
-					try {
-						state.ingestService.ingestOutputEvent({
-							session,
-							roomId: room?.id,
-							actorId: session.ownerScope,
-							event: persistableEvent,
-							legacyStreamId: stored.streamId,
-							createdAt: stored.createdAt,
-						});
-					} catch (error) {
-						console.warn("[chat-web] failed to shadow output event into V2", error);
-					}
-				}
 				state.reliabilityStore.append({
 					topic: "pibo.output",
 					key: persistableEvent.piboSessionId,
@@ -2910,17 +2890,15 @@ function createChatHtml(): string {
 
 export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 	const defaultProfile = options.defaultProfile ?? "codex-compat-openai-web";
-	const storagePath = options.readModelPath;
-	const dataMode = resolveChatDataMode(options);
 	const dataStore = createDataStore(options);
 	const state: ChatWebAppState = {
-		readModel: dataMode === "v2" && dataStore ? new ChatV2ReadModel(dataStore) : createReadModel(storagePath),
-		eventLog: dataMode === "v2" && dataStore ? new ChatV2EventLog(dataStore) : createEventLog(options.eventLogPath ?? storagePath),
-		roomStore: dataMode === "v2" && dataStore ? new ChatV2RoomStore(dataStore) : createRoomStore(options.roomStorePath ?? storagePath),
-		agentStore: createAgentStore(options.agentStorePath ?? storagePath),
+		readModel: new ChatV2ReadModel(dataStore),
+		eventLog: new ChatV2EventLog(dataStore),
+		roomStore: new ChatV2RoomStore(dataStore),
+		agentStore: createAgentStore(options.agentStorePath),
 		reliabilityStore: createReliabilityStore(options.reliabilityStorePath),
 		dataStore,
-		ingestService: dataStore ? new ChatDataIngestService(dataStore) : undefined,
+		ingestService: new ChatDataIngestService(dataStore),
 		traceCache: new Map(),
 		outputCompactor: new OutputCompactor(),
 		liveListeners: new Set(),

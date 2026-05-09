@@ -1,0 +1,80 @@
+{
+  "stores": [
+    {
+      "name": "v2",
+      "path": "/root/.pibo/pibo.sqlite",
+      "exists": false,
+      "bytes": 0,
+      "walBytes": 0,
+      "tables": {}
+    },
+    {
+      "name": "v2-shadow",
+      "path": "/root/.pibo/pibo-chat-v2.sqlite",
+      "exists": false,
+      "bytes": 0,
+      "walBytes": 0,
+      "tables": {}
+    },
+    {
+      "name": "sessions",
+      "path": "/root/.pibo/pibo-sessions.sqlite",
+      "exists": true,
+      "bytes": 241664,
+      "walBytes": 482072,
+      "tables": {
+        "pibo_sessions": 262
+      },
+      "integrity": "ok",
+      "freelistPages": 0,
+      "pageCount": 59,
+      "pageSize": 4096
+    },
+    {
+      "name": "chat",
+      "path": "/root/.pibo/web-chat.sqlite",
+      "exists": true,
+      "bytes": 1730973696,
+      "walBytes": 347917552,
+      "tables": {
+        "chat_events": 88398,
+        "web_chat_events": 87357,
+        "web_chat_sessions": 294,
+        "pibo_rooms": 8,
+        "chat_session_reads": 224
+      },
+      "integrity": "ok",
+      "freelistPages": 320772,
+      "pageCount": 422601,
+      "pageSize": 4096
+    },
+    {
+      "name": "reliability",
+      "path": "/root/.pibo/pibo-events.sqlite",
+      "exists": true,
+      "bytes": 923074560,
+      "walBytes": 432031472,
+      "tables": {
+        "pibo_event_stream": 117492,
+        "pibo_jobs": 2,
+        "pibo_runs": 3
+      },
+      "integrity": "ok",
+      "freelistPages": 171129,
+      "pageCount": 225360,
+      "pageSize": 4096
+    },
+    {
+      "name": "auth",
+      "path": "/root/.pibo/auth.sqlite",
+      "exists": true,
+      "bytes": 57344,
+      "walBytes": 0,
+      "tables": {},
+      "integrity": "ok",
+      "freelistPages": 0,
+      "pageCount": 14,
+      "pageSize": 4096
+    }
+  ]
+}
