@@ -1976,8 +1976,6 @@ function responseBuiltChatPublicFile(request: Request, pathname: string): Respon
 	const publicFilePaths = new Set([
 		`${CHAT_WEB_MOUNT_PATH}/manifest.webmanifest`,
 		`${CHAT_WEB_MOUNT_PATH}/sw.js`,
-		`${CHAT_WEB_MOUNT_PATH}/icons/pibo-icon-192.png`,
-		`${CHAT_WEB_MOUNT_PATH}/icons/pibo-icon-512.png`,
 	]);
 	if (!publicFilePaths.has(pathname)) return undefined;
 	const cacheControl = pathname.endsWith("/sw.js") || pathname.endsWith("/manifest.webmanifest")
@@ -2060,7 +2058,7 @@ function createChatHtml(): string {
 	<meta name="apple-mobile-web-app-capable" content="yes">
 	<meta name="apple-mobile-web-app-title" content="Pibo Chat">
 	<link rel="manifest" href="/apps/chat/manifest.webmanifest">
-	<link rel="apple-touch-icon" href="/apps/chat/icons/pibo-icon-192.png">
+	<link rel="apple-touch-icon" href="/apps/chat/assets/pwa-images/ios/180.png">
 	<title>Pibo Web Chat</title>
 	<style>
 		:root { color-scheme: dark; font-family: "Public Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #101d22; color: #d8e3e7; }
