@@ -1780,9 +1780,7 @@ function SessionTracePane({
 	useEffect(() => {
 		if (!selectedPiboSessionId || !traceQueryKey) return;
 		if (!currentTraceView || currentTraceView.piboSessionId !== selectedPiboSessionId) return;
-		const params = selectedRoomId
-			? new URLSearchParams({ roomId: selectedRoomId, piboSessionId: selectedPiboSessionId })
-			: new URLSearchParams({ piboSessionId: selectedPiboSessionId });
+		const params = new URLSearchParams({ piboSessionId: selectedPiboSessionId });
 		if (currentTraceView?.latestStreamId !== undefined) {
 			params.set("since", `${currentTraceView.latestStreamId}:999999`);
 		}
@@ -1857,7 +1855,7 @@ function SessionTracePane({
 			if (bootstrapTimer) clearTimeout(bootstrapTimer);
 			events.close();
 		};
-	}, [currentTraceView?.latestStreamId, currentTraceView?.piboSessionId, enqueueStreamEvent, onError, onRefreshBootstrap, onRefreshTrace, selectedPiboSessionId, selectedRoomId, traceQueryKey]);
+	}, [currentTraceView?.latestStreamId, currentTraceView?.piboSessionId, enqueueStreamEvent, onError, onRefreshBootstrap, onRefreshTrace, selectedPiboSessionId, traceQueryKey]);
 
 	const selectedTrace = null;
 	const sessionBreadcrumbs = useMemo(
@@ -3486,11 +3484,13 @@ function Composer({
 	}, [activeSkillIndex, filteredSkills.length]);
 
 	useEffect(() => {
-		activeCommandRef.current?.scrollIntoView({ block: "nearest" });
+		const frame = requestAnimationFrame(() => activeCommandRef.current?.scrollIntoView({ block: "nearest" }));
+		return () => cancelAnimationFrame(frame);
 	}, [activeIndex, filtered.length]);
 
 	useEffect(() => {
-		activeSkillRef.current?.scrollIntoView({ block: "nearest" });
+		const frame = requestAnimationFrame(() => activeSkillRef.current?.scrollIntoView({ block: "nearest" }));
+		return () => cancelAnimationFrame(frame);
 	}, [activeSkillIndex, filteredSkills.length]);
 
 	useEffect(() => {
@@ -3678,6 +3678,11 @@ function Composer({
 
 function resizeComposerInput(input: HTMLTextAreaElement | null) {
 	if (!input) return;
+	if (!input.value.includes("\n") && input.value.length < 80) {
+		input.style.height = "";
+		input.style.overflowY = "hidden";
+		return;
+	}
 	const style = window.getComputedStyle(input);
 	const lineHeight = cssPx(style.lineHeight, 20);
 	const borderFrame = cssPx(style.borderTopWidth) + cssPx(style.borderBottomWidth);

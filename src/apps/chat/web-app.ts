@@ -393,7 +393,7 @@ function requestMatchesVersion(request: Request, version: string): boolean {
 		.some((value) => value === "*" || value === etagForVersion(version) || value === `W/${etagForVersion(version)}`);
 }
 
-const TRACE_RENDER_EVENTS_LIMIT = 10_000;
+const TRACE_RENDER_EVENTS_LIMIT = 2_000;
 
 function traceCacheKey(piboSessionId: string, version: string): string {
 	return [piboSessionId, version, "structural"].join(":");
@@ -3702,20 +3702,22 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 			if (url.pathname === `${CHAT_WEB_API_PREFIX}/events` && request.method === "GET") {
 				const webSession = await requireSession(request, context);
 				const requestedRoomId = url.searchParams.get("roomId") || undefined;
+				const requestedPiboSessionId = url.searchParams.get("piboSessionId") || undefined;
 				const selectedSession = resolveRequestedSession(
 					state,
 					context,
 					webSession,
 					defaultProfile,
-					url.searchParams.get("piboSessionId") || undefined,
+					requestedPiboSessionId,
 					requestedRoomId,
 				);
 				const roomId = requestedRoomId ?? selectedRoomIdForSession(state, context, selectedSession);
 				requireRoom(state, roomId, webSession, "read");
 				const cursor = parseSseCursor(url.searchParams.get("since")) ?? parseSseCursor(request.headers.get("last-event-id"));
+				const streamPiboSessionId = requestedPiboSessionId || !requestedRoomId ? selectedSession.id : undefined;
 				return createEventStream({
-					roomId: url.searchParams.has("roomId") ? roomId : undefined,
-					piboSessionId: url.searchParams.has("roomId") ? undefined : selectedSession.id,
+					roomId: streamPiboSessionId ? undefined : roomId,
+					piboSessionId: streamPiboSessionId,
 					activePiboSessionId: selectedSession.id,
 					principalId: principalIdFor(webSession),
 					context,

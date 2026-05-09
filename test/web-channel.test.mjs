@@ -1230,7 +1230,6 @@ test("chat web app room SSE frames include unfocused session ids", async () => {
 			headers: { "x-test-user": "user-1" },
 		});
 		assert.equal(sessionResponse.status, 200);
-		const sessionPayload = await sessionResponse.json();
 		const bootstrapResponse = await fetch(`${baseURL}/api/chat/bootstrap`, {
 			headers: { "x-test-user": "user-1" },
 		});
@@ -1253,7 +1252,7 @@ test("chat web app room SSE frames include unfocused session ids", async () => {
 
 		const controller = new AbortController();
 		const response = await fetch(
-			`${baseURL}/api/chat/events?roomId=${encodeURIComponent(bootstrap.selectedRoomId)}&piboSessionId=${encodeURIComponent(sessionPayload.session.id)}&since=0`,
+			`${baseURL}/api/chat/events?roomId=${encodeURIComponent(bootstrap.selectedRoomId)}&since=0`,
 			{
 				headers: { "x-test-user": "user-1" },
 				signal: controller.signal,
@@ -1272,6 +1271,86 @@ test("chat web app room SSE frames include unfocused session ids", async () => {
 
 		assert.match(text, new RegExp(`"piboSessionId":"${secondPayload.session.id}"`));
 		assert.match(text, /hello while unfocused/);
+	} finally {
+		await channel.stop?.();
+	}
+});
+
+test("chat web app scopes room-authenticated session SSE to the selected session", async () => {
+	const { channel, baseURL, emitOutput } = await startWebHostChannel({
+		auth: createFakeAuthService(),
+	});
+
+	try {
+		const sessionResponse = await fetch(`${baseURL}/api/chat/session`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(sessionResponse.status, 200);
+		const sessionPayload = await sessionResponse.json();
+		const bootstrapResponse = await fetch(`${baseURL}/api/chat/bootstrap`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(bootstrapResponse.status, 200);
+		const bootstrap = await bootstrapResponse.json();
+		const secondResponse = await fetch(`${baseURL}/api/chat/sessions`, {
+			method: "POST",
+			headers: { "x-test-user": "user-1", "content-type": "application/json", origin: baseURL },
+			body: JSON.stringify({ roomId: bootstrap.selectedRoomId }),
+		});
+		assert.equal(secondResponse.status, 201);
+		const secondPayload = await secondResponse.json();
+
+		emitOutput({
+			type: "assistant_message",
+			piboSessionId: sessionPayload.session.id,
+			eventId: "focused-before-cursor",
+			text: "focused before cursor",
+		});
+		const traceResponse = await fetch(
+			`${baseURL}/api/chat/trace?piboSessionId=${encodeURIComponent(sessionPayload.session.id)}`,
+			{ headers: { "x-test-user": "user-1" } },
+		);
+		assert.equal(traceResponse.status, 200);
+		const trace = await traceResponse.json();
+		assert.equal(typeof trace.latestStreamId, "number");
+
+		emitOutput({
+			type: "assistant_message",
+			piboSessionId: secondPayload.session.id,
+			eventId: "unfocused-after-cursor",
+			text: "unfocused after selected cursor",
+		});
+
+		const controller = new AbortController();
+		const response = await fetch(
+			`${baseURL}/api/chat/events?roomId=${encodeURIComponent(bootstrap.selectedRoomId)}&piboSessionId=${encodeURIComponent(sessionPayload.session.id)}&since=${trace.latestStreamId}:999999`,
+			{
+				headers: { "x-test-user": "user-1" },
+				signal: controller.signal,
+			},
+		);
+		assert.equal(response.status, 200);
+		const reader = response.body.getReader();
+		const decoder = new TextDecoder();
+		let text = "";
+		text += decoder.decode((await reader.read()).value, { stream: true });
+
+		emitOutput({
+			type: "assistant_message",
+			piboSessionId: sessionPayload.session.id,
+			eventId: "focused-after-cursor",
+			text: "focused after cursor",
+		});
+		for (let index = 0; index < 8 && !text.includes("focused after cursor"); index += 1) {
+			const chunk = await reader.read();
+			assert.equal(chunk.done, false);
+			text += decoder.decode(chunk.value, { stream: true });
+		}
+		controller.abort();
+
+		assert.match(text, /focused after cursor/);
+		assert.doesNotMatch(text, /unfocused after selected cursor/);
+		assert.doesNotMatch(text, new RegExp(`"piboSessionId":"${secondPayload.session.id}"`));
 	} finally {
 		await channel.stop?.();
 	}
