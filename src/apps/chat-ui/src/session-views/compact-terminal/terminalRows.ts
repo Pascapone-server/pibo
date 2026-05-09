@@ -675,8 +675,8 @@ function compactInlinePreview(value: unknown): string {
 	return truncate(text.replace(/\s+/g, " ").trim(), 96);
 }
 
-function isShellToolName(name: string): boolean {
-	const normalized = name.trim().toLowerCase();
+function isShellToolName(name: string | undefined): boolean {
+	const normalized = (name ?? "").trim().toLowerCase();
 	return (
 		normalized === "shell" ||
 		normalized === "bash" ||
