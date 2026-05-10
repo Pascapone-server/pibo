@@ -19,6 +19,7 @@ import type {
 	RuntimeVarsResult,
 } from "./types.js";
 import { PythonRuntimeBackend } from "./python-backend.js";
+import { NodeRuntimeBackend } from "./node-backend.js";
 
 export type RuntimeSessionRegistryOptions = {
 	cwd: string;
@@ -70,26 +71,22 @@ export class RuntimeSessionRegistry {
 	}
 
 	async start(ownerPiboSessionId: string, input: RuntimeStartInput): Promise<RuntimeStartResult> {
-		if (input.runtime !== "python") {
-			return {
-				status: "error",
-				error: { name: "UnsupportedRuntime", message: `Runtime "${input.runtime}" is not implemented yet.` },
-			};
-		}
 		if (input.target?.type && input.target.type !== "local") {
 			return {
 				status: "error",
 				error: { name: "UnsupportedRuntimeTarget", message: `Runtime target "${input.target.type}" is not implemented yet.` },
 			};
 		}
-		const sessionId = `rt_python_${randomUUID().slice(0, 8)}`;
+		const sessionId = `rt_${input.runtime}_${randomUUID().slice(0, 8)}`;
 		try {
-			const backend = await PythonRuntimeBackend.start(this.options.cwd, input);
+			const backend = input.runtime === "python"
+				? await PythonRuntimeBackend.start(this.options.cwd, input)
+				: await NodeRuntimeBackend.start(this.options.cwd, input);
 			const startedAt = nowIso();
 			const record = backend.getRecord();
 			const session: RuntimeSession = {
 				sessionId,
-				runtime: "python",
+				runtime: input.runtime,
 				name: input.name,
 				cwd: record.cwd,
 				status: "idle",
@@ -103,12 +100,12 @@ export class RuntimeSessionRegistry {
 				history: [],
 			};
 			this.sessions.set(sessionId, session);
-			return { status: "ok", sessionId, runtime: "python", name: input.name, ...record, startedAt };
+			return { status: "ok", sessionId, runtime: input.runtime, name: input.name, ...record, startedAt };
 		} catch (error) {
 			return {
 				status: "failed",
 				sessionId,
-				runtime: "python",
+				runtime: input.runtime,
 				error: error instanceof Error
 					? { name: error.name, message: error.message, stack: error.stack }
 					: { name: "RuntimeStartError", message: String(error) },

@@ -124,12 +124,12 @@ export function createRuntimeToolDefinition(controller: PiboRuntimeToolControlle
 	return defineTool({
 		name: "runtime",
 		label: "Runtime",
-		description: "Start and use persistent Python runtime sessions. Supports start, exec, inspect, vars, interrupt, close, and list. Node runtime is reserved for a later backend.",
-		promptSnippet: "Use runtime for stateful Python/Node exploration. Set closeOnSuccess on exec for one-shot code: success closes the runtime; failure keeps prior state for inspection and repair. Use bash for shell commands and package installs.",
+		description: "Start and use persistent Python and Node runtime sessions. Supports start, exec, inspect, vars, interrupt, close, and list.",
+		promptSnippet: "Use runtime for stateful Python or Node exploration. Set closeOnSuccess on exec for one-shot code: success closes the runtime; failure keeps prior state for inspection and repair. Use bash for shell commands and package installs.",
 		executionMode: "parallel",
 		parameters: Type.Object({
 			action: StringEnum(["start", "exec", "inspect", "vars", "interrupt", "close", "list"], { description: "Runtime action to perform." }),
-			runtime: Type.Optional(StringEnum(["python", "node"], { description: "Runtime kind for start. Python is implemented first." })),
+			runtime: Type.Optional(StringEnum(["python", "node"], { description: "Runtime kind for start." })),
 			name: Type.Optional(Type.String({ description: "Optional human-readable runtime name." })),
 			target: Type.Optional(Type.Any({ description: "Runtime target options such as { type: 'local', cwd, executable, args, env }." })),
 			sessionId: Type.Optional(Type.String({ description: "Runtime session id returned by start." })),
