@@ -36,7 +36,7 @@ function nowIso(): string {
 	return new Date().toISOString();
 }
 
-function notFoundExec(sessionId: string): RuntimeExecResult {
+function notFoundExec(sessionId = "auto"): RuntimeExecResult {
 	return {
 		status: "not_found",
 		sessionId,
@@ -45,7 +45,7 @@ function notFoundExec(sessionId: string): RuntimeExecResult {
 	};
 }
 
-function notFoundInspect(sessionId: string): RuntimeInspectResult {
+function notFoundInspect(sessionId = "auto"): RuntimeInspectResult {
 	return {
 		status: "not_found",
 		sessionId,
@@ -53,7 +53,7 @@ function notFoundInspect(sessionId: string): RuntimeInspectResult {
 	};
 }
 
-function notFoundVars(sessionId: string): RuntimeVarsResult {
+function notFoundVars(sessionId = "auto"): RuntimeVarsResult {
 	return {
 		status: "not_found",
 		sessionId,
@@ -114,16 +114,19 @@ export class RuntimeSessionRegistry {
 	}
 
 	async exec(ownerPiboSessionId: string, input: RuntimeExecInput): Promise<RuntimeExecResult> {
-		const session = this.getOwned(ownerPiboSessionId, input.sessionId);
-		if (!session) return notFoundExec(input.sessionId);
-		if (session.status === "closed" || session.status === "failed") return notFoundExec(input.sessionId);
+		const session = input.sessionId
+			? this.getOwned(ownerPiboSessionId, input.sessionId)
+			: await this.getOrStartDefault(ownerPiboSessionId, input);
+		const sessionId = input.sessionId ?? session?.sessionId ?? "auto";
+		if (!session) return notFoundExec(sessionId);
+		if (session.status === "closed" || session.status === "failed") return notFoundExec(sessionId);
 		if (session.status === "busy") {
 			return {
 				status: "failed",
-				sessionId: input.sessionId,
+				sessionId,
 				runtime: session.runtime,
 				durationMs: 0,
-				error: { name: "RuntimeBusy", message: `Runtime session "${input.sessionId}" is already busy.` },
+				error: { name: "RuntimeBusy", message: `Runtime session "${sessionId}" is already busy.` },
 			};
 		}
 		const startedAt = nowIso();
@@ -145,7 +148,6 @@ export class RuntimeSessionRegistry {
 			id: randomUUID(),
 			startedAt,
 			durationMs: result.durationMs,
-			mode: input.mode ?? "exec",
 			code: input.code,
 			status: result.status,
 			error: result.error,
@@ -158,22 +160,23 @@ export class RuntimeSessionRegistry {
 	}
 
 	async inspect(ownerPiboSessionId: string, input: RuntimeInspectInput): Promise<RuntimeInspectResult> {
-		const session = this.getOwned(ownerPiboSessionId, input.sessionId);
+		const session = input.sessionId ? this.getOwned(ownerPiboSessionId, input.sessionId) : this.getDefault(ownerPiboSessionId, input.runtime ?? "python");
 		if (!session) return notFoundInspect(input.sessionId);
 		const result = await session.backend.inspect(input);
 		return { ...result, sessionId: session.sessionId };
 	}
 
 	async vars(ownerPiboSessionId: string, input: RuntimeVarsInput): Promise<RuntimeVarsResult> {
-		const session = this.getOwned(ownerPiboSessionId, input.sessionId);
+		const session = input.sessionId ? this.getOwned(ownerPiboSessionId, input.sessionId) : this.getDefault(ownerPiboSessionId, input.runtime ?? "python");
 		if (!session) return notFoundVars(input.sessionId);
 		const result = await session.backend.vars(input);
 		return { ...result, sessionId: session.sessionId };
 	}
 
 	async interrupt(ownerPiboSessionId: string, input: RuntimeInterruptInput): Promise<RuntimeInterruptResult> {
-		const session = this.getOwned(ownerPiboSessionId, input.sessionId);
-		if (!session) return { status: "not_found", sessionId: input.sessionId, message: `Runtime session "${input.sessionId}" was not found.` };
+		const session = input.sessionId ? this.getOwned(ownerPiboSessionId, input.sessionId) : this.getDefault(ownerPiboSessionId, input.runtime ?? "python");
+		const sessionId = input.sessionId ?? session?.sessionId ?? "auto";
+		if (!session) return { status: "not_found", sessionId, message: `Runtime session "${sessionId}" was not found.` };
 		const result = await session.backend.interrupt();
 		return { ...result, sessionId: session.sessionId };
 	}
@@ -238,6 +241,28 @@ export class RuntimeSessionRegistry {
 			close: (input: RuntimeCloseInput) => this.close(ownerPiboSessionId, input),
 			list: () => this.list(ownerPiboSessionId),
 		};
+	}
+
+	private getDefault(ownerPiboSessionId: string, runtime: RuntimeStartInput["runtime"]): RuntimeSession | undefined {
+		return [...this.sessions.values()].find((session) =>
+			session.ownerPiboSessionId === ownerPiboSessionId &&
+			session.runtime === runtime &&
+			session.status !== "closed" &&
+			session.status !== "failed"
+		);
+	}
+
+	private async getOrStartDefault(ownerPiboSessionId: string, input: RuntimeExecInput): Promise<RuntimeSession | undefined> {
+		const runtime = input.runtime ?? "python";
+		const existing = this.getDefault(ownerPiboSessionId, runtime);
+		if (existing) return existing;
+		const started = await this.start(ownerPiboSessionId, {
+			runtime,
+			name: input.name,
+			target: input.target,
+			timeoutMs: input.timeoutMs,
+		});
+		return started.sessionId ? this.getOwned(ownerPiboSessionId, started.sessionId) : undefined;
 	}
 
 	private getOwned(ownerPiboSessionId: string, sessionId: string): RuntimeSession | undefined {
