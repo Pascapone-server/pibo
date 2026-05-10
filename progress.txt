@@ -1,4 +1,5 @@
 ## Codebase Patterns
+- Workflow validation code should emit `WorkflowDiagnostic` objects with `WorkflowInterfaceError.*` codes and JSONPath-like `path` values instead of throwing, then aggregate through `ValidationResult`.
 - Workflow-system implementation progress is currently tracked in `docs/specs/changes/pibo-workflow-system-v1/tasks.md`; the referenced `prd_*.json` files are not present in this worktree.
 - Keep the new workflow framework isolated under `packages/workflows` so future iterations can evolve the package without touching the host gateway or existing app surfaces.
 - Export public workflow package types through `packages/workflows/src/index.ts` using `.js` module specifiers because the package uses `moduleResolution: NodeNext`.
@@ -24,4 +25,16 @@
   - Use registered ids (`RegistryRefId`) in workflow definitions for handlers, adapters, guards, prompt builders, and human actions so persisted IR stays closure-free.
   - Keep validation behavior out of the type layer; story 1.3 should add validators against these exported types rather than embedding runtime assumptions in type definitions.
   - The standalone workflow package typecheck is the relevant fast check until root workspace wiring includes `packages/workflows`.
+---
+
+## 2026-05-10 22:28 UTC - 1.3
+- Implemented workflow JSON schema subset validation for workflow definitions, covering JSON ports on workflows/nodes, human node schemas, edge adapter output ports, and global state field schemas.
+- Added public validation exports for `validateWorkflow`, `validateWorkflowPort`, and `validateJsonSchemaSubset` with structured `WorkflowDiagnostic` results for OpenAI Structured Outputs/tool-calling subset failures such as root `anyOf`, non-object structured roots, missing `additionalProperties: false`, incomplete `required`, missing array `items`, unsupported `oneOf`/`allOf`, and unresolved local `$defs` refs.
+- Marked task `1.3` complete in the workflow-system task list because no `prd_*.json` files exist in this worktree.
+- Quality checks: `npm --prefix packages/workflows run typecheck` on host and inside `pibo-dev-Workflows` container; root `npm run typecheck` on host.
+- Files changed: `packages/workflows/src/validation/index.ts`, `packages/workflows/src/index.ts`, `docs/specs/changes/pibo-workflow-system-v1/tasks.md`, `progress.txt`.
+- **Learnings for future iterations:**
+  - JSON workflow ports are treated as Structured Outputs roots, so scalar/array contracts must be wrapped in an object property and every object must use `additionalProperties: false`.
+  - Keep validation side-effect free and registry/runtime independent; later stories can layer graph, compatibility, and registry reference checks into the same `ValidationResult` pattern.
+  - Human node response schemas and edge adapter output ports need the same schema subset checks as workflow/node JSON ports.
 ---
