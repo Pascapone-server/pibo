@@ -125,7 +125,7 @@ export function createRuntimeToolDefinition(controller: PiboRuntimeToolControlle
 		name: "runtime",
 		label: "Runtime",
 		description: "Start and use persistent Python and Node runtime sessions. Supports start, exec, inspect, vars, interrupt, close, and list.",
-		promptSnippet: "Use runtime for stateful Python or Node exploration. Set closeOnSuccess on exec for one-shot code: success closes the runtime; failure keeps prior state for inspection and repair. Use bash for shell commands and package installs.",
+		promptSnippet: "Use runtime for Python/Node code, especially longer snippets (~20+ lines), uncertain code, or objects/state to inspect. For one-off runs, set closeOnSuccess: success closes; failure keeps state for inspection/retry. Use bash for shell commands and package installs.",
 		executionMode: "parallel",
 		parameters: Type.Object({
 			action: StringEnum(["start", "exec", "inspect", "vars", "interrupt", "close", "list"], { description: "Runtime action to perform." }),
