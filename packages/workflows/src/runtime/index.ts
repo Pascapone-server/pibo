@@ -12,6 +12,7 @@ import type {
   WorkflowRuntimeEvent,
   WorkflowValue,
 } from "../types/index.js";
+import type { WorkflowRunStore } from "../store/index.js";
 import { validateNodeOutput, validateWorkflow, validateWorkflowInput, validateWorkflowOutput } from "../validation/index.js";
 
 export type OneNodeAgentExecutorContext = {
@@ -128,6 +129,7 @@ export type OneNodeAgentWorkflowOptions = {
   now?: () => Date | string;
   createRunId?: () => WorkflowRunId;
   createNodeAttemptId?: () => NodeAttemptId;
+  store?: WorkflowRunStore;
   agentExecutor: OneNodeAgentExecutor;
 };
 
@@ -319,6 +321,7 @@ export async function runOneNodeAgentWorkflow(
   };
 
   events.push({ type: "workflow.started", runId: run.id, workflowId: definition.id });
+  await persistWorkflowRun(options.store, run);
 
   const nodeAttempt: NodeAttempt = {
     id: options.createNodeAttemptId?.() ?? createId("wna"),
@@ -355,6 +358,7 @@ export async function runOneNodeAgentWorkflow(
         events,
         diagnostics: nodeOutputResult.diagnostics,
         timestamp,
+        store: options.store,
         error: {
           code: "WorkflowRuntimeError.invalidNodeOutput",
           message: "Agent node output failed validation before workflow completion.",
@@ -370,6 +374,7 @@ export async function runOneNodeAgentWorkflow(
         events,
         diagnostics: workflowOutputResult.diagnostics,
         timestamp,
+        store: options.store,
         error: {
           code: "WorkflowRuntimeError.invalidWorkflowOutput",
           message: "Workflow output failed validation before completion.",
@@ -404,6 +409,7 @@ export async function runOneNodeAgentWorkflow(
     run.updatedAt = completedAt;
 
     events.push({ type: "workflow.completed", runId: run.id, output: executorResult.output });
+    await persistWorkflowRun(options.store, run);
 
     return { ok: true, run, nodeAttempt, events, output: executorResult.output };
   } catch (caught) {
@@ -413,6 +419,7 @@ export async function runOneNodeAgentWorkflow(
       events,
       diagnostics: [],
       timestamp,
+      store: options.store,
       error: errorSummaryFromCaught(caught),
     });
   }
@@ -470,14 +477,15 @@ function emitMessageAndWaitForPiboReply(
   });
 }
 
-function failRunningWorkflow(options: {
+async function failRunningWorkflow(options: {
   run: WorkflowRun;
   nodeAttempt: NodeAttempt;
   events: WorkflowRuntimeEvent[];
   diagnostics: WorkflowDiagnostic[];
   timestamp: () => string;
+  store?: WorkflowRunStore;
   error: WorkflowErrorSummary;
-}): OneNodeAgentWorkflowFailure {
+}): Promise<OneNodeAgentWorkflowFailure> {
   const failedAt = options.timestamp();
   options.nodeAttempt.status = "failed";
   options.nodeAttempt.error = options.error;
@@ -493,6 +501,7 @@ function failRunningWorkflow(options: {
     error: options.error,
   });
   options.events.push({ type: "workflow.failed", runId: options.run.id, error: options.error });
+  await persistWorkflowRun(options.store, options.run);
 
   return {
     ok: false,
@@ -510,6 +519,10 @@ function runtimeFailure(
   error: WorkflowErrorSummary,
 ): OneNodeAgentWorkflowFailure {
   return { ok: false, events, diagnostics, error };
+}
+
+async function persistWorkflowRun(store: WorkflowRunStore | undefined, run: WorkflowRun): Promise<void> {
+  await store?.saveRun(run);
 }
 
 function buildOneNodeAgentPrompt(node: AgentNodeDefinition, input: WorkflowValue): string {

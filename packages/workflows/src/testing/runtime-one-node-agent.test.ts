@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import {
   createPiboSessionRoutingAgentExecutor,
   minimalOneNodePiboAgentWorkflowFixture,
   runOneNodeAgentWorkflow,
+  SqliteWorkflowRunStore,
   validateOneNodeAgentWorkflowPath,
 } from "../index.js";
 import type { AgentNodeDefinition, WorkflowDefinition } from "../index.js";
@@ -146,6 +150,47 @@ describe("one-node agent workflow runtime path", () => {
       result.events.map((event) => event.type),
       ["workflow.started", "node.started", "node.completed", "workflow.completed"],
     );
+  });
+
+  it("persists workflow run identity, status, cursor, input, and output", async () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), "pibo-workflows-test-"));
+    const dbPath = join(tempRoot, "pibo-workflows.sqlite");
+    const store = new SqliteWorkflowRunStore(dbPath);
+
+    try {
+      const result = await runOneNodeAgentWorkflow(minimalOneNodePiboAgentWorkflowFixture, "Persist this run.", {
+        ownerScope: "user:persist",
+        now: () => "2026-05-10T23:03:00.000Z",
+        createRunId: () => "wfr_persisted",
+        createNodeAttemptId: () => "wna_persisted",
+        store,
+        agentExecutor: () => ({ output: "Persisted workflow output." }),
+      });
+
+      assert.equal(result.ok, true);
+      assert.deepEqual(store.getRun("wfr_persisted"), result.run);
+      store.close();
+
+      const reopened = new SqliteWorkflowRunStore(dbPath);
+      const persisted = reopened.getRun("wfr_persisted");
+      reopened.close();
+
+      assert.ok(persisted);
+      assert.equal(persisted.id, "wfr_persisted");
+      assert.equal(persisted.workflowId, minimalOneNodePiboAgentWorkflowFixture.id);
+      assert.equal(persisted.workflowVersion, minimalOneNodePiboAgentWorkflowFixture.version);
+      assert.equal(persisted.status, "completed");
+      assert.deepEqual(persisted.current, { nodeId: "answer", status: "completed" });
+      assert.equal(persisted.input, "Persist this run.");
+      assert.equal(persisted.output, "Persisted workflow output.");
+    } finally {
+      try {
+        store.close();
+      } catch {
+        // Already closed by the reopen check.
+      }
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
   });
 
   it("rejects workflows outside the one-node agent shape", () => {
