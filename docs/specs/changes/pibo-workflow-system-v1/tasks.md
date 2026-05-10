@@ -6,7 +6,7 @@
 
 ## 1. Foundation
 
-- [ ] 1.1 Create `packages/workflows` with `src/api`, `src/registry`, `src/types`, `src/validation`, `src/graph`, `src/compiler`, `src/runtime`, `src/store`, `src/xstate`, `src/fixtures`, and `src/testing`.
+- [x] 1.1 Create `packages/workflows` with `src/api`, `src/registry`, `src/types`, `src/validation`, `src/graph`, `src/compiler`, `src/runtime`, `src/store`, `src/xstate`, `src/fixtures`, and `src/testing`.
 - [ ] 1.2 Add TypeScript types for workflow definitions, ports, nodes, edges, registered adapters, run state, human actions, and XState projection.
 - [ ] 1.3 Add schema validation for workflow definitions using the OpenAI Structured Outputs / tool-calling JSON Schema subset.
 - [ ] 1.4 Add fixtures for minimal one-node `pibo-agent`, mixed-node, adapter, human-wait, registry, debug-serialization, nested workflow, and bounded back-edge/review-loop definitions.
