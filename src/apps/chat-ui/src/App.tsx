@@ -2633,9 +2633,9 @@ function SessionTracePane({
 
 	const headerPiboSessionId = currentTraceView?.piboSessionId ?? selectedPiboSessionId ?? "";
 	const headerPiboSessionCopied = copiedHeaderPiboSessionId === headerPiboSessionId;
-	const copyHeaderPiboSessionId = async () => {
+	const copyHeaderPiboSessionId = () => {
 		if (!headerPiboSessionId) return;
-		await copyTextToClipboard(headerPiboSessionId);
+		void copyTextToClipboard(headerPiboSessionId).catch(() => undefined);
 		setCopiedHeaderPiboSessionId(headerPiboSessionId);
 		if (copyHeaderPiboSessionTimeout.current) window.clearTimeout(copyHeaderPiboSessionTimeout.current);
 		copyHeaderPiboSessionTimeout.current = window.setTimeout(() => setCopiedHeaderPiboSessionId(null), 900);
@@ -2681,6 +2681,7 @@ function SessionTracePane({
 							{bootstrap.room?.name ?? selectedRoomId ?? "Room"} · {headerPiboSessionId ? (
 								<button
 									type="button"
+									onMouseDown={(event) => event.preventDefault()}
 									onClick={() => void copyHeaderPiboSessionId()}
 									title={headerPiboSessionCopied ? "Copied Pibo session ID" : "Copy Pibo session ID"}
 									aria-label={headerPiboSessionCopied ? "Copied Pibo session ID" : "Copy Pibo session ID"}
