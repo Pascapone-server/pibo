@@ -83,6 +83,10 @@ export type BasePromptSnapshot = {
 
 export type CompactionPromptMode = "library" | "custom";
 
+export type UserSettings = {
+	timezone: string;
+};
+
 export type CompactionPromptSnapshot = {
 	mode: CompactionPromptMode;
 	effectiveMode: CompactionPromptMode;
@@ -570,6 +574,18 @@ export async function patchModelDefaults(input: ModelDefaults): Promise<ModelDef
 		headers: { "content-type": "application/json" },
 		body: JSON.stringify(input),
 	})).modelDefaults;
+}
+
+export async function getUserSettings(): Promise<UserSettings> {
+	return (await requestJson<{ userSettings: UserSettings }>("/api/chat/user-settings")).userSettings;
+}
+
+export async function patchUserSettings(input: UserSettings): Promise<UserSettings> {
+	return (await requestJson<{ userSettings: UserSettings }>("/api/chat/user-settings", {
+		method: "PATCH",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify(input),
+	})).userSettings;
 }
 
 export async function deleteCustomAgent(id: string, confirmName: string): Promise<{ deletedAgentId: string; deletedSessionIds: string[] }> {

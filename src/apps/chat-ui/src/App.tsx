@@ -41,7 +41,7 @@ import {
 	Wrench,
 	X,
 } from "lucide-react";
-import { createUserSkill, deleteCustomAgent, deletePiPackage, deleteProject, deleteRoom, deleteSession, deleteUserSkill, fetchSignalTree, downloadChatFile, getBootstrap, getNavigation, getProjectsBootstrap, getSessionPage, getTrace, getTraceSummary, getUserSkill, installUserSkill, listUserSkills, markSessionRead, patchCustomAgent, patchModelDefaults, patchPiPackage, patchProject, patchProjectSession, patchRoom, patchSession, postAction, postContextFile, postCustomAgent, postMessage, postPiPackage, postProject, postProjectMessage, postProjectSession, postRoom, postSession, signInWithGoogle, signOut, subscribeSignalTree, updateUserSkill, type SaveCustomAgentInput } from "./api";
+import { createUserSkill, deleteCustomAgent, deletePiPackage, deleteProject, deleteRoom, deleteSession, deleteUserSkill, fetchSignalTree, downloadChatFile, getBootstrap, getNavigation, getProjectsBootstrap, getSessionPage, getTrace, getTraceSummary, getUserSettings, getUserSkill, installUserSkill, listUserSkills, markSessionRead, patchCustomAgent, patchModelDefaults, patchPiPackage, patchProject, patchProjectSession, patchRoom, patchSession, patchUserSettings, postAction, postContextFile, postCustomAgent, postMessage, postPiPackage, postProject, postProjectMessage, postProjectSession, postRoom, postSession, signInWithGoogle, signOut, subscribeSignalTree, updateUserSkill, type SaveCustomAgentInput, type UserSettings } from "./api";
 import { THINKING_LEVELS } from "./types";
 import type { AgentCatalog, BootstrapData, CustomAgent, CustomAgentSubagent, ModelCatalog, ModelDefaults, ModelProfile, NavigationData, PiboProject, ProjectsBootstrapData, PiboRoom, PiboSession, PiboSessionTraceSummary, PiboSessionTraceView, PiboSignalPatch, PiboSignalSnapshot, PiboTraceNode, PiboTraceOrderKey, PiboWebSessionNode, PiboWebSessionStatus, ThinkingLevel, UserSkill } from "./types";
 import type { ChatWebStoredEvent } from "../../../shared/trace-types.js";
@@ -6207,6 +6207,7 @@ function SettingsView({
 				General
 			</h1>
 			<DesignerPanel title="General">
+				<UserTimezoneSettings />
 				<InlineCheckboxToggle
 					checked={showThinking}
 					title="Show thinking blocks"
@@ -6232,6 +6233,52 @@ function SettingsView({
 					onChanged={onModelDefaultsChanged}
 				/>
 			</DesignerPanel>
+		</div>
+	);
+}
+
+function UserTimezoneSettings() {
+	const queryClient = useQueryClient();
+	const { data, isLoading } = useQuery({ queryKey: ["user-settings"], queryFn: getUserSettings });
+	const [draft, setDraft] = useState("");
+	const [saving, setSaving] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+
+	useEffect(() => {
+		if (data?.timezone) setDraft(data.timezone);
+	}, [data?.timezone]);
+
+	const save = async () => {
+		setSaving(true);
+		setError(null);
+		try {
+			const saved = await patchUserSettings({ timezone: draft.trim() } satisfies UserSettings);
+			setDraft(saved.timezone);
+			queryClient.setQueryData(["user-settings"], saved);
+		} catch (err) {
+			setError(err instanceof Error ? err.message : String(err));
+		} finally {
+			setSaving(false);
+		}
+	};
+
+	return (
+		<div className="border-b border-slate-800 pb-4 mb-4">
+			<div className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">User timezone</div>
+			<div className="flex max-w-xl gap-2 max-[640px]:flex-col">
+				<input
+					value={draft}
+					disabled={isLoading || saving}
+					onChange={(event) => setDraft(event.target.value)}
+					className="min-w-0 flex-1 rounded-sm border border-slate-700 bg-[#0e1116] px-3 py-2 text-sm outline-none focus:border-[#11a4d4] disabled:opacity-60"
+					placeholder="Europe/Berlin"
+				/>
+				<button className="rounded-sm border border-slate-700 px-3 py-2 text-xs font-semibold uppercase tracking-wider hover:border-[#11a4d4] disabled:opacity-50" disabled={isLoading || saving || !draft.trim()} onClick={() => void save()}>
+					{saving ? "Saving" : "Save"}
+				</button>
+			</div>
+			<div className="mt-2 text-[11px] text-slate-500">Loaded into every runtime context together with the user ID and current Pibo Session ID.</div>
+			{error ? <div className="mt-2 text-xs text-red-300">{error}</div> : null}
 		</div>
 	);
 }

@@ -32,6 +32,7 @@ import {
 } from "../sessions/store.js";
 import { getDefaultPiboWorkspace } from "./workspace.js";
 import { loadPiboModelDefaults, type PiboModelDefaults } from "./model-defaults.js";
+import { loadPiboUserSettings } from "./user-settings.js";
 import { resolvePiboSessionActiveModel } from "./session-model.js";
 import { RuntimeSessionRegistry } from "../tools/runtime/registry.js";
 
@@ -138,6 +139,11 @@ function isTerminalRunStatus(status: string): boolean {
 
 function asJsonObject(value: PiboJsonObject | undefined): PiboJsonObject {
 	return value ?? {};
+}
+
+function userIdFromOwnerScope(ownerScope: string | undefined): string | undefined {
+	if (!ownerScope) return undefined;
+	return ownerScope.startsWith("user:") ? ownerScope.slice("user:".length) : ownerScope;
 }
 
 export class PiboSessionRouter {
@@ -362,6 +368,7 @@ export class PiboSessionRouter {
 			: undefined;
 		const modelDefaults = this.resolveModelDefaults();
 		const activeModel = this.ensureSessionActiveModel(piboSession, profile, parentPiSessionId, modelDefaults);
+		const userSettings = loadPiboUserSettings(piboSession.ownerScope ?? "user:unknown");
 		const runtime = await createPiboRuntime({
 			cwd: piboSession.workspace ?? this.options.cwd,
 			persistSession: this.options.persistSession,
@@ -372,6 +379,12 @@ export class PiboSessionRouter {
 			runtimeToolController: this.runtimeRegistry.createController(piboSession.id),
 			modelDefaults,
 			activeModel,
+			sessionContext: {
+				userId: userIdFromOwnerScope(piboSession.ownerScope),
+				ownerScope: piboSession.ownerScope,
+				piboSessionId: piboSession.id,
+				timezone: userSettings.timezone,
+			},
 		});
 		const session = new RoutedSession(
 			piboSession.id,

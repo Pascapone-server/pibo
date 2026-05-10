@@ -45,6 +45,7 @@ import {
 	savePiboModelDefaults,
 	type PiboModelDefaults,
 } from "../../core/model-defaults.js";
+import { loadPiboUserSettings, sanitizeTimezone, updatePiboUserSettings } from "../../core/user-settings.js";
 import { loadModelCatalog } from "./model-catalog.js";
 import type { ModelProfile } from "../../core/profiles.js";
 import { isPiboThinkingLevel, type PiboThinkingLevel } from "../../core/thinking.js";
@@ -320,6 +321,10 @@ type ChatModelDefaultsBody = {
 	main?: unknown;
 	subagent?: unknown;
 	thinking?: unknown;
+};
+
+type ChatUserSettingsBody = {
+	timezone?: unknown;
 };
 
 type ChatMessageBody = {
@@ -3535,6 +3540,20 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				const modelDefaults = updateChatModelDefaults(body, process.cwd());
 				invalidateBootstrapCatalogCache(state);
 				return responseJson({ modelDefaults });
+			}
+
+			if (url.pathname === `${CHAT_WEB_API_PREFIX}/user-settings` && request.method === "GET") {
+				const webSession = await requireSession(request, context);
+				return responseJson({ userSettings: loadPiboUserSettings(webSession.ownerScope) });
+			}
+
+			if (url.pathname === `${CHAT_WEB_API_PREFIX}/user-settings` && request.method === "PATCH") {
+				requireSameOriginJsonRequest(request);
+				const webSession = await requireSession(request, context);
+				const body = await readJsonBody<ChatUserSettingsBody>(request);
+				const timezone = sanitizeTimezone(body.timezone);
+				if (!timezone) throw new PiboWebHttpError("Invalid timezone", 400);
+				return responseJson({ userSettings: updatePiboUserSettings(webSession.ownerScope, { timezone }) });
 			}
 
 			if (url.pathname === `${CHAT_WEB_API_PREFIX}/pi-packages` && request.method === "GET") {
