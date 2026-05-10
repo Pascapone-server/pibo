@@ -128,7 +128,7 @@ export class PythonRuntimeBackend implements RuntimeBackend {
 		try {
 			const response = await this.request("exec", {
 				code: input.code,
-				mode: "exec",
+				mode: input.mode ?? "exec",
 			}, input.timeoutMs ?? 30000);
 			return {
 				status: normalizeExecStatus(response.status),

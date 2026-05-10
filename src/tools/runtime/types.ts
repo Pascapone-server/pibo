@@ -43,6 +43,7 @@ export type RuntimeExecInput = {
 	target?: RuntimeTarget;
 	code: string;
 	timeoutMs?: number;
+	mode?: "exec" | "eval" | "auto";
 	closeOnSuccess?: boolean;
 };
 
@@ -162,7 +163,7 @@ export type RuntimeHistoryEntry = {
 };
 
 export type RuntimeBackend = {
-	exec(input: Pick<RuntimeExecInput, "code" | "timeoutMs">): Promise<RuntimeExecResult>;
+	exec(input: Pick<RuntimeExecInput, "code" | "timeoutMs" | "mode">): Promise<RuntimeExecResult>;
 	inspect(input: Omit<RuntimeInspectInput, "sessionId">): Promise<RuntimeInspectResult>;
 	vars(input: Omit<RuntimeVarsInput, "sessionId">): Promise<RuntimeVarsResult>;
 	interrupt(): Promise<RuntimeInterruptResult>;

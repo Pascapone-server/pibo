@@ -128,7 +128,7 @@ export class NodeRuntimeBackend implements RuntimeBackend {
 		try {
 			const response = await this.request("exec", {
 				code: input.code,
-				mode: "exec",
+				mode: input.mode ?? "exec",
 				timeoutMs: input.timeoutMs ?? 30000,
 			}, input.timeoutMs ?? 30000);
 			return {

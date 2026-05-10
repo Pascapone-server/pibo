@@ -72,16 +72,24 @@ export function sanitizePiboModelDefaults(value: unknown): PiboModelDefaults {
 	const raw = value && typeof value === "object" && !Array.isArray(value)
 		? value as Record<string, unknown>
 		: {};
-	return {
-		main: sanitizeModelProfile(raw.main),
-		subagent: sanitizeModelProfile(raw.subagent),
-		thinking: sanitizeThinkingLevel(raw.thinking),
-		mainThinking: sanitizeThinkingLevel(raw.mainThinking),
-		subagentThinking: sanitizeThinkingLevel(raw.subagentThinking),
-		fast: sanitizeBoolean(raw.fast),
-		mainFast: sanitizeBoolean(raw.mainFast),
-		subagentFast: sanitizeBoolean(raw.subagentFast),
-	};
+	const sanitized: PiboModelDefaults = {};
+	const main = sanitizeModelProfile(raw.main);
+	const subagent = sanitizeModelProfile(raw.subagent);
+	const thinking = sanitizeThinkingLevel(raw.thinking);
+	const mainThinking = sanitizeThinkingLevel(raw.mainThinking);
+	const subagentThinking = sanitizeThinkingLevel(raw.subagentThinking);
+	const fast = sanitizeBoolean(raw.fast);
+	const mainFast = sanitizeBoolean(raw.mainFast);
+	const subagentFast = sanitizeBoolean(raw.subagentFast);
+	if (main) sanitized.main = main;
+	if (subagent) sanitized.subagent = subagent;
+	if (thinking) sanitized.thinking = thinking;
+	if (mainThinking) sanitized.mainThinking = mainThinking;
+	if (subagentThinking) sanitized.subagentThinking = subagentThinking;
+	if (fast !== undefined) sanitized.fast = fast;
+	if (mainFast !== undefined) sanitized.mainFast = mainFast;
+	if (subagentFast !== undefined) sanitized.subagentFast = subagentFast;
+	return sanitized;
 }
 
 export function sanitizeThinkingLevel(value: unknown): PiboThinkingLevel | undefined {

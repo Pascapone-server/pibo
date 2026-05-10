@@ -45,6 +45,7 @@ type RuntimeToolParams = {
 	sessionId?: string;
 	code?: string;
 	timeoutMs?: number;
+	mode?: "exec" | "eval" | "auto";
 	closeOnSuccess?: boolean;
 	expression?: string;
 	what?: "summary" | "signature" | "members" | "source" | "doc" | "all";
@@ -133,6 +134,7 @@ export function createRuntimeToolDefinition(controller: PiboRuntimeToolControlle
 			sessionId: Type.Optional(Type.String({ description: "Existing runtime session id; omit to use auto runtime." })),
 			code: Type.Optional(Type.String({ description: "Code to execute for exec." })),
 			timeoutMs: Type.Optional(Type.Number({ description: "Action timeout in milliseconds." })),
+			mode: Type.Optional(StringEnum(["exec", "eval", "auto"], { description: "For exec: execution mode. Use eval when you need an expression result." })),
 			closeOnSuccess: Type.Optional(Type.Boolean({ description: "For exec: close the runtime only if execution succeeds." })),
 			expression: Type.Optional(Type.String({ description: "Expression to inspect." })),
 			what: Type.Optional(StringEnum(["summary", "signature", "members", "source", "doc", "all"], { description: "Inspection detail to return." })),
@@ -152,6 +154,7 @@ export function createRuntimeToolDefinition(controller: PiboRuntimeToolControlle
 							target: validateTarget(params.target),
 							code: requireString(params.code, "code"),
 							timeoutMs: params.timeoutMs,
+							mode: params.mode,
 							closeOnSuccess: params.closeOnSuccess,
 						});
 						break;
