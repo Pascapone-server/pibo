@@ -1,4 +1,5 @@
 ## Codebase Patterns
+- Direct workflow edge compatibility is conservative: text ports match text ports, and JSON ports match only when their semantic schema contracts are equivalent; otherwise use an explicit edge adapter or adapter node.
 - Single-prompt one-node runtime coverage should assert validation, routed Pibo session creation/message emission, trace events, and reopened `SqliteWorkflowRunStore` facts in one end-to-end test.
 - Workflow run persistence is exposed through `WorkflowRunStore` and `SqliteWorkflowRunStore` in `packages/workflows/src/store/index.ts`; inject a store into `runOneNodeAgentWorkflow` when a runtime path must persist run status/cursor/input/output facts.
 - One-node agent runtime trace/event projection uses the optional `emitEvent` hook on `runOneNodeAgentWorkflow`; it receives the same `WorkflowRuntimeEvent` objects returned in `result.events`.
@@ -210,4 +211,17 @@
   - Keep graph-structure failures separate from interface/schema failures by using `WorkflowGraphError.*` diagnostics.
   - Edge diagnostics should include both `edgeId` and the referenced `nodeId` so future UI/CLI inspection can highlight the bad edge endpoint directly.
   - Edge node-reference validation currently runs before later compatibility/adapters checks in `validateWorkflow`, so story 4.2 can safely assume source/target nodes exist or report its own diagnostics after this pass.
+---
+
+## 2026-05-10 23:19 UTC - 4.2
+- Implemented direct workflow edge port compatibility validation for non-adapted edges.
+- Added a public `areWorkflowPortsDirectlyCompatible` helper that accepts text-to-text edges and conservatively accepts JSON-to-JSON edges only when their semantic schema contracts match.
+- Added validation tests for compatible JSON direct edges, text-to-JSON incompatibility, and incompatible JSON schema contracts.
+- Marked task `4.2` complete in the workflow-system task list because no `prd_*.json` files exist in this worktree.
+- Quality checks: `npm --prefix packages/workflows run typecheck`; `npm --prefix packages/workflows test`; root `npm run typecheck`; container `docker exec pibo-dev-Workflows ... npm --prefix packages/workflows run typecheck && npm --prefix packages/workflows test && npm run typecheck`.
+- Files changed: `packages/workflows/src/validation/index.ts`, `packages/workflows/src/testing/validation.test.ts`, `docs/specs/changes/pibo-workflow-system-v1/tasks.md`, `progress.txt`.
+- **Learnings for future iterations:**
+  - Direct JSON edge compatibility deliberately uses semantic schema equality rather than broad JSON Schema subsumption; if compatibility cannot be proven, future adapter stories should require an explicit adapter.
+  - Edge compatibility validation skips edges with `edge.adapter` so adapter-specific output-to-target checks can be layered in the later adapter stories without rejecting existing adapter fixtures.
+  - Keep graph compatibility diagnostics in the `WorkflowGraphError.*` family with `edgeId` and JSONPath-like `path` fields for UI/CLI highlighting.
 ---

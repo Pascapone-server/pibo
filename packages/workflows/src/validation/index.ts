@@ -62,6 +62,22 @@ export function validateWorkflow(definition: WorkflowDefinition): ValidationResu
   return validateWorkflowDefinitionSchemas(definition);
 }
 
+export function areWorkflowPortsDirectlyCompatible(source: WorkflowPort, target: WorkflowPort): boolean {
+  if (source.kind !== target.kind) {
+    return false;
+  }
+
+  if (source.kind === "text" && target.kind === "text") {
+    return true;
+  }
+
+  if (source.kind === "json" && target.kind === "json") {
+    return semanticJsonSchemasEqual(source.schema, target.schema);
+  }
+
+  return false;
+}
+
 export function validateWorkflowDefinitionSchemas(definition: WorkflowDefinition): ValidationResult {
   const diagnostics: WorkflowDiagnostic[] = [];
 
@@ -74,6 +90,7 @@ export function validateWorkflowDefinitionSchemas(definition: WorkflowDefinition
 
   for (const [edgeId, edge] of Object.entries(definition.edges)) {
     validateWorkflowEdgeNodeRefs(definition, edgeId, edge, diagnostics);
+    validateWorkflowEdgePortCompatibility(definition, edgeId, edge, diagnostics);
 
     if (edge.adapter) {
       validateWorkflowPort(edge.adapter.output, `$.edges.${edgeId}.adapter.output`, diagnostics, { edgeId });
@@ -262,6 +279,36 @@ function validateWorkflowEdgeNodeRefs(
       hint: "Update the edge target to reference a declared workflow node id, or add the missing node to the workflow definition.",
     });
   }
+}
+
+function validateWorkflowEdgePortCompatibility(
+  definition: Pick<WorkflowDefinition, "nodes">,
+  edgeId: string,
+  edge: WorkflowEdgeDefinition,
+  diagnostics: WorkflowDiagnostic[],
+): void {
+  if (edge.adapter) {
+    return;
+  }
+
+  const sourceNode = definition.nodes[edge.from.nodeId];
+  const targetNode = definition.nodes[edge.to.nodeId];
+  if (!sourceNode || !targetNode || !sourceNode.output || !targetNode.input) {
+    return;
+  }
+
+  if (areWorkflowPortsDirectlyCompatible(sourceNode.output, targetNode.input)) {
+    return;
+  }
+
+  diagnostics.push({
+    code: "WorkflowGraphError.incompatibleEdgePorts",
+    message: `Workflow edge '${edgeId}' connects incompatible source output and target input ports.`,
+    severity: "error",
+    edgeId,
+    path: `$.edges.${edgeId}`,
+    hint: "Use matching text ports, use JSON ports with the same schema contract, or add an explicit edgeAdapter/adapter node to transform the payload.",
+  });
 }
 
 function validateNodeSchemas(
@@ -767,6 +814,47 @@ function valueMatchesType(value: unknown, typeName: JsonSchemaTypeName): boolean
 
 function formatSchemaTypes(types: JsonSchemaTypeName[]): string {
   return types.length === 1 ? `'${types[0]}'` : `one of ${types.map((typeName) => `'${typeName}'`).join(", ")}`;
+}
+
+function semanticJsonSchemasEqual(left: JsonSchema, right: JsonSchema): boolean {
+  return jsonValuesEqual(normalizeSemanticJsonSchema(left), normalizeSemanticJsonSchema(right));
+}
+
+function normalizeSemanticJsonSchema(value: unknown, key?: string): unknown {
+  if (Array.isArray(value)) {
+    const normalizedItems = value.map((item) => normalizeSemanticJsonSchema(item));
+    if (key === "required" || key === "type" || key === "enum" || key === "anyOf") {
+      return normalizedItems.sort((left, right) => stableJsonStringify(left).localeCompare(stableJsonStringify(right)));
+    }
+
+    return normalizedItems;
+  }
+
+  if (isRecord(value)) {
+    const normalizedEntries = Object.entries(value)
+      .filter(([entryKey]) => entryKey !== "title" && entryKey !== "description" && entryKey !== "default")
+      .map(([entryKey, entryValue]) => [entryKey, normalizeSemanticJsonSchema(entryValue, entryKey)] as const)
+      .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey));
+
+    return Object.fromEntries(normalizedEntries);
+  }
+
+  return value;
+}
+
+function stableJsonStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableJsonStringify(item)).join(",")}]`;
+  }
+
+  if (isRecord(value)) {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJsonStringify(value[key])}`)
+      .join(",")}}`;
+  }
+
+  return JSON.stringify(value);
 }
 
 function jsonValuesEqual(left: unknown, right: unknown): boolean {

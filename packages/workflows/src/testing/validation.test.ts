@@ -310,6 +310,79 @@ describe("workflow definition validation", () => {
     );
   });
 
+  it("accepts direct edges with compatible source output and target input ports", () => {
+    const definition = withDefinitionMutation((draft) => {
+      const payloadSchema = strictObjectSchema({ value: { type: "string" } });
+      draft.nodes.answer.output = { kind: "json", schema: payloadSchema };
+      draft.nodes.next = {
+        kind: "code",
+        language: "typescript",
+        handler: "fixture.handlers.next",
+        input: { kind: "json", schema: structuredClone(payloadSchema) as JsonSchema },
+        output: { kind: "text" },
+      };
+      draft.edges["answer-to-next"] = {
+        id: "answer-to-next",
+        from: { nodeId: "answer" },
+        to: { nodeId: "next" },
+        kind: "data",
+      };
+    });
+
+    assert.equal(validateWorkflow(definition).ok, true);
+  });
+
+  it("rejects direct edges with incompatible source output and target input ports", () => {
+    const definition = withDefinitionMutation((draft) => {
+      draft.nodes.next = {
+        kind: "code",
+        language: "typescript",
+        handler: "fixture.handlers.next",
+        input: { kind: "json", schema: strictObjectSchema({ value: { type: "string" } }) },
+        output: { kind: "text" },
+      };
+      draft.edges["answer-to-next"] = {
+        id: "answer-to-next",
+        from: { nodeId: "answer" },
+        to: { nodeId: "next" },
+        kind: "data",
+      };
+    });
+
+    const result = validateWorkflow(definition);
+
+    assert.equal(result.ok, false);
+    findDiagnostic(
+      result,
+      "WorkflowGraphError.incompatibleEdgePorts",
+      (diagnostic) => diagnostic.edgeId === "answer-to-next" && diagnostic.path === "$.edges.answer-to-next",
+    );
+  });
+
+  it("rejects direct JSON edges when schema compatibility cannot be proven", () => {
+    const definition = withDefinitionMutation((draft) => {
+      draft.nodes.answer.output = { kind: "json", schema: strictObjectSchema({ value: { type: "number" } }) };
+      draft.nodes.next = {
+        kind: "code",
+        language: "typescript",
+        handler: "fixture.handlers.next",
+        input: { kind: "json", schema: strictObjectSchema({ value: { type: "string" } }) },
+        output: { kind: "text" },
+      };
+      draft.edges["answer-to-next"] = {
+        id: "answer-to-next",
+        from: { nodeId: "answer" },
+        to: { nodeId: "next" },
+        kind: "data",
+      };
+    });
+
+    const result = validateWorkflow(definition);
+
+    assert.equal(result.ok, false);
+    findDiagnostic(result, "WorkflowGraphError.incompatibleEdgePorts", (diagnostic) => diagnostic.edgeId === "answer-to-next");
+  });
+
   it("rejects malformed edge adapter output schemas", () => {
     const definition = withDefinitionMutation((draft) => {
       draft.nodes.next = {
