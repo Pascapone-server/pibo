@@ -30,7 +30,7 @@
 
 ## 4. Requirement: Workflows compose through edges
 
-- [ ] 4.1 Add edge validation for source and target node existence.
+- [x] 4.1 Add edge validation for source and target node existence.
 - [ ] 4.2 Add direct compatibility checks between source output port and target input port.
 - [ ] 4.3 Implement edge data transfer.
 - [ ] 4.4 Record edge transfer events in the workflow run.

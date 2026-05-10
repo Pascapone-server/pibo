@@ -279,6 +279,37 @@ describe("workflow definition validation", () => {
     );
   });
 
+  it("rejects edges that reference missing source or target nodes", () => {
+    const definition = withDefinitionMutation((draft) => {
+      draft.edges["missing-links"] = {
+        id: "missing-links",
+        from: { nodeId: "missing-source" },
+        to: { nodeId: "missing-target" },
+        kind: "data",
+      };
+    });
+
+    const result = validateWorkflow(definition);
+
+    assert.equal(result.ok, false);
+    findDiagnostic(
+      result,
+      "WorkflowGraphError.unknownSourceNode",
+      (diagnostic) =>
+        diagnostic.edgeId === "missing-links" &&
+        diagnostic.nodeId === "missing-source" &&
+        diagnostic.path === "$.edges.missing-links.from.nodeId",
+    );
+    findDiagnostic(
+      result,
+      "WorkflowGraphError.unknownTargetNode",
+      (diagnostic) =>
+        diagnostic.edgeId === "missing-links" &&
+        diagnostic.nodeId === "missing-target" &&
+        diagnostic.path === "$.edges.missing-links.to.nodeId",
+    );
+  });
+
   it("rejects malformed edge adapter output schemas", () => {
     const definition = withDefinitionMutation((draft) => {
       draft.nodes.next = {

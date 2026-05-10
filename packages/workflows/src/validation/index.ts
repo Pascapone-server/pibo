@@ -4,6 +4,7 @@ import type {
   ValidationResult,
   WorkflowDefinition,
   WorkflowDiagnostic,
+  WorkflowEdgeDefinition,
   WorkflowNodeDefinition,
   WorkflowPort,
 } from "../types/index.js";
@@ -72,6 +73,8 @@ export function validateWorkflowDefinitionSchemas(definition: WorkflowDefinition
   }
 
   for (const [edgeId, edge] of Object.entries(definition.edges)) {
+    validateWorkflowEdgeNodeRefs(definition, edgeId, edge, diagnostics);
+
     if (edge.adapter) {
       validateWorkflowPort(edge.adapter.output, `$.edges.${edgeId}.adapter.output`, diagnostics, { edgeId });
     }
@@ -228,6 +231,37 @@ export function validateJsonValueAgainstSchema(
   validateValueNode(schema, value, options.path ?? "$.value", context);
 
   return diagnostics;
+}
+
+function validateWorkflowEdgeNodeRefs(
+  definition: Pick<WorkflowDefinition, "nodes">,
+  edgeId: string,
+  edge: WorkflowEdgeDefinition,
+  diagnostics: WorkflowDiagnostic[],
+): void {
+  if (!Object.hasOwn(definition.nodes, edge.from.nodeId)) {
+    diagnostics.push({
+      code: "WorkflowGraphError.unknownSourceNode",
+      message: `Workflow edge '${edgeId}' references missing source node '${edge.from.nodeId}'.`,
+      severity: "error",
+      edgeId,
+      nodeId: edge.from.nodeId,
+      path: `$.edges.${edgeId}.from.nodeId`,
+      hint: "Update the edge source to reference a declared workflow node id, or add the missing node to the workflow definition.",
+    });
+  }
+
+  if (!Object.hasOwn(definition.nodes, edge.to.nodeId)) {
+    diagnostics.push({
+      code: "WorkflowGraphError.unknownTargetNode",
+      message: `Workflow edge '${edgeId}' references missing target node '${edge.to.nodeId}'.`,
+      severity: "error",
+      edgeId,
+      nodeId: edge.to.nodeId,
+      path: `$.edges.${edgeId}.to.nodeId`,
+      hint: "Update the edge target to reference a declared workflow node id, or add the missing node to the workflow definition.",
+    });
+  }
 }
 
 function validateNodeSchemas(
