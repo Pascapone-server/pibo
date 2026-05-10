@@ -31,7 +31,7 @@ import {
 	type PiboSessionStore,
 } from "../sessions/store.js";
 import { getDefaultPiboWorkspace } from "./workspace.js";
-import { loadPiboModelDefaults, type PiboModelDefaults } from "./model-defaults.js";
+import { loadPiboModelDefaults, selectRequestedFastMode, type PiboModelDefaults } from "./model-defaults.js";
 import { loadPiboUserSettings } from "./user-settings.js";
 import { resolvePiboSessionActiveModel } from "./session-model.js";
 import { RuntimeSessionRegistry } from "../tools/runtime/registry.js";
@@ -76,6 +76,11 @@ function profileForSession(
 		mainModel: baseProfile.mainModel,
 		subagentModel: baseProfile.subagentModel,
 		thinkingLevel: baseProfile.thinkingLevel,
+		mainThinkingLevel: baseProfile.mainThinkingLevel,
+		subagentThinkingLevel: baseProfile.subagentThinkingLevel,
+		fast: baseProfile.fast,
+		mainFast: baseProfile.mainFast,
+		subagentFast: baseProfile.subagentFast,
 		skills: baseProfile.skills,
 		tools: baseProfile.tools,
 		subagents: baseProfile.subagents,
@@ -386,12 +391,14 @@ export class PiboSessionRouter {
 				timezone: userSettings.timezone,
 			},
 		});
+		const initialFastMode = selectRequestedFastMode(profileForSession(profile, piboSession.piSessionId, parentPiSessionId), modelDefaults) ?? false;
 		const session = new RoutedSession(
 			piboSession.id,
 			runtime,
 			this.emitOutput,
 			this.pluginRegistry,
 			this.options.forwardPiEvents ?? false,
+			initialFastMode,
 			(result, event) => this.handleSessionOperation(result, event),
 			(id, opts) => this.killChildSessions(id, opts),
 			(state) => this.signalRegistry.project({ type: "session_processing_changed", piboSessionId: piboSession.id, processing: state.processing, queuedMessages: state.queuedMessages }),

@@ -2581,11 +2581,12 @@ function SessionTracePane({
 	}, [currentTraceView?.latestStreamId, currentTraceView?.piboSessionId, enqueueStreamEvent, onError, onRefreshBootstrap, onRefreshTrace, selectedPiboSessionId, tracePageQueryKey]);
 
 	const selectedTrace = null;
+	const selectedSessionNode = selectedPiboSessionId ? findSessionNode(bootstrap.sessions, selectedPiboSessionId) : undefined;
 	const traceThinkingState = resolveTraceThinkingState(currentTraceView);
 	const sessionActiveModelBadge = formatSessionModelBadge(
 		selectedSessionActiveModel,
-		bootstrap.runtimeStatus?.thinkingLevel ?? traceThinkingState.level ?? resolveSessionThinkingLevel(bootstrap, selectedSessionProfile),
-		bootstrap.runtimeStatus?.fastMode ?? traceThinkingState.fast,
+		bootstrap.runtimeStatus?.thinkingLevel ?? traceThinkingState.level ?? resolveSessionThinkingLevel(bootstrap, selectedSessionProfile, Boolean(selectedSessionNode?.parentId)),
+		bootstrap.runtimeStatus?.fastMode ?? traceThinkingState.fast ?? resolveSessionFastMode(bootstrap, selectedSessionProfile, Boolean(selectedSessionNode?.parentId)) ?? false,
 	);
 	const sessionBreadcrumbs = useMemo(
 		() => selectedPiboSessionId ? createSessionBreadcrumbs(bootstrap.sessions, selectedPiboSessionId) : [],
@@ -4077,10 +4078,20 @@ function resolveSessionActiveModel(
 	return profileModel?.mainModel ?? bootstrap.modelDefaults?.main;
 }
 
-function resolveSessionThinkingLevel(bootstrap: BootstrapData, profileName: string): ThinkingLevel | undefined {
+function resolveSessionThinkingLevel(bootstrap: BootstrapData, profileName: string, isSubagent = false): ThinkingLevel | undefined {
 	const staticAgent = bootstrap.agents.find((agent) => agent.name === profileName);
 	const customAgent = bootstrap.customAgents.find((agent) => agent.profileName === profileName);
-	return staticAgent?.thinkingLevel ?? customAgent?.thinkingLevel ?? bootstrap.modelDefaults?.thinking;
+	const profile = staticAgent ?? customAgent;
+	if (isSubagent) return profile?.subagentThinkingLevel ?? profile?.thinkingLevel ?? bootstrap.modelDefaults?.subagentThinking ?? bootstrap.modelDefaults?.thinking;
+	return profile?.mainThinkingLevel ?? profile?.thinkingLevel ?? bootstrap.modelDefaults?.mainThinking ?? bootstrap.modelDefaults?.thinking;
+}
+
+function resolveSessionFastMode(bootstrap: BootstrapData, profileName: string, isSubagent = false): boolean | undefined {
+	const staticAgent = bootstrap.agents.find((agent) => agent.name === profileName);
+	const customAgent = bootstrap.customAgents.find((agent) => agent.profileName === profileName);
+	const profile = staticAgent ?? customAgent;
+	if (isSubagent) return profile?.subagentFast ?? profile?.fast ?? bootstrap.modelDefaults?.subagentFast ?? bootstrap.modelDefaults?.fast;
+	return profile?.mainFast ?? profile?.fast ?? bootstrap.modelDefaults?.mainFast ?? bootstrap.modelDefaults?.fast;
 }
 
 function formatSessionModelBadge(modelLabel: string | undefined, thinkingLevel: ThinkingLevel | undefined, fast: boolean): string | undefined {
@@ -4088,8 +4099,8 @@ function formatSessionModelBadge(modelLabel: string | undefined, thinkingLevel: 
 	return [modelLabel, thinkingLevel, fast ? "fast" : undefined].filter(Boolean).join(" ");
 }
 
-function resolveTraceThinkingState(traceView: PiboSessionTraceView | null): { level?: ThinkingLevel; fast: boolean } {
-	let state: { level?: ThinkingLevel; fast: boolean } = { fast: false };
+function resolveTraceThinkingState(traceView: PiboSessionTraceView | null): { level?: ThinkingLevel; fast?: boolean } {
+	let state: { level?: ThinkingLevel; fast?: boolean } = {};
 	if (!traceView) return state;
 	for (const node of flattenTraceNodes(traceView.nodes)) {
 		if (node.type !== "execution.command" || (node.title !== "thinking" && node.title !== "fast_mode")) continue;
@@ -4097,7 +4108,7 @@ function resolveTraceThinkingState(traceView: PiboSessionTraceView | null): { le
 		const level = typeof output?.level === "string" && isThinkingLevel(output.level) ? output.level : undefined;
 		state = {
 			level: level ?? state.level,
-			fast: node.title === "fast_mode" ? output?.mode === "fast" : false,
+			fast: node.title === "fast_mode" ? output?.mode === "fast" : state.fast,
 		};
 	}
 	return state;
@@ -4636,6 +4647,11 @@ function AgentsView({
 				mainModel: draft.mainModel,
 				subagentModel: draft.subagentModel,
 				thinkingLevel: draft.thinkingLevel ?? null,
+				mainThinkingLevel: draft.mainThinkingLevel ?? null,
+				subagentThinkingLevel: draft.subagentThinkingLevel ?? null,
+				fast: draft.fast,
+				mainFast: draft.mainFast,
+				subagentFast: draft.subagentFast,
 				builtinTools: draft.builtinTools,
 				builtinToolNames: draft.builtinToolNames,
 				autoContextFiles: draft.autoContextFiles,
@@ -4850,32 +4866,33 @@ function AgentsView({
 								This plugin profile hard-pins <span className="font-mono">{formatModelProfile(draft.hardPinnedModel)}</span>. Main-agent and subagent defaults do not apply.
 							</div>
 						) : null}
-						<ModelSelector
-							title="Main Agent Model"
-							catalog={modelCatalog}
-							value={draft.mainModel}
-							allowUnset
+						<AgentRuntimeOptions
+							title="Main Agent"
+							modelTitle="Main Agent Model"
+							model={draft.mainModel}
+							thinking={draft.mainThinkingLevel}
+							fast={draft.mainFast}
+							modelCatalog={modelCatalog}
 							readOnly={readOnly}
-							hint="Unset to use the settings default."
-							emptyProviderLabel="Default"
-							onChange={(mainModel) => setDraft((current) => ({ ...current, mainModel }))}
+							modelHint="Unset to use the settings default."
+							thinkingHint="Unset to use the settings default."
+							onModelChange={(mainModel) => setDraft((current) => ({ ...current, mainModel }))}
+							onThinkingChange={(mainThinkingLevel) => setDraft((current) => ({ ...current, mainThinkingLevel }))}
+							onFastChange={(mainFast) => setDraft((current) => ({ ...current, mainFast }))}
 						/>
-						<ModelSelector
-							title="Subagent Model"
-							catalog={modelCatalog}
-							value={draft.subagentModel}
-							allowUnset
+						<AgentRuntimeOptions
+							title="Subagent"
+							modelTitle="Subagent Model"
+							model={draft.subagentModel}
+							thinking={draft.subagentThinkingLevel}
+							fast={draft.subagentFast}
+							modelCatalog={modelCatalog}
 							readOnly={readOnly}
-							hint="Unset to use the settings default."
-							emptyProviderLabel="Default"
-							onChange={(subagentModel) => setDraft((current) => ({ ...current, subagentModel }))}
-						/>
-						<ThinkingLevelSelector
-							title="Thinking Level"
-							value={draft.thinkingLevel}
-							readOnly={readOnly}
-							hint="Unset to use the settings default."
-							onChange={(thinkingLevel) => setDraft((current) => ({ ...current, thinkingLevel }))}
+							modelHint="Unset to use the settings default."
+							thinkingHint="Unset to use the settings default."
+							onModelChange={(subagentModel) => setDraft((current) => ({ ...current, subagentModel }))}
+							onThinkingChange={(subagentThinkingLevel) => setDraft((current) => ({ ...current, subagentThinkingLevel }))}
+							onFastChange={(subagentFast) => setDraft((current) => ({ ...current, subagentFast }))}
 						/>
 						<InlineCheckboxToggle disabled={readOnly} checked={draft.autoContextFiles} title="Load AGENTS.md / CLAUDE.md" onToggle={() => setDraft((current) => ({ ...current, autoContextFiles: !current.autoContextFiles }))} />
 						<BuiltinToolsDesigner draft={draft} setDraft={setDraft} readOnly={readOnly} />
@@ -5020,6 +5037,11 @@ type AgentDraft = SaveCustomAgentInput & {
 	archivedAt?: string;
 	hardPinnedModel?: ModelProfile;
 	thinkingLevel?: ThinkingLevel;
+	mainThinkingLevel?: ThinkingLevel;
+	subagentThinkingLevel?: ThinkingLevel;
+	fast?: boolean;
+	mainFast?: boolean;
+	subagentFast?: boolean;
 	brokenContextFiles?: string[];
 	source: "custom" | "profile";
 };
@@ -5037,6 +5059,11 @@ function createBlankAgentDraft(catalog?: AgentCatalog): AgentDraft {
 		mainModel: undefined,
 		subagentModel: undefined,
 		thinkingLevel: undefined,
+		mainThinkingLevel: undefined,
+		subagentThinkingLevel: undefined,
+		fast: undefined,
+		mainFast: undefined,
+		subagentFast: undefined,
 		builtinTools: "default",
 		builtinToolNames: [...DEFAULT_BUILTIN_TOOL_NAMES],
 		autoContextFiles: true,
@@ -5062,6 +5089,11 @@ function agentToDraft(agent: CustomAgent): AgentDraft {
 		mainModel: agent.mainModel,
 		subagentModel: agent.subagentModel,
 		thinkingLevel: agent.thinkingLevel,
+		mainThinkingLevel: agent.mainThinkingLevel,
+		subagentThinkingLevel: agent.subagentThinkingLevel,
+		fast: agent.fast,
+		mainFast: agent.mainFast,
+		subagentFast: agent.subagentFast,
 		builtinTools: agent.builtinTools,
 		builtinToolNames: normalizeBuiltinToolNames(agent.builtinToolNames, agent.builtinTools),
 		autoContextFiles: agent.autoContextFiles ?? true,
@@ -5086,6 +5118,11 @@ function profileToDraft(profile: BootstrapData["agents"][number], catalog?: Agen
 		mainModel: profile.mainModel ?? profile.model,
 		subagentModel: profile.subagentModel ?? profile.model,
 		thinkingLevel: profile.thinkingLevel,
+		mainThinkingLevel: profile.mainThinkingLevel ?? profile.thinkingLevel,
+		subagentThinkingLevel: profile.subagentThinkingLevel ?? profile.thinkingLevel,
+		fast: profile.fast,
+		mainFast: profile.mainFast ?? profile.fast,
+		subagentFast: profile.subagentFast ?? profile.fast,
 		builtinTools: profile.builtinTools ?? "default",
 		builtinToolNames: normalizeBuiltinToolNames(profile.builtinToolNames, profile.builtinTools),
 		autoContextFiles: profile.autoContextFiles ?? true,
@@ -6317,34 +6354,106 @@ function ModelDefaultsSettings({
 	return (
 		<div className="grid gap-3 border-t border-slate-800 pt-3">
 			<div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Runtime Model Defaults</div>
-			<ModelSelector
-				title="Main Agent Default"
-				catalog={modelCatalog}
-				value={draft.main}
-				allowUnset
+			<AgentRuntimeOptions
+				title="Main Agent"
+				modelTitle="Main Agent Default"
+				model={draft.main}
+				thinking={draft.mainThinking}
+				fast={draft.mainFast}
+				modelCatalog={modelCatalog}
 				readOnly={saving}
-				hint="Unset to use provider fallback."
+				modelHint="Unset to use provider fallback."
+				thinkingHint="Unset to use the provider/runtime fallback."
 				configuredProvidersOnly
-				onChange={(main) => void save({ ...draft, main })}
+				onModelChange={(main) => void save({ ...draft, main })}
+				onThinkingChange={(mainThinking) => void save({ ...draft, mainThinking })}
+				onFastChange={(mainFast) => void save({ ...draft, mainFast })}
 			/>
-			<ModelSelector
-				title="Subagent Default"
-				catalog={modelCatalog}
-				value={draft.subagent}
-				allowUnset
+			<AgentRuntimeOptions
+				title="Subagent"
+				modelTitle="Subagent Default"
+				model={draft.subagent}
+				thinking={draft.subagentThinking}
+				fast={draft.subagentFast}
+				modelCatalog={modelCatalog}
 				readOnly={saving}
-				hint="Unset to use provider fallback."
+				modelHint="Unset to use provider fallback."
+				thinkingHint="Unset to use the provider/runtime fallback."
 				configuredProvidersOnly
-				onChange={(subagent) => void save({ ...draft, subagent })}
-			/>
-			<ThinkingLevelSelector
-				title="Default Thinking Level"
-				value={draft.thinking}
-				readOnly={saving}
-				hint="Unset to use the provider/runtime fallback."
-				onChange={(thinking) => void save({ ...draft, thinking })}
+				onModelChange={(subagent) => void save({ ...draft, subagent })}
+				onThinkingChange={(subagentThinking) => void save({ ...draft, subagentThinking })}
+				onFastChange={(subagentFast) => void save({ ...draft, subagentFast })}
 			/>
 			{error ? <div className="text-xs text-amber-100">{error}</div> : null}
+		</div>
+	);
+}
+
+function AgentRuntimeOptions({
+	title,
+	modelTitle,
+	model,
+	thinking,
+	fast,
+	modelCatalog,
+	readOnly,
+	modelHint,
+	thinkingHint,
+	configuredProvidersOnly = false,
+	onModelChange,
+	onThinkingChange,
+	onFastChange,
+}: {
+	title: string;
+	modelTitle: string;
+	model?: ModelProfile;
+	thinking?: ThinkingLevel;
+	fast?: boolean;
+	modelCatalog?: ModelCatalog;
+	readOnly: boolean;
+	modelHint?: string;
+	thinkingHint?: string;
+	configuredProvidersOnly?: boolean;
+	onModelChange: (value: ModelProfile | undefined) => void;
+	onThinkingChange: (value: ThinkingLevel | undefined) => void;
+	onFastChange: (value: boolean | undefined) => void;
+}) {
+	return (
+		<div className="grid gap-2 border border-slate-800 rounded-sm p-3">
+			<div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{title}</div>
+			<div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(150px,190px)_auto] lg:items-end">
+				<ModelSelector
+					title={modelTitle}
+					catalog={modelCatalog}
+					value={model}
+					allowUnset
+					readOnly={readOnly}
+					hint={modelHint}
+					emptyProviderLabel="Default"
+					configuredProvidersOnly={configuredProvidersOnly}
+					onChange={onModelChange}
+				/>
+				<ThinkingLevelSelector
+					title="Thinking"
+					value={thinking}
+					readOnly={readOnly}
+					hint={thinkingHint}
+					onChange={onThinkingChange}
+				/>
+				<div className="grid gap-2 pb-1">
+					<div className="text-[11px] uppercase tracking-wider text-slate-500">Fast</div>
+					<button
+						type="button"
+						disabled={readOnly}
+						onClick={() => onFastChange(fast === undefined ? true : !fast)}
+						className="inline-flex h-9 w-fit items-center gap-2 text-left text-sm text-slate-300 hover:text-slate-100 disabled:opacity-60"
+					>
+						<SelectionCheckbox checked={fast === true} disabled={readOnly} />
+						<span>{fast === undefined ? "Default" : "Fast"}</span>
+					</button>
+					<button type="button" disabled={readOnly || fast === undefined} onClick={() => onFastChange(undefined)} className="text-left text-[10px] uppercase tracking-wider text-slate-500 hover:text-slate-300 disabled:opacity-50">Unset</button>
+				</div>
+			</div>
 		</div>
 	);
 }

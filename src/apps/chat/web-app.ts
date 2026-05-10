@@ -291,6 +291,11 @@ type ChatAgentBody = {
 	mainModel?: unknown;
 	subagentModel?: unknown;
 	thinkingLevel?: unknown;
+	mainThinkingLevel?: unknown;
+	subagentThinkingLevel?: unknown;
+	fast?: unknown;
+	mainFast?: unknown;
+	subagentFast?: unknown;
 	builtinTools?: unknown;
 	builtinToolNames?: unknown;
 	autoContextFiles?: unknown;
@@ -321,6 +326,11 @@ type ChatModelDefaultsBody = {
 	main?: unknown;
 	subagent?: unknown;
 	thinking?: unknown;
+	mainThinking?: unknown;
+	subagentThinking?: unknown;
+	fast?: unknown;
+	mainFast?: unknown;
+	subagentFast?: unknown;
 };
 
 type ChatUserSettingsBody = {
@@ -708,6 +718,12 @@ function normalizeRunControl(value: unknown): boolean {
 	return value;
 }
 
+function normalizeOptionalBoolean(value: unknown, fieldName: string): boolean | undefined {
+	if (value === undefined || value === null) return undefined;
+	if (typeof value !== "boolean") throw new PiboWebHttpError(`${fieldName} must be a boolean`, 400);
+	return value;
+}
+
 function normalizeThinkingLevel(value: unknown, fieldName: string): PiboThinkingLevel | undefined {
 	if (value === undefined || value === null) return undefined;
 	if (typeof value !== "string" || !isPiboThinkingLevel(value)) {
@@ -893,6 +909,11 @@ function updateChatModelDefaults(body: ChatModelDefaultsBody, cwd = process.cwd(
 		main: normalizeModelProfile(body.main, "main"),
 		subagent: normalizeModelProfile(body.subagent, "subagent"),
 		thinking: normalizeThinkingLevel(body.thinking, "thinking"),
+		mainThinking: normalizeThinkingLevel(body.mainThinking, "mainThinking"),
+		subagentThinking: normalizeThinkingLevel(body.subagentThinking, "subagentThinking"),
+		fast: normalizeOptionalBoolean(body.fast, "fast"),
+		mainFast: normalizeOptionalBoolean(body.mainFast, "mainFast"),
+		subagentFast: normalizeOptionalBoolean(body.subagentFast, "subagentFast"),
 	}, cwd);
 }
 
@@ -1542,6 +1563,11 @@ function createAgentInput(ownerScope: string, body: ChatAgentBody) {
 		mainModel: normalizeModelProfile(body.mainModel, "mainModel"),
 		subagentModel: normalizeModelProfile(body.subagentModel, "subagentModel"),
 		thinkingLevel: normalizeThinkingLevel(body.thinkingLevel, "thinkingLevel"),
+		mainThinkingLevel: normalizeThinkingLevel(body.mainThinkingLevel, "mainThinkingLevel"),
+		subagentThinkingLevel: normalizeThinkingLevel(body.subagentThinkingLevel, "subagentThinkingLevel"),
+		fast: normalizeOptionalBoolean(body.fast, "fast"),
+		mainFast: normalizeOptionalBoolean(body.mainFast, "mainFast"),
+		subagentFast: normalizeOptionalBoolean(body.subagentFast, "subagentFast"),
 		builtinTools: normalizeBuiltinTools(body.builtinTools),
 		builtinToolNames: normalizeBuiltinToolNames(body.builtinToolNames),
 		autoContextFiles: normalizeAutoContextFiles(body.autoContextFiles),
@@ -1562,6 +1588,11 @@ function createAgentUpdate(body: ChatAgentBody): UpdateCustomAgentInput {
 	if (body.mainModel !== undefined) update.mainModel = normalizeModelProfile(body.mainModel, "mainModel");
 	if (body.subagentModel !== undefined) update.subagentModel = normalizeModelProfile(body.subagentModel, "subagentModel");
 	if (body.thinkingLevel !== undefined) update.thinkingLevel = normalizeThinkingLevel(body.thinkingLevel, "thinkingLevel");
+	if (body.mainThinkingLevel !== undefined) update.mainThinkingLevel = normalizeThinkingLevel(body.mainThinkingLevel, "mainThinkingLevel");
+	if (body.subagentThinkingLevel !== undefined) update.subagentThinkingLevel = normalizeThinkingLevel(body.subagentThinkingLevel, "subagentThinkingLevel");
+	if (body.fast !== undefined) update.fast = normalizeOptionalBoolean(body.fast, "fast");
+	if (body.mainFast !== undefined) update.mainFast = normalizeOptionalBoolean(body.mainFast, "mainFast");
+	if (body.subagentFast !== undefined) update.subagentFast = normalizeOptionalBoolean(body.subagentFast, "subagentFast");
 	if (body.builtinTools !== undefined) update.builtinTools = normalizeBuiltinTools(body.builtinTools);
 	if (body.builtinToolNames !== undefined) update.builtinToolNames = normalizeBuiltinToolNames(body.builtinToolNames);
 	if (body.autoContextFiles !== undefined) update.autoContextFiles = normalizeAutoContextFiles(body.autoContextFiles);

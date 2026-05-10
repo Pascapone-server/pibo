@@ -326,10 +326,12 @@ export class RoutedSession {
 		private readonly emit: PiboEventListener,
 		private readonly pluginRegistry: PiboPluginRegistry,
 		private readonly forwardPiEvents: boolean,
+		initialFastMode: boolean,
 		private readonly onSessionOperation?: PiboSessionOperationListener,
 		private readonly onKillChildren?: (piboSessionId: string, options?: { includeRuns?: boolean }) => Promise<{ killed: string[]; cancelledRuns: string[] }>,
 		private readonly onStateChange?: (state: { processing: boolean; queuedMessages: number; disposed: boolean }) => void,
 	) {
+		this.fastMode = initialFastMode && this.runtime.session.supportsThinking();
 		this.bindRuntimeSession();
 		this.patchAgentContinue();
 		this.runtime.setRebindSession(async () => {

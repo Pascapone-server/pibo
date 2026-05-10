@@ -10,6 +10,11 @@ export type PiboModelDefaults = {
 	main?: ModelProfile;
 	subagent?: ModelProfile;
 	thinking?: PiboThinkingLevel;
+	mainThinking?: PiboThinkingLevel;
+	subagentThinking?: PiboThinkingLevel;
+	fast?: boolean;
+	mainFast?: boolean;
+	subagentFast?: boolean;
 };
 
 export function selectRequestedModelProfile(
@@ -25,7 +30,16 @@ export function selectRequestedThinkingLevel(
 	profile: InitialSessionContext,
 	defaults: PiboModelDefaults = {},
 ): PiboThinkingLevel | undefined {
-	return profile.thinkingLevel ?? defaults.thinking;
+	if (profile.parentSessionId) return profile.subagentThinkingLevel ?? profile.thinkingLevel ?? defaults.subagentThinking ?? defaults.thinking;
+	return profile.mainThinkingLevel ?? profile.thinkingLevel ?? defaults.mainThinking ?? defaults.thinking;
+}
+
+export function selectRequestedFastMode(
+	profile: InitialSessionContext,
+	defaults: PiboModelDefaults = {},
+): boolean | undefined {
+	if (profile.parentSessionId) return profile.subagentFast ?? profile.fast ?? defaults.subagentFast ?? defaults.fast;
+	return profile.mainFast ?? profile.fast ?? defaults.mainFast ?? defaults.fast;
 }
 
 export function loadPiboModelDefaults(
@@ -62,6 +76,11 @@ export function sanitizePiboModelDefaults(value: unknown): PiboModelDefaults {
 		main: sanitizeModelProfile(raw.main),
 		subagent: sanitizeModelProfile(raw.subagent),
 		thinking: sanitizeThinkingLevel(raw.thinking),
+		mainThinking: sanitizeThinkingLevel(raw.mainThinking),
+		subagentThinking: sanitizeThinkingLevel(raw.subagentThinking),
+		fast: sanitizeBoolean(raw.fast),
+		mainFast: sanitizeBoolean(raw.mainFast),
+		subagentFast: sanitizeBoolean(raw.subagentFast),
 	};
 }
 
@@ -82,4 +101,8 @@ export function sanitizeModelProfile(value: unknown): ModelProfile | undefined {
 
 function cloneModelProfile(model: ModelProfile | undefined): ModelProfile | undefined {
 	return model ? { ...model } : undefined;
+}
+
+function sanitizeBoolean(value: unknown): boolean | undefined {
+	return typeof value === "boolean" ? value : undefined;
 }

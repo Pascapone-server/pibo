@@ -543,6 +543,11 @@ export type SaveCustomAgentInput = {
 	mainModel?: ModelProfile;
 	subagentModel?: ModelProfile;
 	thinkingLevel?: CustomAgent["thinkingLevel"] | null;
+	mainThinkingLevel?: CustomAgent["mainThinkingLevel"] | null;
+	subagentThinkingLevel?: CustomAgent["subagentThinkingLevel"] | null;
+	fast?: boolean;
+	mainFast?: boolean;
+	subagentFast?: boolean;
 	builtinTools: "default" | "disabled";
 	builtinToolNames: string[];
 	autoContextFiles: boolean;

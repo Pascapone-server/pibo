@@ -304,6 +304,11 @@ export type ModelDefaults = {
 	main?: ModelProfile;
 	subagent?: ModelProfile;
 	thinking?: ThinkingLevel;
+	mainThinking?: ThinkingLevel;
+	subagentThinking?: ThinkingLevel;
+	fast?: boolean;
+	mainFast?: boolean;
+	subagentFast?: boolean;
 };
 
 export type ModelCatalog = {
@@ -339,6 +344,11 @@ export type AgentProfile = {
 	mainModel?: ModelProfile;
 	subagentModel?: ModelProfile;
 	thinkingLevel?: ThinkingLevel;
+	mainThinkingLevel?: ThinkingLevel;
+	subagentThinkingLevel?: ThinkingLevel;
+	fast?: boolean;
+	mainFast?: boolean;
+	subagentFast?: boolean;
 	builtinTools?: "default" | "disabled";
 	builtinToolNames?: string[];
 	autoContextFiles?: boolean;
@@ -434,6 +444,11 @@ export type CustomAgent = {
 	mainModel?: ModelProfile;
 	subagentModel?: ModelProfile;
 	thinkingLevel?: ThinkingLevel;
+	mainThinkingLevel?: ThinkingLevel;
+	subagentThinkingLevel?: ThinkingLevel;
+	fast?: boolean;
+	mainFast?: boolean;
+	subagentFast?: boolean;
 	builtinTools: "default" | "disabled";
 	builtinToolNames: string[];
 	autoContextFiles: boolean;
