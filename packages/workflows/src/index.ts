@@ -8,4 +8,5 @@ export * from "./api/index.js";
 export * from "./validation/index.js";
 export * from "./runtime/index.js";
 export * from "./store/index.js";
+export * from "./registry/index.js";
 export * from "./fixtures/index.js";

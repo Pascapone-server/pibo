@@ -8,6 +8,7 @@ import type {
   WorkflowEdgeDefinition,
   WorkflowNodeDefinition,
   WorkflowPort,
+  WorkflowRegistry,
 } from "../types/index.js";
 
 const SUPPORTED_SCHEMA_TYPES = new Set<JsonSchemaTypeName>([
@@ -47,6 +48,10 @@ export type WorkflowValueValidationOptions = {
   path?: string;
 };
 
+export type WorkflowValidationOptions = {
+  registry?: Pick<WorkflowRegistry, "adapters">;
+};
+
 type SchemaValidationContext = {
   rootSchema: JsonSchema;
   diagnostics: WorkflowDiagnostic[];
@@ -59,8 +64,8 @@ type ValueValidationContext = {
   seenRefs: Set<string>;
 };
 
-export function validateWorkflow(definition: WorkflowDefinition): ValidationResult {
-  return validateWorkflowDefinitionSchemas(definition);
+export function validateWorkflow(definition: WorkflowDefinition, options: WorkflowValidationOptions = {}): ValidationResult {
+  return validateWorkflowDefinitionSchemas(definition, options);
 }
 
 export function areWorkflowPortsDirectlyCompatible(source: WorkflowPort, target: WorkflowPort): boolean {
@@ -79,7 +84,10 @@ export function areWorkflowPortsDirectlyCompatible(source: WorkflowPort, target:
   return false;
 }
 
-export function validateWorkflowDefinitionSchemas(definition: WorkflowDefinition): ValidationResult {
+export function validateWorkflowDefinitionSchemas(
+  definition: WorkflowDefinition,
+  options: WorkflowValidationOptions = {},
+): ValidationResult {
   const diagnostics: WorkflowDiagnostic[] = [];
 
   validateWorkflowPort(definition.input, "$.input", diagnostics);
@@ -87,11 +95,12 @@ export function validateWorkflowDefinitionSchemas(definition: WorkflowDefinition
 
   for (const [nodeId, node] of Object.entries(definition.nodes)) {
     validateNodeSchemas(nodeId, node, diagnostics);
+    validateWorkflowAdapterNodeRef(nodeId, node, diagnostics, options);
   }
 
   for (const [edgeId, edge] of Object.entries(definition.edges)) {
     validateWorkflowEdgeNodeRefs(definition, edgeId, edge, diagnostics);
-    validateWorkflowEdgeAdapterRef(definition, edgeId, edge, diagnostics);
+    validateWorkflowEdgeAdapterRef(definition, edgeId, edge, diagnostics, options);
     validateWorkflowEdgePortCompatibility(definition, edgeId, edge, diagnostics);
 
     if (edge.adapter) {
@@ -288,6 +297,7 @@ function validateWorkflowEdgeAdapterRef(
   edgeId: string,
   edge: WorkflowEdgeDefinition,
   diagnostics: WorkflowDiagnostic[],
+  options: WorkflowValidationOptions,
 ): void {
   if (!edge.adapter) {
     return;
@@ -301,6 +311,12 @@ function validateWorkflowEdgeAdapterRef(
       edgeId,
       path: `$.edges.${edgeId}.adapter.transform`,
       hint: "Create edge adapters with edgeAdapter(adapterRef('adapter.id'), outputPort) so persisted workflow IR stores an explicit adapter ref instead of an inline or raw handler value.",
+    });
+  } else {
+    validateRegisteredAdapterExists(edge.adapter.transform, diagnostics, options, {
+      edgeId,
+      path: `$.edges.${edgeId}.adapter.transform.id`,
+      ownerLabel: `Workflow edge '${edgeId}'`,
     });
   }
 
@@ -320,6 +336,56 @@ function validateWorkflowEdgeAdapterRef(
     edgeId,
     path: `$.edges.${edgeId}.adapter.output`,
     hint: "Set the edgeAdapter output port to the exact target input contract, or insert a visible adapter node whose output matches the downstream node.",
+  });
+}
+
+function validateWorkflowAdapterNodeRef(
+  nodeId: string,
+  node: WorkflowNodeDefinition,
+  diagnostics: WorkflowDiagnostic[],
+  options: WorkflowValidationOptions,
+): void {
+  if (node.kind !== "adapter") {
+    return;
+  }
+
+  if (!isRegisteredAdapterRef(node.handler)) {
+    diagnostics.push({
+      code: "WorkflowGraphError.invalidAdapterRef",
+      message: `Workflow adapter node '${nodeId}' must use a registered TypeScript adapter ref for its handler.`,
+      severity: "error",
+      nodeId,
+      path: `$.nodes.${nodeId}.handler`,
+      hint: "Create adapter nodes with handler: adapterRef('adapter.id') so persisted workflow IR stores an explicit adapter ref instead of an inline or raw handler value.",
+    });
+    return;
+  }
+
+  validateRegisteredAdapterExists(node.handler, diagnostics, options, {
+    nodeId,
+    path: `$.nodes.${nodeId}.handler.id`,
+    ownerLabel: `Workflow adapter node '${nodeId}'`,
+  });
+}
+
+function validateRegisteredAdapterExists(
+  ref: AdapterRef,
+  diagnostics: WorkflowDiagnostic[],
+  options: WorkflowValidationOptions,
+  target: Pick<WorkflowDiagnostic, "nodeId" | "edgeId"> & { path: string; ownerLabel: string },
+): void {
+  if (!options.registry || options.registry.adapters.has(ref.id)) {
+    return;
+  }
+
+  diagnostics.push({
+    code: "WorkflowGraphError.unknownAdapterRef",
+    message: `${target.ownerLabel} references adapter '${ref.id}', but it is not registered in the Workflow Registry.`,
+    severity: "error",
+    nodeId: target.nodeId,
+    edgeId: target.edgeId,
+    path: target.path,
+    hint: "Register the adapter with registerWorkflowAdapter/createWorkflowRegistry before validating or executing this workflow, or update the workflow to use a registered adapter id.",
   });
 }
 

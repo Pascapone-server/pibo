@@ -1,4 +1,5 @@
 ## Codebase Patterns
+- Registry-backed workflow validation should remain opt-in via `validateWorkflow(definition, { registry })` until each ref family is implemented, preserving schema/graph-only validation for fixtures without providers.
 - Edge adapters should validate both structural adapter refs (`adapterRef(...)`) and declared adapter output compatibility with the target node input; actual registry resolution remains a separate validation layer.
 - Use `adapterRef(...)` for registered deterministic TypeScript adapters in workflow IR; pass those refs to `edgeAdapter(...)` for edge-local adapters and to visible `adapter` node `handler` fields.
 - Two-node direct-edge tests should validate the workflow definition, call `recordWorkflowEdgeTransfer`, then use `transferResult.targetInput` as the downstream node attempt input.
@@ -292,4 +293,17 @@
   - `validateWorkflow` now treats `edge.adapter.transform` as untrusted IR and verifies it has the `adapterRef(...)` shape before accepting it as an explicit bridge.
   - Adapter output compatibility is a static graph validation concern; runtime value validation and registry-backed adapter execution remain in stories 5.3-5.5.
   - No browser verification was needed because this story only changes the workflow package validation/test layer.
+---
+
+## 2026-05-10 23:40 UTC - 5.3
+- Implemented Workflow Registry adapter registration and resolution helpers, including scoped registry creation from workflow providers, duplicate registration protection, overrides, and adapter lookup by `adapterRef(...)` or id.
+- Added registry-backed workflow validation for edge adapter refs and visible adapter node refs when a registry is provided, producing `WorkflowGraphError.unknownAdapterRef` diagnostics for missing adapters.
+- Added registry tests covering adapter resolution/execution, duplicate/override behavior, edge adapter validation, and visible adapter node validation.
+- Marked task `5.3` complete in the workflow-system task list because no `prd_*.json` files exist in this worktree.
+- Quality checks: `npm --prefix packages/workflows run typecheck`; `npm --prefix packages/workflows test`; root `npm run typecheck`; container `docker exec pibo-dev-Workflows ... npm --prefix packages/workflows run typecheck && npm --prefix packages/workflows test && npm run typecheck`.
+- Files changed: `packages/workflows/src/registry/index.ts`, `packages/workflows/src/index.ts`, `packages/workflows/src/validation/index.ts`, `packages/workflows/src/testing/registry.test.ts`, `docs/specs/changes/pibo-workflow-system-v1/tasks.md`, `progress.txt`.
+- **Learnings for future iterations:**
+  - Use `createWorkflowRegistry(workflowFixtureProviders)` in tests when validation needs actual registered adapters rather than only structural `adapterRef(...)` checks.
+  - `validateWorkflow(definition)` intentionally keeps registry lookup disabled unless a registry is passed, so existing schema/graph validation remains usable for plain fixture validation.
+  - Adapter registry diagnostics use `WorkflowGraphError.unknownAdapterRef` with `edgeId` or `nodeId` plus a path ending in `.id` so UI/CLI inspectors can highlight the unresolved registered ref.
 ---
