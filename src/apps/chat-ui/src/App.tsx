@@ -3131,7 +3131,10 @@ function dropReplacedOptimisticUserMessages(
 }
 
 function isOptimisticUserMessageNode(node: PiboTraceNode): boolean {
-	return node.type === "user.message" && (node.id.startsWith("optimistic:user-message:") || node.stableKey?.startsWith("optimistic:user-message:") === true);
+	if (node.type !== "user.message") return false;
+	return [node.id, node.stableKey, node.eventId]
+		.filter((value): value is string => typeof value === "string")
+		.some((value) => value.startsWith("optimistic:user-message:") || value.includes(":optimistic:user-message:"));
 }
 
 function trimLiveOverlayForBaseTrace(overlay: LiveTraceOverlay | null, baseTrace: PiboSessionTraceView): LiveTraceOverlay | null {
@@ -6272,10 +6275,43 @@ function SettingsView({
 	);
 }
 
+const FALLBACK_TIMEZONES = [
+	"UTC",
+	"Europe/Berlin",
+	"Europe/London",
+	"Europe/Paris",
+	"Europe/Madrid",
+	"Europe/Rome",
+	"Europe/Amsterdam",
+	"Europe/Vienna",
+	"Europe/Zurich",
+	"Europe/Warsaw",
+	"Europe/Istanbul",
+	"America/New_York",
+	"America/Chicago",
+	"America/Denver",
+	"America/Los_Angeles",
+	"America/Toronto",
+	"America/Sao_Paulo",
+	"America/Mexico_City",
+	"Asia/Dubai",
+	"Asia/Jerusalem",
+	"Asia/Kolkata",
+	"Asia/Bangkok",
+	"Asia/Singapore",
+	"Asia/Shanghai",
+	"Asia/Tokyo",
+	"Asia/Seoul",
+	"Australia/Sydney",
+	"Australia/Melbourne",
+	"Pacific/Auckland",
+] as const;
+
 function UserTimezoneSettings() {
 	const queryClient = useQueryClient();
 	const { data, isLoading } = useQuery({ queryKey: ["user-settings"], queryFn: getUserSettings });
-	const [draft, setDraft] = useState("");
+	const timezoneOptions = useMemo(() => buildTimezoneOptions(data?.timezone), [data?.timezone]);
+	const [draft, setDraft] = useState("UTC");
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
@@ -6283,11 +6319,11 @@ function UserTimezoneSettings() {
 		if (data?.timezone) setDraft(data.timezone);
 	}, [data?.timezone]);
 
-	const save = async () => {
+	const save = async (timezone = draft) => {
 		setSaving(true);
 		setError(null);
 		try {
-			const saved = await patchUserSettings({ timezone: draft.trim() } satisfies UserSettings);
+			const saved = await patchUserSettings({ timezone } satisfies UserSettings);
 			setDraft(saved.timezone);
 			queryClient.setQueryData(["user-settings"], saved);
 		} catch (err) {
@@ -6301,21 +6337,62 @@ function UserTimezoneSettings() {
 		<div className="border-b border-slate-800 pb-4 mb-4">
 			<div className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">User timezone</div>
 			<div className="flex max-w-xl gap-2 max-[640px]:flex-col">
-				<input
+				<select
 					value={draft}
 					disabled={isLoading || saving}
-					onChange={(event) => setDraft(event.target.value)}
+					onChange={(event) => {
+						const timezone = event.target.value;
+						setDraft(timezone);
+						void save(timezone);
+					}}
 					className="min-w-0 flex-1 rounded-sm border border-slate-700 bg-[#0e1116] px-3 py-2 text-sm outline-none focus:border-[#11a4d4] disabled:opacity-60"
-					placeholder="Europe/Berlin"
-				/>
-				<button className="rounded-sm border border-slate-700 px-3 py-2 text-xs font-semibold uppercase tracking-wider hover:border-[#11a4d4] disabled:opacity-50" disabled={isLoading || saving || !draft.trim()} onClick={() => void save()}>
+				>
+					{timezoneOptions.map((option) => (
+						<option key={option.value} value={option.value}>{option.label}</option>
+					))}
+				</select>
+				<button className="rounded-sm border border-slate-700 px-3 py-2 text-xs font-semibold uppercase tracking-wider hover:border-[#11a4d4] disabled:opacity-50" disabled={isLoading || saving || draft === data?.timezone} onClick={() => void save()}>
 					{saving ? "Saving" : "Save"}
 				</button>
 			</div>
-			<div className="mt-2 text-[11px] text-slate-500">Loaded into every runtime context together with the user ID and current Pibo Session ID.</div>
+			<div className="mt-2 text-[11px] text-slate-500">Choose a city-based timezone. It is loaded into every runtime context together with the user ID and current Pibo Session ID.</div>
 			{error ? <div className="mt-2 text-xs text-red-300">{error}</div> : null}
 		</div>
 	);
+}
+
+function buildTimezoneOptions(currentTimezone: string | undefined): Array<{ value: string; label: string }> {
+	const intl = Intl as typeof Intl & { supportedValuesOf?: (key: "timeZone") => string[] };
+	const zones = new Set<string>(["UTC", ...(intl.supportedValuesOf?.("timeZone") ?? FALLBACK_TIMEZONES)]);
+	if (currentTimezone) zones.add(currentTimezone);
+	return [...zones]
+		.map((timezone) => ({ value: timezone, label: timezoneLabel(timezone), offset: timezoneOffsetMinutes(timezone) }))
+		.sort((a, b) => a.offset - b.offset || a.label.localeCompare(b.label))
+		.map(({ value, label }) => ({ value, label }));
+}
+
+function timezoneLabel(timezone: string): string {
+	const city = timezone === "UTC" ? "UTC" : timezone.split("/").pop()?.replaceAll("_", " ") ?? timezone;
+	const region = timezone.includes("/") ? timezone.split("/")[0].replaceAll("_", " ") : undefined;
+	const offset = timezoneOffsetLabel(timezone);
+	return `${city}${region ? ` (${region})` : ""} — ${offset}`;
+}
+
+function timezoneOffsetLabel(timezone: string): string {
+	try {
+		const parts = new Intl.DateTimeFormat("en-US", { timeZone: timezone, timeZoneName: "shortOffset" }).formatToParts(new Date());
+		return parts.find((part) => part.type === "timeZoneName")?.value.replace("GMT", "UTC") ?? timezone;
+	} catch {
+		return timezone;
+	}
+}
+
+function timezoneOffsetMinutes(timezone: string): number {
+	const label = timezoneOffsetLabel(timezone);
+	const match = /^UTC(?:(?<sign>[+-])(?<hours>\d{1,2})(?::(?<minutes>\d{2}))?)?$/.exec(label);
+	if (!match?.groups?.sign) return 0;
+	const direction = match.groups.sign === "-" ? -1 : 1;
+	return direction * (Number(match.groups.hours) * 60 + Number(match.groups.minutes ?? 0));
 }
 
 function ModelDefaultsSettings({
