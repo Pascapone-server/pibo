@@ -5,6 +5,7 @@
 - Keep the new workflow framework isolated under `packages/workflows` so future iterations can evolve the package without touching the host gateway or existing app surfaces.
 - Export public workflow package types through `packages/workflows/src/index.ts` using `.js` module specifiers because the package uses `moduleResolution: NodeNext`.
 - Keep reusable workflow examples in `packages/workflows/src/fixtures/index.ts`; pair registry-ref-heavy fixtures with `workflowFixtureProviders` so future tests can resolve handlers/adapters/guards without embedding closures in definitions.
+- Put public workflow authoring helpers in `packages/workflows/src/api/index.ts`, export them from the package root, and test them through `../index.js`.
 
 ## 2026-05-10 22:18 UTC - 1.1
 - Implemented the initial `packages/workflows` package boundary with the PRD-required submodule directories.
@@ -63,4 +64,18 @@
   - Tests should import public exports from `../index.js` to exercise the package boundary while preserving NodeNext `.js` import specifiers.
   - Current malformed-definition coverage is focused on schema subset rejection; graph/registry/runtime malformed cases belong to later validation stories as those validators are implemented.
   - Keeping fixtures in the positive test path helps catch regressions when validation expands beyond schema checks.
+---
+
+
+## 2026-05-10 22:41 UTC - 2.1
+- Added public `text()` and `json()` port authoring helpers plus `isTextPort`/`isJsonPort` kind guards for workflow/node/adapter contracts.
+- Exported the API helpers from the workflow package root.
+- Added port helper tests that exercise text ports, JSON schema-backed ports, optional descriptions, and kind narrowing.
+- Marked task `2.1` complete in the workflow-system task list because no `prd_*.json` files exist in this worktree.
+- Quality checks: `npm --prefix packages/workflows run typecheck`; `npm --prefix packages/workflows test`; root `npm run typecheck`; container `docker exec pibo-dev-Workflows ... npm --prefix packages/workflows run typecheck && npm --prefix packages/workflows test`.
+- Files changed: `packages/workflows/src/api/index.ts`, `packages/workflows/src/index.ts`, `packages/workflows/src/testing/ports.test.ts`, `docs/specs/changes/pibo-workflow-system-v1/tasks.md`, `progress.txt`.
+- **Learnings for future iterations:**
+  - Keep helper APIs small and IR-preserving: `json(schema, description?)` stores the same schema contract that validation/runtime layers will consume later.
+  - Public package tests should import helpers from `../index.js` so root exports stay covered as the authoring API grows.
+  - Story 2.1 only adds port construction/narrowing; value validation for workflow inputs/outputs belongs to the later 2.3/2.4 stories.
 ---
