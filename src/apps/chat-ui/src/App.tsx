@@ -3651,6 +3651,7 @@ function Composer({
 	onCommand: (text: string) => Promise<boolean>;
 	onSend: (text: string) => Promise<void>;
 }) {
+	const composerRootRef = useRef<HTMLDivElement>(null);
 	const inputRef = useRef<HTMLTextAreaElement>(null);
 	const activeCommandRef = useRef<HTMLButtonElement>(null);
 	const activeSkillRef = useRef<HTMLButtonElement>(null);
@@ -3658,6 +3659,7 @@ function Composer({
 	const [activeIndex, setActiveIndex] = useState(0);
 	const [activeSkillIndex, setActiveSkillIndex] = useState(0);
 	const [cursorPos, setCursorPos] = useState(0);
+	const [dismissedSuggestionKeys, setDismissedSuggestionKeys] = useState<string[]>([]);
 
 	const skillTrigger = useMemo(() => {
 		for (let i = cursorPos - 1; i >= 0; i--) {
@@ -3672,14 +3674,45 @@ function Composer({
 		return null;
 	}, [value, cursorPos]);
 
-	const filteredSkills = useMemo(() => {
+	const commandTrigger = value.trim().startsWith("/") ? value.trim().split(/\s+/)[0] : null;
+	const skillSuggestionKey = skillTrigger ? composerSkillSuggestionKey(skillTrigger.startPos, value.slice(skillTrigger.startPos, cursorPos)) : null;
+	const commandSuggestionKey = commandTrigger ? composerCommandSuggestionKey(commandTrigger) : null;
+
+	const rawFilteredSkills = useMemo(() => {
 		if (!skillTrigger) return [];
 		return skills.filter((skill) => skill.name.toLowerCase().startsWith(skillTrigger.query));
 	}, [skillTrigger, skills]);
 
-	const filtered = value.trim().startsWith("/")
-		? commands.filter((command) => command.slash.startsWith(value.trim().split(/\s+/)[0]))
-		: [];
+	const rawFiltered = useMemo(() => {
+		if (!commandTrigger) return [];
+		return commands.filter((command) => command.slash.startsWith(commandTrigger));
+	}, [commandTrigger, commands]);
+
+	const filteredSkills = skillSuggestionKey && dismissedSuggestionKeys.includes(skillSuggestionKey) ? [] : rawFilteredSkills;
+	const filtered = commandSuggestionKey && dismissedSuggestionKeys.includes(commandSuggestionKey) ? [] : rawFiltered;
+
+	const dismissSuggestionKey = useCallback((key: string | null) => {
+		if (!key) return;
+		setDismissedSuggestionKeys((current) => current.includes(key) ? current : [...current, key]);
+	}, []);
+
+	const dismissVisibleSuggestions = useCallback(() => {
+		const keys = [
+			rawFilteredSkills.length ? skillSuggestionKey : null,
+			rawFiltered.length ? commandSuggestionKey : null,
+		].filter((key): key is string => Boolean(key));
+		if (!keys.length) return;
+		setDismissedSuggestionKeys((current) => {
+			const next = new Set(current);
+			for (const key of keys) next.add(key);
+			return next.size === current.length ? current : [...next];
+		});
+	}, [commandSuggestionKey, rawFiltered.length, rawFilteredSkills.length, skillSuggestionKey]);
+
+	useEffect(() => {
+		const currentKeys = [skillSuggestionKey, commandSuggestionKey].filter((key): key is string => Boolean(key));
+		setDismissedSuggestionKeys((current) => current.filter((key) => currentKeys.includes(key)));
+	}, [commandSuggestionKey, skillSuggestionKey]);
 
 	useEffect(() => {
 		if (!filtered.length || activeIndex < filtered.length) return;
@@ -3715,6 +3748,18 @@ function Composer({
 		setCursorPos(cursorPosition);
 	}, [focusSignal]);
 
+	useEffect(() => {
+		if (!filtered.length && !filteredSkills.length) return;
+		const onPointerDown = (event: PointerEvent) => {
+			const target = event.target;
+			if (!(target instanceof Node)) return;
+			if (composerRootRef.current?.contains(target)) return;
+			dismissVisibleSuggestions();
+		};
+		document.addEventListener("pointerdown", onPointerDown, true);
+		return () => document.removeEventListener("pointerdown", onPointerDown, true);
+	}, [dismissVisibleSuggestions, filtered.length, filteredSkills.length]);
+
 	useLayoutEffect(() => {
 		resizeComposerInput(inputRef.current);
 	}, [value]);
@@ -3725,7 +3770,9 @@ function Composer({
 		const after = value.slice(skillTrigger.endPos);
 		const newValue = before + "$" + skillName + after;
 		onValueChange(newValue);
+		dismissSuggestionKey(composerSkillSuggestionKey(skillTrigger.startPos, `$${skillName}`));
 		const newCursorPos = skillTrigger.startPos + 1 + skillName.length;
+		setCursorPos(newCursorPos);
 		requestAnimationFrame(() => {
 			inputRef.current?.setSelectionRange(newCursorPos, newCursorPos);
 			setCursorPos(newCursorPos);
@@ -3782,7 +3829,9 @@ function Composer({
 			return;
 		}
 		if (filtered.length && !commands.some((command) => command.slash === text.split(/\s+/)[0])) {
-			onValueChange(filtered[Math.min(activeIndex, filtered.length - 1)].slash);
+			const selectedSlash = filtered[Math.min(activeIndex, filtered.length - 1)].slash;
+			onValueChange(selectedSlash);
+			dismissSuggestionKey(composerCommandSuggestionKey(selectedSlash));
 			return;
 		}
 		historyNavRef.current = null;
@@ -3793,7 +3842,7 @@ function Composer({
 	};
 
 	return (
-		<div className="relative p-3 bg-[#151f24] border-t border-slate-800 max-[980px]:p-2">
+		<div ref={composerRootRef} className="relative p-3 bg-[#151f24] border-t border-slate-800 max-[980px]:p-2">
 			{filteredSkills.length ? (
 				<div className="absolute left-3 bottom-full mb-2 w-[min(520px,calc(100%-24px))] max-h-72 overflow-auto bg-[#0e1116] border border-emerald-500 rounded-sm shadow-xl">
 					{filteredSkills.map((skill, index) => (
@@ -3819,6 +3868,7 @@ function Composer({
 							type="button"
 							onClick={() => {
 								onValueChange(command.slash);
+								dismissSuggestionKey(composerCommandSuggestionKey(command.slash));
 								setActiveIndex(index);
 							}}
 							className={`w-full grid grid-cols-[120px_1fr] gap-2 px-3 py-2 text-left border-b border-slate-800 ${index === activeIndex ? "bg-[#11a4d4]/15" : ""}`}
@@ -3841,6 +3891,12 @@ function Composer({
 						setCursorPos(event.target.selectionStart);
 					}}
 					onKeyDown={(event) => {
+						if (event.key === "Escape" && (filteredSkills.length || filtered.length)) {
+							event.preventDefault();
+							event.stopPropagation();
+							dismissVisibleSuggestions();
+							return;
+						}
 						if (filteredSkills.length && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
 							event.preventDefault();
 							setActiveSkillIndex((current) =>
@@ -3882,6 +3938,14 @@ function Composer({
 			</div>
 		</div>
 	);
+}
+
+function composerSkillSuggestionKey(startPos: number, token: string): string {
+	return `skill:${startPos}:${token}`;
+}
+
+function composerCommandSuggestionKey(commandToken: string): string {
+	return `command:${commandToken}`;
 }
 
 function resizeComposerInput(input: HTMLTextAreaElement | null) {
