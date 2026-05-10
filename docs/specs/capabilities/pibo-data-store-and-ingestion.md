@@ -1,0 +1,299 @@
+# Spec: Pibo Data Store and Chat Ingestion
+
+**Status:** Draft
+**Created:** 2026-05-10
+**Owner / Source:** Scheduled Pibo Source Specs Coverage
+**Related docs:** [Chat Web Rooms and Event Streams](./chat-web-rooms-and-event-streams.md), [Pibo Session Routing](./pibo-session-routing.md), [Debug CLI](./debug-cli.md)
+
+## Why
+
+Pibo needs one local, queryable data model for sessions, rooms, messages, observations, payload references, navigation, and migration bookkeeping. Legacy stores still exist for compatibility, but new Chat Web and debugging behavior needs a stable v2 store that can ingest user input and runtime output without duplicating rows or losing large payloads.
+
+This spec captures the current `src/data` behavior as a durable product contract. It does not replace the legacy session store, Chat Web read model, or reliability store specs; it defines the v2 data-store capability used to shadow and index conversation data.
+
+## Goal
+
+Pibo SHALL maintain a SQLite-backed v2 data store that idempotently ingests Chat Web user messages and Pibo output events into ordered event, message, observation, payload, session, and navigation projections.
+
+## Background / Current State
+
+The current implementation creates `.pibo/pibo.sqlite` through `PiboDataStore`, applies schema version 1, enables foreign keys, sets a busy timeout, and uses WAL for file-backed stores. The store owns sub-stores for payloads, event log rows, chat messages, observations, session navigation, and sessions.
+
+`ChatDataIngestService` writes accepted user messages and normalized `PiboOutputEvent` records. It records append-only event rows, creates message and observation projections, upserts session and navigation metadata, and externalizes large content into a compressed payload directory.
+
+## Scope
+
+### In Scope
+
+- v2 data-store database creation and schema application.
+- Event log append and listing behavior.
+- Payload storage, deduplication, compression, and reading.
+- Chat Web user-message ingestion.
+- Pibo output-event ingestion into event, message, observation, session, and navigation projections.
+- V2-native Chat Web room, session, timeline, event-command, and read-state services.
+- Data CLI inventory and repair/migration behavior that operates on v2 store files.
+
+### Out of Scope
+
+- Legacy Chat Web read model semantics — covered by Chat Web specs.
+- Runtime routing and Pi transcript persistence — covered by session routing and trace specs.
+- Reliability event streams, durable jobs, and yielded-run records in `.pibo/pibo-events.sqlite` — separate capability.
+- UI rendering of messages and observations — consumers of this store decide presentation.
+
+## Requirements
+
+### Requirement: V2 store initializes deterministically
+
+The system MUST create or open the v2 SQLite store at the configured path and apply the current schema idempotently.
+
+#### Current
+
+`PiboDataStore` defaults to `piboHomePath("pibo.sqlite")`, creates parent directories, enables `PRAGMA busy_timeout = 5000`, enables foreign keys, uses WAL for file-backed stores, and calls `applyPiboDataSchema`.
+
+#### Target
+
+Opening an existing or new v2 store yields the same table/index contract and sets `PRAGMA user_version` to the code-declared schema version.
+
+#### Acceptance
+
+- Applying the schema twice leaves one copy of each expected table and index.
+- The database contains sessions, rooms, room members, payloads, event log, chat messages, observations, stats, navigation, indexer offsets, and migration import map tables.
+- File-backed stores use the configured database path and payload root.
+
+#### Scenario: Fresh v2 store
+
+- GIVEN no v2 database file exists
+- WHEN Pibo opens `PiboDataStore`
+- THEN the database is created with schema version 1 and all v2 tables are present
+
+### Requirement: Event log appends are ordered and idempotent
+
+The system MUST append conversation events with a monotonically increasing `streamId` and MUST return the existing row when the same idempotency key is appended again.
+
+#### Current
+
+`PiboEventLogStore.appendEvent` checks `idempotencyKey`, inserts an event row, and retrieves the row by stream id or idempotency key.
+
+#### Target
+
+Consumers can safely retry event appends without creating duplicate event rows.
+
+#### Acceptance
+
+- Event rows can be listed by session, room, topic, and `afterStreamId` in ascending stream order.
+- Duplicate appends with the same idempotency key return the original `streamId` and original attributes.
+- List limits are bounded.
+
+#### Scenario: Retried append
+
+- GIVEN an event was appended with idempotency key `append-1`
+- WHEN the same append is retried with different preview text
+- THEN only one event row exists and the stored preview remains the first committed value
+
+### Requirement: Payloads are content-addressed and externalized for large values
+
+The system MUST store large or explicitly written payloads as compressed files addressed by SHA-256 and referenced from database rows.
+
+#### Current
+
+`PayloadStore.writePayload` serializes text, JSON, or binary values, gzips bytes, stores files under `payloads/sha256/<prefix>/<prefix>/<hash>.<ext>.gz`, and increments `ref_count` for duplicate SHA-256 content.
+
+#### Target
+
+Large message and event bodies do not bloat the SQLite event or message rows, while repeated payload content is stored once.
+
+#### Acceptance
+
+- Writing the same payload bytes twice returns the same payload id and increments `ref_count`.
+- Stored payloads can be read back as bytes, text, or JSON according to caller intent.
+- Inline previews remain bounded and safe for navigation or list views.
+
+#### Scenario: Large user message
+
+- GIVEN a user message exceeds the inline message threshold
+- WHEN the message is ingested
+- THEN the message row references a payload id and does not store the full text inline
+
+### Requirement: User-message ingestion is idempotent per client transaction
+
+The system MUST ingest accepted Chat Web user messages exactly once per room, actor, and client transaction id.
+
+#### Current
+
+`ingestUserMessageAccepted` builds an idempotency key from room id, actor id, and `clientTxnId`, writes a `chat` topic event, inserts a user message projection, upserts the session, and updates session navigation.
+
+#### Target
+
+Client retries after network errors or duplicate sends do not create duplicate messages or event rows.
+
+#### Acceptance
+
+- The first ingest returns `duplicate: false` and creates event, message, session, and navigation rows.
+- A retry with the same client transaction returns `duplicate: true` and the same message id.
+- The event type is `user.message.accepted`, retention class is `chat_message`, and preview text is normalized.
+
+#### Scenario: Retried accepted input
+
+- GIVEN a Chat Web client sends text with `clientTxnId = txn-1`
+- WHEN ingestion runs twice with the same room and actor
+- THEN only one chat event and one user message exist for that transaction
+
+### Requirement: Runtime output ingestion shadows messages and observations
+
+The system MUST ingest normalized runtime output into append-only `pibo.output` events and derived projections that support chat views and diagnostics.
+
+#### Current
+
+`ingestOutputEvent` computes an event-specific idempotency key, appends a `pibo.output` event, optionally creates an assistant message, always inserts an observation, and updates navigation for assistant, finish, and session-error events.
+
+#### Target
+
+The v2 store can reconstruct high-level message lists and operational observations from normalized runtime output without relying on Pi transcript files as its primary query path.
+
+#### Acceptance
+
+- Assistant messages create both a `pibo.output` event and an assistant `chat_messages` row.
+- Tool output creates a tool observation with the tool name and status.
+- Progressive tool-call argument snapshots may create distinct events when their completeness or argument hash differs.
+- Re-ingesting the same output event returns the existing stream id when its idempotency key matches.
+
+#### Scenario: Assistant output retry
+
+- GIVEN an assistant message output event has event id `run-output-1`
+- WHEN that output event is ingested twice
+- THEN one event, one assistant message, and one observation exist for the session
+
+### Requirement: Session and navigation projections track current conversation placement
+
+The system MUST upsert session metadata and navigation rows when ingestion establishes or updates room activity.
+
+#### Current
+
+The session projection stores Pibo Session identity, linked Pi session id, owner scope, room id, root/parent/origin ids, channel, kind, profile, active model, workspace, title, status, metadata, timestamps, and first-message preview. The navigation projection stores owner, room, session hierarchy, title, profile, status, last activity, last message preview, child count, sort key, and archive state.
+
+#### Target
+
+Room/session lists can query v2 projections by owner and room without scanning transcripts or raw events.
+
+#### Acceptance
+
+- User-message ingestion sets first message preview only when not already present.
+- Root session id is the session id for roots and uses parent/root metadata for children.
+- Navigation listing filters by owner, optional room id, archive visibility, and bounded limit, ordered by sort key descending.
+
+#### Scenario: New room activity
+
+- GIVEN a session has no v2 projection row
+- WHEN its first user message is ingested for a room
+- THEN the session row has that room id and the navigation row appears in that room for the owner scope
+
+### Requirement: V2-native Chat Web services read and write through the v2 store
+
+The system MUST provide Chat Web service adapters for rooms, sessions, timelines, event commands, and read state that operate on the v2 data store without using legacy Chat Web stores.
+
+#### Current
+
+`ChatRoomService`, `ChatSessionQueryService`, `ChatTimelineQueryService`, `ChatEventCommandService`, and `ChatReadStateService` wrap `PiboDataStore`. They create default rooms and memberships, upsert sessions and navigation rows, append idempotent chat events, list bounded room/session timelines, expose trace events in session order, and track per-principal read progress.
+
+#### Target
+
+Chat Web call sites can move to v2-native services while retaining existing room, session, timeline, and unread-count behavior.
+
+#### Acceptance
+
+- Default room creation is owner-scoped and ensures an owner membership for the principal.
+- Session upsert writes both the session projection and navigation projection.
+- Chat event append with the same room, actor, and client transaction id returns the first stored event.
+- Timeline listing supports room id, Pibo Session id, `afterStreamId`, and bounded limits ordered by ascending stream id.
+- Trace event listing excludes live-only event types by default and orders by ascending session sequence.
+- Read-state counting excludes messages sent by the same principal and ignores events at or below that principal's last-read stream id.
+- Marking a session read is monotonic; a lower later cursor does not reduce the stored read cursor.
+
+#### Scenario: V2-native chat service flow
+
+- GIVEN a fresh v2 store and an owner principal
+- WHEN Chat Web ensures the default room, upserts a Pibo Session, appends a user event and an assistant event, lists the timeline, and marks the session read
+- THEN the duplicate user append returns the first event
+- AND the timeline returns the stored events in stream order
+- AND unread counts drop to zero after the read cursor reaches the latest stream id.
+
+### Requirement: Data CLI reports and repair operations are bounded
+
+The system MUST expose operator-facing data diagnostics and repairs without mutating unrelated stores by default.
+
+#### Current
+
+`pibo data inventory` reports selected store files, sizes, WAL sizes, integrity, page stats, and table counts. `pibo data migrate sessions-to-v2` copies legacy session metadata into the v2 store. `pibo data repair unread-baseline` requires owner scope and cutoff timestamp and supports dry-run mode.
+
+#### Target
+
+Operators and agents can inspect data-store state, migrate session projections, and repair unread baselines with explicit inputs and JSON output support.
+
+#### Acceptance
+
+- Inventory can run against a configured root and includes v2, v2-shadow, legacy sessions, legacy chat, reliability, and auth stores.
+- Session migration reports read, inserted, updated, skipped, and source-existence counts.
+- Unread repair refuses to run without owner scope and cutoff timestamp and reports candidate and changed sessions.
+
+#### Scenario: Inventory for missing root store
+
+- GIVEN a configured Pibo home has no `pibo.sqlite`
+- WHEN `pibo data inventory --json` runs
+- THEN the v2 inventory item marks `exists: false` and does not fail integrity checks
+
+## Edge Cases
+
+- Duplicate output events without stable event ids or tool call ids may not be idempotent and can create multiple rows.
+- Observation insertion uses `INSERT OR IGNORE`; callers must treat an existing id or sequence as an already-shadowed observation.
+- Large JSON and text payloads are externalized only above the inline threshold; small payloads may remain in row attributes.
+- Payload deduplication is byte-based after serialization; semantically equivalent JSON with different serialized form is not guaranteed to dedupe.
+- The v2 store can coexist with legacy stores; migration must not delete legacy rows.
+- V2-native services must not reinsert runtime output events that are already owned by `ChatDataIngestService`.
+
+## Constraints
+
+- **Compatibility:** Existing legacy stores remain readable during migration and debugging.
+- **Security / Privacy:** Payload previews must stay bounded; full payloads are read only by explicit payload-reference lookup.
+- **Performance:** Append/list operations must use indexed session, room, topic, and idempotency paths; list limits must be bounded.
+- **Durability:** File-backed stores use WAL and payload writes use temp-file then rename semantics.
+- **Dependencies:** The implementation relies on Node SQLite APIs and local filesystem payload storage.
+
+## Success Criteria
+
+- [ ] SC-001: Opening a v2 store twice leaves schema version and table/index inventory stable.
+- [ ] SC-002: Retried user-message ingestion with the same client transaction creates one event and one message.
+- [ ] SC-003: Retried assistant output ingestion with the same event identity creates one output event, one assistant message, and one observation.
+- [ ] SC-004: Large message payloads are externalized and readable from their payload reference.
+- [ ] SC-005: V2-native Chat Web service tests cover default rooms, session upsert, idempotent event append, timeline ordering, trace-event ordering, and read-state monotonicity.
+- [ ] SC-006: Data inventory reports v2 and legacy stores without requiring those files to exist.
+
+## Assumptions and Open Questions
+
+### Assumptions
+
+- The v2 store is a projection/indexing store for current Chat Web behavior, not yet the sole canonical replacement for every legacy store.
+- Retention classes are stored as strings so new policy names can be introduced without a schema change.
+- The current inline threshold of 16 KiB for message and JSON payloads is an implementation-level policy that consumers should not rely on for UX decisions.
+
+### Open Questions
+
+- Should `pibo.output` events in the v2 data store eventually replace or mirror the reliability store topic of the same name?
+- Should observation lifecycle updates become explicit updates instead of append/ignore rows for long-running tools?
+- Should payload reference counts be decremented by retention or deletion workflows, and where should that behavior be specified?
+
+## Traceability
+
+| Requirement | Scenario / Story | Plan / Task | Status |
+|---|---|---|---|
+| REQ-001 V2 store initializes deterministically | Fresh v2 store | `src/data/schema.ts`, `src/data/pibo-store.ts` | Draft |
+| REQ-002 Event log appends are ordered and idempotent | Retried append | `src/data/event-log.ts` | Draft |
+| REQ-003 Payloads are content-addressed and externalized for large values | Large user message | `src/data/payload-store.ts`, `src/data/ingest-service.ts` | Draft |
+| REQ-004 User-message ingestion is idempotent per client transaction | Retried accepted input | `src/data/ingest-service.ts` | Draft |
+| REQ-005 Runtime output ingestion shadows messages and observations | Assistant output retry | `src/data/ingest-service.ts`, `src/data/message-store.ts`, `src/data/observation-store.ts` | Draft |
+| REQ-006 Session and navigation projections track current conversation placement | New room activity | `src/data/session-store.ts`, `src/data/navigation-store.ts` | Draft |
+| REQ-007 V2-native Chat Web services read and write through the v2 store | V2-native chat service flow | `src/apps/chat/data/*.ts`, `test/chat-v2-native-services.test.mjs` | Draft |
+| REQ-008 Data CLI reports and repair operations are bounded | Inventory for missing root store | `src/data/cli.ts` | Draft |
+
+## Verification Basis
+
+This spec is based on the current code in `src/data/schema.ts`, `src/data/pibo-store.ts`, `src/data/event-log.ts`, `src/data/payload-store.ts`, `src/data/ingest-service.ts`, `src/data/message-store.ts`, `src/data/observation-store.ts`, `src/data/navigation-store.ts`, `src/data/session-store.ts`, `src/data/cli.ts`, and `src/apps/chat/data/*.ts`, plus behavior asserted in `test/data-v2-store.test.mjs`, `test/data-v2-ingest-service.test.mjs`, `test/chat-v2-native-services.test.mjs`, `test/data-cli.test.mjs`, and `test/pibo-data-session-store.test.mjs`.

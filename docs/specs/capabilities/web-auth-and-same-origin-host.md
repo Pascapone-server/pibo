@@ -1,0 +1,282 @@
+# Spec: Web Auth and Same-Origin Host
+
+**Status:** Draft  
+**Created:** 2026-05-10  
+**Owner / Source:** Scheduled Pibo Source Specs Coverage  
+**Related docs:** [Chat Web Rooms and Event Streams](./chat-web-rooms-and-event-streams.md), [Custom Agents and Agent Designer](./custom-agents.md), [Scheduled Pibo Jobs](./scheduled-pibo-jobs.md)
+
+## Why
+
+Pibo's Chat Web App, auth routes, and web APIs share one HTTP origin. This boundary decides who may use web apps, which owner scope a request receives, how auth differs between production and Docker development, and how browser requests are routed to registered apps.
+
+A spec is needed because several capabilities depend on the same behavior: Better Auth in normal gateways, dev auth only inside Docker workers, owner-scoped Chat Web APIs, and safe same-origin routing.
+
+## Goal
+
+The web host MUST expose auth, health/status, simple-agent, and registered web app routes through one predictable HTTP channel while mapping every authenticated web request to a stable `user:<auth-user-id>` owner scope.
+
+## Background / Current State
+
+Current code defines a `web-host` channel with required auth mode. It converts Node HTTP requests to Fetch `Request` objects, enforces a maximum request body size, optionally redirects browser GET/HEAD requests to a canonical base URL, delegates `/api/auth/*` to the registered auth service, and dispatches registered web apps by `mountPath` or `apiPrefix`.
+
+Normal web gateways register Better Auth. Docker worker gateways may opt into dev auth. Dev auth is rejected outside a Docker runtime and the legacy `PIBO_DEV_AUTH=1` environment switch no longer enables host dev auth.
+
+## Scope
+
+### In Scope
+
+- HTTP route ownership for the web host channel.
+- Better Auth service requirements for normal web gateways.
+- Docker-only dev auth behavior.
+- Mapping auth sessions to web owner scopes.
+- Registered web app route dispatch and route conflict constraints.
+- Basic request/response handling that is externally observable.
+
+### Out of Scope
+
+- Chat Web domain behavior such as rooms, timelines, agents, or cron APIs — covered by separate capability specs.
+- Better Auth's internal OAuth implementation — treated as an external dependency behind Pibo's auth service contract.
+- Browser UI design and visual states.
+- Non-web channels such as local TUI or remote agent TCP protocol.
+
+## Requirements
+
+### Requirement: Web gateways select exactly one auth service
+
+The web gateway MUST register exactly one auth service before serving authenticated web apps.
+
+#### Current
+
+`createWebPiboPluginRegistry` registers either Better Auth or dev auth. The plugin registry rejects a second auth service.
+
+#### Acceptance
+
+- Starting a normal web gateway registers the Better Auth service.
+- Starting a Docker worker web gateway with dev auth enabled registers the dev auth service.
+- Registering two auth services fails before requests are served.
+
+#### Scenario: Duplicate auth service registration
+
+- GIVEN a plugin registry already has an auth service
+- WHEN another plugin registers a second auth service
+- THEN registry creation fails with an auth service conflict
+
+### Requirement: Normal web gateways use Better Auth configuration
+
+The normal web gateway MUST require Better Auth configuration before accepting sessions.
+
+#### Current
+
+Better Auth requires `auth.baseURL`, `auth.secret`, `auth.googleClientId`, `auth.googleClientSecret`, and at least one allowed email. Secrets shorter than 32 characters are rejected. The auth database defaults to `.pibo/auth.sqlite` unless configured otherwise.
+
+#### Acceptance
+
+- Missing required auth config prevents service creation or startup.
+- `auth.secret` shorter than 32 characters is rejected.
+- Empty or missing `auth.allowedEmails` is rejected.
+- Configured `auth.trustedOrigins` are combined with the auth base URL origin.
+
+#### Scenario: Missing allowed email list
+
+- GIVEN a normal web gateway config has OAuth credentials and a valid secret
+- AND `auth.allowedEmails` is missing or empty
+- WHEN the gateway creates the Better Auth service
+- THEN startup fails with a clear configuration error
+
+### Requirement: Better Auth authorizes only allowed emails
+
+The Better Auth service MUST return a Pibo auth session only for signed-in users whose email appears in the allowed email set.
+
+#### Current
+
+`getSession` calls Better Auth, normalizes the user's email to lowercase, rejects non-allowed users with `403`, and maps allowed users to a Pibo identity with provider `google`.
+
+#### Acceptance
+
+- No Better Auth session returns no Pibo auth session.
+- A signed-in user outside `auth.allowedEmails` receives `403 Forbidden`.
+- A signed-in allowed user receives an auth session containing `identity.userId`, email, name, optional image, provider, session id, and expiry.
+
+#### Scenario: Signed-in user is not allowed
+
+- GIVEN Better Auth resolves a Google user with email `other@example.com`
+- AND `auth.allowedEmails` does not include that email after lowercase normalization
+- WHEN a web API requires a session
+- THEN the request fails with `403 Forbidden`
+
+### Requirement: Dev auth is available only inside Docker workers
+
+The dev auth service MUST be selectable only for Docker worker runtimes and MUST refuse non-loopback auth route requests.
+
+#### Current
+
+`resolveWebGatewayAuthMode` throws when dev auth is requested outside Docker. Dev auth accepts only loopback host and forwarded host values. It simulates Google sign-in by redirecting through callback routes and setting an HTTP-only, same-site cookie.
+
+#### Acceptance
+
+- `devAuth: true` outside Docker fails before server startup.
+- `PIBO_DEV_AUTH=1` alone does not enable host dev auth and instead returns an explicit error for normal gateway startup.
+- Dev auth `/api/auth/*` requests with non-loopback host context receive `403`.
+- A loopback dev sign-in creates a session for the fixed dev identity.
+
+#### Scenario: Host tries to enable dev auth by environment
+
+- GIVEN the gateway is not running inside Docker
+- AND `PIBO_DEV_AUTH=1` is set
+- WHEN the normal web gateway resolves auth mode
+- THEN it fails and tells the operator to use the Docker worker entrypoint
+
+### Requirement: Authenticated web requests map to owner scopes
+
+Every authenticated web app request that requires a session MUST expose the owner scope `user:<auth-user-id>` to the app handler.
+
+#### Current
+
+`requireWebSession` calls the channel auth service and returns `{ authSession, ownerScope: \`user:${authSession.identity.userId}\` }`. Web apps receive this through `PiboWebAppContext.requireSession`.
+
+#### Acceptance
+
+- Missing sessions fail with `401 Unauthenticated`.
+- Authenticated sessions produce owner scopes derived only from the auth identity user id.
+- Web app code does not receive owner scopes from request bodies or query parameters.
+
+#### Scenario: Chat API request uses authenticated owner
+
+- GIVEN a request carries a valid auth session for user id `abc123`
+- WHEN a registered web app calls `requireSession`
+- THEN it receives owner scope `user:abc123`
+
+### Requirement: Web host routes same-origin requests deterministically
+
+The web host MUST route requests in a deterministic order: canonical redirect, health/status, auth routes, simple-agent API, registered web apps, root redirect, and not found.
+
+#### Current
+
+The channel handles `/health`, `/gateway/status`, `/api/auth/*`, simple-agent requests, registered apps matching `mountPath` or `apiPrefix`, `/`, and finally `404` JSON.
+
+#### Acceptance
+
+- `/health` returns JSON status without requiring a web app route.
+- `/gateway/status` returns gateway mode, runtime statuses, and active runs.
+- `/api/auth/*` is always delegated to the auth service before app routing.
+- Unknown paths return JSON `404`.
+
+#### Scenario: Auth route is not claimed by an app
+
+- GIVEN a registered app has broad route prefixes
+- WHEN a request path starts with `/api/auth/`
+- THEN the web host sends the request to the auth service, not the app
+
+### Requirement: Canonical redirects protect browser-facing origins
+
+When a canonical base URL is configured, the web host MUST redirect only safe browser-facing GET/HEAD routes from a non-canonical origin to the configured origin.
+
+#### Current
+
+Canonical redirects apply to GET/HEAD requests for `/`, `/apps...`, and `/api/auth...`. Other methods and paths are not redirected.
+
+#### Acceptance
+
+- GET `/apps/chat` on a non-canonical origin redirects to the same path and query on the canonical origin.
+- POST requests are not redirected by this mechanism.
+- Non-browser API paths outside `/apps` and `/api/auth` are not canonical-redirected.
+
+#### Scenario: OAuth callback reaches loopback origin
+
+- GIVEN a normal web gateway has canonical base URL `https://pibo.example.test`
+- WHEN a GET request reaches `/api/auth/callback/google?code=x` on another origin
+- THEN the web host redirects to `https://pibo.example.test/api/auth/callback/google?code=x`
+
+### Requirement: Registered web app routes must not overlap
+
+The plugin registry MUST reject duplicate or overlapping web app mount and API prefixes before the web host starts.
+
+#### Current
+
+`registerWebApp` validates that routes start with `/`, do not end with `/` except root, and do not overlap existing app routes.
+
+#### Acceptance
+
+- A mount path or API prefix without leading `/` is rejected.
+- A non-root route ending in `/` is rejected.
+- Overlapping app routes such as `/apps/chat` and `/apps/chat/admin` are rejected.
+
+#### Scenario: Two apps claim the same API prefix
+
+- GIVEN one web app has API prefix `/api/chat`
+- WHEN another app registers API prefix `/api/chat`
+- THEN registration fails before the channel starts
+
+### Requirement: HTTP request and response handling is bounded and explicit
+
+The web host MUST bound incoming request bodies and preserve externally important response headers.
+
+#### Current
+
+Non-GET/HEAD request bodies are limited to 4 MiB. JSON responses may be gzip-compressed when the client accepts gzip and the response is large enough. `Set-Cookie` headers are preserved when sending Fetch responses through Node HTTP.
+
+#### Acceptance
+
+- Requests with bodies larger than 4 MiB fail with `413`.
+- Invalid JSON bodies read through `readJsonBody` fail with `400`.
+- Auth responses may set or clear cookies through `Set-Cookie` headers.
+- Large JSON responses include `content-encoding: gzip` only when the client accepts gzip.
+
+#### Scenario: Oversized API body
+
+- GIVEN a POST request body exceeds 4 MiB
+- WHEN the web host converts the Node request to a Fetch request
+- THEN the request fails with HTTP `413 Request body too large`
+
+## Edge Cases
+
+- Better Auth may return no session; Pibo must treat that as `401`, not as an anonymous owner.
+- Dev auth must check both `Host` and `X-Forwarded-Host` so a remote forwarded request cannot obtain a dev session.
+- If no web apps are registered, `/` returns a small HTML page instead of failing server startup.
+- If an auth service does not expose HTTP routes, `/api/auth/*` returns `500` because the selected web auth mode is misconfigured.
+- Gzip must not apply to `204`, `304`, or already encoded responses.
+
+## Constraints
+
+- **Security / Privacy:** Production web gateways use Better Auth, not dev auth. Owner scope derives from the authenticated identity only. Allowed email checks are enforced after provider session resolution.
+- **Compatibility:** The web host uses Fetch `Request`/`Response` objects internally while serving through Node HTTP.
+- **Performance:** Request bodies are bounded at 4 MiB; large JSON responses can use gzip with low compression level.
+- **Dependencies:** Normal auth depends on Better Auth, Google OAuth settings, and SQLite migrations from Better Auth.
+
+## Success Criteria
+
+- [ ] SC-001: A normal gateway with complete Better Auth config starts and serves `/health`, `/gateway/status`, `/api/auth/*`, and registered apps from one origin.
+- [ ] SC-002: A normal gateway with missing auth config fails before accepting authenticated app traffic.
+- [ ] SC-003: Docker worker dev auth supports loopback sign-in and rejects non-loopback auth route requests.
+- [ ] SC-004: Web app handlers receive authenticated owner scopes as `user:<auth-user-id>`.
+- [ ] SC-005: Overlapping web app routes are rejected at plugin registration time.
+
+## Assumptions and Open Questions
+
+### Assumptions
+
+- `auth.allowedEmails` is the intended production access-control list for Chat Web and other same-origin apps.
+- Dev auth is meant for isolated Docker workers only and should not become a general local development mode on the host gateway.
+
+### Open Questions
+
+- Should `/gateway/status` require authentication, or is current unauthenticated status output intentional for gateway supervision?
+- Should simple-agent API routes have an explicit spec and auth policy separate from registered web apps?
+
+## Traceability
+
+| Requirement | Scenario / Story | Code Basis | Status |
+|---|---|---|---|
+| REQ-001 Web gateways select exactly one auth service | Duplicate auth service registration | `src/gateway/web.ts`, `src/plugins/registry.ts` | Draft |
+| REQ-002 Normal web gateways use Better Auth configuration | Missing allowed email list | `src/auth/better-auth.ts`, `src/config/config.ts` | Draft |
+| REQ-003 Better Auth authorizes only allowed emails | Signed-in user is not allowed | `src/auth/better-auth.ts` | Draft |
+| REQ-004 Dev auth is available only inside Docker workers | Host tries env dev auth | `src/gateway/web.ts`, `src/plugins/dev-auth.ts` | Draft |
+| REQ-005 Authenticated web requests map to owner scopes | Chat API request uses authenticated owner | `src/web/auth.ts`, `src/web/types.ts` | Draft |
+| REQ-006 Web host routes same-origin requests deterministically | Auth route is not claimed by an app | `src/web/channel.ts` | Draft |
+| REQ-007 Canonical redirects protect browser-facing origins | OAuth callback reaches loopback origin | `src/web/channel.ts`, `src/gateway/web.ts` | Draft |
+| REQ-008 Registered web app routes must not overlap | Two apps claim same API prefix | `src/plugins/registry.ts`, `src/web/types.ts` | Draft |
+| REQ-009 HTTP request and response handling is bounded and explicit | Oversized API body | `src/web/http.ts` | Draft |
+
+## Verification Basis
+
+This spec was derived from the current implementation in `src/web/*`, `src/auth/*`, `src/plugins/better-auth.ts`, `src/plugins/dev-auth.ts`, `src/plugins/web.ts`, `src/plugins/registry.ts`, `src/gateway/web.ts`, `src/config/config.ts`, and web app integration points in `src/apps/chat/web-app.ts`.

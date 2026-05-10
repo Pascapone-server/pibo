@@ -1,0 +1,265 @@
+# Spec: Local Store Ownership and Canonical Data Boundaries
+
+**Status:** Draft  
+**Created:** 2026-05-10  
+**Owner / Source:** Scheduled Pibo Source Specs Coverage  
+**Related docs:** `GLOSSARY.md`, `docs/specs/README.md`, `docs/specs/capabilities/pibo-home-and-workspace-state.md`, `docs/specs/capabilities/pibo-data-store-and-ingestion.md`, `docs/specs/capabilities/pibo-session-store.md`, `docs/specs/capabilities/reliable-event-core.md`, `docs/specs/capabilities/debug-cli.md`
+
+## Why
+
+Pibo persists product state in several local stores. Agents, web handlers, CLIs, and debug tools need a clear boundary for which store owns each product fact. Without that boundary, future code can accidentally treat projections, debug aliases, or legacy stores as canonical and create inconsistent session, room, event, or runtime state.
+
+This spec captures the current source-owned local storage contract: where stores live, what each store owns, which data is derived, and how consumers must recover when a store is missing or contains stale projection data.
+
+## Goal
+
+Pibo MUST keep each local product fact owned by exactly one current store and MUST treat read models, projections, and debug aliases as derived views unless their source module explicitly owns mutation for that fact.
+
+## Background / Current State
+
+`src/core/pibo-home.ts` defines the default Pibo home as `$PIBO_HOME` or `~/.pibo`. Most product-wide SQLite stores live under that home. Workspace-specific resources, such as prompt files and Pi package registrations, live under the effective workspace `.pibo/` directory.
+
+The current v2 data store in `src/data/pibo-store.ts` creates `pibo.sqlite` and applies `src/data/schema.ts`. That store owns unified Chat Web and projected session data: rooms, room members, event log rows, payload metadata, chat messages, observations, read stats, navigation rows, and indexed session projection rows. The routed Pibo Session source of truth remains the session store implementation used by the router; the v2 store shadows session facts for Chat Web navigation and debugging.
+
+Other durable stores own focused facts: `pibo-events.sqlite` for reliability streams, durable jobs, and yielded-run records; `pibo-cron.sqlite` for scheduled Pibo jobs and run history; `chat-agents.sqlite` for custom Agent Designer profiles; `auth.sqlite` for Better Auth state; context-file SQLite metadata plus managed markdown files for managed context files; `config.json`, `model-defaults.json`, and `user-settings.json` for local settings; and workspace `.pibo/pi-packages.json` plus package install directories for Pi package registrations.
+
+## Scope
+
+### In Scope
+
+- Store path ownership under Pibo home and workspace `.pibo/` directories.
+- Canonical ownership of sessions, rooms, chat events, reliability events, cron jobs, custom agents, auth data, managed context files, Pi packages, prompts, model defaults, and user settings.
+- Projection and read-model rules for Chat Web data and debug store aliases.
+- Idempotency, migration, and recovery behavior at store boundaries.
+- Operator/debug visibility for store paths and missing stores.
+
+### Out of Scope
+
+- Distributed storage, remote synchronization, or multi-host replication.
+- Full schemas for every table; capability specs for each subsystem own table-level behavior.
+- Pi Coding Agent transcript persistence internals outside the Pibo product boundary.
+- Legacy documents as authoritative storage contracts.
+
+## Requirements
+
+### Requirement: Store roots are deterministic
+
+The system MUST resolve product-wide stores from the configured Pibo home and workspace-scoped stores from the effective workspace.
+
+#### Current
+
+`getPiboHome()` returns `$PIBO_HOME` when set and otherwise `~/.pibo`. `piboHomePath()` joins product-wide store names to that root. Pi package, base prompt, and compaction prompt stores resolve under the current workspace `.pibo/` directory.
+
+#### Acceptance
+
+- Setting `PIBO_HOME=/tmp/pibo-a` causes product-wide store paths to use `/tmp/pibo-a`.
+- Unset `PIBO_HOME` causes product-wide stores to use `~/.pibo`.
+- Workspace files such as `.pibo/pi-packages.json`, `.pibo/base-prompt.json`, and `.pibo/compaction-prompt.json` do not move when only `PIBO_HOME` changes.
+- Store constructors create parent directories before opening file-backed stores.
+
+#### Scenario: Isolated product home
+
+- GIVEN `PIBO_HOME` points at an empty temporary directory
+- WHEN Pibo opens its default data, reliability, cron, auth, and user-settings stores
+- THEN each product-wide file is created under that temporary directory and not under the operator's normal home.
+
+### Requirement: Pibo Session identity has one routing source of truth
+
+The system MUST use the router's Pibo Session Store as the canonical source for Pibo Session identity, ownership, hierarchy, profile, active model, and Pi session binding.
+
+#### Current
+
+`SqlitePiboSessionStore` owns `pibo_sessions` records with unique `pi_session_id`, owner scope, parent and origin ids, profile, workspace, metadata, title, and active model. The v2 data store also contains a `sessions` table, but Chat Web ingestion writes it as an indexed projection for navigation and trace queries.
+
+#### Acceptance
+
+- Runtime routing resolves a Pibo Session from the session store before creating or resuming a runtime.
+- Chat Web projections may copy session fields into `pibo.sqlite`, but they must not be the authority for creating a routed runtime.
+- Updating a routed session's profile, title, workspace, metadata, or active model must go through the session store or a channel service that delegates to it.
+- Duplicate Pi session ownership is rejected by the canonical session store.
+
+#### Scenario: Projection missing for an existing session
+
+- GIVEN the Pibo Session Store contains session `S`
+- AND `pibo.sqlite.sessions` has no row for `S`
+- WHEN a routed message targets `S`
+- THEN routing uses the Pibo Session Store record and can rebuild Chat Web projections from later ingestion.
+
+### Requirement: Chat Web owns rooms and read-model projections in the v2 data store
+
+The system MUST treat `pibo.sqlite` as the canonical store for Chat Web rooms, room membership, read state, event-log rows, payload metadata, chat messages, observations, and navigation projections.
+
+#### Current
+
+`PiboDataStore` creates `pibo.sqlite`, applies the schema, and exposes stores for payloads, event log, messages, observations, navigation, and session projections. Chat room and query services use this store for room trees, event timelines, read cursors, and navigation.
+
+#### Acceptance
+
+- Room creation, archive state, workspace metadata, and membership mutations are persisted in `pibo.sqlite`.
+- User-message acceptance creates durable Chat Web event rows and updates projections through v2 data-store services.
+- Chat Web read and unread state is derived from `principal_session_stats`, `principal_room_stats`, and visible session/navigation rows in `pibo.sqlite`.
+- Consumers must treat `session_navigation`, `chat_messages`, and `observations` as projections of accepted input and runtime output, not as independent runtime transcripts.
+
+#### Scenario: Navigation row is stale
+
+- GIVEN a session has a newer event-log row than its navigation projection
+- WHEN Chat Web re-indexes or ingests the event
+- THEN it updates navigation from the event/session data instead of treating the stale navigation row as canonical.
+
+### Requirement: Reliability state is operational, not Chat Web canonical state
+
+The system MUST use `pibo-events.sqlite` for operational replay, durable jobs, and yielded-run records, without replacing Chat Web's event log or the Pibo Session Store.
+
+#### Current
+
+`PiboReliabilityStore` defaults to `pibo-events.sqlite`. It stores append-only Pibo events with topics and retention classes, consumer offsets, pending/dead jobs, and yielded-run records. Chat Web ingestion mirrors normalized output events into the `pibo.output` topic for diagnostics and replay.
+
+#### Acceptance
+
+- Reliability events are append-only and cursor-addressable by stream id.
+- Consumer offsets are monotonic and scoped to a consumer/topic pair.
+- Durable jobs and yielded-run records recover operational work after interruption.
+- Missing reliability mirror rows do not erase Chat Web room events or Pibo Session records.
+- Replaying reliability data may repair or diagnose projections, but it must not invent a canonical Pibo Session that is absent from the session store.
+
+#### Scenario: Reliability mirror is pruned
+
+- GIVEN Chat Web has persisted event-log rows for session `S`
+- AND older `pibo.output` reliability rows have been pruned according to retention policy
+- WHEN a user opens the Chat Web trace for `S`
+- THEN the trace uses Chat Web/Pi transcript sources and does not fail because the reliability mirror was pruned.
+
+### Requirement: Focused stores own focused product records
+
+The system MUST keep focused product records in their owning stores and reference them by stable ids from other subsystems.
+
+#### Current
+
+`PiboCronStore` owns `pibo-cron.sqlite` jobs and runs. `CustomAgentStore` owns `chat-agents.sqlite` custom agent definitions. Better Auth owns `auth.sqlite`. The context-file metadata store owns managed context-file metadata and revisions while markdown lives at managed file paths. The Pi package store owns workspace `.pibo/pi-packages.json` and install directories.
+
+#### Acceptance
+
+- Cron jobs reference targets such as room ids and persist run outcomes without owning room or session records.
+- Custom agents persist selected capability keys and package ids without owning the capability catalog or package installer state.
+- Better Auth user/session tables are used only by auth services; owner scopes are product-level derived identities.
+- Managed context-file metadata owns revision history; plugin context files remain read-only plugin resources.
+- Pi package registration does not activate a runtime package unless a profile selects the package and runtime loading succeeds.
+
+#### Scenario: Referenced custom-agent package is removed
+
+- GIVEN a custom agent stores a selected Pi package id
+- AND that package is removed from the workspace Pi package store
+- WHEN the custom-agent profile is assembled
+- THEN the package is skipped or diagnosed by runtime/profile assembly, and the custom-agent record remains the owner of the user's selection.
+
+### Requirement: Local settings stores have narrow, typed ownership
+
+The system MUST keep local configuration, model defaults, user settings, and prompt choices in separate typed stores with bounded recovery behavior.
+
+#### Current
+
+`config.json` stores local operator config such as auth settings. `model-defaults.json` stores provider/model defaults. `user-settings.json` stores owner-scoped settings such as timezone. Workspace `.pibo/base-prompt.*` and `.pibo/compaction-prompt.*` store runtime prompt modes and custom content.
+
+#### Acceptance
+
+- Config display redacts secrets and rejects unknown keys through the config CLI contract.
+- Invalid or missing model defaults fall back to supported defaults without corrupting sessions that already froze an active model.
+- Invalid or missing user timezone falls back to `UTC` for that owner scope.
+- Prompt stores preserve custom content across mode switches and remain workspace-scoped.
+- None of these settings stores owns session, room, event, or auth identity records.
+
+#### Scenario: Corrupt user settings file
+
+- GIVEN `user-settings.json` is missing or cannot be parsed as valid state
+- WHEN runtime context asks for an owner's timezone
+- THEN Pibo returns the default timezone and does not alter session identity.
+
+### Requirement: Debug store names are diagnostic aliases
+
+The system MUST expose debug store names as read-only diagnostics and MUST distinguish aliases from distinct canonical stores.
+
+#### Current
+
+`PIBO_DEBUG_STORES` maps `pibo-data`, `sessions`, and `chat` to `pibo.sqlite`, maps `agents` to `chat-agents.sqlite`, `auth` to `auth.sqlite`, `bindings` to `session-bindings.sqlite`, and `reliability` to `pibo-events.sqlite`. Debug commands report existence and inspect tables without mutating stores.
+
+#### Acceptance
+
+- `pibo debug stores` shows each known store name, resolved path, and whether the file exists.
+- `sessions` and `chat` debug names are aliases for different views of `pibo.sqlite`, not separate owners of session or chat facts.
+- A missing debug store is reported as missing instead of being created by read-only diagnostics.
+- Debug SQL rejects mutating statements.
+
+#### Scenario: Debug alias inspection
+
+- GIVEN `pibo.sqlite` exists
+- WHEN an operator inspects debug stores
+- THEN `pibo-data`, `sessions`, and `chat` resolve to the same path with different descriptions.
+
+## Edge Cases
+
+- A projection can lag behind its source event; readers that need canonical behavior must consult the owning store or rebuild the projection.
+- A focused store may reference a missing external id, such as a deleted room or package; validation happens at use time and must not silently mutate the owning record unless the user requested cleanup.
+- Store constructors may use `:memory:` for tests; behavior must match file-backed stores except for persistence and WAL mode.
+- Debug aliases may include legacy or currently unused store names; diagnostics must label missing files without implying current ownership.
+- JSON fields must degrade safely when malformed in stores that explicitly sanitize on read.
+
+## Constraints
+
+- **Product Boundary:** Pibo-owned stores define product state. Pi Coding Agent transcripts are separate engine persistence and are used for trace reconstruction, not for Pibo room or routing ownership.
+- **Compatibility:** Existing store paths remain stable unless a migration explicitly moves data and updates debug discovery.
+- **Security / Privacy:** Auth state and secrets must not be exposed through debug or config display beyond redacted, read-only diagnostics.
+- **Reliability:** Projection repair may use durable events, but canonical stores must remain idempotent and avoid duplicating facts.
+- **Context Economy:** Specs and debug output should name store ownership compactly instead of repeating full schemas at every command level.
+
+## Success Criteria
+
+- [ ] SC-001: Product-wide store paths resolve from `PIBO_HOME` or `~/.pibo`, while workspace stores remain under the effective workspace `.pibo/` directory.
+- [ ] SC-002: Routed runtime creation depends on the Pibo Session Store, not on Chat Web projection tables.
+- [ ] SC-003: Chat Web room, membership, event, read-state, and navigation behavior is owned by `pibo.sqlite` services.
+- [ ] SC-004: Reliability replay, durable jobs, and yielded-run records are owned by `pibo-events.sqlite` without replacing Chat Web event-log state.
+- [ ] SC-005: Cron jobs, custom agents, Better Auth, context files, Pi packages, prompts, model defaults, config, and user settings each have narrow store ownership.
+- [ ] SC-006: Debug store commands reveal resolved paths and aliases without creating or mutating stores.
+
+## Assumptions and Open Questions
+
+### Assumptions
+
+- The current v2 direction is that `pibo.sqlite` is the unified Chat Web and projected-session data store, while the router's Pibo Session Store remains the routing authority.
+- `session-bindings.sqlite` is retained as a debug-visible legacy or compatibility store name until source code removes or redefines it.
+
+### Open Questions
+
+- Should a future migration retire `pibo-sessions.sqlite` in favor of `pibo.sqlite.sessions`, or should both stores remain distinct long term?
+- Should debug output explicitly label `sessions` and `chat` as aliases to reduce operator confusion?
+- Which repair command, if any, should rebuild Chat Web projections from canonical session and event sources?
+
+## Traceability
+
+| Requirement | Scenario / Story | Source Basis | Status |
+|---|---|---|---|
+| REQ-001 Store roots are deterministic | Isolated product home | `src/core/pibo-home.ts`, `src/data/pibo-store.ts`, `src/reliability/store.ts`, `src/cron/store.ts`, `src/core/base-prompt.ts`, `src/core/compaction-prompt.ts`, `src/pi-packages/store.ts` | Draft |
+| REQ-002 Pibo Session identity has one routing source of truth | Projection missing for an existing session | `src/sessions/sqlite-store.ts`, `src/sessions/store.ts`, `src/core/session-router.ts`, `src/data/schema.ts` | Draft |
+| REQ-003 Chat Web owns rooms and read-model projections | Navigation row is stale | `src/data/schema.ts`, `src/data/pibo-store.ts`, `src/apps/chat/data/room-service.ts`, `src/apps/chat/data/read-state-service.ts`, `src/apps/chat/data/navigation-query-service.ts` | Draft |
+| REQ-004 Reliability state is operational | Reliability mirror is pruned | `src/reliability/store.ts`, `src/apps/chat/web-app.ts`, `src/data/ingest-service.ts` | Draft |
+| REQ-005 Focused stores own focused product records | Referenced custom-agent package is removed | `src/cron/store.ts`, `src/apps/chat/agent-store.ts`, `src/auth/better-auth.ts`, `src/plugins/context-files-store.ts`, `src/pi-packages/store.ts` | Draft |
+| REQ-006 Local settings stores have narrow ownership | Corrupt user settings file | `src/config/config.ts`, `src/core/model-defaults.ts`, `src/core/user-settings.ts`, `src/core/base-prompt.ts`, `src/core/compaction-prompt.ts` | Draft |
+| REQ-007 Debug store names are diagnostic aliases | Debug alias inspection | `src/debug/stores.ts`, `src/debug/sql.ts`, `src/debug/index.ts` | Draft |
+
+## Verification Basis
+
+This spec is based on current source inspection of:
+
+- `GLOSSARY.md`
+- `docs/specs/README.md`
+- the full current `docs/specs/` file list
+- `src/core/pibo-home.ts`
+- `src/sessions/sqlite-store.ts`
+- `src/data/schema.ts`
+- `src/data/pibo-store.ts`
+- `src/reliability/store.ts`
+- `src/cron/store.ts`
+- `src/apps/chat/agent-store.ts`
+- `src/auth/better-auth.ts`
+- `src/plugins/context-files-store.ts`
+- `src/pi-packages/store.ts`
+- `src/debug/stores.ts`
