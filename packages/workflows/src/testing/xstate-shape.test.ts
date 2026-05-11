@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   WORKFLOW_XSTATE_ACTOR_SOURCES,
   WORKFLOW_XSTATE_CANCEL_EVENT,
+  WORKFLOW_XSTATE_NODE_DONE_EVENT,
   WORKFLOW_XSTATE_PROJECTION_KIND,
   WORKFLOW_XSTATE_PROJECTION_VERSION,
   WORKFLOW_XSTATE_RESUME_EVENT,
@@ -12,10 +13,14 @@ import {
   createXStateProjectionContextShape,
   minimalOneNodePiboAgentWorkflowFixture,
   mixedNodeWorkflowFixture,
+  projectWorkflowEdgesToXState,
   projectWorkflowNodesToXState,
   projectWorkflowToXStateProjection,
+  workflowFixtureRegistryRefs,
   xstateActorIdForNode,
   xstateStateIdForNode,
+  xstateTransferEdgeActionId,
+  xstateTransitionIdForEdge,
 } from "../index.js";
 import type { XStateProjectionState } from "../index.js";
 
@@ -185,7 +190,7 @@ describe("XState projection shape", () => {
     });
   });
 
-  it("projects a workflow definition into a machine with node states before edge mapping", () => {
+  it("projects a workflow definition into a machine with node states and edge transitions", () => {
     const projection = projectWorkflowToXStateProjection(minimalOneNodePiboAgentWorkflowFixture);
 
     assert.equal(projection.id, "fixture.minimal-pibo-agent");
@@ -200,7 +205,84 @@ describe("XState projection shape", () => {
     assert.ok(projection.config.states[WORKFLOW_XSTATE_TERMINAL_STATE_IDS.completed]);
   });
 
+  it("maps workflow edges to deterministic XState transitions and transfer actions", () => {
+    const edgeProjection = projectWorkflowEdgesToXState(mixedNodeWorkflowFixture);
+
+    assert.deepEqual(
+      edgeProjection.transitions.map((transition) => transition.id),
+      [
+        xstateTransitionIdForEdge("draft-to-review"),
+        xstateTransitionIdForEdge("normalize-to-child"),
+        xstateTransitionIdForEdge("plan-to-draft"),
+        xstateTransitionIdForEdge("review-to-normalize"),
+      ],
+    );
+
+    const planTransition = edgeProjection.transitions.find((transition) => transition.edgeId === "plan-to-draft");
+    assert.deepEqual(planTransition, {
+      id: xstateTransitionIdForEdge("plan-to-draft"),
+      event: WORKFLOW_XSTATE_NODE_DONE_EVENT,
+      source: xstateStateIdForNode("plan"),
+      target: xstateStateIdForNode("draft"),
+      edgeId: "plan-to-draft",
+      actions: [xstateTransferEdgeActionId("plan-to-draft")],
+      meta: {
+        pibo: {
+          edgeId: "plan-to-draft",
+          edgeKind: "data",
+        },
+      },
+    });
+    assert.deepEqual(edgeProjection.actions[xstateTransferEdgeActionId("plan-to-draft")], {
+      id: xstateTransferEdgeActionId("plan-to-draft"),
+      kind: "transferEdge",
+      edgeId: "plan-to-draft",
+      durableEffect: true,
+    });
+
+    const adapterTransition = edgeProjection.transitions.find((transition) => transition.edgeId === "normalize-to-child");
+    assert.equal(adapterTransition?.meta?.pibo.adapterRef, workflowFixtureRegistryRefs.adapters.draftToSummary);
+
+    const resumeTransition = edgeProjection.transitions.find((transition) => transition.edgeId === "review-to-normalize");
+    assert.equal(resumeTransition?.event, WORKFLOW_XSTATE_RESUME_EVENT);
+    assert.equal(resumeTransition?.guard, workflowFixtureRegistryRefs.guards.approved);
+    assert.deepEqual(resumeTransition?.meta?.pibo, {
+      edgeId: "review-to-normalize",
+      edgeKind: "resume",
+      guardRef: workflowFixtureRegistryRefs.guards.approved,
+      priority: 1,
+    });
+
+    const projection = projectWorkflowToXStateProjection(mixedNodeWorkflowFixture);
+    assert.equal(projection.transitions.length, 4);
+    assert.equal(projection.actions[xstateTransferEdgeActionId("plan-to-draft")]?.kind, "transferEdge");
+    assert.deepEqual(projection.config.states[xstateStateIdForNode("plan")]?.on?.[WORKFLOW_XSTATE_NODE_DONE_EVENT], {
+      target: xstateStateIdForNode("draft"),
+      actions: [xstateTransferEdgeActionId("plan-to-draft")],
+      meta: {
+        pibo: {
+          edgeId: "plan-to-draft",
+          edgeKind: "data",
+        },
+      },
+    });
+    assert.deepEqual(projection.config.states[xstateStateIdForNode("review")]?.on?.[WORKFLOW_XSTATE_RESUME_EVENT], {
+      target: xstateStateIdForNode("normalize"),
+      guard: workflowFixtureRegistryRefs.guards.approved,
+      actions: [xstateTransferEdgeActionId("review-to-normalize")],
+      meta: {
+        pibo: {
+          edgeId: "review-to-normalize",
+          edgeKind: "resume",
+          guardRef: workflowFixtureRegistryRefs.guards.approved,
+          priority: 1,
+        },
+      },
+    });
+  });
+
   it("exposes stable event names for future wait/cancel mappings", () => {
+    assert.equal(WORKFLOW_XSTATE_NODE_DONE_EVENT, "WORKFLOW.NODE.DONE");
     assert.equal(WORKFLOW_XSTATE_RESUME_EVENT, "WORKFLOW.RESUME");
     assert.equal(WORKFLOW_XSTATE_CANCEL_EVENT, "WORKFLOW.CANCEL");
   });

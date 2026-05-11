@@ -1,10 +1,12 @@
 import type {
   EdgeId,
+  EdgeKind,
   EdgeStateMapping,
   NodeId,
   StateAccessPolicy,
   StatePath,
   WorkflowDefinition,
+  WorkflowEdgeDefinition,
   WorkflowId,
   WorkflowMetadata,
   WorkflowNodeDefinition,
@@ -26,6 +28,8 @@ import type {
   XStateProjectionStateMeta,
   XStateProjectionTerminalKind,
   XStateProjectionTransition,
+  XStateProjectionTransitionConfig,
+  XStateProjectionTransitionMeta,
 } from "../types/index.js";
 
 export const WORKFLOW_XSTATE_PROJECTION_KIND: XStateProjectionKind = "pibo.workflow.xstateProjection";
@@ -39,6 +43,7 @@ export const WORKFLOW_XSTATE_TERMINAL_STATE_IDS: Record<XStateProjectionTerminal
   cancelled: "workflow.cancelled",
 };
 
+export const WORKFLOW_XSTATE_NODE_DONE_EVENT = "WORKFLOW.NODE.DONE";
 export const WORKFLOW_XSTATE_RESUME_EVENT = "WORKFLOW.RESUME";
 export const WORKFLOW_XSTATE_CANCEL_EVENT = "WORKFLOW.CANCEL";
 export const WORKFLOW_XSTATE_FAIL_EVENT = "WORKFLOW.FAIL";
@@ -91,6 +96,11 @@ export type WorkflowNodeXStateProjection = {
   contextShape: XStateProjectionContextShape;
 };
 
+export type WorkflowEdgeXStateProjection = {
+  transitions: XStateProjectionTransition[];
+  actions: Record<string, XStateProjectionAction>;
+};
+
 export function projectWorkflowNodesToXState(definition: WorkflowDefinition): WorkflowNodeXStateProjection {
   const states: Record<string, XStateProjectionState> = {};
   const actors: Record<string, XStateProjectionActor> = {};
@@ -122,15 +132,50 @@ export function projectWorkflowNodesToXState(definition: WorkflowDefinition): Wo
   };
 }
 
+export function projectWorkflowEdgesToXState(definition: WorkflowDefinition): WorkflowEdgeXStateProjection {
+  const transitions: XStateProjectionTransition[] = [];
+  const actions: Record<string, XStateProjectionAction> = {};
+
+  for (const [edgeId, edge] of Object.entries(definition.edges).sort(compareWorkflowEdgeEntriesForXState)) {
+    const actionId = xstateTransferEdgeActionId(edgeId);
+    actions[actionId] = {
+      id: actionId,
+      kind: "transferEdge",
+      edgeId,
+      durableEffect: true,
+    };
+
+    const transition: XStateProjectionTransition = {
+      id: xstateTransitionIdForEdge(edgeId),
+      event: xstateEventForEdge(edge),
+      source: xstateStateIdForNode(edge.from.nodeId),
+      target: xstateStateIdForNode(edge.to.nodeId),
+      edgeId,
+      actions: [actionId],
+      meta: createXStateTransitionMetaForEdge(edgeId, edge),
+    };
+    if (edge.guard?.handler !== undefined) {
+      transition.guard = edge.guard.handler;
+    }
+
+    transitions.push(transition);
+  }
+
+  return { transitions, actions };
+}
+
 export function projectWorkflowToXStateProjection(definition: WorkflowDefinition): XStateMachineProjection {
   const nodeProjection = projectWorkflowNodesToXState(definition);
+  const edgeProjection = projectWorkflowEdgesToXState(definition);
 
   return createXStateMachineProjection({
     id: definition.id,
     version: definition.version,
     initial: nodeProjection.initial,
     states: nodeProjection.states,
+    transitions: edgeProjection.transitions,
     actors: nodeProjection.actors,
+    actions: edgeProjection.actions,
     contextShape: nodeProjection.contextShape,
     metadata: definition.metadata,
     ui: definition.ui,
@@ -229,12 +274,18 @@ function createXStateMachineConfig(options: CreateXStateMachineConfigOptions): X
     }
 
     sourceState.on ??= {};
-    const projectedTransition = {
+    const projectedTransition: XStateProjectionTransitionConfig = {
       target: transition.target,
-      guard: transition.guard,
-      actions: transition.actions,
-      meta: transition.meta,
     };
+    if (transition.guard !== undefined) {
+      projectedTransition.guard = transition.guard;
+    }
+    if (transition.actions !== undefined) {
+      projectedTransition.actions = transition.actions;
+    }
+    if (transition.meta !== undefined) {
+      projectedTransition.meta = transition.meta;
+    }
     const existingTransition = sourceState.on[transition.event];
     if (existingTransition === undefined) {
       sourceState.on[transition.event] = projectedTransition;
@@ -326,6 +377,89 @@ export function createXStateProjectionStateForNode(
       },
     },
   };
+}
+
+export function xstateTransitionIdForEdge(edgeId: EdgeId): string {
+  return `workflow.edge.${edgeId}.transition`;
+}
+
+export function xstateTransferEdgeActionId(edgeId: EdgeId): string {
+  return `workflow.edge.${edgeId}.transfer`;
+}
+
+export function xstateEventForEdge(edge: WorkflowEdgeDefinition): string {
+  if (edge.event !== undefined) {
+    return edge.event;
+  }
+
+  const kind = xstateEdgeKind(edge);
+  if (kind === "error") {
+    return WORKFLOW_XSTATE_FAIL_EVENT;
+  }
+  if (kind === "resume") {
+    return WORKFLOW_XSTATE_RESUME_EVENT;
+  }
+
+  return WORKFLOW_XSTATE_NODE_DONE_EVENT;
+}
+
+export function createXStateTransitionMetaForEdge(
+  edgeId: EdgeId,
+  edge: WorkflowEdgeDefinition,
+): XStateProjectionTransitionMeta {
+  const pibo: XStateProjectionTransitionMeta["pibo"] = {
+    edgeId,
+    edgeKind: xstateEdgeKind(edge),
+  };
+
+  if (edge.guard?.handler !== undefined) {
+    pibo.guardRef = edge.guard.handler;
+  }
+  if (edge.adapter?.transform.id !== undefined) {
+    pibo.adapterRef = edge.adapter.transform.id;
+  }
+  if (edge.join !== undefined) {
+    pibo.join = edge.join;
+  }
+  const priority = edge.priority ?? edge.guard?.priority;
+  if (priority !== undefined) {
+    pibo.priority = priority;
+  }
+  if (edge.ui !== undefined) {
+    pibo.ui = edge.ui;
+  }
+
+  return { pibo };
+}
+
+function compareWorkflowEdgeEntriesForXState(
+  [leftId, left]: [EdgeId, WorkflowEdgeDefinition],
+  [rightId, right]: [EdgeId, WorkflowEdgeDefinition],
+): number {
+  const sourceComparison = left.from.nodeId.localeCompare(right.from.nodeId);
+  if (sourceComparison !== 0) {
+    return sourceComparison;
+  }
+
+  const eventComparison = xstateEventForEdge(left).localeCompare(xstateEventForEdge(right));
+  if (eventComparison !== 0) {
+    return eventComparison;
+  }
+
+  const priorityComparison = xstateEdgePriority(left) - xstateEdgePriority(right);
+  if (priorityComparison !== 0) {
+    return priorityComparison;
+  }
+
+  return leftId.localeCompare(rightId);
+}
+
+function xstateEdgeKind(edge: WorkflowEdgeDefinition): EdgeKind {
+  return edge.kind ?? "data";
+}
+
+function xstateEdgePriority(edge: WorkflowEdgeDefinition): number {
+  return edge.priority ?? edge.guard?.priority ?? Number.MAX_SAFE_INTEGER;
 }
 
 export function xstateActorIdForNode(nodeId: NodeId): string {
