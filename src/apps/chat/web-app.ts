@@ -2758,9 +2758,13 @@ async function buildProjectsBootstrap(input: {
 		});
 		projectSessions = [input.state.projectService.getProjectSession(session.id)!];
 	}
-	const sessions = projectSessions
+	const rootSessions = projectSessions
 		.map((projectSession) => input.context.channelContext.getSession(projectSession.piboSessionId))
 		.filter((session): session is PiboSession => Boolean(session));
+	const sessions = collectProjectSessionTreeSessions(
+		rootSessions,
+		input.context.channelContext.findSessions({ ownerScope: input.webSession.ownerScope }),
+	);
 	const requestedSession = input.piboSessionId ? sessions.find((session) => session.id === input.piboSessionId) : undefined;
 	const selectedSession = requestedSession ?? sessions.find((session) => session.id === selectedProject.currentMainSessionId) ?? sessions[0];
 	indexOwnedSessions(input.state.sessionQuery, sessions);
@@ -2777,6 +2781,21 @@ async function buildProjectsBootstrap(input: {
 		sessions: nodes,
 		...(await loadBootstrapCatalog(input.state, input.context, input.webSession)),
 	};
+}
+
+function collectProjectSessionTreeSessions(rootSessions: PiboSession[], candidateSessions: PiboSession[]): PiboSession[] {
+	const sessionsById = new Map(rootSessions.map((session) => [session.id, session]));
+	let changed = true;
+	while (changed) {
+		changed = false;
+		for (const session of candidateSessions) {
+			if (sessionsById.has(session.id)) continue;
+			if (!session.parentId || !sessionsById.has(session.parentId)) continue;
+			sessionsById.set(session.id, session);
+			changed = true;
+		}
+	}
+	return [...sessionsById.values()].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }
 
 function applyProjectSessionArchiveState(nodes: PiboWebSessionNode[], archivedBySessionId: ReadonlyMap<string, boolean>): void {

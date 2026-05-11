@@ -2192,9 +2192,9 @@ function ProjectsArea({
 								<button type="button" onClick={() => { const next = !showArchivedSessions; setShowArchivedSessions(next); localStorage.setItem("pibo.chat.projects.showArchivedSessions", String(next)); }} title={showArchivedSessions ? "Hide Archived Project Sessions" : "Show Archived Project Sessions"} aria-label={showArchivedSessions ? "Hide Archived Project Sessions" : "Show Archived Project Sessions"} className={`h-6 w-6 inline-flex items-center justify-center border rounded-sm hover:border-[#11a4d4] hover:text-[#11a4d4] ${showArchivedSessions ? "border-[#11a4d4] text-[#11a4d4]" : "border-slate-700 text-slate-400"}`}>{showArchivedSessions ? <ArchiveRestore size={14} /> : <Archive size={14} />}</button>
 							</div>
 						</div>
-						{sessionGroups.active.map((session) => <SessionNode key={session.piboSessionId} node={session} signalNow={Date.now()} selectedPiboSessionId={selectedPiboSessionId} selectedSessionPathIds={selectedSessionPathIds} onSelect={(piboSessionId) => onNavigate(selectedProject?.id, piboSessionId)} onRename={(piboSessionId, title) => void renameSession(piboSessionId, title)} onArchive={(piboSessionId, archived) => void patchProjectSession(piboSessionId, { archived }).then(() => load({ projectId: selectedProject?.id }))} onDelete={(node) => void patchProjectSession(node.piboSessionId, { archived: true }).then(() => load({ projectId: selectedProject?.id }))} loadingPiboSessionId={null} autoRename={autoRenameSessionId === session.piboSessionId} onAutoRenameConsumed={() => setAutoRenameSessionId(null)} />)}
+						{sessionGroups.active.map((session) => <SessionNode key={session.piboSessionId} node={session} signalNow={Date.now()} selectedPiboSessionId={selectedPiboSessionId} selectedSessionPathIds={selectedSessionPathIds} onSelect={(piboSessionId) => onNavigate(selectedProject?.id, piboSessionId)} onRename={(piboSessionId, title) => void renameSession(piboSessionId, title)} onArchive={(piboSessionId, archived) => void patchProjectSession(piboSessionId, { archived }).then(() => load({ projectId: selectedProject?.id }))} onDelete={(node) => void patchProjectSession(node.piboSessionId, { archived: true }).then(() => load({ projectId: selectedProject?.id }))} loadingPiboSessionId={null} autoRename={autoRenameSessionId === session.piboSessionId} onAutoRenameConsumed={() => setAutoRenameSessionId(null)} showWorkflowSessionKindMarkers />)}
 						{sessionGroups.active.length === 0 ? <div className="px-2 py-3 text-xs text-slate-500 border border-dashed border-slate-700 rounded-sm">No active project sessions</div> : null}
-						{showArchivedSessions ? <div className="mt-3"><div className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Archived Project Sessions</div>{sessionGroups.archived.map((session) => <SessionNode key={session.piboSessionId} node={session} signalNow={Date.now()} selectedPiboSessionId={selectedPiboSessionId} selectedSessionPathIds={selectedSessionPathIds} onSelect={(piboSessionId) => onNavigate(selectedProject?.id, piboSessionId)} onRename={(piboSessionId, title) => void renameSession(piboSessionId, title)} onArchive={(piboSessionId, archived) => void patchProjectSession(piboSessionId, { archived }).then(() => load({ projectId: selectedProject?.id }))} onDelete={(node) => void patchProjectSession(node.piboSessionId, { archived: true }).then(() => load({ projectId: selectedProject?.id }))} loadingPiboSessionId={null} />)}{sessionGroups.archived.length === 0 ? <div className="px-2 py-3 text-xs text-slate-500 border border-dashed border-slate-700 rounded-sm">No archived project sessions</div> : null}</div> : null}
+						{showArchivedSessions ? <div className="mt-3"><div className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Archived Project Sessions</div>{sessionGroups.archived.map((session) => <SessionNode key={session.piboSessionId} node={session} signalNow={Date.now()} selectedPiboSessionId={selectedPiboSessionId} selectedSessionPathIds={selectedSessionPathIds} onSelect={(piboSessionId) => onNavigate(selectedProject?.id, piboSessionId)} onRename={(piboSessionId, title) => void renameSession(piboSessionId, title)} onArchive={(piboSessionId, archived) => void patchProjectSession(piboSessionId, { archived }).then(() => load({ projectId: selectedProject?.id }))} onDelete={(node) => void patchProjectSession(node.piboSessionId, { archived: true }).then(() => load({ projectId: selectedProject?.id }))} loadingPiboSessionId={null} showWorkflowSessionKindMarkers />)}{sessionGroups.archived.length === 0 ? <div className="px-2 py-3 text-xs text-slate-500 border border-dashed border-slate-700 rounded-sm">No archived project sessions</div> : null}</div> : null}
 					</div>
 				</div>
 			</aside>
@@ -4119,6 +4119,7 @@ function SessionNode({
 	loadingPiboSessionId,
 	autoRename = false,
 	onAutoRenameConsumed,
+	showWorkflowSessionKindMarkers = false,
 }: {
 	node: PiboWebSessionNode;
 	signalNow: number;
@@ -4132,6 +4133,7 @@ function SessionNode({
 	loadingPiboSessionId?: string | null;
 	autoRename?: boolean;
 	onAutoRenameConsumed?: () => void;
+	showWorkflowSessionKindMarkers?: boolean;
 }) {
 	const safeTitle = sessionNodeTitle(node);
 	const [editing, setEditing] = useState(false);
@@ -4180,6 +4182,8 @@ function SessionNode({
 	};
 	const signal = sessionNodeSignal(node, signalNow);
 	const loading = loadingPiboSessionId === node.piboSessionId;
+	const workflowKind = showWorkflowSessionKindMarkers ? workflowSessionKindPresentation(node.workflowSessionKind) : null;
+	const WorkflowKindIcon = workflowKind?.Icon;
 
 	return (
 		<div>
@@ -4244,11 +4248,22 @@ function SessionNode({
 								}
 								onSelect(node.piboSessionId);
 							}}
+							aria-label={workflowKind ? `${workflowKind.ariaLabel}: ${safeTitle}` : `Open session ${safeTitle}`}
 							className="min-w-0 text-left px-1 py-1 grid grid-cols-[minmax(0,1fr)_auto] gap-2 items-center"
 						>
 							<span className="min-w-0">
-								<span className={`block text-sm truncate ${node.archived ? "text-slate-500" : "text-slate-200"}`}>{safeTitle}</span>
-								<span className="block text-[10px] font-mono truncate text-slate-500">{node.piboSessionId}</span>
+								<span className="flex min-w-0 items-center gap-1.5">
+									{workflowKind && WorkflowKindIcon ? (
+										<span className={`h-4 w-4 shrink-0 inline-flex items-center justify-center rounded-sm border ${workflowKind.className}`} title={workflowKind.ariaLabel} aria-label={workflowKind.ariaLabel}>
+											<WorkflowKindIcon size={11} aria-hidden="true" />
+										</span>
+									) : null}
+									<span className={`block min-w-0 truncate text-sm ${node.archived ? "text-slate-500" : "text-slate-200"}`}>{safeTitle}</span>
+								</span>
+								<span className="mt-0.5 flex min-w-0 items-center gap-1.5">
+									{workflowKind ? <span className={`shrink-0 rounded-sm border px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide ${workflowKind.className}`} title={workflowKind.ariaLabel}>{workflowKind.label}</span> : null}
+									<span className="min-w-0 truncate font-mono text-[10px] text-slate-500">{node.piboSessionId}</span>
+								</span>
 							</span>
 						</button>
 						<span className="grid grid-rows-[16px_16px] place-items-center gap-0.5">
@@ -4375,6 +4390,7 @@ function SessionNode({
 					onDelete={onDelete}
 					depth={depth + 1}
 					loadingPiboSessionId={loadingPiboSessionId}
+					showWorkflowSessionKindMarkers={showWorkflowSessionKindMarkers}
 				/>
 			)) : null}
 		</div>
@@ -4383,6 +4399,21 @@ function SessionNode({
 
 function sessionNodeTitle(node: PiboWebSessionNode): string {
 	return typeof node.title === "string" && node.title ? node.title : "Untitled Session";
+}
+
+function workflowSessionKindPresentation(kind: PiboWebSessionNode["workflowSessionKind"]): { label: string; ariaLabel: string; className: string; Icon: typeof Layers } | null {
+	switch (kind) {
+		case "main_workflow":
+			return { label: "main workflow", ariaLabel: "Main workflow session", className: "border-[#11a4d4]/40 bg-[#11a4d4]/10 text-[#11a4d4]", Icon: Layers };
+		case "nested_workflow":
+			return { label: "nested workflow", ariaLabel: "Nested workflow session", className: "border-violet-400/40 bg-violet-500/10 text-violet-300", Icon: Copy };
+		case "agent_node":
+			return { label: "agent node", ariaLabel: "Workflow agent node session", className: "border-emerald-400/40 bg-emerald-500/10 text-emerald-300", Icon: UserRound };
+		case "subagent":
+			return { label: "subagent", ariaLabel: "Subagent session", className: "border-amber-400/40 bg-amber-500/10 text-amber-300", Icon: User };
+		default:
+			return null;
+	}
 }
 
 function sessionNodeSignal(node: PiboWebSessionNode, now: number): { className: string; title: string } {

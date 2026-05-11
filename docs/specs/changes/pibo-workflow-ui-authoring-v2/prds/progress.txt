@@ -11,6 +11,7 @@
 - V2 workflow HTTP contracts are documented under Chat Web routes: catalog/lifecycle APIs use `/api/chat/workflows`, while Project workflow session APIs use `/api/chat/projects/:projectId/workflow-sessions`.
 - Use `createWorkflowDiagnosticReport` from `@pasko70/pibo-workflows` validation exports for V2 diagnostic grouping across Workflow Library, Builder, Project session creation, run start, and runtime failure surfaces.
 - Workflow session routing metadata uses the stable Pibo Session metadata key `workflowSessionKind` with values `main_workflow`, `nested_workflow`, `agent_node`, and `subagent`; Chat sidebar nodes expose it as `PiboWebSessionNode.workflowSessionKind`.
+- Project workflow sidebars should build from Project root Pibo Sessions plus real parent/child Pibo Session descendants from `channelContext.findSessions`, not from logical workflow graph node ids.
 - Published workflow versions use `hashWorkflowDefinition` plus `SqliteWorkflowRunStore.savePublishedWorkflowVersion`; saving the same body is idempotent, while changing a published `workflowId@version` body throws to preserve immutability.
 - Edit-published actions should use `POST /api/chat/workflows/:workflowId/drafts`, create or reuse the one active next-version draft for UI-authored published workflows, and keep code projections duplicate-only.
 - Project workflow session creation should use the V2 `/api/chat/projects/:projectId/workflow-sessions` route and `workflow-versions` picker; keep legacy `/projects/:projectId/sessions` limited to `simple-chat`.
@@ -437,4 +438,31 @@
 - **Learnings for future iterations:**
   - Keep edit-published separate from duplicate-to-draft: edit preserves the UI workflow identity and creates the next version path; duplicate creates a new UI copy.
   - For browser text assertions, label text may be uppercased by CSS/rendering in `innerText`; assert against visible uppercase labels such as `NEXT VERSION PATH` when needed.
+---
+## 2026-05-12 00:43 CEST - US-002
+- What was implemented
+  - Project bootstrap now includes selected Project root sessions plus real descendant Pibo Sessions by walking parent/child links from `channelContext.findSessions`, so nested workflow, agent-node, and subagent sessions can appear when they exist.
+  - Added distinct visible badges, icons, and accessible labels for `main_workflow`, `nested_workflow`, `agent_node`, and `subagent` sidebar session kinds.
+  - Added Web API coverage that verifies Project sidebar data includes only real Pibo Session descendants and excludes unrelated workflow-session-like records.
+- Files changed
+  - `src/apps/chat/web-app.ts`
+  - `src/apps/chat-ui/src/App.tsx`
+  - `test/web-channel.test.mjs`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_07_project_run_inspection_sidebar_and_human_actions.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck'` — passed.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run build && node --test --test-name-pattern "project bootstrap includes real workflow session descendants" test/web-channel.test.mjs'` — passed.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && node --test test/web-channel.test.mjs'` — passed, 55/55 tests.
+  - `python3 -m json.tool docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_07_project_run_inspection_sidebar_and_human_actions.json` — passed.
+  - `git diff --check` — passed.
+- Browser verification, if UI changed
+  - Restarted the container gateway from rebuilt `/workspace/dist` and verified `http://127.0.0.1:4802/apps/chat` returned OK.
+  - Created a dev-auth Project `Workflow Sidebar V2 1778539335` and configured workflow session `Sidebar Marker Workflow` through the Chat Web API.
+  - Used `browser-use --fresh-profile` inside `pibo-dev-WorkflowsV2` to open `/apps/chat/projects/prj_7c80688b-1b39-48ca-991c-46773c56b6e4/sessions/ps_d8efbe74-521a-4650-8f3b-13863db9bd1b`.
+  - Verified the authenticated page shows `dev@pibo.local`, the Project, the workflow session, the visible `main workflow` marker, and a `Main workflow session` aria label.
+  - Saved screenshot: `/tmp/ralph-v2-project-sidebar-session-kinds.png` inside the container.
+- **Learnings for future iterations:**
+  - Project sidebar session trees need both the durable Project session roots and runtime-created descendants; child workflow/subagent sessions are real Pibo Sessions even when they do not have `project_sessions` rows.
+  - UI markers should consume `PiboWebSessionNode.workflowSessionKind` directly and keep workflow graph nodes/edges/guards/adapters out of the sidebar tree.
 ---

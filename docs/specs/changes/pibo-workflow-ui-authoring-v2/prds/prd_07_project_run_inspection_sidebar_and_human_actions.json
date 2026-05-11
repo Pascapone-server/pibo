@@ -31,8 +31,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented real Pibo Session descendant inclusion for Project bootstrap and UI session-kind markers/labels in the Project sidebar."
     },
     {
       "id": "US-003",

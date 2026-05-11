@@ -2065,6 +2065,113 @@ test("chat web app creates configured Project workflow sessions from the workflo
 	}
 });
 
+test("chat web app project bootstrap includes real workflow session descendants only", async () => {
+	const { channel, baseURL, sessions, storageDir } = await startWebHostChannel({
+		auth: createFakeAuthService(),
+		profiles: [{ name: "pibo-agent", aliases: ["default"] }, { name: "reviewer-agent" }],
+	});
+
+	try {
+		const projectResponse = await fetch(`${baseURL}/api/chat/projects`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({
+				name: "Workflow Tree Project",
+				projectFolder: join(storageDir, "workflow-tree-project"),
+				createFolder: true,
+			}),
+		});
+		assert.equal(projectResponse.status, 201);
+		const projectPayload = await projectResponse.json();
+
+		const createdResponse = await fetch(`${baseURL}/api/chat/projects/${encodeURIComponent(projectPayload.project.id)}/workflow-sessions`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({
+				profile: "pibo-agent",
+				workflowId: "standard-project",
+				workflowVersion: "1.0.0",
+				title: "Workflow Root",
+			}),
+		});
+		assert.equal(createdResponse.status, 201);
+		const createdPayload = await createdResponse.json();
+		const root = createdPayload.session;
+		const ownerScope = root.ownerScope;
+		assert.equal(ownerScope, "user:user-1");
+
+		const nested = sessions.create({
+			channel: "pibo.workflow",
+			kind: "workflow",
+			profile: "pibo-agent",
+			ownerScope,
+			parentId: root.id,
+			workspace: projectPayload.project.projectFolder,
+			title: "Nested Review Workflow",
+			metadata: { workflowSessionKind: "nested_workflow", workflowNodeId: "review-subflow" },
+		});
+		const agent = sessions.create({
+			channel: "pibo.workflow",
+			kind: "agent-node",
+			profile: "pibo-agent",
+			ownerScope,
+			parentId: nested.id,
+			workspace: projectPayload.project.projectFolder,
+			title: "Drafting Agent Node",
+			metadata: { workflowSessionKind: "agent_node", workflowNodeId: "draft" },
+		});
+		const subagent = sessions.create({
+			channel: "pibo.subagents",
+			kind: "subagent",
+			profile: "reviewer-agent",
+			ownerScope,
+			parentId: agent.id,
+			workspace: projectPayload.project.projectFolder,
+			title: "Reviewer Subagent",
+			metadata: { workflowSessionKind: "subagent", subagentName: "reviewer" },
+		});
+		const unrelated = sessions.create({
+			channel: "pibo.workflow",
+			kind: "agent-node",
+			profile: "pibo-agent",
+			ownerScope,
+			workspace: projectPayload.project.projectFolder,
+			title: "Unrelated Workflow Node",
+			metadata: { workflowSessionKind: "agent_node", workflowNodeId: "unrelated" },
+		});
+
+		const bootstrapResponse = await fetch(`${baseURL}/api/chat/projects/bootstrap?projectId=${encodeURIComponent(projectPayload.project.id)}&piboSessionId=${encodeURIComponent(subagent.id)}`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(bootstrapResponse.status, 200);
+		const bootstrapPayload = await bootstrapResponse.json();
+		assert.equal(bootstrapPayload.selectedPiboSessionId, subagent.id);
+
+		const flatten = (nodes) => nodes.flatMap((node) => [node, ...flatten(node.children ?? [])]);
+		const flattened = flatten(bootstrapPayload.sessions);
+		assert.deepEqual(new Set(flattened.map((node) => node.piboSessionId)), new Set([root.id, nested.id, agent.id, subagent.id]));
+		assert.ok(!flattened.some((node) => node.piboSessionId === unrelated.id));
+
+		const rootNode = bootstrapPayload.sessions.find((node) => node.piboSessionId === root.id);
+		assert.ok(rootNode);
+		assert.equal(rootNode.workflowSessionKind, "main_workflow");
+		assert.equal(rootNode.children[0].workflowSessionKind, "nested_workflow");
+		assert.equal(rootNode.children[0].children[0].workflowSessionKind, "agent_node");
+		assert.equal(rootNode.children[0].children[0].children[0].workflowSessionKind, "subagent");
+		assert.deepEqual(bootstrapPayload.projectSessions.map((session) => session.piboSessionId), [root.id]);
+	} finally {
+		await channel.stop?.();
+	}
+});
+
 test("chat web app surfaces broken custom agent context files and allows cleanup", async () => {
 	const { channel, baseURL } = await startWebHostChannel({
 		auth: createFakeAuthService(),
