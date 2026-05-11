@@ -16,6 +16,7 @@ import type {
   NodeLocalStateReader,
   PromptBuilderRef,
   PromptBuilderResult,
+  RecordedAgentPrompt,
   RuntimeSelectionMetadata,
   ScopedStatePath,
   StatePatch,
@@ -645,6 +646,9 @@ export async function dispatchWorkflowAgentNode(
       });
     }
 
+    recordFinalAgentPrompt(nodeAttempt, promptResult.recordedPrompt);
+    await persistWorkflowNodeAttempt(options.store, nodeAttempt);
+
     const executorResult = await options.agentExecutor({
       workflow: definition,
       run,
@@ -687,6 +691,7 @@ export async function dispatchWorkflowAgentNode(
     nodeAttempt.output = executorResult.output;
     nodeAttempt.completedAt = completedAt;
     nodeAttempt.metadata = {
+      ...nodeAttempt.metadata,
       runtime: runtimeMetadata,
       ...(executorResult.piboSessionId ? { piboSessionId: executorResult.piboSessionId } : {}),
       ...(executorResult.piSessionId ? { piSessionId: executorResult.piSessionId } : {}),
@@ -2074,6 +2079,9 @@ export async function runOneNodeAgentWorkflow(
       });
     }
 
+    recordFinalAgentPrompt(nodeAttempt, promptResult.recordedPrompt);
+    await persistWorkflowNodeAttempt(options.store, nodeAttempt);
+
     const executorResult = await options.agentExecutor({
       workflow: definition,
       run,
@@ -2133,6 +2141,7 @@ export async function runOneNodeAgentWorkflow(
     nodeAttempt.output = executorResult.output;
     nodeAttempt.completedAt = completedAt;
     nodeAttempt.metadata = {
+      ...nodeAttempt.metadata,
       runtime: runtimeMetadata,
       ...(executorResult.piboSessionId ? { piboSessionId: executorResult.piboSessionId } : {}),
       ...(executorResult.piSessionId ? { piSessionId: executorResult.piSessionId } : {}),
@@ -2808,7 +2817,7 @@ function createAgentRuntimeRoutingMetadata(
 }
 
 type AgentNodePromptBuildResult =
-  | { ok: true; prompt: string }
+  | { ok: true; prompt: string; recordedPrompt: RecordedAgentPrompt }
   | { ok: false; diagnostics: WorkflowDiagnostic[]; error: WorkflowErrorSummary };
 
 type AgentNodePromptBuildOptions = {
@@ -2829,16 +2838,19 @@ async function buildAgentNodePrompt(
   }
 
   if (!node.promptTemplate) {
-    return { ok: true, prompt: formatPromptTemplateValue(input) };
+    const prompt = formatPromptTemplateValue(input);
+    return { ok: true, prompt, recordedPrompt: createRecordedAgentPrompt(prompt, "input") };
   }
 
+  const prompt = renderPromptTemplate(node.promptTemplate, {
+    input,
+    state: options.run.state,
+    nodeId: options.nodeId,
+  });
   return {
     ok: true,
-    prompt: renderPromptTemplate(node.promptTemplate, {
-      input,
-      state: options.run.state,
-      nodeId: options.nodeId,
-    }),
+    prompt,
+    recordedPrompt: createRecordedAgentPrompt(prompt, "promptTemplate"),
   };
 }
 
@@ -2883,9 +2895,16 @@ async function buildAgentNodePromptWithRegisteredBuilder(
       run: options.run,
       workflow: options.workflow,
     });
-    const prompt = normalizePromptBuilderResult(result);
-    if (prompt !== undefined) {
-      return { ok: true, prompt };
+    const normalized = normalizePromptBuilderResult(result);
+    if (normalized !== undefined) {
+      return {
+        ok: true,
+        prompt: normalized.prompt,
+        recordedPrompt: createRecordedAgentPrompt(normalized.prompt, "promptBuilder", {
+          promptBuilderId: builderId,
+          builderMetadata: normalized.metadata,
+        }),
+      };
     }
 
     const diagnostic: WorkflowDiagnostic = {
@@ -2925,16 +2944,47 @@ async function buildAgentNodePromptWithRegisteredBuilder(
   }
 }
 
-function normalizePromptBuilderResult(result: PromptBuilderResult | unknown): string | undefined {
+function normalizePromptBuilderResult(
+  result: PromptBuilderResult | unknown,
+): { prompt: string; metadata?: Record<string, JsonValue> } | undefined {
   if (typeof result === "string") {
-    return result;
+    return { prompt: result };
   }
 
   if (isPromptTemplateObject(result) && typeof result.prompt === "string") {
-    return result.prompt;
+    const metadata = isJsonObject(result.metadata) ? result.metadata : undefined;
+    return {
+      prompt: result.prompt,
+      ...(metadata ? { metadata } : {}),
+    };
   }
 
   return undefined;
+}
+
+function createRecordedAgentPrompt(
+  text: string,
+  source: RecordedAgentPrompt["source"],
+  options: Pick<RecordedAgentPrompt, "promptBuilderId" | "builderMetadata"> = {},
+): RecordedAgentPrompt {
+  return {
+    text,
+    source,
+    tracePrivacy: {
+      kind: "ownerScope",
+      storage: "workflow-node-attempt",
+      redacted: false,
+    },
+    ...(options.promptBuilderId ? { promptBuilderId: options.promptBuilderId } : {}),
+    ...(options.builderMetadata ? { builderMetadata: options.builderMetadata } : {}),
+  };
+}
+
+function recordFinalAgentPrompt(nodeAttempt: NodeAttempt, prompt: RecordedAgentPrompt): void {
+  nodeAttempt.metadata = {
+    ...nodeAttempt.metadata,
+    finalPrompt: prompt,
+  };
 }
 
 function createPromptBuilderStateReader(values: Record<string, JsonValue>): WorkflowGlobalStateReader | NodeLocalStateReader {
@@ -3044,6 +3094,10 @@ function formatPromptTemplateValue(value: WorkflowValue | JsonValue): string {
 
 function isPromptTemplateObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isJsonObject(value: unknown): value is Record<string, JsonValue> {
+  return isPromptTemplateObject(value) && Object.values(value).every(isPromptTemplateValue);
 }
 
 function isPromptTemplateValue(value: unknown): value is WorkflowValue | JsonValue {

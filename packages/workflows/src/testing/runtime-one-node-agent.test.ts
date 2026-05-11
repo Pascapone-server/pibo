@@ -292,6 +292,15 @@ describe("one-node agent workflow runtime path", () => {
       assert.equal(result.run.projectId, "project_single_prompt");
       assert.equal(result.nodeAttempt.metadata?.piboSessionId, "ps_single_prompt");
       assert.equal(result.nodeAttempt.metadata?.piSessionId, "pi_single_prompt");
+      assert.deepEqual(result.nodeAttempt.metadata?.finalPrompt, {
+        text: "Answer the user request using normal Pibo Runtime routing: Summarize the workflow system.",
+        source: "promptTemplate",
+        tracePrivacy: {
+          kind: "ownerScope",
+          storage: "workflow-node-attempt",
+          redacted: false,
+        },
+      });
       assert.equal(result.nodeAttempt.metadata?.runtime?.profileId, "pibo-agent");
       assert.deepEqual(result.nodeAttempt.metadata?.runtime?.tools, ["read", "bash"]);
       assert.deepEqual(
@@ -331,6 +340,7 @@ describe("one-node agent workflow runtime path", () => {
       store.close();
       const reopened = new SqliteWorkflowRunStore(dbPath);
       const persisted = reopened.getRun("wfr_single_prompt");
+      const persistedNodeAttempt = reopened.getNodeAttempt("wna_single_prompt");
       reopened.close();
 
       assert.ok(persisted);
@@ -340,6 +350,7 @@ describe("one-node agent workflow runtime path", () => {
       assert.deepEqual(persisted.current, { nodeId: "answer", status: "completed" });
       assert.equal(persisted.piboSessionId, "ps_single_prompt");
       assert.equal(persisted.projectId, "project_single_prompt");
+      assert.deepEqual(persistedNodeAttempt?.metadata?.finalPrompt, result.nodeAttempt.metadata?.finalPrompt);
     } finally {
       try {
         store.close();

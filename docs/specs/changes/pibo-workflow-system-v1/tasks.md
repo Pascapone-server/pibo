@@ -66,7 +66,7 @@
 - [x] 8.1 Implement `promptTemplate` rendering from input and state.
 - [x] 8.2 Define `promptBuilder` contract.
 - [x] 8.3 Implement prompt builders through registered handlers or TypeScript code nodes.
-- [ ] 8.4 Record final prompt according to existing trace privacy rules.
+- [x] 8.4 Record final prompt according to existing trace privacy rules.
 - [ ] 8.5 Test fixed and variable prompt workflows.
 
 ## 9. Requirement: State, data flow, and bounded backtracking are explicit

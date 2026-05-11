@@ -117,6 +117,15 @@ describe("workflow agent node dispatch", () => {
     assert.equal(result.nodeAttempt.status, "completed");
     assert.equal(result.nodeAttempt.metadata?.piboSessionId, "ps_agent_node");
     assert.equal(result.nodeAttempt.metadata?.piSessionId, "pi_agent_node");
+    assert.deepEqual(result.nodeAttempt.metadata?.finalPrompt, {
+      text: "Draft an answer for: Explain workflows",
+      source: "promptTemplate",
+      tracePrivacy: {
+        kind: "ownerScope",
+        storage: "workflow-node-attempt",
+        redacted: false,
+      },
+    });
     assert.equal(result.nodeAttempt.metadata?.runtime?.profileId, "pibo-agent");
     assert.deepEqual(result.nodeAttempt.metadata?.runtime?.tools, ["read", "bash"]);
     assert.deepEqual(store.getNodeAttempt("wna_agent"), result.nodeAttempt);
@@ -298,6 +307,17 @@ describe("workflow agent node dispatch", () => {
 
     assert.equal(result.ok, true);
     assert.equal(result.output, "Prompt builder rendered.");
+    assert.deepEqual(result.nodeAttempt.metadata?.finalPrompt, {
+      text: "Draft about registered prompt builders for workflow authors in a concise tone using edge payload.",
+      source: "promptBuilder",
+      tracePrivacy: {
+        kind: "ownerScope",
+        storage: "workflow-node-attempt",
+        redacted: false,
+      },
+      promptBuilderId: "test.promptBuilders.articleDraft",
+      builderMetadata: { source: "unit-test" },
+    });
   });
 
   it("fails before Pibo Runtime execution when a prompt builder is not registered", async () => {

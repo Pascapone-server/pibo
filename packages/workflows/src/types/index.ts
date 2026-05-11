@@ -622,12 +622,27 @@ export type NodeAttempt = {
   availableAt?: string;
 };
 
+export type RecordedAgentPromptSource = "input" | "promptTemplate" | "promptBuilder";
+
+export type RecordedAgentPrompt = {
+  text: string;
+  source: RecordedAgentPromptSource;
+  tracePrivacy: {
+    kind: "ownerScope";
+    storage: "workflow-node-attempt";
+    redacted: false;
+  };
+  promptBuilderId?: RegistryRefId;
+  builderMetadata?: Record<string, JsonValue>;
+};
+
 export type NodeAttemptMetadata = {
   runtime?: RuntimeSelectionMetadata;
+  finalPrompt?: RecordedAgentPrompt;
   childRunId?: WorkflowRunId;
   waitTokenId?: WorkflowWaitTokenId;
   adapterId?: RegistryRefId;
-  [key: string]: JsonValue | RuntimeSelectionMetadata | undefined;
+  [key: string]: JsonValue | RuntimeSelectionMetadata | RecordedAgentPrompt | undefined;
 };
 
 export type EdgeTransferStatus = "pending" | "transferred" | "failed";
