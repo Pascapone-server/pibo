@@ -10,6 +10,7 @@ import {
 	Brain,
 	Bug,
 	Check,
+	CheckCheck,
 	ChevronDown,
 	ChevronRight,
 	ChevronsDown,
@@ -42,7 +43,7 @@ import {
 	Wrench,
 	X,
 } from "lucide-react";
-import { createUserSkill, deleteCustomAgent, deletePiPackage, deleteProject, deleteRoom, deleteSession, deleteUserSkill, fetchSignalTree, downloadChatFile, getBootstrap, getNavigation, getProjectsBootstrap, getSessionPage, getTrace, getTraceSummary, getUserSettings, getUserSkill, installUserSkill, listUserSkills, markSessionRead, patchCustomAgent, patchModelDefaults, patchPiPackage, patchProject, patchProjectSession, patchRoom, patchSession, patchUserSettings, postAction, postContextFile, postCustomAgent, postMessage, postPiPackage, postProject, postProjectMessage, postProjectSession, postRoom, postSession, signInWithGoogle, signOut, subscribeSignalTree, updateUserSkill, type SaveCustomAgentInput, type UserSettings } from "./api";
+import { createUserSkill, deleteCustomAgent, deletePiPackage, deleteProject, deleteRoom, deleteSession, deleteUserSkill, fetchSignalTree, downloadChatFile, getBootstrap, getNavigation, getProjectsBootstrap, getSessionPage, getTrace, getTraceSummary, getUserSettings, getUserSkill, installUserSkill, listUserSkills, markRoomRead, markSessionRead, patchCustomAgent, patchModelDefaults, patchPiPackage, patchProject, patchProjectSession, patchRoom, patchSession, patchUserSettings, postAction, postContextFile, postCustomAgent, postMessage, postPiPackage, postProject, postProjectMessage, postProjectSession, postRoom, postSession, signInWithGoogle, signOut, subscribeSignalTree, updateUserSkill, type SaveCustomAgentInput, type UserSettings } from "./api";
 import { THINKING_LEVELS } from "./types";
 import type { AgentCatalog, BootstrapData, CustomAgent, CustomAgentSubagent, ModelCatalog, ModelDefaults, ModelProfile, NavigationData, PiboProject, PiboProjectSession, ProjectsBootstrapData, PiboRoom, PiboSession, PiboSessionTraceSummary, PiboSessionTraceView, PiboSignalPatch, PiboSignalSnapshot, PiboTraceNode, PiboTraceOrderKey, PiboWebSessionNode, PiboWebSessionStatus, ThinkingLevel, UserSkill } from "./types";
 import type { ChatWebStoredEvent } from "../../../shared/trace-types.js";
@@ -1153,6 +1154,17 @@ export function App({ route }: { route: ChatAppRoute }) {
 		}
 	};
 
+	const readAllRoom = async (roomId: string) => {
+		try {
+			await markRoomRead(roomId);
+			const data = await loadBootstrap(selectedPiboSessionId ?? undefined, showArchivedRef.current, selectedRoomId ?? undefined, { force: true, selectSession: false });
+			if (area === "sessions") navigateToSelectedSession(data.selectedRoomId, data.selectedPiboSessionId, false, { closeMobileSidebar: false });
+			setError(null);
+		} catch (caught) {
+			setError(caught instanceof Error ? caught.message : String(caught));
+		}
+	};
+
 	const setRoomArchived = async (roomId: string, archived: boolean) => {
 		await queryClient.cancelQueries({ queryKey: ["chat", "bootstrap"] });
 		const snapshot = createBootstrapMutationSnapshot(queryClient, bootstrap);
@@ -1539,6 +1551,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 													onSelect={(roomId) => void selectRoom(roomId)}
 													onUpdate={(roomId, input) => void updateRoom(roomId, input)}
 													onArchive={(roomId, archived) => void setRoomArchived(roomId, archived)}
+													onReadAll={(roomId) => void readAllRoom(roomId)}
 													onDelete={requestRoomDelete}
 												/>
 											</div>
@@ -1579,6 +1592,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 												onSelect={(roomId) => void selectRoom(roomId)}
 												onUpdate={(roomId, input) => void updateRoom(roomId, input)}
 												onArchive={(roomId, archived) => void setRoomArchived(roomId, archived)}
+												onReadAll={(roomId) => void readAllRoom(roomId)}
 												onDelete={requestRoomDelete}
 											/>
 										))}
@@ -1593,6 +1607,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 														onSelect={(roomId) => void selectRoom(roomId)}
 														onUpdate={(roomId, input) => void updateRoom(roomId, input)}
 														onArchive={(roomId, archived) => void setRoomArchived(roomId, archived)}
+														onReadAll={(roomId) => void readAllRoom(roomId)}
 														onDelete={requestRoomDelete}
 													/>
 												) : <div className="px-2 py-3 text-xs text-slate-500 border border-dashed border-slate-700 rounded-sm">No archived rooms</div>}
@@ -3531,6 +3546,7 @@ function ArchivedRoomsList({
 	onSelect,
 	onUpdate,
 	onArchive,
+	onReadAll,
 	onDelete,
 }: {
 	rooms: PiboRoom[];
@@ -3538,6 +3554,7 @@ function ArchivedRoomsList({
 	onSelect: (roomId: string) => void;
 	onUpdate: (roomId: string, input: { name?: string; topic?: string | null; workspace?: string | null }) => void;
 	onArchive: (roomId: string, archived: boolean) => void;
+	onReadAll: (roomId: string) => void;
 	onDelete: (room: PiboRoom) => void;
 }) {
 	return (
@@ -3550,6 +3567,7 @@ function ArchivedRoomsList({
 					onSelect={onSelect}
 					onUpdate={onUpdate}
 					onArchive={onArchive}
+					onReadAll={onReadAll}
 					onDelete={onDelete}
 				/>
 			))}
@@ -3610,6 +3628,7 @@ function RoomNode({
 	onSelect,
 	onUpdate,
 	onArchive,
+	onReadAll,
 	onDelete,
 	depth = 0,
 }: {
@@ -3618,6 +3637,7 @@ function RoomNode({
 	onSelect: (roomId: string) => void;
 	onUpdate: (roomId: string, input: { name?: string; topic?: string | null; workspace?: string | null }) => void;
 	onArchive: (roomId: string, archived: boolean) => void;
+	onReadAll: (roomId: string) => void;
 	onDelete: (room: PiboRoom) => void;
 	depth?: number;
 }) {
@@ -3790,6 +3810,15 @@ function RoomNode({
 												</button>
 												<button
 													type="button"
+													onClick={() => onReadAll(room.id)}
+													title="Read All"
+													aria-label="Read All"
+													className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]"
+												>
+													<CheckCheck size={13} />
+												</button>
+												<button
+													type="button"
 													onClick={() => onArchive(room.id, true)}
 													title="Archive Room"
 													aria-label="Archive Room"
@@ -3854,6 +3883,13 @@ function RoomNode({
 														</button>
 														<button
 															type="button"
+															onClick={() => { setMenuOpen(false); onReadAll(room.id); }}
+															className="w-full text-left px-3 py-2.5 text-sm text-slate-300 hover:bg-[#11a4d4]/10 hover:text-[#11a4d4] flex items-center gap-2"
+														>
+															<CheckCheck size={16} /> Read All
+														</button>
+														<button
+															type="button"
 															onClick={() => { setMenuOpen(false); onArchive(room.id, true); }}
 															className="w-full text-left px-3 py-2.5 text-sm text-slate-300 hover:bg-[#11a4d4]/10 hover:text-[#11a4d4] flex items-center gap-2"
 														>
@@ -3878,6 +3914,7 @@ function RoomNode({
 						onSelect={onSelect}
 						onUpdate={onUpdate}
 						onArchive={onArchive}
+						onReadAll={onReadAll}
 						onDelete={onDelete}
 						depth={depth + 1}
 					/>
