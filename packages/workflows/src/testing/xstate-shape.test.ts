@@ -9,8 +9,10 @@ import {
   WORKFLOW_XSTATE_PROJECTION_VERSION,
   WORKFLOW_XSTATE_RESUME_EVENT,
   WORKFLOW_XSTATE_TERMINAL_STATE_IDS,
+  boundedReviewLoopWorkflowFixture,
   createXStateMachineProjection,
   createXStateProjectionContextShape,
+  humanWaitWorkflowFixture,
   minimalOneNodePiboAgentWorkflowFixture,
   mixedNodeWorkflowFixture,
   projectWorkflowEdgesToXState,
@@ -18,6 +20,14 @@ import {
   projectWorkflowToXStateProjection,
   workflowFixtureRegistryRefs,
   xstateActorIdForNode,
+  xstateCompleteNodeActionId,
+  xstateEnterWaitActionId,
+  xstateHumanTimeoutDelayId,
+  xstateRecordFailureActionId,
+  xstateResumeWaitActionId,
+  xstateRetryDelayId,
+  xstateRetryDelayStateIdForNode,
+  xstateScheduleRetryActionId,
   xstateStateIdForNode,
   xstateTransferEdgeActionId,
   xstateTransitionIdForEdge,
@@ -197,7 +207,15 @@ describe("XState projection shape", () => {
     assert.equal(projection.initial, xstateStateIdForNode("answer"));
     assert.equal(projection.states[xstateStateIdForNode("answer")]?.nodeId, "answer");
     assert.equal(projection.actors[xstateActorIdForNode("answer")]?.kind, "agent");
-    assert.deepEqual(projection.transitions, []);
+    assert.deepEqual(projection.transitions, [
+      {
+        id: "workflow.node.answer.complete.transition",
+        event: WORKFLOW_XSTATE_NODE_DONE_EVENT,
+        source: xstateStateIdForNode("answer"),
+        target: WORKFLOW_XSTATE_TERMINAL_STATE_IDS.completed,
+        actions: [xstateCompleteNodeActionId("answer")],
+      },
+    ]);
     assert.equal(projection.config.initial, xstateStateIdForNode("answer"));
     const answerInvoke = projection.config.states[xstateStateIdForNode("answer")]?.invoke;
     assert.ok(answerInvoke && !Array.isArray(answerInvoke));
@@ -254,7 +272,7 @@ describe("XState projection shape", () => {
     });
 
     const projection = projectWorkflowToXStateProjection(mixedNodeWorkflowFixture);
-    assert.equal(projection.transitions.length, 4);
+    assert.equal(projection.transitions.length, 5);
     assert.equal(projection.actions[xstateTransferEdgeActionId("plan-to-draft")]?.kind, "transferEdge");
     assert.deepEqual(projection.config.states[xstateStateIdForNode("plan")]?.on?.[WORKFLOW_XSTATE_NODE_DONE_EVENT], {
       target: xstateStateIdForNode("draft"),
@@ -277,6 +295,86 @@ describe("XState projection shape", () => {
           guardRef: workflowFixtureRegistryRefs.guards.approved,
           priority: 1,
         },
+      },
+    });
+  });
+
+  it("maps guards, durable waits, retry delays, failures, and final states", () => {
+    const mixedProjection = projectWorkflowToXStateProjection(mixedNodeWorkflowFixture);
+    assert.deepEqual(mixedProjection.guards[workflowFixtureRegistryRefs.guards.approved], {
+      id: workflowFixtureRegistryRefs.guards.approved,
+      ref: workflowFixtureRegistryRefs.guards.approved,
+      edgeId: "review-to-normalize",
+    });
+    assert.deepEqual(mixedProjection.config.meta.pibo.guards, mixedProjection.guards);
+    assert.deepEqual(
+      mixedProjection.config.states[xstateStateIdForNode("child-summary")]?.on?.[WORKFLOW_XSTATE_NODE_DONE_EVENT],
+      {
+        target: WORKFLOW_XSTATE_TERMINAL_STATE_IDS.completed,
+        actions: [xstateCompleteNodeActionId("child-summary")],
+      },
+    );
+    assert.deepEqual(mixedProjection.config.states[xstateStateIdForNode("plan")]?.invoke, {
+      id: xstateActorIdForNode("plan"),
+      src: WORKFLOW_XSTATE_ACTOR_SOURCES.code,
+      input: { kind: "nodeInput", nodeId: "plan" },
+      onError: {
+        target: WORKFLOW_XSTATE_TERMINAL_STATE_IDS.failed,
+        actions: [xstateRecordFailureActionId("plan")],
+      },
+    });
+
+    const waitProjection = projectWorkflowToXStateProjection(humanWaitWorkflowFixture);
+    const waitState = waitProjection.states[xstateStateIdForNode("review")];
+    assert.equal(waitState?.kind, "wait");
+    assert.deepEqual(waitState?.entry, [xstateEnterWaitActionId("review")]);
+    assert.deepEqual(waitState?.exit, [xstateResumeWaitActionId("review")]);
+    assert.deepEqual(waitState?.meta?.pibo.wait, {
+      durable: true,
+      resumeEvent: WORKFLOW_XSTATE_RESUME_EVENT,
+      actions:
+        humanWaitWorkflowFixture.nodes.review?.kind === "human"
+          ? humanWaitWorkflowFixture.nodes.review.actions
+          : undefined,
+      timeout: { kind: "minutes", value: 60 },
+    });
+    assert.deepEqual(waitProjection.delays[xstateHumanTimeoutDelayId("review")], {
+      id: xstateHumanTimeoutDelayId("review"),
+      kind: "humanTimeout",
+      nodeId: "review",
+      duration: { kind: "minutes", value: 60 },
+      durableWakeup: true,
+    });
+    assert.deepEqual(waitProjection.config.states[xstateStateIdForNode("review")]?.after, {
+      [xstateHumanTimeoutDelayId("review")]: {
+        target: WORKFLOW_XSTATE_TERMINAL_STATE_IDS.failed,
+        actions: [xstateRecordFailureActionId("review")],
+      },
+    });
+
+    const retryProjection = projectWorkflowToXStateProjection(boundedReviewLoopWorkflowFixture);
+    const loopTransition = retryProjection.transitions.find((transition) => transition.edgeId === "revise-to-draft");
+    assert.equal(loopTransition?.guard, workflowFixtureRegistryRefs.guards.needsRevision);
+    assert.equal(loopTransition?.meta?.pibo.guardRef, workflowFixtureRegistryRefs.guards.needsRevision);
+    assert.deepEqual(retryProjection.delays[xstateRetryDelayId("draft")], {
+      id: xstateRetryDelayId("draft"),
+      kind: "retry",
+      nodeId: "draft",
+      duration: { kind: "milliseconds", value: 1_000 },
+      durableWakeup: true,
+    });
+    assert.deepEqual(retryProjection.config.states[xstateStateIdForNode("draft")]?.invoke, {
+      id: xstateActorIdForNode("draft"),
+      src: WORKFLOW_XSTATE_ACTOR_SOURCES.agent,
+      input: { kind: "nodeInput", nodeId: "draft" },
+      onError: {
+        target: xstateRetryDelayStateIdForNode("draft"),
+        actions: [xstateRecordFailureActionId("draft"), xstateScheduleRetryActionId("draft")],
+      },
+    });
+    assert.deepEqual(retryProjection.config.states[xstateRetryDelayStateIdForNode("draft")]?.after, {
+      [xstateRetryDelayId("draft")]: {
+        target: xstateStateIdForNode("draft"),
       },
     });
   });

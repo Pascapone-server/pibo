@@ -917,6 +917,7 @@ export type XStateProjectionState = {
   invoke?: XStateProjectionInvokeConfig;
   entry?: string[];
   exit?: string[];
+  after?: Record<string, XStateProjectionTransitionConfig | XStateProjectionTransitionConfig[]>;
   tags?: string[];
   meta?: XStateProjectionStateMeta;
 };

@@ -1,8 +1,10 @@
 import type {
+  DurationSpec,
   EdgeId,
   EdgeKind,
   EdgeStateMapping,
   NodeId,
+  RetryPolicy,
   StateAccessPolicy,
   StatePath,
   WorkflowDefinition,
@@ -93,29 +95,64 @@ export type WorkflowNodeXStateProjection = {
   initial: string;
   states: Record<string, XStateProjectionState>;
   actors: Record<string, XStateProjectionActor>;
+  actions: Record<string, XStateProjectionAction>;
+  delays: Record<string, XStateProjectionDelay>;
   contextShape: XStateProjectionContextShape;
 };
 
 export type WorkflowEdgeXStateProjection = {
   transitions: XStateProjectionTransition[];
+  guards: Record<string, XStateProjectionGuard>;
   actions: Record<string, XStateProjectionAction>;
 };
 
 export function projectWorkflowNodesToXState(definition: WorkflowDefinition): WorkflowNodeXStateProjection {
   const states: Record<string, XStateProjectionState> = {};
   const actors: Record<string, XStateProjectionActor> = {};
+  const actions: Record<string, XStateProjectionAction> = {};
+  const delays: Record<string, XStateProjectionDelay> = {};
 
   for (const [nodeId, node] of Object.entries(definition.nodes).sort(([left], [right]) => left.localeCompare(right))) {
     const actor = createXStateProjectionActorForNode(nodeId, node);
-    const state = createXStateProjectionStateForNode(nodeId, node, actor);
+    const retryPolicy = node.retry ?? definition.retry;
+    const state = createXStateProjectionStateForNode(nodeId, node, actor, retryPolicy);
+    const failureAction = createXStateRecordFailureAction(nodeId);
+
     actors[actor.id] = actor;
+    actions[failureAction.id] = failureAction;
     states[state.id] = state;
+
+    if (node.kind === "human") {
+      const enterWaitAction = createXStateEnterWaitAction(nodeId);
+      const resumeWaitAction = createXStateResumeWaitAction(nodeId);
+      actions[enterWaitAction.id] = enterWaitAction;
+      actions[resumeWaitAction.id] = resumeWaitAction;
+
+      if (node.timeout !== undefined) {
+        const timeoutDelay = createXStateHumanTimeoutDelay(nodeId, node.timeout);
+        delays[timeoutDelay.id] = timeoutDelay;
+      }
+    }
+
+    if (retryPolicy !== undefined) {
+      const retryDelay = createXStateRetryDelay(nodeId, retryPolicy);
+      const scheduleRetryAction = createXStateScheduleRetryAction(nodeId);
+      delays[retryDelay.id] = retryDelay;
+      actions[scheduleRetryAction.id] = scheduleRetryAction;
+      states[xstateRetryDelayStateIdForNode(nodeId)] = createXStateRetryDelayStateForNode(
+        nodeId,
+        retryPolicy,
+        retryDelay.id,
+      );
+    }
   }
 
   return {
     initial: xstateInitialStateIdForWorkflow(definition),
     states,
     actors,
+    actions,
+    delays,
     contextShape: createXStateProjectionContextShape({
       global: definition.state?.global,
       local: Object.fromEntries(
@@ -134,10 +171,18 @@ export function projectWorkflowNodesToXState(definition: WorkflowDefinition): Wo
 
 export function projectWorkflowEdgesToXState(definition: WorkflowDefinition): WorkflowEdgeXStateProjection {
   const transitions: XStateProjectionTransition[] = [];
+  const guards: Record<string, XStateProjectionGuard> = {};
   const actions: Record<string, XStateProjectionAction> = {};
+
+  const loopGuardsByEdgeId = new Map(
+    (definition.loops ?? [])
+      .filter((loop) => loop.guard?.handler !== undefined)
+      .map((loop) => [loop.edgeId, loop.guard]),
+  );
 
   for (const [edgeId, edge] of Object.entries(definition.edges).sort(compareWorkflowEdgeEntriesForXState)) {
     const actionId = xstateTransferEdgeActionId(edgeId);
+    const guard = edge.guard ?? loopGuardsByEdgeId.get(edgeId);
     actions[actionId] = {
       id: actionId,
       kind: "transferEdge",
@@ -152,30 +197,38 @@ export function projectWorkflowEdgesToXState(definition: WorkflowDefinition): Wo
       target: xstateStateIdForNode(edge.to.nodeId),
       edgeId,
       actions: [actionId],
-      meta: createXStateTransitionMetaForEdge(edgeId, edge),
+      meta: createXStateTransitionMetaForEdge(edgeId, edge, guard),
     };
-    if (edge.guard?.handler !== undefined) {
-      transition.guard = edge.guard.handler;
+    if (guard?.handler !== undefined) {
+      transition.guard = guard.handler;
+      guards[guard.handler] ??= {
+        id: guard.handler,
+        ref: guard.handler,
+        edgeId,
+      };
     }
 
     transitions.push(transition);
   }
 
-  return { transitions, actions };
+  return { transitions, guards, actions };
 }
 
 export function projectWorkflowToXStateProjection(definition: WorkflowDefinition): XStateMachineProjection {
   const nodeProjection = projectWorkflowNodesToXState(definition);
   const edgeProjection = projectWorkflowEdgesToXState(definition);
+  const finalProjection = projectWorkflowFinalStatesToXState(definition);
 
   return createXStateMachineProjection({
     id: definition.id,
     version: definition.version,
     initial: nodeProjection.initial,
     states: nodeProjection.states,
-    transitions: edgeProjection.transitions,
+    transitions: [...edgeProjection.transitions, ...finalProjection.transitions],
     actors: nodeProjection.actors,
-    actions: edgeProjection.actions,
+    guards: edgeProjection.guards,
+    actions: { ...nodeProjection.actions, ...edgeProjection.actions, ...finalProjection.actions },
+    delays: nodeProjection.delays,
     contextShape: nodeProjection.contextShape,
     metadata: definition.metadata,
     ui: definition.ui,
@@ -252,6 +305,7 @@ function createXStateMachineConfig(options: CreateXStateMachineConfigOptions): X
       entry: state.entry,
       exit: state.exit,
       invoke: state.invoke,
+      after: state.after,
       meta: state.meta,
     };
   }
@@ -350,12 +404,13 @@ export function createXStateProjectionStateForNode(
   nodeId: NodeId,
   node: WorkflowNodeDefinition,
   actor: XStateProjectionActor = createXStateProjectionActorForNode(nodeId, node),
+  retryPolicy: RetryPolicy | undefined = node.retry,
 ): XStateProjectionState {
-  const tags = [node.kind, ...(node.metadata?.tags ?? [])];
-
-  return {
+  const tags = [node.kind, ...(node.kind === "human" ? ["wait"] : []), ...(node.metadata?.tags ?? [])];
+  const stateKind = node.kind === "human" ? "wait" : "node";
+  const state: XStateProjectionState = {
     id: xstateStateIdForNode(nodeId),
-    kind: "node",
+    kind: stateKind,
     nodeId,
     type: "atomic",
     actorId: actor.id,
@@ -363,11 +418,15 @@ export function createXStateProjectionStateForNode(
       id: actor.id,
       src: actor.src,
       input: actor.input,
+      onError: {
+        target: xstateFailureTargetForNode(nodeId, retryPolicy),
+        actions: xstateFailureActionsForNode(nodeId, retryPolicy),
+      },
     },
     tags,
     meta: {
       pibo: {
-        kind: "node",
+        kind: stateKind,
         nodeId,
         nodeKind: node.kind,
         actorId: actor.id,
@@ -377,6 +436,39 @@ export function createXStateProjectionStateForNode(
       },
     },
   };
+
+  if (node.kind === "human") {
+    state.entry = [xstateEnterWaitActionId(nodeId)];
+    state.exit = [xstateResumeWaitActionId(nodeId)];
+    state.meta = {
+      pibo: {
+        kind: stateKind,
+        nodeId,
+        nodeKind: node.kind,
+        actorId: actor.id,
+        description: node.description,
+        tags,
+        ui: node.ui,
+        wait: {
+          durable: true,
+          resumeEvent: WORKFLOW_XSTATE_RESUME_EVENT,
+          actions: node.actions,
+          timeout: node.timeout,
+        },
+      },
+    };
+
+    if (node.timeout !== undefined) {
+      state.after = {
+        [xstateHumanTimeoutDelayId(nodeId)]: {
+          target: WORKFLOW_XSTATE_TERMINAL_STATE_IDS.failed,
+          actions: [xstateRecordFailureActionId(nodeId)],
+        },
+      };
+    }
+  }
+
+  return state;
 }
 
 export function xstateTransitionIdForEdge(edgeId: EdgeId): string {
@@ -385,6 +477,34 @@ export function xstateTransitionIdForEdge(edgeId: EdgeId): string {
 
 export function xstateTransferEdgeActionId(edgeId: EdgeId): string {
   return `workflow.edge.${edgeId}.transfer`;
+}
+
+export function xstateRecordFailureActionId(nodeId: NodeId): string {
+  return `workflow.node.${nodeId}.recordFailure`;
+}
+
+export function xstateEnterWaitActionId(nodeId: NodeId): string {
+  return `workflow.node.${nodeId}.enterWait`;
+}
+
+export function xstateResumeWaitActionId(nodeId: NodeId): string {
+  return `workflow.node.${nodeId}.resumeWait`;
+}
+
+export function xstateScheduleRetryActionId(nodeId: NodeId): string {
+  return `workflow.node.${nodeId}.scheduleRetry`;
+}
+
+export function xstateCompleteNodeActionId(nodeId: NodeId): string {
+  return `workflow.node.${nodeId}.complete`;
+}
+
+export function xstateRetryDelayId(nodeId: NodeId): string {
+  return `workflow.node.${nodeId}.retryDelay`;
+}
+
+export function xstateHumanTimeoutDelayId(nodeId: NodeId): string {
+  return `workflow.node.${nodeId}.humanTimeout`;
 }
 
 export function xstateEventForEdge(edge: WorkflowEdgeDefinition): string {
@@ -406,14 +526,15 @@ export function xstateEventForEdge(edge: WorkflowEdgeDefinition): string {
 export function createXStateTransitionMetaForEdge(
   edgeId: EdgeId,
   edge: WorkflowEdgeDefinition,
+  guard = edge.guard,
 ): XStateProjectionTransitionMeta {
   const pibo: XStateProjectionTransitionMeta["pibo"] = {
     edgeId,
     edgeKind: xstateEdgeKind(edge),
   };
 
-  if (edge.guard?.handler !== undefined) {
-    pibo.guardRef = edge.guard.handler;
+  if (guard?.handler !== undefined) {
+    pibo.guardRef = guard.handler;
   }
   if (edge.adapter?.transform.id !== undefined) {
     pibo.adapterRef = edge.adapter.transform.id;
@@ -477,4 +598,168 @@ export function xstateInitialStateIdForWorkflow(definition: WorkflowDefinition):
 
 export function xstateStateIdForNode(nodeId: NodeId): string {
   return `node.${nodeId}`;
+}
+
+export function xstateRetryDelayStateIdForNode(nodeId: NodeId): string {
+  return `node.${nodeId}.retryDelay`;
+}
+
+type WorkflowFinalXStateProjection = {
+  transitions: XStateProjectionTransition[];
+  actions: Record<string, XStateProjectionAction>;
+};
+
+function projectWorkflowFinalStatesToXState(definition: WorkflowDefinition): WorkflowFinalXStateProjection {
+  const transitions: XStateProjectionTransition[] = [];
+  const actions: Record<string, XStateProjectionAction> = {};
+  const finalNodeIds = Array.isArray(definition.final)
+    ? definition.final
+    : definition.final === undefined
+      ? []
+      : [definition.final];
+
+  for (const nodeId of [...finalNodeIds].sort((left, right) => left.localeCompare(right))) {
+    if (definition.nodes[nodeId] === undefined) {
+      continue;
+    }
+
+    const action = createXStateCompleteNodeAction(nodeId);
+    actions[action.id] = action;
+    transitions.push({
+      id: xstateFinalTransitionIdForNode(nodeId),
+      event: WORKFLOW_XSTATE_NODE_DONE_EVENT,
+      source: xstateStateIdForNode(nodeId),
+      target: WORKFLOW_XSTATE_TERMINAL_STATE_IDS.completed,
+      actions: [action.id],
+    });
+  }
+
+  return { transitions, actions };
+}
+
+function createXStateRecordFailureAction(nodeId: NodeId): XStateProjectionAction {
+  return {
+    id: xstateRecordFailureActionId(nodeId),
+    kind: "recordFailure",
+    nodeId,
+    durableEffect: true,
+  };
+}
+
+function createXStateEnterWaitAction(nodeId: NodeId): XStateProjectionAction {
+  return {
+    id: xstateEnterWaitActionId(nodeId),
+    kind: "enterWait",
+    nodeId,
+    durableEffect: true,
+  };
+}
+
+function createXStateResumeWaitAction(nodeId: NodeId): XStateProjectionAction {
+  return {
+    id: xstateResumeWaitActionId(nodeId),
+    kind: "resumeWait",
+    nodeId,
+    durableEffect: true,
+  };
+}
+
+function createXStateScheduleRetryAction(nodeId: NodeId): XStateProjectionAction {
+  return {
+    id: xstateScheduleRetryActionId(nodeId),
+    kind: "scheduleRetry",
+    nodeId,
+    durableEffect: true,
+  };
+}
+
+function createXStateCompleteNodeAction(nodeId: NodeId): XStateProjectionAction {
+  return {
+    id: xstateCompleteNodeActionId(nodeId),
+    kind: "completeNode",
+    nodeId,
+    durableEffect: true,
+  };
+}
+
+function createXStateRetryDelay(nodeId: NodeId, policy: RetryPolicy): XStateProjectionDelay {
+  return {
+    id: xstateRetryDelayId(nodeId),
+    kind: "retry",
+    nodeId,
+    duration: retryBackoffDuration(policy.backoff),
+    durableWakeup: true,
+  };
+}
+
+function createXStateHumanTimeoutDelay(nodeId: NodeId, duration: DurationSpec): XStateProjectionDelay {
+  return {
+    id: xstateHumanTimeoutDelayId(nodeId),
+    kind: "humanTimeout",
+    nodeId,
+    duration,
+    durableWakeup: true,
+  };
+}
+
+function createXStateRetryDelayStateForNode(
+  nodeId: NodeId,
+  policy: RetryPolicy,
+  delayId: string,
+): XStateProjectionState {
+  return {
+    id: xstateRetryDelayStateIdForNode(nodeId),
+    kind: "retryDelay",
+    nodeId,
+    type: "atomic",
+    tags: ["retryDelay"],
+    after: {
+      [delayId]: {
+        target: xstateStateIdForNode(nodeId),
+      },
+    },
+    meta: {
+      pibo: {
+        kind: "retryDelay",
+        nodeId,
+        retry: {
+          durable: true,
+          delayId,
+          policy,
+        },
+      },
+    },
+  };
+}
+
+function xstateFailureTargetForNode(nodeId: NodeId, retryPolicy: RetryPolicy | undefined): string {
+  return retryPolicy === undefined
+    ? WORKFLOW_XSTATE_TERMINAL_STATE_IDS.failed
+    : xstateRetryDelayStateIdForNode(nodeId);
+}
+
+function xstateFailureActionsForNode(nodeId: NodeId, retryPolicy: RetryPolicy | undefined): string[] {
+  return retryPolicy === undefined
+    ? [xstateRecordFailureActionId(nodeId)]
+    : [xstateRecordFailureActionId(nodeId), xstateScheduleRetryActionId(nodeId)];
+}
+
+function retryBackoffDuration(policy: RetryPolicy["backoff"]): XStateProjectionDelay["duration"] {
+  if (policy === undefined || policy.kind === "none") {
+    return undefined;
+  }
+
+  if (policy.kind === "fixed") {
+    return { kind: "milliseconds", value: policy.delayMs };
+  }
+
+  if (policy.kind === "linear") {
+    return { kind: "milliseconds", value: policy.initialMs };
+  }
+
+  return { kind: "milliseconds", value: policy.initialMs };
+}
+
+function xstateFinalTransitionIdForNode(nodeId: NodeId): string {
+  return `workflow.node.${nodeId}.complete.transition`;
 }

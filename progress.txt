@@ -1,4 +1,5 @@
 ## Codebase Patterns
+- XState guard/wait/failure/final projection is deterministic: edge/loop guards populate the flat `guards` index, human nodes become `wait` states with durable wait actions/timeouts, node invoke failures target failed or retry-delay states, and `definition.final` nodes add completion transitions to `workflow.completed`.
 - XState workflow projection composes `projectWorkflowNodesToXState` and `projectWorkflowEdgesToXState` inside `projectWorkflowToXStateProjection`: map each workflow node to `node.<id>` plus `workflow.node.<id>` actor metadata, then layer edge transitions/actions without changing node ids.
 - XState projection data is Pibo-owned and versioned (`kind`, `schemaVersion`) with both a machine-config view and flat indexes for states/transitions/actors/guards/actions/delays; keep context shape projection-only with `durableTruth: "kernel"` and `exposesPrivatePayloads: false`.
 - XState edge projection goes through `projectWorkflowEdgesToXState`: use stable `workflow.edge.<id>.transition` and `workflow.edge.<id>.transfer` ids, default data/control events to `WORKFLOW.NODE.DONE`, resume edges to `WORKFLOW.RESUME`, and error edges to `WORKFLOW.FAIL`.
@@ -706,4 +707,16 @@
   - Edge projection is intentionally metadata/action oriented; the kernel remains responsible for actually validating and persisting edge transfers.
   - `projectWorkflowToXStateProjection` now composes node and edge projections, so future guard/wait/final-state work should extend the same projection assembly rather than rebuilding machine config directly.
   - Transition order is deterministic by source node, event, explicit edge/guard priority, then edge id so guarded outgoing transitions can become XState arrays in a stable order.
+---
+
+## 2026-05-11 01:54 UTC - 10.5
+- Mapped XState edge/loop guards, durable human waits, failure transitions, retry delay states, and workflow final-node completion transitions in the workflow projection.
+- Added projection metadata/actions/delays for wait entry/resume, human timeouts, record-failure, retry scheduling, and final-node completion; extended projection state types to carry `after` transitions.
+- Added tests covering guard indexes, loop-guard transition projection, human wait timeout projection, node failure targets, retry delay wakeups, and final-state completion transitions.
+- Files changed: `packages/workflows/src/xstate/index.ts`, `packages/workflows/src/types/index.ts`, `packages/workflows/src/testing/xstate-shape.test.ts`, `docs/specs/changes/pibo-workflow-system-v1/tasks.md`, `progress.txt`.
+- Quality checks: `npm --prefix packages/workflows run typecheck`; `npm --prefix packages/workflows test`; `npm run typecheck`; container `docker exec pibo-dev-Workflows ... npm --prefix packages/workflows run typecheck && npm --prefix packages/workflows test && npm run typecheck`.
+- **Learnings for future iterations:**
+  - XState projection keeps runtime durability explicit by using named actions/delays (`enterWait`, `resumeWait`, `recordFailure`, `scheduleRetry`) instead of relying on in-memory XState effects.
+  - Final workflow nodes are projected separately from normal edges so guarded outgoing transitions can remain ordered before fallback completion transitions.
+  - Human wait and retry delay projections need `after` support on `XStateProjectionState` so machine config and flat projection indexes stay aligned.
 ---
