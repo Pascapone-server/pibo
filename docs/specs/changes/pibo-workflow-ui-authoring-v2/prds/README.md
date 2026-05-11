@@ -50,6 +50,8 @@ This directory translates the Pibo Workflow UI Authoring V2 proposal, spec, desi
 - UI-created workflows use Pibo Workflow IR directly. V2 adds no separate YAML/JSON authoring layer.
 - XState remains a projection/visualization layer, not workflow truth.
 - Raw Workflow IR is viewable and editable. Raw XState editing is not supported.
+- Workflow Builder canvas interactions use `@xyflow/react`; saved layout uses existing `WorkflowDefinition.ui` metadata and remains outside runtime semantics.
+- Prompt asset edits create revisioned prompt assets and do not mutate code/plugin prompt assets or already published workflow versions in place.
 - Published workflow versions are immutable.
 - Archive applies to the whole workflow. Delete is allowed even when historical runs exist.
 - Historical runs must remain inspectable through snapshots after workflow deletion.
@@ -104,13 +106,11 @@ The source specs already answer the PRD discovery questions:
 
 ## Known Open Questions / TBD Before Implementation
 
-The Workflow Registry/store schema and V2 permission matrix are resolved in `02-workflow-registry-catalog-and-draft-store.md`. The PRDs preserve the remaining source specs' open questions instead of choosing silently. Implementation MUST resolve and document these before coding the affected area:
+The Workflow Registry/store schema and V2 permission matrix are resolved in `02-workflow-registry-catalog-and-draft-store.md`. The builder graph/canvas and prompt asset persistence decisions are resolved in `04-workflow-builder-and-ir-editing.md`. The PRDs preserve the remaining source specs' open questions instead of choosing silently. Implementation MUST resolve and document these before coding the affected area:
 
 - exact configuration/effective-definition snapshot fields beyond the minimum required for deleted-workflow run inspection;
 - deleted-workflow display and link behavior in historical Project run views;
-- exact API route contracts for catalog, drafts, versions, publish, archive, delete, Project session creation, and run start;
-- graph/canvas library for the visual editor;
-- prompt asset mutation versus prompt asset versioning behavior.
+- exact API route contracts for catalog, drafts, versions, publish, archive, delete, Project session creation, and run start.
 
 ## Second-Pass Coverage Rule
 

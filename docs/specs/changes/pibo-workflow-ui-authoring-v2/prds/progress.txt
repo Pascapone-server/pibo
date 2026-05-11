@@ -3,6 +3,8 @@
 - In the `pibo-dev-WorkflowsV2` browser worker, pass `--fresh-profile` to every `browser-use` command when the default `PIBo` Chrome profile is already locked by another browser process.
 - When resolving PRD decision stories, update the focused PRD plus `README.md`, `tasks.md`, and `09-implementation-completeness-contract.md` if they repeat the same TBD or baseline contract.
 - For V2 open-question stories, also clear matching stale open questions in the parent `spec.md` and `design.md` when the decision is now documented.
+- Workflow Builder canvas state should remain a projection; persist saved layout through existing `WorkflowDefinition.ui.layout` and `WorkflowDefinition.ui.positions`.
+- Prompt asset edits should create managed revisions and pin revision IDs/content hashes in published workflow versions and snapshots.
 
 ## 2026-05-11 22:37 CEST - US-001
 - What was implemented
@@ -82,4 +84,30 @@
 - **Learnings for future iterations:**
   - Prompt override decisions should name both the eligible IR shape and the disallowed mutation paths so API/UI stories can enforce the same boundary.
   - Pre-start edit policy affects snapshot design; freezing configured-session values keeps creation, snapshot, and start semantics simple for the first implementation pass.
+---
+## 2026-05-11 22:55 CEST - US-001
+- What was implemented
+  - Documented the Workflow Builder graph/canvas decision: use `@xyflow/react` as the visual canvas projection over Pibo Workflow IR.
+  - Documented the layout metadata contract using existing `WorkflowDefinition.ui.layout` and `WorkflowDefinition.ui.positions` fields.
+  - Documented prompt asset persistence as revisioned managed assets, with published versions and snapshots pinning revision IDs/content hashes.
+  - Cleared the matching graph/prompt open questions from the source spec/design/task/PRD docs and marked PRD 04 US-001 passing.
+- Files changed
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/spec.md`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/design.md`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/tasks.md`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/04-workflow-builder-and-ir-editing.md`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/09-implementation-completeness-contract.md`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/README.md`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_04_workflow_builder_and_ir_editing.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `python3 -m json.tool docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_04_workflow_builder_and_ir_editing.json` — passed.
+  - `git diff --check` — passed.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck'` — passed.
+  - Relevant tests: not run; documentation-only change.
+- Browser verification, if UI changed
+  - Not run; documentation-only change with no UI behavior changes.
+- **Learnings for future iterations:**
+  - The existing workflow type contract already contains `WorkflowDefinition.ui.layout` and `WorkflowDefinition.ui.positions`, so builder layout docs should reuse those fields instead of inventing a new layout store.
+  - Prompt asset versioning should follow the same revision/pinning safety principle as immutable workflow versions and session snapshots.
 ---

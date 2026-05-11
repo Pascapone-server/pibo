@@ -461,13 +461,14 @@ V2 does not expand nested workflow internals inline inside the parent graph.
 
 ### Requirement: Graph layout supports manual and automatic modes
 
-The UI MUST support drag-and-drop layout and automatic layout for workflows without saved positions.
+The UI MUST use `@xyflow/react` for canvas interactions and support drag-and-drop layout plus automatic layout for workflows without saved positions.
 
 #### Acceptance
 
 - Users can move nodes and save positions.
 - TypeScript/code-registered workflows without positions receive an automatic layout.
-- Layout metadata does not affect execution.
+- Saved positions use `workflow.ui.layout` and `workflow.ui.positions` from the existing Workflow IR UI metadata contract.
+- Layout metadata does not affect execution, validation, or publish gating except for metadata shape checks.
 
 ### Requirement: Workflow Library lists all available workflows
 
@@ -491,7 +492,7 @@ Prompt assets referenced by workflows MUST be editable in V2 using the existing 
 
 #### Acceptance
 
-Users can open and edit prompt assets from the Workflow Builder where permissions and source allow it.
+Users can open and edit prompt assets from the Workflow Builder where permissions and source allow it. Prompt asset edits create revisions, update draft references to the new revision/hash, and do not mutate code/plugin prompt assets or already published workflow versions in place.
 
 ### Requirement: V2 uses existing JSON Schema subset
 
@@ -562,7 +563,8 @@ UI editing writes Pibo workflow nodes, edges, ports, adapters, guards, state, an
 - UI drafts need a wrapper around `WorkflowDefinition` for draft status, source, diagnostics, and version metadata.
 - Code-registered workflows can be serialized into editable IR for duplication.
 - Existing JSON Schema subset remains the schema contract.
-- Existing Markdown editor patterns can be reused for prompt assets.
+- `@xyflow/react` is the selected graph/canvas library for the Workflow Builder.
+- Existing Markdown editor patterns can be reused for revisioned prompt asset editing.
 - Session model, thinking level, and fast mode overrides are workflow-session-wide in V2.
 - Session prompt overrides target only explicitly opted-in Pibo Agent nodes with direct `promptTemplate` values.
 - Configured-session values are immutable after creation and before start.
@@ -573,7 +575,6 @@ UI editing writes Pibo workflow nodes, edges, ports, adapters, guards, state, an
 - What definition/configuration snapshot fields are required to keep deleted-workflow runs inspectable?
 - How should deleted workflows appear in historical run views?
 - What exact API routes should expose catalog, drafts, versions, publish, archive, delete, and run start?
-- Which graph/canvas library should V2 use?
 
 ## Traceability
 

@@ -36,7 +36,7 @@
   - The builder edits Pibo Workflow IR fields: workflow metadata, ports, nodes, edges, adapters, guards, state, prompts, prompt assets, and UI metadata.
   - The raw editor exposes Workflow IR only and never raw XState JSON.
   - Schema editors are raw JSON only and validate against the existing workflow JSON Schema subset.
-  - Prompt asset editing uses the existing Markdown editor pattern; whether asset edits mutate the current asset or create asset versions is TBD.
+  - Prompt asset editing uses the existing Markdown editor pattern and saves versioned prompt asset revisions instead of mutating published asset content in place.
   - Draft save is allowed with validation errors; publish and run are blocked by error diagnostics.
   - Drafts with zero nodes can be saved, but a published/runnable workflow requires at least one node plus workflow input and output contracts.
 
@@ -53,13 +53,13 @@
 - **Tool Requirements**:
   - Workflow validation and serialization APIs.
   - XState projection for display only.
-  - Graph/canvas library selected by implementation.
-  - Markdown editor pattern from Context Files for prompt assets.
+  - `@xyflow/react` (React Flow) for graph canvas interactions.
+  - Markdown editor pattern from Context Files for prompt asset revision editing.
   - Raw JSON editor for schemas and raw Workflow IR.
 
 - **Evaluation Strategy**:
   - UI tests cover duplicate, open builder, add node, connect edge, save layout, edit prompt, edit schema, validate, and publish.
-  - Prompt asset tests verify editor wiring without assuming mutation-versus-versioning until that open decision is resolved.
+  - Prompt asset tests verify revision creation, draft reference updates, and published-version pinning.
   - Publish tests reject zero-node drafts and drafts missing workflow input or output contracts.
   - Raw IR tests cover valid edit sync, invalid JSON warning, invalid workflow diagnostics, and preservation of last valid draft object.
   - Layout tests verify automatic layout appears for definitions without positions and saved positions persist without changing serialized runtime semantics.
@@ -73,6 +73,19 @@
   - Raw IR edits parse into the same draft IR object after successful parse.
   - XState projection is regenerated from Pibo IR for display and run visualization.
   - Publish normalizes and validates a full `WorkflowDefinition` before creating an immutable version.
+
+### Builder Library and Persistence Decisions
+
+- **Graph/canvas library:** Use `@xyflow/react` for Workflow Builder canvas interactions: pan, zoom, selection, node drag, and edge creation. React Flow state is a UI projection of draft Pibo Workflow IR.
+- **Layout metadata contract:** Persist layout in the existing `WorkflowDefinition.ui` and node/edge `ui` metadata from `packages/workflows/src/types/index.ts`. `workflow.ui.layout` is `"auto"` or `"manual"`; `workflow.ui.positions` maps node IDs to `{ x, y }`; node-level `node.ui.position` may seed imported or code-defined layouts. On save, the builder writes the workflow-level positions map. Auto layout is computed from draft nodes and edges when positions are missing and is not saved until the user moves nodes or explicitly saves layout. Runtime execution, validation, and publish gating ignore layout metadata except for metadata shape checks.
+- **Prompt asset persistence:** Prompt asset edits create revisioned prompt assets. Code/plugin prompt assets are read-only and may be copied into managed UI prompt assets. Each save appends a new asset revision and updates the draft reference to that revision and content hash. Published workflow versions and session snapshots pin prompt asset revision IDs and content hashes, so later prompt asset edits affect only drafts or future workflow versions.
+
+Dependent implementation stories must use these decisions:
+
+- US-002 loads draft IR with `WorkflowDefinition.ui` and prompt asset references intact.
+- US-003 uses `@xyflow/react`, writes `workflow.ui.positions`, and keeps layout outside runtime semantics.
+- US-007 uses revisioned prompt asset persistence and pins references during publish/snapshot creation.
+- US-009 verifies that layout changes do not alter runtime semantics and that prompt asset revisions do not mutate published versions.
 
 - **Integration Points**:
   - Workflow Registry/store for draft load/save/publish.

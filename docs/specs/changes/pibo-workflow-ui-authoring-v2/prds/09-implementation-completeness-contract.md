@@ -230,6 +230,13 @@ The builder MUST include:
 
 The builder MUST NOT expose raw XState editing.
 
+The builder MUST use the documented builder decisions from `04-workflow-builder-and-ir-editing.md`:
+
+- use `@xyflow/react` for pan, zoom, selection, node drag, and edge creation;
+- store saved layout in `workflow.ui.layout` and `workflow.ui.positions` without affecting runtime semantics;
+- compute ephemeral auto layout for workflows without positions;
+- create revisioned prompt assets and pin prompt asset revision IDs/content hashes in published versions and session snapshots.
+
 ### 4.6 Composition Contract
 
 The implementation MUST support node kinds:
@@ -461,16 +468,17 @@ The implementation MUST keep Pibo's existing auth, Project/session visibility, p
 
 ### 4.14 Open Decisions Gate
 
-The implementation MUST resolve and document these source-spec open questions before coding the affected area:
+The implementation MUST resolve and document these remaining source-spec open questions before coding the affected area:
 
-- exact Workflow Registry/store schema and database records for UI drafts and UI-published workflows;
 - exact configuration/effective-definition snapshot fields beyond the minimum listed in this PRD;
 - deleted-workflow display and link behavior in historical Project run views;
-- exact API route contracts for catalog, drafts, versions, publish, archive, delete, Project session creation, and run start;
-- graph/canvas library for the visual editor;
-- prompt asset mutation versus prompt asset versioning behavior.
+- exact API route contracts for catalog, drafts, versions, publish, archive, delete, Project session creation, and run start.
+
+Resolved registry/store decisions are documented in `02-workflow-registry-catalog-and-draft-store.md`: workflow identity, draft record, published version record, archive state, delete/tombstone state, and the V2 permission matrix.
 
 Resolved Project session override decisions are documented in `03-project-session-selection-and-snapshots.md`: prompt overrides are limited to explicitly opted-in Pibo Agent nodes with direct `promptTemplate` values; model, thinking level, and fast mode are workflow-session-wide; configured-session values are immutable before start.
+
+Resolved builder decisions are documented in `04-workflow-builder-and-ir-editing.md`: use `@xyflow/react` for the visual canvas, save layout through existing Workflow IR UI metadata, and persist prompt asset edits as revisions instead of mutating published asset content in place.
 
 ## 5. Risks & Roadmap
 

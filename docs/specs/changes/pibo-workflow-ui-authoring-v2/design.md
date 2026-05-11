@@ -323,6 +323,30 @@ Main panels:
 - raw IR editor toggle;
 - publish/version panel.
 
+### Builder Canvas and Layout Metadata
+
+Use `@xyflow/react` for the visual canvas. React Flow owns pan, zoom, selection, node dragging, and edge creation in the browser, but Pibo Workflow IR remains the source of truth.
+
+Persist layout in the existing workflow UI metadata contract:
+
+```ts
+type WorkflowUiMetadata = {
+  layout?: "auto" | "manual";
+  positions?: Record<NodeId, { x: number; y: number }>;
+  collapsed?: NodeId[];
+  color?: string;
+  icon?: string;
+};
+```
+
+Rules:
+
+- `workflow.ui.positions` is the canonical saved node position map for the builder.
+- `node.ui.position` may seed imported or code-defined layouts, but the builder writes workflow-level positions on save.
+- Workflows without complete saved positions receive deterministic auto layout from draft nodes and edges.
+- Auto layout stays ephemeral until the user moves nodes or saves layout.
+- Runtime execution, validation, and publish gating ignore layout metadata except for metadata shape checks.
+
 ## Editing Model
 
 ### Nodes
@@ -448,7 +472,14 @@ The UI validates schemas with the existing JSON Schema subset validator.
 
 ### Prompt Assets
 
-Prompt assets are editable in V2. Reuse the existing Markdown editor pattern from Context Files.
+Prompt assets are editable in V2 through the existing Markdown editor pattern from Context Files. Prompt asset saves create revisions; they do not mutate code/plugin prompt assets or published asset content in place.
+
+Rules:
+
+- Code/plugin prompt assets are read-only in the builder and can be copied into managed UI prompt assets.
+- Each prompt asset save appends a new revision with a content hash and updates the draft reference.
+- Published workflow versions and session snapshots pin prompt asset revision IDs and content hashes.
+- Later prompt asset edits affect only drafts or future workflow versions that reference the new revision.
 
 ### Raw IR Editor
 
@@ -587,5 +618,3 @@ Zod schema layer
 1. What exact database tables/records should the Workflow Registry store use for UI drafts and UI-published workflows?
 2. What exact snapshot fields are required to keep deleted-workflow runs inspectable?
 3. How should workflow deletion interact with links from old Project sessions?
-4. Which graph library should power the visual editor?
-5. Should prompt asset edits create versions or mutate current prompt assets?
