@@ -447,7 +447,7 @@ function principalIdFor(webSession: PiboWebSession): string {
 	return webSession.ownerScope;
 }
 
-function roomResourcePath(pathname: string): { roomId: string; child?: "events" | "messages" } | undefined {
+function roomResourcePath(pathname: string): { roomId: string; child?: "events" | "messages" | "read" } | undefined {
 	const prefix = `${CHAT_WEB_API_PREFIX}/rooms/`;
 	if (!pathname.startsWith(prefix)) return undefined;
 	const parts = pathname
@@ -457,8 +457,8 @@ function roomResourcePath(pathname: string): { roomId: string; child?: "events" 
 	if (parts.length < 1 || parts.length > 2) return undefined;
 	try {
 		const roomId = decodeURIComponent(parts[0]);
-		const child = parts[1] ? (decodeURIComponent(parts[1]) as "events" | "messages") : undefined;
-		if (child && child !== "events" && child !== "messages") return undefined;
+		const child = parts[1] ? (decodeURIComponent(parts[1]) as "events" | "messages" | "read") : undefined;
+		if (child && child !== "events" && child !== "messages" && child !== "read") return undefined;
 		return { roomId, child };
 	} catch {
 		throw new PiboWebHttpError("Invalid room id", 400);
@@ -1113,6 +1113,21 @@ function visibleOwnedSessions(
 
 function sessionsInRoom(sessions: PiboSession[], roomId: string): PiboSession[] {
 	return sessions.filter((session) => chatRoomIdFromMetadata(session.metadata) === roomId);
+}
+
+function sessionsInRoomSubtree(sessions: PiboSession[], roomId: string): PiboSession[] {
+	const ids = new Set(sessionsInRoom(sessions, roomId).map((session) => session.id));
+	let changed = true;
+	while (changed) {
+		changed = false;
+		for (const session of sessions) {
+			if (session.parentId && ids.has(session.parentId) && !ids.has(session.id)) {
+				ids.add(session.id);
+				changed = true;
+			}
+		}
+	}
+	return sessions.filter((session) => ids.has(session.id));
 }
 
 function visibleSessionsInRoom(input: {
@@ -4048,6 +4063,15 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 					body,
 					forcedRoomId: roomResource.roomId,
 				});
+			}
+
+			if (roomResource && roomResource.child === "read" && request.method === "POST") {
+				requireSameOriginJsonRequest(request);
+				const webSession = await requireSession(request, context);
+				const room = requireRoom(state, roomResource.roomId, webSession, "read");
+				const roomSessions = sessionsInRoomSubtree(listOwnedSessions(context, webSession), room.id);
+				markSessionsRead(state, roomSessions, principalIdFor(webSession));
+				return responseJson({ ok: true, roomId: room.id, readSessionIds: roomSessions.map((session) => session.id) });
 			}
 
 			const sessionReadPrefix = `${CHAT_WEB_API_PREFIX}/sessions/`;

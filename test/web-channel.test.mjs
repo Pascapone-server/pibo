@@ -1340,6 +1340,82 @@ test("chat web app marks a selected session read through the read endpoint", asy
 	}
 });
 
+test("chat web app marks all room sessions read through the room read endpoint", async () => {
+	const { channel, baseURL, emitOutput } = await startWebHostChannel({
+		auth: createFakeAuthService(),
+	});
+
+	try {
+		const firstResponse = await fetch(`${baseURL}/api/chat/session`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(firstResponse.status, 200);
+		const firstPayload = await firstResponse.json();
+		const room = firstPayload.room;
+
+		const secondResponse = await fetch(`${baseURL}/api/chat/sessions`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({ roomId: room.id }),
+		});
+		assert.equal(secondResponse.status, 201);
+		const secondPayload = await secondResponse.json();
+
+		for (const [session, eventId] of [[firstPayload.session, "room-read-all-1"], [secondPayload.session, "room-read-all-2"]]) {
+			emitOutput({
+				type: "assistant_message",
+				piboSessionId: session.id,
+				eventId,
+				text: `answer for ${session.id}`,
+			});
+			emitOutput({
+				type: "message_finished",
+				piboSessionId: session.id,
+				eventId,
+			});
+		}
+
+		let bootstrap = await fetch(`${baseURL}/api/chat/bootstrap?markRead=false&roomId=${encodeURIComponent(room.id)}&piboSessionId=${encodeURIComponent(firstPayload.session.id)}`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(bootstrap.status, 200);
+		let payload = await bootstrap.json();
+		assert.equal(payload.rooms[0].unreadCount, 2);
+		assert.equal(payload.sessions.find((session) => session.piboSessionId === firstPayload.session.id)?.unreadCount, 1);
+		assert.equal(payload.sessions.find((session) => session.piboSessionId === secondPayload.session.id)?.unreadCount, 1);
+
+		const marked = await fetch(`${baseURL}/api/chat/rooms/${encodeURIComponent(room.id)}/read`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: "{}",
+		});
+		assert.equal(marked.status, 200);
+		const markedPayload = await marked.json();
+		assert.equal(markedPayload.ok, true);
+		assert.equal(markedPayload.roomId, room.id);
+		assert.deepEqual(new Set(markedPayload.readSessionIds), new Set([firstPayload.session.id, secondPayload.session.id]));
+
+		bootstrap = await fetch(`${baseURL}/api/chat/bootstrap?markRead=false&roomId=${encodeURIComponent(room.id)}&piboSessionId=${encodeURIComponent(firstPayload.session.id)}`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(bootstrap.status, 200);
+		payload = await bootstrap.json();
+		assert.equal(payload.rooms[0].unreadCount, undefined);
+		assert.equal(payload.sessions.find((session) => session.piboSessionId === firstPayload.session.id)?.unreadCount, undefined);
+		assert.equal(payload.sessions.find((session) => session.piboSessionId === secondPayload.session.id)?.unreadCount, undefined);
+	} finally {
+		await channel.stop?.();
+	}
+});
+
 test("chat web app replays durable SSE frames with stream cursors", async () => {
 	const { channel, baseURL, emitOutput } = await startWebHostChannel({
 		auth: createFakeAuthService(),

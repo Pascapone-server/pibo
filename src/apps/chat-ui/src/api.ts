@@ -366,6 +366,14 @@ export async function markSessionRead(piboSessionId: string): Promise<{ ok: true
 	});
 }
 
+export async function markRoomRead(roomId: string): Promise<{ ok: true; roomId: string; readSessionIds: string[] }> {
+	return requestJson<{ ok: true; roomId: string; readSessionIds: string[] }>(`/api/chat/rooms/${encodeURIComponent(roomId)}/read`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: "{}",
+	});
+}
+
 export async function getAgentCatalog(): Promise<{
 	catalog: AgentCatalog;
 	profiles: Array<{ name: string; description?: string; aliases: string[] }>;
