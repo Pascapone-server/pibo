@@ -122,6 +122,6 @@
 - [x] 14.1 Run `npm run typecheck`.
 - [x] 14.2 Run workflow unit tests.
 - [x] 14.3 Run persistence tests for completed, failed, waiting, and resumed workflow runs.
-- [ ] 14.4 Run a manual one-node `pibo-agent` workflow.
+- [x] 14.4 Run a manual one-node `pibo-agent` workflow.
 - [ ] 14.5 Run a manual two-workflow composition with an explicit registered TypeScript adapter.
 - [ ] 14.6 Run a manual bounded review/fix loop with max attempts.

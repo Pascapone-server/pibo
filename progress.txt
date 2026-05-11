@@ -1,4 +1,5 @@
 ## Codebase Patterns
+- Manual workflow validation can be run as a one-off `npx tsx` harness inside `/workspace` using fixture definitions/providers, `createWorkflowRegistry(...)`, `runOneNodeAgentWorkflow(...)`, routed executor seams, a temporary `SqliteWorkflowRunStore`, and `inspectWorkflowRun(...)` after reopening the store.
 - Workflow persistence validation should close/reopen `SqliteWorkflowRunStore` around each recovery boundary; use real human dispatch/action APIs for waiting/resumed run facts instead of only direct row inserts.
 - Workflow debug/registration docs should treat Workflow Registry ids as the durable boundary: definitions store serializable refs, plugins register implementations in scoped registries, and debug snapshots summarize refs/diagnostics/projection without raw private payloads.
 - XState workflow docs should treat the kernel snapshot/workflow store as authoritative; `xstate` and `ui` snapshots are optional reconstructable caches, and normal UI should consume `createWorkflowXStateUiModel(...)`.
@@ -1011,4 +1012,14 @@
   - Close and reopen `SqliteWorkflowRunStore` at each persistence recovery boundary when validating restart behavior.
   - Waiting/resumed workflow validation should exercise `dispatchWorkflowHumanNode` and `applyWorkflowHumanAction` so wait tokens, human actions, wakeups, node attempts, run status, and events stay aligned.
   - The package test script currently runs all `src/**/*.test.ts` even when a filename is passed, so count increases are a reliable way to confirm newly added workflow tests executed.
+---
+## 2026-05-11 04:04 UTC - 14.4
+- Ran a manual one-node `pibo-agent` workflow validation in the Docker worker using the minimal workflow fixture, registry-backed `pibo-agent` profile resolution, routed agent executor semantics, temporary workflow SQLite persistence, store reopen, and `inspectWorkflowRun`.
+- Recorded the validation evidence in a report and marked task `14.4` complete in the workflow-system task list because the referenced JSON PRDs are absent and completion status is tracked in `tasks.md`.
+- Files changed: `docs/reports/2026-05-11-workflow-manual-one-node-pibo-agent.md`, `docs/specs/changes/pibo-workflow-system-v1/tasks.md`, `progress.txt`.
+- Quality checks: container `/workspace` manual validation script via `npx tsx`; container `/workspace` `npm --prefix packages/workflows run typecheck && npm --prefix packages/workflows test && npm run typecheck`.
+- **Learnings for future iterations:**
+  - Manual workflow validation can reuse the public workflow package surface and fixture registry from a temporary `tsx` script without adding permanent test harness files.
+  - Reopen the temporary `pibo-workflows.sqlite` and inspect the run after the manual execution so validation proves persisted facts, not only in-memory runtime results.
+  - The worker Chat Web app was reachable and dev-auth succeeded, but the live Chat Web catalog did not expose a `pibo-agent` profile; the V1 workflow fixture registry is the current source for this manual `pibo-agent` validation path.
 ---
