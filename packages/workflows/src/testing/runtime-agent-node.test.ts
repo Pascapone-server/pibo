@@ -129,6 +129,10 @@ describe("workflow agent node dispatch", () => {
     assert.equal(result.nodeAttempt.metadata?.runtime?.profileId, "pibo-agent");
     assert.deepEqual(result.nodeAttempt.metadata?.runtime?.tools, ["read", "bash"]);
     assert.deepEqual(store.getNodeAttempt("wna_agent"), result.nodeAttempt);
+    assert.equal(result.run.piboSessionId, "ps_agent_node");
+    assert.equal(result.run.projectId, "project_agent_node");
+    assert.equal(store.getRun("wfr_agent")?.piboSessionId, "ps_agent_node");
+    assert.equal(store.getRun("wfr_agent")?.projectId, "project_agent_node");
     store.close();
     assert.deepEqual(result.run.current, { nodeId: "draft", status: "running" });
     assert.deepEqual(externalEvents, result.events);

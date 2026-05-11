@@ -1,4 +1,5 @@
 ## Codebase Patterns
+- Workflow Agent session linkage stays structural: `createPiboSessionRoutingAgentExecutor` can call an injected `linkProjectSession` callback, while Chat Web `ChatProjectService` persists `workflow_run_id` on `project_sessions` without importing workflow runtime code.
 - Workflow DB boundaries should store workflow facts plus lightweight links (`pibo_session_id`, `project_id`) only; normal Pibo/Pi traces, tool calls, spans, transcripts, and session records stay in their existing session stores.
 - Workflow fact persistence uses small store interfaces in `packages/workflows/src/store/index.ts`; runtime helpers should persist events/edge transfers only when the injected store supports the corresponding optional `save*` method.
 - Workflow SQLite schema changes belong in `packages/workflows/src/store/index.ts` with `CREATE TABLE IF NOT EXISTS` / additive column migrations and a focused schema contract test under `packages/workflows/src/testing`.
@@ -787,4 +788,17 @@
   - The workflow store should expose only workflow-specific logical tables; add new workflow facts there, but leave Pibo/Pi session tables and trace payload storage in existing stores.
   - Agent-node workflow persistence should record session linkage (`piboSessionId`, optional `piSessionId`) and workflow events, not routed session tool-call/span/transcript event payloads.
   - Schema-boundary tests can use storage-name keyword guards while allowing explicit link columns such as `pibo_session_id` for future inspection stories.
+---
+
+## 2026-05-11 02:31 UTC - 11.4
+- Linked workflow runs to routed Pibo Sessions at both one-node and general agent-node dispatch boundaries by copying the executor-returned `piboSessionId` plus routing `projectId` onto the persisted `WorkflowRun`.
+- Added an injected `linkProjectSession` seam to `createPiboSessionRoutingAgentExecutor` so product code can upsert Project Session linkage before the workflow prompt is sent, without coupling `packages/workflows` to Chat Web internals.
+- Extended `ChatProjectService` with `workflowRunId` persistence for project sessions and a `linkWorkflowRunSession` helper for workflow-backed main/sub project sessions.
+- Marked task `11.4` complete in the workflow-system task list because the referenced JSON PRDs are absent and progress is tracked in `tasks.md`.
+- Files changed: `packages/workflows/src/runtime/index.ts`, `packages/workflows/src/testing/runtime-agent-node.test.ts`, `packages/workflows/src/testing/runtime-one-node-agent.test.ts`, `src/apps/chat/data/project-service.ts`, `test/project-service-workflow-link.test.mjs`, `docs/specs/changes/pibo-workflow-system-v1/tasks.md`, `progress.txt`.
+- Quality checks: host `npm --prefix packages/workflows run typecheck`; host `npm --prefix packages/workflows test`; host `npm run typecheck`; host `npm run build && node --test test/project-service-workflow-link.test.mjs`; container `/workspace` `npm --prefix packages/workflows run typecheck && npm --prefix packages/workflows test && npm run typecheck`; container `node --test test/project-service-workflow-link.test.mjs`.
+- **Learnings for future iterations:**
+  - Keep product/session integration behind injected seams in `packages/workflows`; Chat Web can adapt those seams to `ChatProjectService` instead of making the workflow package import product services.
+  - `workflow_runs.piboSessionId/projectId` now updates for general agent-node dispatch, not just the one-node convenience runner, so inspection code can find workflow-backed sessions from either runtime path.
+  - Project sub-session linking should not change `projects.current_main_session_id`; `ChatProjectService.addProjectSession` now only advances the current main session for `kind: "main"`.
 ---

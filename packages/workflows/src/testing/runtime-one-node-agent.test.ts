@@ -116,6 +116,75 @@ describe("one-node agent workflow runtime path", () => {
     assert.deepEqual(result.nodeAttempt.metadata?.runtime?.tools, ["read", "bash"]);
   });
 
+  it("links routed workflow agent sessions to project sessions before sending the prompt", async () => {
+    const lifecycle: string[] = [];
+    const projectSessionLinks: unknown[] = [];
+    const listeners = new Set<(event: { type: string; piboSessionId: string; eventId?: string; text?: string }) => void>();
+    const definition = cloneMinimalWorkflow();
+    (definition.nodes.answer as AgentNodeDefinition).routing = {
+      parentSessionId: "ps_project_main",
+      ownerScope: "user:project-link",
+      projectId: "project_workflow_link",
+    };
+
+    const result = await runOneNodeAgentWorkflow(definition, "Link the workflow session.", {
+      ownerScope: "user:fallback",
+      now: () => "2026-05-11T02:30:00.000Z",
+      createRunId: () => "wfr_project_link",
+      createNodeAttemptId: () => "wna_project_link",
+      agentExecutor: createPiboSessionRoutingAgentExecutor({
+        routing: {
+          createSession(input) {
+            lifecycle.push("createSession");
+            return { id: "ps_project_workflow_agent", profile: input.profile };
+          },
+          emit(event) {
+            lifecycle.push("emitPrompt");
+            queueMicrotask(() => {
+              for (const listener of listeners) {
+                listener({
+                  type: "assistant_message",
+                  piboSessionId: event.piboSessionId,
+                  eventId: event.id,
+                  text: "Linked project workflow response.",
+                });
+              }
+            });
+          },
+          subscribe(listener) {
+            listeners.add(listener);
+            return () => listeners.delete(listener);
+          },
+        },
+        createMessageId: () => "msg_project_link",
+        title: "Project workflow agent",
+        linkProjectSession(input) {
+          lifecycle.push("linkProjectSession");
+          projectSessionLinks.push(input);
+        },
+      }),
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.run.piboSessionId, "ps_project_workflow_agent");
+    assert.equal(result.run.projectId, "project_workflow_link");
+    assert.deepEqual(lifecycle, ["createSession", "linkProjectSession", "emitPrompt"]);
+    assert.deepEqual(projectSessionLinks, [
+      {
+        projectId: "project_workflow_link",
+        piboSessionId: "ps_project_workflow_agent",
+        workflowRunId: "wfr_project_link",
+        workflowId: definition.id,
+        workflowVersion: definition.version,
+        workflowNodeId: "answer",
+        workflowNodeAttemptId: "wna_project_link",
+        parentPiboSessionId: "ps_project_main",
+        ownerScope: "user:project-link",
+        title: "Project workflow agent",
+      },
+    ]);
+  });
+
   it("keeps normal session trace/tool-call/span/transcript events in the routed session stream", async () => {
     const tempRoot = mkdtempSync(join(tmpdir(), "pibo-workflows-session-facts-boundary-"));
     const dbPath = join(tempRoot, "pibo-workflows.sqlite");

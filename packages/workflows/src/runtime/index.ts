@@ -173,6 +173,23 @@ export type PiboWorkflowSessionRouting = {
   getSessionRuntimeStatus?(piboSessionId: string): PiboWorkflowSessionStatus | undefined;
 };
 
+export type PiboWorkflowProjectSessionLinkInput = {
+  projectId: string;
+  piboSessionId: string;
+  workflowRunId: WorkflowRunId;
+  workflowId: string;
+  workflowVersion: string;
+  workflowNodeId: string;
+  workflowNodeAttemptId?: NodeAttemptId;
+  parentPiboSessionId?: string;
+  ownerScope: string;
+  title?: string;
+};
+
+export type PiboWorkflowProjectSessionLinker = (
+  input: PiboWorkflowProjectSessionLinkInput,
+) => Promise<unknown> | unknown;
+
 export type PiboSessionRoutingAgentExecutorOptions = {
   routing: PiboWorkflowSessionRouting;
   workspace?: string;
@@ -182,6 +199,7 @@ export type PiboSessionRoutingAgentExecutorOptions = {
   kind?: string;
   title?: string | ((context: OneNodeAgentExecutorContext) => string | undefined);
   metadata?: PiboRoutingJsonObject | ((context: OneNodeAgentExecutorContext) => PiboRoutingJsonObject | undefined);
+  linkProjectSession?: PiboWorkflowProjectSessionLinker;
 };
 
 export type OneNodeAgentExecutorResult = {
@@ -557,14 +575,16 @@ export function createPiboSessionRoutingAgentExecutor(
   options: PiboSessionRoutingAgentExecutorOptions,
 ): OneNodeAgentExecutor {
   return async (context) => {
+    const ownerScope = context.routing?.ownerScope ?? context.run.ownerScope;
+    const title = resolveExecutorTitle(options.title, context);
     const session = options.routing.createSession({
       channel: options.channel ?? context.routing?.channel ?? "pibo.workflows",
       kind: options.kind ?? "workflow-agent",
       profile: context.profileId,
-      ownerScope: context.routing?.ownerScope ?? context.run.ownerScope,
+      ownerScope,
       parentId: context.routing?.parentSessionId,
       workspace: options.workspace,
-      title: resolveExecutorTitle(options.title, context),
+      title,
       metadata: {
         ...resolveExecutorMetadata(options.metadata, context),
         workflowRunId: context.run.id,
@@ -576,6 +596,20 @@ export function createPiboSessionRoutingAgentExecutor(
         ...(context.routing?.roomId ? { chatRoomId: context.routing.roomId } : {}),
       },
     });
+    if (context.routing?.projectId && options.linkProjectSession) {
+      await options.linkProjectSession({
+        projectId: context.routing.projectId,
+        piboSessionId: session.id,
+        workflowRunId: context.run.id,
+        workflowId: context.workflow.id,
+        workflowVersion: context.workflow.version,
+        workflowNodeId: context.nodeId,
+        ...(context.nodeAttemptId ? { workflowNodeAttemptId: context.nodeAttemptId } : {}),
+        ...(context.routing.parentSessionId ? { parentPiboSessionId: context.routing.parentSessionId } : {}),
+        ownerScope,
+        ...(title ? { title } : {}),
+      });
+    }
     const messageId = options.createMessageId?.() ?? createId("wfm");
     const reply = await emitMessageAndWaitForPiboReply(
       options.routing,
@@ -813,6 +847,7 @@ export async function dispatchWorkflowAgentNode(
       ...(executorResult.piboSessionId ? { piboSessionId: executorResult.piboSessionId } : {}),
       ...(executorResult.piSessionId ? { piSessionId: executorResult.piSessionId } : {}),
     };
+    linkWorkflowRunToAgentSession(run, agentNode, executorResult);
     run.current = { nodeId, status: run.status };
     run.updatedAt = completedAt;
 
@@ -2293,8 +2328,7 @@ export async function runOneNodeAgentWorkflow(
 
     run.status = "completed";
     run.current = { nodeId, status: "completed" };
-    if (executorResult.piboSessionId) run.piboSessionId = executorResult.piboSessionId;
-    if (node.routing?.projectId) run.projectId = node.routing.projectId;
+    linkWorkflowRunToAgentSession(run, node, executorResult);
     run.output = executorResult.output;
     run.completedAt = completedAt;
     run.updatedAt = completedAt;
@@ -3033,6 +3067,15 @@ async function resolveAgentProfileForRuntime(options: {
       },
     };
   }
+}
+
+function linkWorkflowRunToAgentSession(
+  run: WorkflowRun,
+  node: AgentNodeDefinition,
+  executorResult: OneNodeAgentExecutorResult,
+): void {
+  if (executorResult.piboSessionId) run.piboSessionId = executorResult.piboSessionId;
+  if (node.routing?.projectId) run.projectId = node.routing.projectId;
 }
 
 function createAgentRuntimeSelectionMetadata(options: {
