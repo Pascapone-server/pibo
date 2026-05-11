@@ -124,4 +124,4 @@
 - [x] 14.3 Run persistence tests for completed, failed, waiting, and resumed workflow runs.
 - [x] 14.4 Run a manual one-node `pibo-agent` workflow.
 - [x] 14.5 Run a manual two-workflow composition with an explicit registered TypeScript adapter.
-- [ ] 14.6 Run a manual bounded review/fix loop with max attempts.
+- [x] 14.6 Run a manual bounded review/fix loop with max attempts.
