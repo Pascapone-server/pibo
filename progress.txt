@@ -979,3 +979,13 @@
   - The current workflow package exposes registry maps for workflows, profiles, handlers, adapters, guards, prompt builders, and human actions; raw prompt assets are represented by stable metadata refs while executable prompt construction uses prompt builders.
   - No `prd_*.json` files exist in this worktree; workflow completion status is being tracked through `docs/specs/changes/pibo-workflow-system-v1/tasks.md`.
 ---
+## 2026-05-11 03:57 UTC - 14.1
+- Ran the root TypeScript typecheck successfully on the host worktree and inside the `pibo-dev-Workflows` container.
+- Marked task `14.1` complete because the root `npm run typecheck` validation passes; no `prd_*.json` files exist in this worktree, so completion status remains tracked in `tasks.md`.
+- Files changed: `docs/specs/changes/pibo-workflow-system-v1/tasks.md`, `progress.txt`.
+- Quality checks: host `npm run typecheck`; container `/workspace` `npm run typecheck`.
+- **Learnings for future iterations:**
+  - Validation section tasks may only require recording the completed check in `tasks.md` and `progress.txt`; keep these commits limited to the validation evidence.
+  - The root typecheck includes `tsc -p tsconfig.json --noEmit`, `chat-ui:typecheck`, and `context-files-ui:typecheck`, so it covers both backend TypeScript and the two UI TypeScript projects.
+  - For this Docker worker, the container project path is `/workspace`; use `docker exec pibo-dev-Workflows bash -lc 'cd /workspace && ...'` for container validation.
+---
