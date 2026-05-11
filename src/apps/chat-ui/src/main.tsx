@@ -33,6 +33,7 @@ function chatRouteFromLocation(pathname: string, search: Record<string, unknown>
 		.map((part) => decodeURIComponent(part));
 	const sessionViewId = parseChatSessionViewId(search.view);
 	if (parts[0] === "context") return { area: "context" };
+	if (parts[0] === "workflows" && parts[1] === "drafts" && parts[2]) return { area: "workflows", draftId: parts[2] };
 	if (parts[0] === "workflows") return { area: "workflows" };
 	if (parts[0] === "agents") return { area: "agents" };
 	if (parts[0] === "cron") return { area: "cron" };
@@ -91,6 +92,10 @@ const workflowsRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: "workflows",
 });
+const workflowDraftRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: "workflows/drafts/$draftId",
+});
 const agentsRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: "agents",
@@ -124,7 +129,7 @@ const settingsProvidersRoute = createRoute({
 	path: "settings/providers",
 });
 const router = createRouter({
-	routeTree: rootRoute.addChildren([indexRoute, sessionRoute, roomRoute, roomSessionRoute, projectsRoute, projectRoute, projectSessionRoute, workflowsRoute, agentsRoute, cronRoute, ralphRoute, contextRoute, settingsRoute, settingsPiPackagesRoute, settingsSkillsRoute, settingsProvidersRoute]),
+	routeTree: rootRoute.addChildren([indexRoute, sessionRoute, roomRoute, roomSessionRoute, projectsRoute, projectRoute, projectSessionRoute, workflowsRoute, workflowDraftRoute, agentsRoute, cronRoute, ralphRoute, contextRoute, settingsRoute, settingsPiPackagesRoute, settingsSkillsRoute, settingsProvidersRoute]),
 	basepath: "/apps/chat",
 });
 

@@ -258,6 +258,56 @@ export async function getWorkflowVersionPicker(input: { selectedWorkflowId?: str
 	return requestJson<WorkflowVersionPickerResponse>(`/api/chat/workflows/pickers/workflow-versions${suffix}`);
 }
 
+export type WorkflowDraftDiagnostic = {
+	code: string;
+	message: string;
+	severity: "info" | "warning" | "error";
+	path?: string;
+	nodeId?: string;
+	edgeId?: string;
+	registryRef?: string;
+	hint?: string;
+};
+
+export type WorkflowDraftDefinition = Record<string, unknown>;
+
+export type WorkflowDraftRecord = {
+	draftId: string;
+	workflowId: string;
+	source: "ui";
+	status: "draft";
+	baseWorkflowId?: string;
+	baseWorkflowVersion?: string;
+	baseDefinitionHash?: string;
+	versionIntent: "patch" | "minor" | "major";
+	definition: WorkflowDraftDefinition;
+	diagnostics: WorkflowDraftDiagnostic[];
+	validationState: "unknown" | "valid" | "warning" | "error";
+	revision: number;
+	createdAt: string;
+	updatedAt: string;
+};
+
+export type WorkflowDraftResponse = {
+	draft: WorkflowDraftRecord;
+};
+
+export async function getWorkflowDraft(draftId: string): Promise<WorkflowDraftResponse> {
+	return requestJson<WorkflowDraftResponse>(`/api/chat/workflows/drafts/${encodeURIComponent(draftId)}`);
+}
+
+export type WorkflowDuplicateDraftResponse = WorkflowDraftResponse & {
+	builderPath: string;
+};
+
+export async function postWorkflowDuplicateDraft(workflowId: string, input: { version?: string } = {}): Promise<WorkflowDuplicateDraftResponse> {
+	return requestJson<WorkflowDuplicateDraftResponse>(`/api/chat/workflows/${encodeURIComponent(workflowId)}/duplicate`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify(input),
+	});
+}
+
 export type CronScheduleInput =
 	| { kind: "in"; value: string }
 	| { kind: "at"; at: string }

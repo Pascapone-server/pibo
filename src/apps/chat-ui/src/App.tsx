@@ -85,7 +85,7 @@ type SettingsPanel = "general" | "pi-packages" | "skills" | "providers";
 export type ChatAppRoute =
 	| { area: "sessions"; roomId?: string; piboSessionId?: string; sessionViewId?: ChatSessionViewId }
 	| { area: "projects"; projectId?: string; piboSessionId?: string; sessionViewId?: ChatSessionViewId }
-	| { area: "workflows" }
+	| { area: "workflows"; draftId?: string }
 	| { area: "agents" }
 	| { area: "cron" }
 	| { area: "ralph" }
@@ -454,6 +454,10 @@ export function App({ route }: { route: ChatAppRoute }) {
 				return;
 			}
 			if (target.area === "workflows") {
+				if (target.draftId) {
+					void navigate({ to: "/workflows/drafts/$draftId", params: { draftId: target.draftId }, replace });
+					return;
+				}
 				void navigate({ to: "/workflows", replace });
 				return;
 			}
@@ -1466,7 +1470,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 						creatingSession={creatingSession || selectedRoomArchived}
 					/>
 				) : area === "workflows" ? (
-					<WorkflowsArea />
+					<WorkflowsArea draftId={route.area === "workflows" ? route.draftId : undefined} />
 				) : area === "projects" ? (
 					<ProjectsArea
 						baseBootstrap={bootstrap}

@@ -13,6 +13,7 @@
 - Published workflow versions use `hashWorkflowDefinition` plus `SqliteWorkflowRunStore.savePublishedWorkflowVersion`; saving the same body is idempotent, while changing a published `workflowId@version` body throws to preserve immutability.
 - Project workflow session creation should use the V2 `/api/chat/projects/:projectId/workflow-sessions` route and `workflow-versions` picker; keep legacy `/projects/:projectId/sessions` limited to `simple-chat`.
 - Project workflow session records keep selected workflow metadata in `project_sessions.workflow_id`, `workflow_version`, and constrained lifecycle `state`; configured sessions must not set `workflow_run_id` until Start.
+- Chat Web API state that must survive multiple HTTP requests in tests should use durable storage; scaffold-only in-memory state needs a shared cache because the web-channel test harness may recreate `createChatWebApp` through `getWebApps`.
 
 ## 2026-05-11 22:37 CEST - US-001
 - What was implemented
@@ -347,4 +348,34 @@
 - **Learnings for future iterations:**
   - The Project workflow creation route already resolves published workflow picker options; pass the resolved version into `ChatProjectService.addProjectSession` so the durable Project record and Pibo Session metadata stay aligned.
   - Keep legacy `simple_chat`/`workflow` state values available while adding V2 lifecycle states to avoid breaking existing Project/session rendering.
+---
+## 2026-05-12 00:16 CEST - US-002
+- What was implemented
+  - Added `/apps/chat/workflows/drafts/:draftId` routing for the Workflow Builder.
+  - Added authenticated draft loader and duplicate-to-draft Chat Web APIs for starter/duplicated UI draft wrappers around Pibo Workflow IR.
+  - Updated the Workflows tab Library to open an existing draft row and duplicate published workflow rows into builder drafts.
+  - Updated the Builder to load draft metadata, diagnostics, and Pibo Workflow IR while explicitly keeping raw XState source read-only/projection-only.
+- Files changed
+  - `src/apps/chat/web-app.ts`
+  - `src/apps/chat-ui/src/api.ts`
+  - `src/apps/chat-ui/src/App.tsx`
+  - `src/apps/chat-ui/src/main.tsx`
+  - `src/apps/chat-ui/src/WorkflowsArea.tsx`
+  - `test/web-channel.test.mjs`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_04_workflow_builder_and_ir_editing.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck'` — passed.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run build && node --test --test-name-pattern "workflow builder draft loader" test/web-channel.test.mjs'` — passed.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && node --test test/web-channel.test.mjs'` — passed, 52/52 tests.
+  - `python3 -m json.tool docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_04_workflow_builder_and_ir_editing.json` — passed.
+- Browser verification, if UI changed
+  - Restarted the container gateway with the safe non-self-killing restart form and verified `http://127.0.0.1:4802/apps/chat` returned OK.
+  - Used `browser-use --fresh-profile` inside `pibo-dev-WorkflowsV2` with dev auth to open `/apps/chat/workflows/drafts/v2-starter-draft`.
+  - Verified the builder shows `Loaded UI draft`, `WorkflowBuilderWarning.partialDraft`, `Pibo Workflow IR draft`, and the raw XState projection-only notice.
+  - Clicked `Duplicate to draft` for `standard-project@1.0.0` and verified navigation to `/apps/chat/workflows/drafts/draft_standard-project_1-0-0_*`, `Standard Project Draft`, `WorkflowBuilderInfo.duplicatedDraft`, and the raw XState notice.
+  - Saved screenshot: `/tmp/ralph-v2-builder-draft-loader.png` inside the container.
+- **Learnings for future iterations:**
+  - The web-channel test harness can recreate `createChatWebApp` through `getWebApps`, so multi-request API state should be durable; this scaffold uses a shared temporary cache until the PRD 02 persistent draft store story lands.
+  - `pkill -f "runWebGatewayServer"` can kill the detached restart shell when the same command line contains `runWebGatewayServer`; avoid self-matching patterns or skip kill when no gateway node process is running.
 ---

@@ -183,6 +183,8 @@ type ChatWebAppState = {
 	persistenceMetrics: ChatPersistenceMetrics;
 	userSkillManager: UserSkillManager;
 	syncedUserSkillNames?: Set<string>;
+	workflowDrafts: Map<string, OwnedWorkflowDraftRecord>;
+	workflowDuplicateDrafts: Map<string, string>;
 };
 
 type ChatBootstrapCatalog = {
@@ -357,6 +359,45 @@ type WorkflowVersionPickerResponse = {
 	selectedWorkflowVersion?: string;
 	diagnostics: WorkflowPickerDiagnostic[];
 };
+
+type WorkflowDraftDiagnostic = {
+	code: string;
+	message: string;
+	severity: "info" | "warning" | "error";
+	path?: string;
+	nodeId?: string;
+	edgeId?: string;
+	registryRef?: string;
+	hint?: string;
+};
+
+type WorkflowDraftRecord = {
+	draftId: string;
+	workflowId: string;
+	source: "ui";
+	status: "draft";
+	baseWorkflowId?: string;
+	baseWorkflowVersion?: string;
+	baseDefinitionHash?: string;
+	versionIntent: "patch" | "minor" | "major";
+	definition: PiboJsonObject;
+	diagnostics: WorkflowDraftDiagnostic[];
+	validationState: "unknown" | "valid" | "warning" | "error";
+	revision: number;
+	createdAt: string;
+	updatedAt: string;
+};
+
+type OwnedWorkflowDraftRecord = WorkflowDraftRecord & {
+	ownerScope: string;
+};
+
+type WorkflowDuplicateBody = {
+	version?: unknown;
+};
+
+const WORKFLOW_DRAFT_CACHE = new Map<string, OwnedWorkflowDraftRecord>();
+const WORKFLOW_DUPLICATE_DRAFT_CACHE = new Map<string, string>();
 
 type ChatMcpServerDescriptionBody = {
 	description?: unknown;
@@ -536,6 +577,31 @@ function workflowPickerKind(pathname: string): string | undefined {
 		return decodeURIComponent(encodedKind);
 	} catch {
 		throw new PiboWebHttpError("Invalid workflow picker kind", 400);
+	}
+}
+
+function workflowDraftResourceId(pathname: string): string | undefined {
+	const prefix = `${CHAT_WEB_API_PREFIX}/workflows/drafts/`;
+	if (!pathname.startsWith(prefix)) return undefined;
+	const encodedId = pathname.slice(prefix.length);
+	if (!encodedId || encodedId.includes("/")) return undefined;
+	try {
+		return decodeURIComponent(encodedId);
+	} catch {
+		throw new PiboWebHttpError("Invalid workflow draft id", 400);
+	}
+}
+
+function workflowDuplicateResourceId(pathname: string): string | undefined {
+	const prefix = `${CHAT_WEB_API_PREFIX}/workflows/`;
+	const suffix = "/duplicate";
+	if (!pathname.startsWith(prefix) || !pathname.endsWith(suffix)) return undefined;
+	const encodedId = pathname.slice(prefix.length, -suffix.length);
+	if (!encodedId || encodedId.includes("/")) return undefined;
+	try {
+		return decodeURIComponent(encodedId);
+	} catch {
+		throw new PiboWebHttpError("Invalid workflow id", 400);
 	}
 }
 
@@ -1890,6 +1956,161 @@ function buildProjectWorkflowVersionOptions(): WorkflowVersionPickerOption[] {
 			tags: ["project", "chat"],
 		},
 	];
+}
+
+const WORKFLOW_STARTER_DRAFT_ID = "v2-starter-draft";
+
+function workflowDraftBuilderPath(draftId: string): string {
+	return `${CHAT_WEB_MOUNT_PATH}/workflows/drafts/${encodeURIComponent(draftId)}`;
+}
+
+function serializeWorkflowDraft(record: OwnedWorkflowDraftRecord): WorkflowDraftRecord {
+	const { ownerScope: _ownerScope, ...draft } = record;
+	return draft;
+}
+
+function requireWorkflowDraft(state: ChatWebAppState, webSession: PiboWebSession, draftId: string): WorkflowDraftRecord {
+	const existing = state.workflowDrafts.get(draftId);
+	if (draftId === WORKFLOW_STARTER_DRAFT_ID && (!existing || existing.ownerScope !== webSession.ownerScope)) {
+		state.workflowDrafts.set(draftId, createStarterWorkflowDraft(webSession));
+	}
+	const record = state.workflowDrafts.get(draftId);
+	if (!record || record.ownerScope !== webSession.ownerScope) throw new PiboWebHttpError("Workflow draft not found", 404);
+	return serializeWorkflowDraft(record);
+}
+
+function duplicateWorkflowIntoDraft(
+	state: ChatWebAppState,
+	webSession: PiboWebSession,
+	workflowIdValue: unknown,
+	workflowVersionValue: unknown,
+): WorkflowDraftRecord {
+	const workflowId = normalizeProjectWorkflowId(workflowIdValue);
+	const workflowVersion = normalizeProjectWorkflowVersion(workflowVersionValue);
+	const published = selectPublishedWorkflowVersion(workflowId, workflowVersion);
+	if (!published) throw new PiboWebHttpError("Published workflow version not found", 404);
+
+	const duplicateKey = `${webSession.ownerScope}:${published.id}@${published.version}`;
+	const existingDraftId = state.workflowDuplicateDrafts.get(duplicateKey);
+	if (existingDraftId) return requireWorkflowDraft(state, webSession, existingDraftId);
+
+	const now = new Date().toISOString();
+	const draftId = `draft_${published.id.replace(/[^a-zA-Z0-9_-]/g, "-")}_${published.version.replace(/[^a-zA-Z0-9_-]/g, "-")}_${randomUUID().slice(0, 8)}`;
+	const draft: OwnedWorkflowDraftRecord = {
+		draftId,
+		workflowId: `ui-${published.id}-copy`,
+		source: "ui",
+		status: "draft",
+		baseWorkflowId: published.id,
+		baseWorkflowVersion: published.version,
+		baseDefinitionHash: `catalog:${published.id}@${published.version}`,
+		versionIntent: "patch",
+		definition: createDraftDefinitionFromPublishedWorkflow(published),
+		diagnostics: [
+			{
+				code: "WorkflowBuilderInfo.duplicatedDraft",
+				message: `Duplicated '${published.id}@${published.version}' into a UI draft wrapper.`,
+				severity: "info",
+				path: "$.metadata.migration",
+				hint: "Future stories persist edits, validate every change, and publish immutable UI versions.",
+			},
+		],
+		validationState: "warning",
+		revision: 1,
+		createdAt: now,
+		updatedAt: now,
+		ownerScope: webSession.ownerScope,
+	};
+	state.workflowDrafts.set(draftId, draft);
+	state.workflowDuplicateDrafts.set(duplicateKey, draftId);
+	return serializeWorkflowDraft(draft);
+}
+
+function selectPublishedWorkflowVersion(workflowId: string, version?: string): WorkflowVersionPickerOption | undefined {
+	const options = buildProjectWorkflowVersionOptions().filter((option) => option.id === workflowId);
+	if (!version) return options[0];
+	return options.find((option) => option.version === version);
+}
+
+function createStarterWorkflowDraft(webSession: PiboWebSession): OwnedWorkflowDraftRecord {
+	const now = new Date().toISOString();
+	return {
+		draftId: WORKFLOW_STARTER_DRAFT_ID,
+		workflowId: "ui-starter-workflow",
+		source: "ui",
+		status: "draft",
+		versionIntent: "patch",
+		definition: {
+			id: "ui-starter-workflow",
+			version: "0.1.0-draft",
+			title: "Starter UI Workflow Draft",
+			description: "Partial Pibo Workflow IR loaded by the Workflow Builder route.",
+			metadata: {
+				tags: ["ui-draft", "workflows-v2"],
+			},
+			nodes: {},
+			edges: {},
+			ui: {
+				layout: "auto",
+				positions: {},
+			},
+		},
+		diagnostics: [
+			{
+				code: "WorkflowBuilderWarning.partialDraft",
+				message: "This UI draft is intentionally partial and is not publishable yet.",
+				severity: "warning",
+				path: "$.nodes",
+				hint: "Add workflow input/output contracts and at least one node before publishing in later builder stories.",
+			},
+		],
+		validationState: "warning",
+		revision: 1,
+		createdAt: now,
+		updatedAt: now,
+		ownerScope: webSession.ownerScope,
+	};
+}
+
+function createDraftDefinitionFromPublishedWorkflow(workflow: WorkflowVersionPickerOption): PiboJsonObject {
+	return {
+		id: `ui-${workflow.id}-copy`,
+		version: `${workflow.version}-draft`,
+		title: `${workflow.title} Draft`,
+		description: workflow.description ?? `UI draft copied from ${workflow.id}@${workflow.version}.`,
+		input: {
+			kind: "text",
+			description: "Workflow input provided when a Project session starts.",
+		},
+		output: {
+			kind: "text",
+			description: "Workflow output returned to the Project session.",
+		},
+		initial: "agent",
+		nodes: {
+			agent: {
+				kind: "agent",
+				runtime: "pibo",
+				profile: { kind: "fixed", id: "pibo-agent" },
+				promptTemplate: "Use the workflow input to produce a concise answer.\n\n{{input}}",
+				ui: { position: { x: 80, y: 80 } },
+			},
+		},
+		edges: {},
+		metadata: {
+			tags: ["ui-draft", ...workflow.tags],
+			migration: {
+				fromVersion: workflow.version,
+				notes: `Duplicated from ${workflow.id}@${workflow.version} for Workflow UI Authoring V2.`,
+			},
+		},
+		ui: {
+			layout: "auto",
+			positions: {
+				agent: { x: 80, y: 80 },
+			},
+		},
+	};
 }
 
 function agentsSelectingPiPackage(state: ChatWebAppState, packageId: string): CustomAgentDefinition[] {
@@ -3469,6 +3690,8 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 		activeTraceSessions: new Set(),
 		persistenceMetrics: createPersistenceMetrics(),
 		userSkillManager: new UserSkillManager(os.homedir()),
+		workflowDrafts: WORKFLOW_DRAFT_CACHE,
+		workflowDuplicateDrafts: WORKFLOW_DUPLICATE_DRAFT_CACHE,
 	};
 
 	const requireSession = (request: Request, context: PiboWebAppContext): Promise<PiboWebSession> =>
@@ -3833,6 +4056,21 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 						connection: "keep-alive",
 					},
 				});
+			}
+
+			const workflowDraftId = workflowDraftResourceId(url.pathname);
+			if (workflowDraftId && request.method === "GET") {
+				const webSession = await requireSession(request, context);
+				return responseJson({ draft: requireWorkflowDraft(state, webSession, workflowDraftId) });
+			}
+
+			const duplicateWorkflowId = workflowDuplicateResourceId(url.pathname);
+			if (duplicateWorkflowId && request.method === "POST") {
+				requireSameOriginJsonRequest(request);
+				const webSession = await requireSession(request, context);
+				const body = await readJsonBody<WorkflowDuplicateBody>(request);
+				const draft = duplicateWorkflowIntoDraft(state, webSession, duplicateWorkflowId, body.version);
+				return responseJson({ draft, builderPath: workflowDraftBuilderPath(draft.draftId) }, { status: 201 });
 			}
 
 			const pickerKind = workflowPickerKind(url.pathname);

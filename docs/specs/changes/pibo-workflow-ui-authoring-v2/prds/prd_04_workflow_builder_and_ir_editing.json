@@ -30,8 +30,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Workflow Builder draft route, loader API, starter draft, and duplicate-to-draft route are implemented; browser verification covered starter and duplicated drafts."
     },
     {
       "id": "US-003",

@@ -1822,6 +1822,65 @@ test("workflow profile picker excludes archived custom agents and reports archiv
 	}
 });
 
+test("workflow builder draft loader opens starter and duplicated UI draft wrappers", async () => {
+	const { channel, baseURL } = await startWebHostChannel({
+		auth: createFakeAuthService(),
+		profiles: [{ name: "pibo-agent", aliases: ["default"] }],
+	});
+
+	try {
+		const starterResponse = await fetch(`${baseURL}/api/chat/workflows/drafts/v2-starter-draft`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(starterResponse.status, 200);
+		const starterPayload = await starterResponse.json();
+		assert.equal(starterPayload.draft.source, "ui");
+		assert.equal(starterPayload.draft.status, "draft");
+		assert.equal(starterPayload.draft.definition.id, "ui-starter-workflow");
+		assert.equal(starterPayload.draft.validationState, "warning");
+		assert.equal(starterPayload.draft.diagnostics[0].code, "WorkflowBuilderWarning.partialDraft");
+		assert.equal(starterPayload.draft.definition.xstate, undefined);
+
+		const duplicateResponse = await fetch(`${baseURL}/api/chat/workflows/standard-project/duplicate`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({ version: "1.0.0" }),
+		});
+		assert.equal(duplicateResponse.status, 201);
+		const duplicatePayload = await duplicateResponse.json();
+		assert.equal(duplicatePayload.draft.baseWorkflowId, "standard-project");
+		assert.equal(duplicatePayload.draft.baseWorkflowVersion, "1.0.0");
+		assert.equal(duplicatePayload.draft.definition.id, "ui-standard-project-copy");
+		assert.equal(duplicatePayload.draft.definition.ui.layout, "auto");
+		assert.match(duplicatePayload.builderPath, /^\/apps\/chat\/workflows\/drafts\/draft_standard-project_1-0-0_/);
+
+		const loadedDuplicateResponse = await fetch(`${baseURL}/api/chat/workflows/drafts/${encodeURIComponent(duplicatePayload.draft.draftId)}`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(loadedDuplicateResponse.status, 200);
+		const loadedDuplicatePayload = await loadedDuplicateResponse.json();
+		assert.equal(loadedDuplicatePayload.draft.draftId, duplicatePayload.draft.draftId);
+		assert.equal(loadedDuplicatePayload.draft.definition.xstate, undefined);
+
+		const unknownDuplicateResponse = await fetch(`${baseURL}/api/chat/workflows/missing-workflow/duplicate`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({ version: "1.0.0" }),
+		});
+		assert.equal(unknownDuplicateResponse.status, 404);
+	} finally {
+		await channel.stop?.();
+	}
+});
+
 test("chat web app creates configured Project workflow sessions from the workflow catalog without starting a run", async () => {
 	const { channel, baseURL, emitted, storageDir } = await startWebHostChannel({
 		auth: createFakeAuthService(),
