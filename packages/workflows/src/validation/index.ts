@@ -95,6 +95,7 @@ export function validateWorkflowDefinitionSchemas(
 
   for (const [nodeId, node] of Object.entries(definition.nodes)) {
     validateNodeSchemas(nodeId, node, diagnostics);
+    validateWorkflowAgentNodeRuntimeSelection(nodeId, node, diagnostics);
     validateWorkflowCodeNodeRef(nodeId, node, diagnostics, options);
     validateWorkflowAdapterNodeRef(nodeId, node, diagnostics, options);
   }
@@ -402,6 +403,43 @@ function validateWorkflowEdgeAdapterRef(
     path: `$.edges.${edgeId}.adapter.output`,
     hint: "Set the edgeAdapter output port to the exact target input contract, or insert a visible adapter node whose output matches the downstream node.",
   });
+}
+
+function validateWorkflowAgentNodeRuntimeSelection(
+  nodeId: string,
+  node: WorkflowNodeDefinition,
+  diagnostics: WorkflowDiagnostic[],
+): void {
+  if (node.kind !== "agent") {
+    return;
+  }
+
+  const rawNode = node as unknown as Record<string, unknown>;
+  if (rawNode.runtime !== "pibo") {
+    diagnostics.push({
+      code: "WorkflowGraphError.invalidAgentRuntimeSelection",
+      message: `Workflow agent node '${nodeId}' must select the Pibo Runtime in V1.`,
+      severity: "error",
+      nodeId,
+      path: `$.nodes.${nodeId}.runtime`,
+      hint: "Set runtime: 'pibo'. V1 workflow agent nodes cannot select alternate runtimes.",
+    });
+  }
+
+  const profile = rawNode.profile;
+  const profileIsFixed =
+    isRecord(profile) && profile.kind === "fixed" && typeof profile.id === "string" && profile.id.length > 0;
+
+  if (!profileIsFixed) {
+    diagnostics.push({
+      code: "WorkflowGraphError.invalidAgentProfileSelection",
+      message: `Workflow agent node '${nodeId}' must select a fixed Agent Designer profile in V1.`,
+      severity: "error",
+      nodeId,
+      path: `$.nodes.${nodeId}.profile`,
+      hint: "Use fixedProfile('pibo-agent') or { kind: 'fixed', id: 'profile-id' }. Dynamic profile selection is not supported in V1.",
+    });
+  }
 }
 
 function validateWorkflowCodeNodeRef(

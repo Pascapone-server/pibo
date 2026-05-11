@@ -1,7 +1,21 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { adapterRef, adapterRefId, edgeAdapter, isAdapterRef, isJsonPort, isTextPort, json, text } from "../index.js";
+import {
+  adapterRef,
+  adapterRefId,
+  edgeAdapter,
+  excludeSelection,
+  extendSelection,
+  fixedProfile,
+  inheritSelection,
+  isAdapterRef,
+  isJsonPort,
+  isTextPort,
+  json,
+  onlySelection,
+  text,
+} from "../index.js";
 import type { AdapterNodeDefinition, JsonSchema, WorkflowPort } from "../index.js";
 
 const articleSchema: JsonSchema = {
@@ -40,6 +54,14 @@ describe("workflow port authoring helpers", () => {
     assert.equal(isJsonPort(ports[0]), false);
     assert.equal(isTextPort(ports[1]), false);
     assert.equal(isJsonPort(ports[1]), true);
+  });
+
+  it("creates fixed Agent Designer profile and selection policy helpers", () => {
+    assert.deepEqual(fixedProfile("pibo-agent"), { kind: "fixed", id: "pibo-agent" });
+    assert.deepEqual(inheritSelection(), { kind: "inherit" });
+    assert.deepEqual(onlySelection(["read", "bash"]), { kind: "only", ids: ["read", "bash"] });
+    assert.deepEqual(excludeSelection(["dangerous-tool"]), { kind: "exclude", ids: ["dangerous-tool"] });
+    assert.deepEqual(extendSelection(["workflow-skill"]), { kind: "extend", ids: ["workflow-skill"] });
   });
 
   it("creates registered TypeScript adapter refs for edge adapters and visible adapter nodes", () => {

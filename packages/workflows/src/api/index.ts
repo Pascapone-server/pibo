@@ -1,9 +1,11 @@
 import type {
   AdapterRef,
+  AgentProfileSelection,
   EdgeAdapterDefinition,
   JsonSchema,
   JsonWorkflowPort,
   RegistryRefId,
+  SelectionPolicy,
   TextWorkflowPort,
   WorkflowPort,
 } from "../types/index.js";
@@ -61,6 +63,32 @@ export function adapterRefId(ref: AdapterRef): RegistryRefId {
 
 export function edgeAdapter(transform: AdapterRef, output: WorkflowPort): EdgeAdapterDefinition {
   return { kind: "edgeAdapter", transform, output };
+}
+
+/**
+ * Select a fixed Agent Designer profile for a Pibo Runtime-backed agent node.
+ *
+ * V1 intentionally supports only fixed profile selection so workflow runs are
+ * predictable and can record the exact profile requested by each agent node.
+ */
+export function fixedProfile(id: RegistryRefId): AgentProfileSelection {
+  return { kind: "fixed", id };
+}
+
+export function inheritSelection(): SelectionPolicy {
+  return { kind: "inherit" };
+}
+
+export function onlySelection(ids: RegistryRefId[]): SelectionPolicy {
+  return { kind: "only", ids: [...ids] };
+}
+
+export function excludeSelection(ids: RegistryRefId[]): SelectionPolicy {
+  return { kind: "exclude", ids: [...ids] };
+}
+
+export function extendSelection(ids: RegistryRefId[]): SelectionPolicy {
+  return { kind: "extend", ids: [...ids] };
 }
 
 function withOptionalDescription<TPort extends WorkflowPort>(port: TPort, description: string | undefined): TPort {

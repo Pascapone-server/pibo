@@ -185,6 +185,42 @@ describe("workflow definition validation", () => {
     }
   });
 
+  it("rejects agent nodes that do not select the V1 Pibo Runtime", () => {
+    const definition = withDefinitionMutation((draft) => {
+      draft.nodes.answer = {
+        ...draft.nodes.answer,
+        runtime: "other-runtime",
+      } as unknown as WorkflowDefinition["nodes"][string];
+    });
+
+    const result = validateWorkflow(definition);
+
+    assert.equal(result.ok, false);
+    findDiagnostic(
+      result,
+      "WorkflowGraphError.invalidAgentRuntimeSelection",
+      (diagnostic) => diagnostic.nodeId === "answer" && diagnostic.path === "$.nodes.answer.runtime",
+    );
+  });
+
+  it("rejects agent nodes without a fixed Agent Designer profile selection", () => {
+    const definition = withDefinitionMutation((draft) => {
+      draft.nodes.answer = {
+        ...draft.nodes.answer,
+        profile: { kind: "dynamic", id: "pibo-agent" },
+      } as unknown as WorkflowDefinition["nodes"][string];
+    });
+
+    const result = validateWorkflow(definition);
+
+    assert.equal(result.ok, false);
+    findDiagnostic(
+      result,
+      "WorkflowGraphError.invalidAgentProfileSelection",
+      (diagnostic) => diagnostic.nodeId === "answer" && diagnostic.path === "$.nodes.answer.profile",
+    );
+  });
+
   it("rejects JSON workflow ports with non-object roots", () => {
     const definition = withDefinitionMutation((draft) => {
       draft.input = {
