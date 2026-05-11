@@ -1,4 +1,5 @@
 ## Codebase Patterns
+- Nested workflow node UI should reuse the workflow-version picker API, store only `workflowId`/`workflowVersion` refs in parent graph IR, and navigate to a separate workflow viewer instead of inline-expanding child graphs.
 - Workflow catalog persistence uses explicit `SqliteWorkflowRunStore` entities for UI identities, drafts, published versions, archive states, and delete tombstones; tombstones must not remove definition snapshots needed by historical run inspection.
 - Workflow profile picker APIs should compose active custom Agent Designer profiles from `CustomAgentStore` with global `channelContext.getProfiles()` entries, while using archived custom profile rows only to produce diagnostics for already-referenced drafts.
 - Workflow capability picker UI should use select-only registered refs, nullable metadata fields, and selected-ref diagnostics instead of manual text entry paths.
@@ -600,4 +601,32 @@
   - React Flow should stay a UI projection: graph structural edits update Pibo Workflow IR nodes/edges, while layout persistence writes only `workflow.ui.positions`.
   - New graph controls should derive default registered refs from existing picker APIs where possible; hard-coded profile ids can be invalid in dev-auth workers with a different profile catalog.
   - Start detached container gateways with `docker exec -d ... exec node ...`; backgrounding `node` inside a detached shell can exit after logging startup and leave the forwarded port resetting connections.
+---
+## 2026-05-12 01:44 CEST - US-003
+- What was implemented
+  - Added a Workflow Builder nested workflow node picker driven by the authenticated workflow-version picker API.
+  - Added graph controls to add a `workflow` node that stores only `workflowId` and `workflowVersion` refs in Pibo Workflow IR.
+  - Added `/apps/chat/workflows/view/:workflowId/:workflowVersion` as the separate Open workflow viewer target, with explicit no-inline-expansion copy.
+  - Added API coverage for published workflow-version picker options and missing nested workflow refs.
+- Files changed
+  - `src/apps/chat-ui/src/WorkflowsArea.tsx`
+  - `src/apps/chat-ui/src/App.tsx`
+  - `src/apps/chat-ui/src/main.tsx`
+  - `test/web-channel.test.mjs`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_05_composition_node_and_capability_pickers.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck'` — passed.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run chat-ui:build && npm run build && node --test --test-name-pattern "workflow version picker|workflow validation pipeline" test/web-channel.test.mjs'` — passed, 2/2 targeted web-channel tests.
+  - `python3 -m json.tool docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_05_composition_node_and_capability_pickers.json` — passed.
+  - `git diff --check` — passed.
+- Browser verification, if UI changed
+  - Restarted the container gateway from rebuilt `/workspace/dist` and verified `http://127.0.0.1:4802/apps/chat` returned OK.
+  - Used `browser-use --fresh-profile` inside `pibo-dev-WorkflowsV2` with dev auth to open `/apps/chat/workflows?workflowRef=missing-workflow@9.9.9`.
+  - Verified the authenticated Workflows page shows the Workflow node editor, nested workflow picker, `standard-project@1.0.0`, `WorkflowCatalogError.unknownWorkflowVersion`, and no-inline-expansion copy.
+  - Opened `/apps/chat/workflows/view/standard-project/1.0.0` and verified `Workflow version viewer`, `Standard Project`, `standard-project@1.0.0`, separate-viewer copy, and no-inline-expansion copy.
+  - Saved screenshot: `/tmp/ralph-v2-nested-workflow-picker.png` inside the container.
+- **Learnings for future iterations:**
+  - Reuse the published workflow-version picker for nested workflow node authoring so Project session creation and builder refs share the same catalog boundary.
+  - Keep nested workflow Open workflow navigation as a separate viewer route; parent graph UI should show only the reference and no child graph expansion.
 ---

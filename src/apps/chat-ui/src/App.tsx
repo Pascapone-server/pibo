@@ -85,7 +85,7 @@ type SettingsPanel = "general" | "pi-packages" | "skills" | "providers";
 export type ChatAppRoute =
 	| { area: "sessions"; roomId?: string; piboSessionId?: string; sessionViewId?: ChatSessionViewId }
 	| { area: "projects"; projectId?: string; piboSessionId?: string; sessionViewId?: ChatSessionViewId }
-	| { area: "workflows"; draftId?: string }
+	| { area: "workflows"; draftId?: string; viewWorkflowId?: string; viewWorkflowVersion?: string }
 	| { area: "agents" }
 	| { area: "cron" }
 	| { area: "ralph" }
@@ -1470,7 +1470,11 @@ export function App({ route }: { route: ChatAppRoute }) {
 						creatingSession={creatingSession || selectedRoomArchived}
 					/>
 				) : area === "workflows" ? (
-					<WorkflowsArea draftId={route.area === "workflows" ? route.draftId : undefined} />
+					<WorkflowsArea
+						draftId={route.area === "workflows" ? route.draftId : undefined}
+						viewWorkflowId={route.area === "workflows" ? route.viewWorkflowId : undefined}
+						viewWorkflowVersion={route.area === "workflows" ? route.viewWorkflowVersion : undefined}
+					/>
 				) : area === "projects" ? (
 					<ProjectsArea
 						baseBootstrap={bootstrap}

@@ -19,11 +19,12 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { LucideIcon } from "lucide-react";
-import { AlertTriangle, BookOpenText, Brain, CheckCheck, Code2, CopyPlus, Layers, Link2, Loader2, MousePointer2, MoveRight, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
+import { AlertTriangle, BookOpenText, Brain, CheckCheck, Code2, CopyPlus, ExternalLink, Layers, Link2, Loader2, MousePointer2, MoveRight, Plus, RefreshCw, Save, Trash2 } from "lucide-react";
 import {
 	getWorkflowDraft,
 	getWorkflowHandlerPicker,
 	getWorkflowProfilePicker,
+	getWorkflowVersionPicker,
 	patchWorkflowDraft,
 	postWorkflowDuplicateDraft,
 	postWorkflowNextDraft,
@@ -32,8 +33,11 @@ import {
 	type WorkflowDraftRecord,
 	type WorkflowHandlerPickerOption,
 	type WorkflowHandlerPickerResponse,
+	type WorkflowPickerDiagnostic,
 	type WorkflowProfilePickerOption,
 	type WorkflowProfilePickerResponse,
+	type WorkflowVersionPickerOption,
+	type WorkflowVersionPickerResponse,
 } from "./api";
 
 const DEFAULT_AGENT_PROMPT_TEMPLATE = "Use the workflow input to produce a concise answer.\n\n{{input}}";
@@ -94,8 +98,9 @@ type WorkflowGraphProjection = {
 	usedAutoLayout: boolean;
 	missingPositionCount: number;
 };
+type WorkflowVersionSelection = { workflowId: string; workflowVersion: string };
 
-export function WorkflowsArea({ draftId }: { draftId?: string }) {
+export function WorkflowsArea({ draftId, viewWorkflowId, viewWorkflowVersion }: { draftId?: string; viewWorkflowId?: string; viewWorkflowVersion?: string }) {
 	return (
 		<main className="h-full min-h-0 overflow-auto bg-[#101d22]">
 			<section className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6 max-[720px]:p-4" aria-labelledby="workflows-title">
@@ -123,7 +128,13 @@ export function WorkflowsArea({ draftId }: { draftId?: string }) {
 						title="Workflow Builder"
 						description="Load a UI draft wrapper and keep Pibo Workflow IR as the editable source of truth."
 					>
-						{draftId ? <WorkflowBuilderDraftLoader draftId={draftId} /> : <WorkflowBuilderLanding />}
+						{draftId ? (
+							<WorkflowBuilderDraftLoader draftId={draftId} />
+						) : viewWorkflowId && viewWorkflowVersion ? (
+							<WorkflowVersionViewer workflowId={viewWorkflowId} workflowVersion={viewWorkflowVersion} />
+						) : (
+							<WorkflowBuilderLanding />
+						)}
 					</WorkflowSurfaceCard>
 				</div>
 
@@ -257,6 +268,7 @@ function WorkflowBuilderLanding() {
 			/>
 			<WorkflowBuilderAgentNodeEditor />
 			<WorkflowBuilderCodeNodeEditor />
+			<WorkflowBuilderWorkflowNodeEditor />
 		</div>
 	);
 }
@@ -371,12 +383,28 @@ function WorkflowGraphCanvas({ draft, onDraftChange }: { draft: WorkflowDraftRec
 	const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
 	const [statusMessage, setStatusMessage] = useState<string | undefined>();
 	const [defaultAgentProfileId, setDefaultAgentProfileId] = useState("pibo-agent");
+	const [workflowVersionOptions, setWorkflowVersionOptions] = useState<WorkflowVersionPickerOption[]>([]);
+	const [selectedWorkflowVersionKey, setSelectedWorkflowVersionKey] = useState("");
 
 	useEffect(() => {
 		let cancelled = false;
 		getWorkflowProfilePicker()
 			.then((picker) => {
 				if (!cancelled && picker.options[0]?.id) setDefaultAgentProfileId(picker.options[0].id);
+			})
+			.catch(() => undefined);
+		return () => {
+			cancelled = true;
+		};
+	}, []);
+
+	useEffect(() => {
+		let cancelled = false;
+		getWorkflowVersionPicker()
+			.then((picker) => {
+				if (cancelled) return;
+				setWorkflowVersionOptions(picker.options);
+				setSelectedWorkflowVersionKey((current) => current || (picker.options[0] ? workflowVersionOptionKey(picker.options[0]) : ""));
 			})
 			.catch(() => undefined);
 		return () => {
@@ -431,6 +459,20 @@ function WorkflowGraphCanvas({ draft, onDraftChange }: { draft: WorkflowDraftRec
 		const definition = addWorkflowGraphNode(draft.definition, nodeId, position, defaultAgentProfileId);
 		setSelectedElement({ type: "node", id: nodeId });
 		void saveDefinition(definition, `Added node ${nodeId}.`);
+	};
+
+	const selectedNestedWorkflowOption = useMemo(
+		() => workflowVersionOptions.find((option) => workflowVersionOptionKey(option) === selectedWorkflowVersionKey),
+		[workflowVersionOptions, selectedWorkflowVersionKey],
+	);
+
+	const addWorkflowNode = () => {
+		if (!selectedNestedWorkflowOption) return;
+		const nodeId = nextWorkflowNodeId(draft.definition, "workflow");
+		const position = nextGraphNodePosition(nodes);
+		const definition = addWorkflowGraphWorkflowNode(draft.definition, nodeId, position, selectedNestedWorkflowOption);
+		setSelectedElement({ type: "node", id: nodeId });
+		void saveDefinition(definition, `Added nested workflow node ${nodeId} for ${selectedNestedWorkflowOption.id}@${selectedNestedWorkflowOption.version}.`);
 	};
 
 	const connectSelectedNodes = (sourceId = sourceNodeId, targetId = targetNodeId) => {
@@ -529,6 +571,32 @@ function WorkflowGraphCanvas({ draft, onDraftChange }: { draft: WorkflowDraftRec
 							<Plus size={13} />
 							Add Agent node
 						</button>
+						<label className="grid gap-1 font-semibold text-slate-300">
+							<span>Nested workflow version</span>
+							<select
+								aria-label="Nested workflow version"
+								className="rounded-sm border border-slate-700 bg-[#151f24] px-2 py-1.5 text-slate-100"
+								value={selectedWorkflowVersionKey}
+								onChange={(event) => setSelectedWorkflowVersionKey(event.target.value)}
+								disabled={isSaving || !workflowVersionOptions.length}
+							>
+								{workflowVersionOptions.length ? workflowVersionOptions.map((option) => (
+									<option key={workflowVersionOptionKey(option)} value={workflowVersionOptionKey(option)}>{workflowVersionOptionLabel(option)}</option>
+								)) : <option value="">No published workflow versions</option>}
+							</select>
+						</label>
+						<button
+							type="button"
+							className="inline-flex items-center justify-center gap-2 rounded-sm border border-[#11a4d4]/50 px-3 py-2 text-xs font-semibold text-[#8bdcf4] transition hover:border-[#11a4d4] hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+							onClick={addWorkflowNode}
+							disabled={isSaving || !selectedNestedWorkflowOption}
+						>
+							<Layers size={13} />
+							Add Workflow node
+						</button>
+						<div className="rounded-sm border border-slate-800 bg-[#151f24]/70 p-2 text-[11px] leading-5 text-slate-500">
+							Workflow nodes store only a workflow id/version reference. V2 does not inline-expand nested workflow internals in the parent graph.
+						</div>
 						<div className="grid grid-cols-2 gap-2">
 							<label className="grid gap-1 font-semibold text-slate-300">
 								<span>From</span>
@@ -831,6 +899,238 @@ function WorkflowBuilderCodeNodeEditor() {
 	);
 }
 
+function WorkflowBuilderWorkflowNodeEditor() {
+	const [selection, setSelection] = useState<WorkflowVersionSelection>(readInitialWorkflowSelection);
+	const [picker, setPicker] = useState<WorkflowVersionPickerResponse | undefined>();
+	const [loadState, setLoadState] = useState<"loading" | "loaded" | "error">("loading");
+	const [errorMessage, setErrorMessage] = useState<string | undefined>();
+
+	useEffect(() => {
+		let cancelled = false;
+		setLoadState("loading");
+		setErrorMessage(undefined);
+		getWorkflowVersionPicker({
+			selectedWorkflowId: selection.workflowId || undefined,
+			selectedWorkflowVersion: selection.workflowVersion || undefined,
+		})
+			.then((response) => {
+				if (cancelled) return;
+				setPicker(response);
+				setLoadState("loaded");
+			})
+			.catch((error: unknown) => {
+				if (cancelled) return;
+				setErrorMessage(error instanceof Error ? error.message : "Failed to load workflow version picker");
+				setLoadState("error");
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [selection.workflowId, selection.workflowVersion]);
+
+	const selectedOption = useMemo(
+		() => picker?.options.find((option) => option.id === picker.selectedWorkflowId && option.version === picker.selectedWorkflowVersion),
+		[picker],
+	);
+	const selectedKey = selectedOption ? workflowVersionOptionKey(selectedOption) : "";
+	const diagnostics = picker?.diagnostics ?? [];
+
+	return (
+		<div className="flex w-full flex-col gap-4 rounded-sm border border-slate-800 bg-[#101d22]/70 p-4">
+			<div className="flex items-start justify-between gap-3">
+				<div>
+					<div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.16em] text-[#11a4d4]">
+						<Layers size={13} />
+						Workflow node editor
+					</div>
+					<p className="mt-2 text-xs leading-5 text-slate-500">
+						Select a published workflow id/version from registry metadata. The parent graph stores only this reference and opens the child workflow separately.
+					</p>
+				</div>
+				<button
+					type="button"
+					className="inline-flex items-center gap-1 rounded-sm border border-slate-700 px-2 py-1 text-[11px] font-semibold text-slate-300 transition hover:border-[#11a4d4]/60 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+					onClick={() => void refreshWorkflowVersionPicker(selection, setPicker, setLoadState, setErrorMessage)}
+					disabled={loadState === "loading"}
+				>
+					{loadState === "loading" ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+					Refresh
+				</button>
+			</div>
+
+			<label className="grid gap-2 text-xs font-semibold text-slate-300">
+				<span>Nested workflow version</span>
+				<select
+					aria-label="Nested workflow picker"
+					className="rounded-sm border border-slate-700 bg-[#151f24] px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-[#11a4d4] disabled:opacity-60"
+					value={selectedKey}
+					onChange={(event) => setSelection(parseWorkflowVersionKey(event.target.value) ?? { workflowId: "", workflowVersion: "" })}
+					disabled={loadState === "loading" || loadState === "error"}
+				>
+					<option value="">Select a published workflow version</option>
+					{picker?.options.map((option) => (
+						<option key={workflowVersionOptionKey(option)} value={workflowVersionOptionKey(option)}>{workflowVersionOptionLabel(option)}</option>
+					))}
+				</select>
+			</label>
+
+			{loadState === "error" ? (
+				<div className="rounded-sm border border-red-900/70 bg-red-950/40 p-3 text-xs leading-5 text-red-200" role="alert">
+					{errorMessage ?? "Failed to load workflow version picker."}
+				</div>
+			) : null}
+
+			{selectedOption ? <WorkflowVersionSelectionSummary option={selectedOption} /> : null}
+
+			<WorkflowVersionDiagnostics diagnostics={diagnostics} ariaLabel="Nested workflow diagnostics" />
+
+			<a
+				className={`inline-flex items-center justify-center gap-2 rounded-sm border px-3 py-2 text-xs font-semibold transition ${selectedOption ? "border-[#11a4d4]/50 text-[#8bdcf4] hover:border-[#11a4d4] hover:text-slate-100" : "pointer-events-none border-slate-800 text-slate-600"}`}
+				href={selectedOption ? workflowVersionViewerPath(selectedOption.id, selectedOption.version) : "#"}
+				aria-disabled={!selectedOption}
+			>
+				<ExternalLink size={13} />
+				Open workflow
+			</a>
+
+			<div className="grid gap-3" aria-label="Nested workflow picker options">
+				<div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Published workflow refs</div>
+				{picker?.options.map((option) => <WorkflowVersionOptionCard key={workflowVersionOptionKey(option)} option={option} />)}
+			</div>
+
+			<div className="rounded-sm border border-slate-800 bg-[#151f24]/70 p-3 text-[11px] leading-5 text-slate-500">
+				Nested workflow internals stay collapsed in the parent graph for V2. Use <span className="font-semibold text-slate-300">Open workflow</span> to navigate to the child workflow viewer instead of inline-expanding its graph.
+			</div>
+		</div>
+	);
+}
+
+function WorkflowVersionViewer({ workflowId, workflowVersion }: { workflowId: string; workflowVersion: string }) {
+	const [picker, setPicker] = useState<WorkflowVersionPickerResponse | undefined>();
+	const [loadState, setLoadState] = useState<"loading" | "loaded" | "error">("loading");
+	const [errorMessage, setErrorMessage] = useState<string | undefined>();
+
+	useEffect(() => {
+		let cancelled = false;
+		setLoadState("loading");
+		setErrorMessage(undefined);
+		getWorkflowVersionPicker({ selectedWorkflowId: workflowId, selectedWorkflowVersion: workflowVersion })
+			.then((response) => {
+				if (cancelled) return;
+				setPicker(response);
+				setLoadState("loaded");
+			})
+			.catch((error: unknown) => {
+				if (cancelled) return;
+				setErrorMessage(error instanceof Error ? error.message : "Failed to load workflow viewer");
+				setLoadState("error");
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [workflowId, workflowVersion]);
+
+	const selectedOption = useMemo(
+		() => picker?.options.find((option) => option.id === picker.selectedWorkflowId && option.version === picker.selectedWorkflowVersion),
+		[picker],
+	);
+
+	if (loadState === "loading") {
+		return (
+			<div className="flex w-full items-center gap-2 rounded-sm border border-slate-800 bg-[#101d22]/70 p-4 text-sm text-slate-300" aria-live="polite">
+				<Loader2 size={16} className="animate-spin text-[#11a4d4]" />
+				Loading workflow viewer {workflowId}@{workflowVersion}…
+			</div>
+		);
+	}
+
+	if (loadState === "error") {
+		return (
+			<div className="rounded-sm border border-red-900/70 bg-red-950/40 p-4 text-sm leading-6 text-red-200" role="alert">
+				<div className="font-bold">Could not load workflow viewer</div>
+				<div className="mt-1 text-xs">{errorMessage ?? "Failed to load workflow metadata."}</div>
+			</div>
+		);
+	}
+
+	return (
+		<div className="flex w-full flex-col gap-4 rounded-sm border border-slate-800 bg-[#101d22]/70 p-4">
+			<div className="flex items-start justify-between gap-3">
+				<div>
+					<div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.16em] text-[#11a4d4]">
+						<ExternalLink size={13} />
+						Workflow version viewer
+					</div>
+					<h3 className="mt-1 text-lg font-bold text-slate-100">{selectedOption?.title ?? `${workflowId}@${workflowVersion}`}</h3>
+					<p className="mt-2 max-w-2xl text-xs leading-5 text-slate-500">
+						This separate viewer is the nested workflow navigation target. Parent graphs do not inline-expand nested workflow internals in V2.
+					</p>
+				</div>
+				<a className="shrink-0 rounded-sm border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-[#11a4d4]/60 hover:text-slate-100" href="/apps/chat/workflows">
+					Back to Workflows
+				</a>
+			</div>
+
+			{selectedOption ? <WorkflowVersionSelectionSummary option={selectedOption} /> : null}
+			<WorkflowVersionDiagnostics diagnostics={picker?.diagnostics ?? []} ariaLabel="Workflow viewer diagnostics" />
+
+			<div className="rounded-sm border border-slate-800 bg-[#151f24]/70 p-3 text-[11px] leading-5 text-slate-500">
+				Viewer mode shows registry metadata and navigation context only. To change a child workflow, open its own UI draft or duplicate/edit a published workflow from the Workflow Library.
+			</div>
+		</div>
+	);
+}
+
+function WorkflowVersionSelectionSummary({ option }: { option: WorkflowVersionPickerOption }) {
+	return (
+		<div className="rounded-sm border border-slate-800 bg-[#151f24]/70 p-3 text-xs leading-5 text-slate-400">
+			<div className="font-semibold text-slate-200">Selected workflow: {option.title}</div>
+			<div className="mt-1 font-mono text-[11px] text-slate-300">{option.id}@{option.version}</div>
+			{option.description ? <div className="mt-2 text-slate-500">{option.description}</div> : null}
+			<div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+				<WorkflowPill label={`${option.source} source`} />
+				<WorkflowPill label={option.status} />
+				{option.tags.map((tag) => <WorkflowPill key={tag} label={tag} />)}
+			</div>
+		</div>
+	);
+}
+
+function WorkflowVersionOptionCard({ option }: { option: WorkflowVersionPickerOption }) {
+	return (
+		<div className="rounded-sm border border-slate-800 bg-[#151f24]/70 p-3 text-xs leading-5 text-slate-400">
+			<div className="flex flex-wrap items-start justify-between gap-2">
+				<div>
+					<div className="font-semibold text-slate-200">{option.title}</div>
+					<div className="mt-1 font-mono text-[11px] text-slate-300">{option.id}@{option.version}</div>
+				</div>
+				<WorkflowPill label="published workflow" />
+			</div>
+			{option.description ? <div className="mt-2 text-slate-500">{option.description}</div> : null}
+			<div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+				<WorkflowPill label={`${option.source} source`} />
+				{option.tags.map((tag) => <WorkflowPill key={tag} label={tag} />)}
+			</div>
+		</div>
+	);
+}
+
+function WorkflowVersionDiagnostics({ diagnostics, ariaLabel }: { diagnostics: WorkflowPickerDiagnostic[]; ariaLabel: string }) {
+	if (!diagnostics.length) return null;
+	return (
+		<div className="grid gap-2" aria-label={ariaLabel}>
+			{diagnostics.map((diagnostic) => (
+				<div key={`${diagnostic.code}:${diagnostic.registryRef}`} className="rounded-sm border border-amber-700/70 bg-amber-950/30 p-3 text-xs leading-5 text-amber-100">
+					<div className="flex items-center gap-2 font-bold text-amber-200"><AlertTriangle size={13} />{diagnostic.code}</div>
+					<div className="mt-1">{diagnostic.message}</div>
+					<div className="mt-1 font-mono text-[11px] text-amber-200/80">{diagnostic.path}</div>
+					<div className="mt-1 text-amber-200/80">{diagnostic.hint}</div>
+				</div>
+			))}
+		</div>
+	);
+}
+
 function WorkflowGraphNodeCard({ data, selected }: NodeProps<WorkflowGraphFlowNode>) {
 	return (
 		<div className={`min-w-44 rounded-sm border bg-[#15242b] px-3 py-2 shadow-lg shadow-black/20 ${selected ? "border-[#38bdf8]" : "border-slate-700"}`}>
@@ -1027,6 +1327,20 @@ function addWorkflowGraphNode(definition: WorkflowDraftDefinition, nodeId: strin
 	return writeWorkflowGraphPositions(nextDefinition, { ...readWorkflowPositions(definition), [nodeId]: position });
 }
 
+function addWorkflowGraphWorkflowNode(definition: WorkflowDraftDefinition, nodeId: string, position: GraphPosition, workflow: WorkflowVersionPickerOption): WorkflowDraftDefinition {
+	const nodes = readWorkflowNodeDefinitions(definition);
+	const nextDefinition: WorkflowDraftDefinition = {
+		...definition,
+		nodes: {
+			...nodes,
+			[nodeId]: createDefaultWorkflowNodeDefinition(nodeId, workflow),
+		},
+		edges: isWorkflowJsonObject(definition.edges) ? definition.edges : {},
+	};
+	if (!workflowInitialNodeIds(nextDefinition).length) nextDefinition.initial = nodeId;
+	return writeWorkflowGraphPositions(nextDefinition, { ...readWorkflowPositions(definition), [nodeId]: position });
+}
+
 function createDefaultAgentNodeDefinition(nodeId: string, profileId: string): WorkflowJsonObject {
 	return {
 		kind: "agent",
@@ -1035,6 +1349,15 @@ function createDefaultAgentNodeDefinition(nodeId: string, profileId: string): Wo
 		profile: { kind: "fixed", id: profileId || "pibo-agent" },
 		promptTemplate: DEFAULT_AGENT_PROMPT_TEMPLATE,
 		metadata: { sessionOverrides: { prompt: true } },
+	};
+}
+
+function createDefaultWorkflowNodeDefinition(nodeId: string, workflow: WorkflowVersionPickerOption): WorkflowJsonObject {
+	return {
+		kind: "workflow",
+		label: `Workflow ${nodeId}`,
+		workflowId: workflow.id,
+		workflowVersion: workflow.version,
 	};
 }
 
@@ -1122,6 +1445,17 @@ function readInitialHandlerRef(): string {
 	return new URL(window.location.href).searchParams.get("handlerRef") ?? "";
 }
 
+function readInitialWorkflowSelection(): WorkflowVersionSelection {
+	if (typeof window === "undefined") return { workflowId: "", workflowVersion: "" };
+	const searchParams = new URL(window.location.href).searchParams;
+	const workflowRef = searchParams.get("workflowRef");
+	if (workflowRef) return parseWorkflowVersionKey(workflowRef) ?? { workflowId: workflowRef, workflowVersion: "" };
+	return {
+		workflowId: searchParams.get("workflowId") ?? "",
+		workflowVersion: searchParams.get("workflowVersion") ?? "",
+	};
+}
+
 async function refreshProfilePicker(
 	selectedProfileId: string,
 	setPicker: (picker: WorkflowProfilePickerResponse | undefined) => void,
@@ -1156,6 +1490,26 @@ async function refreshHandlerPicker(
 	}
 }
 
+async function refreshWorkflowVersionPicker(
+	selection: WorkflowVersionSelection,
+	setPicker: (picker: WorkflowVersionPickerResponse | undefined) => void,
+	setLoadState: (state: "loading" | "loaded" | "error") => void,
+	setErrorMessage: (message: string | undefined) => void,
+): Promise<void> {
+	setLoadState("loading");
+	setErrorMessage(undefined);
+	try {
+		setPicker(await getWorkflowVersionPicker({
+			selectedWorkflowId: selection.workflowId || undefined,
+			selectedWorkflowVersion: selection.workflowVersion || undefined,
+		}));
+		setLoadState("loaded");
+	} catch (error) {
+		setErrorMessage(error instanceof Error ? error.message : "Failed to load workflow version picker");
+		setLoadState("error");
+	}
+}
+
 function profileOptionLabel(option: WorkflowProfilePickerOption): string {
 	return option.source === "custom" ? `${option.displayName} (custom)` : `${option.displayName} (global)`;
 }
@@ -1177,6 +1531,28 @@ function ProfileSelectionSummary({ option }: { option: WorkflowProfilePickerOpti
 
 function handlerOptionLabel(option: WorkflowHandlerPickerOption): string {
 	return `${option.displayName} (${option.id})`;
+}
+
+function workflowVersionOptionKey(option: WorkflowVersionPickerOption): string {
+	return workflowVersionSelectionKey(option.id, option.version);
+}
+
+function workflowVersionSelectionKey(workflowId: string, workflowVersion: string): string {
+	return `${workflowId}@${workflowVersion}`;
+}
+
+function workflowVersionOptionLabel(option: WorkflowVersionPickerOption): string {
+	return `${option.title} (${workflowVersionOptionKey(option)})`;
+}
+
+function parseWorkflowVersionKey(value: string): WorkflowVersionSelection | undefined {
+	const atIndex = value.lastIndexOf("@");
+	if (atIndex <= 0 || atIndex === value.length - 1) return undefined;
+	return { workflowId: value.slice(0, atIndex), workflowVersion: value.slice(atIndex + 1) };
+}
+
+function workflowVersionViewerPath(workflowId: string, workflowVersion: string): string {
+	return `/apps/chat/workflows/view/${encodeURIComponent(workflowId)}/${encodeURIComponent(workflowVersion)}`;
 }
 
 function HandlerSelectionSummary({ option }: { option: WorkflowHandlerPickerOption }) {

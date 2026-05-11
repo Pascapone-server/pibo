@@ -1868,6 +1868,50 @@ test("workflow handler picker lists registered handlers and reports missing refs
 	}
 });
 
+test("workflow version picker lists published nested workflow refs and reports missing refs", async () => {
+	const { channel, baseURL } = await startWebHostChannel({
+		auth: createFakeAuthService(),
+		profiles: [{ name: "pibo-agent", aliases: ["default"] }],
+	});
+
+	try {
+		const picker = await fetch(`${baseURL}/api/chat/workflows/pickers/workflow-versions`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(picker.status, 200);
+		const pickerPayload = await picker.json();
+		assert.equal(pickerPayload.kind, "workflow-versions");
+		assert.deepEqual(pickerPayload.options.map((option) => `${option.id}@${option.version}`), [
+			"standard-project@1.0.0",
+			"simple-chat@1.0.0",
+			"ui-review-workflow@2.0.0",
+		]);
+		assert.equal(pickerPayload.options.some((option) => option.status !== "published"), false);
+
+		const selectedWorkflow = await fetch(`${baseURL}/api/chat/workflows/pickers/workflow-versions?selectedWorkflowId=standard-project&selectedWorkflowVersion=1.0.0`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(selectedWorkflow.status, 200);
+		const selectedPayload = await selectedWorkflow.json();
+		assert.equal(selectedPayload.selectedWorkflowId, "standard-project");
+		assert.equal(selectedPayload.selectedWorkflowVersion, "1.0.0");
+		assert.deepEqual(selectedPayload.diagnostics, []);
+
+		const missingWorkflow = await fetch(`${baseURL}/api/chat/workflows/pickers/workflow-versions?selectedWorkflowId=missing-workflow&selectedWorkflowVersion=9.9.9`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(missingWorkflow.status, 200);
+		const missingPayload = await missingWorkflow.json();
+		assert.equal(missingPayload.selectedWorkflowId, undefined);
+		assert.equal(missingPayload.selectedWorkflowVersion, undefined);
+		assert.equal(missingPayload.diagnostics[0].code, "WorkflowCatalogError.unknownWorkflowVersion");
+		assert.equal(missingPayload.diagnostics[0].registryRef, "missing-workflow@9.9.9");
+		assert.equal(missingPayload.diagnostics[0].path, "$.workflow");
+	} finally {
+		await channel.stop?.();
+	}
+});
+
 test("workflow builder draft loader opens starter and duplicated UI draft wrappers", async () => {
 	const { channel, baseURL } = await startWebHostChannel({
 		auth: createFakeAuthService(),
