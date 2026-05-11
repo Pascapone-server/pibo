@@ -309,6 +309,35 @@ type ChatAgentBody = {
 	confirmName?: unknown;
 };
 
+type WorkflowProfilePickerOption = {
+	id: string;
+	displayName: string;
+	description?: string;
+	aliases: string[];
+	source: "custom" | "global";
+	visibility: "private" | "global";
+	archived: false;
+	nativeTools: string[];
+	skills: string[];
+	contextFiles: string[];
+};
+
+type WorkflowPickerDiagnostic = {
+	code: string;
+	message: string;
+	severity: "error";
+	path: string;
+	registryRef: string;
+	hint: string;
+};
+
+type WorkflowProfilePickerResponse = {
+	kind: "profiles";
+	options: WorkflowProfilePickerOption[];
+	selectedProfileId?: string;
+	diagnostics: WorkflowPickerDiagnostic[];
+};
+
 type ChatMcpServerDescriptionBody = {
 	description?: unknown;
 };
@@ -475,6 +504,18 @@ function agentResourceId(pathname: string): string | undefined {
 		return decodeURIComponent(encodedId);
 	} catch {
 		throw new PiboWebHttpError("Invalid agent id", 400);
+	}
+}
+
+function workflowPickerKind(pathname: string): string | undefined {
+	const prefix = `${CHAT_WEB_API_PREFIX}/workflows/pickers/`;
+	if (!pathname.startsWith(prefix)) return undefined;
+	const encodedKind = pathname.slice(prefix.length);
+	if (!encodedKind || encodedKind.includes("/")) return undefined;
+	try {
+		return decodeURIComponent(encodedKind);
+	} catch {
+		throw new PiboWebHttpError("Invalid workflow picker kind", 400);
 	}
 }
 
@@ -1665,6 +1706,88 @@ async function buildAgentCatalog(context: PiboWebAppContext, state: ChatWebAppSt
 		mcpServers: await listMcpServerInfos(),
 		piPackages: listPiPackages(),
 		userSkills: state.userSkillManager.list(),
+	};
+}
+
+function buildWorkflowProfilePicker(
+	state: ChatWebAppState,
+	context: PiboWebAppContext,
+	webSession: PiboWebSession,
+	selectedProfileId?: string,
+): WorkflowProfilePickerResponse {
+	const customAgents = state.agentStore.list(webSession.ownerScope, { includeArchived: true });
+	const allCustomProfileNames = new Set(customAgents.map((agent) => agent.profileName));
+	const archivedCustomAgents = new Map(
+		customAgents.filter((agent) => agent.archivedAt).map((agent) => [agent.profileName, agent]),
+	);
+	const options: WorkflowProfilePickerOption[] = [];
+
+	for (const agent of customAgents) {
+		if (agent.archivedAt) continue;
+		options.push({
+			id: agent.profileName,
+			displayName: agent.displayName,
+			...(agent.description ? { description: agent.description } : {}),
+			aliases: [],
+			source: "custom",
+			visibility: "private",
+			archived: false,
+			nativeTools: [...agent.nativeTools],
+			skills: [...agent.skills],
+			contextFiles: [...agent.contextFiles],
+		});
+	}
+
+	for (const profile of context.channelContext.getProfiles?.() ?? []) {
+		if (allCustomProfileNames.has(profile.name)) continue;
+		options.push({
+			id: profile.name,
+			displayName: profile.name,
+			...(profile.description ? { description: profile.description } : {}),
+			aliases: [...(profile.aliases ?? [])],
+			source: "global",
+			visibility: "global",
+			archived: false,
+			nativeTools: [...(profile.nativeTools ?? [])],
+			skills: [...(profile.skills ?? [])],
+			contextFiles: [...(profile.contextFiles ?? [])],
+		});
+	}
+
+	options.sort((left, right) => left.displayName.localeCompare(right.displayName) || left.id.localeCompare(right.id));
+
+	const normalizedSelection = selectedProfileId?.trim() || undefined;
+	const activeSelection = normalizedSelection && options.some((option) => option.id === normalizedSelection)
+		? normalizedSelection
+		: undefined;
+	const diagnostics: WorkflowPickerDiagnostic[] = [];
+	if (normalizedSelection && !activeSelection) {
+		if (archivedCustomAgents.has(normalizedSelection)) {
+			diagnostics.push({
+				code: "WorkflowGraphError.archivedAgentProfileRef",
+				message: `Agent node references archived Agent Designer profile '${normalizedSelection}'.`,
+				severity: "error",
+				path: "$.nodes.agent.profile.id",
+				registryRef: normalizedSelection,
+				hint: "Restore the Agent Designer profile or select a non-archived profile before publishing or running this workflow.",
+			});
+		} else {
+			diagnostics.push({
+				code: "WorkflowGraphError.unknownAgentProfileRef",
+				message: `Agent node references Agent Designer profile '${normalizedSelection}', but it is not available to this user.`,
+				severity: "error",
+				path: "$.nodes.agent.profile.id",
+				registryRef: normalizedSelection,
+				hint: "Select one of the non-archived Agent Designer profiles from the picker.",
+			});
+		}
+	}
+
+	return {
+		kind: "profiles",
+		options,
+		...(activeSelection ? { selectedProfileId: activeSelection } : {}),
+		diagnostics,
 	};
 }
 
@@ -3587,6 +3710,20 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 						connection: "keep-alive",
 					},
 				});
+			}
+
+			const pickerKind = workflowPickerKind(url.pathname);
+			if (pickerKind && request.method === "GET") {
+				const webSession = await requireSession(request, context);
+				if (pickerKind !== "profiles") {
+					throw new PiboWebHttpError(`Workflow picker '${pickerKind}' is not implemented`, 501);
+				}
+				return responseJson(buildWorkflowProfilePicker(
+					state,
+					context,
+					webSession,
+					url.searchParams.get("selectedProfileId") ?? undefined,
+				));
 			}
 
 			if ((url.pathname === `${CHAT_WEB_API_PREFIX}/agent-catalog` || url.pathname === `${CHAT_WEB_API_PREFIX}/catalog`) && request.method === "GET") {

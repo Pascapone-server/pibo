@@ -102,6 +102,8 @@ export type AgentProfileDefinition = {
   nativeTools?: string[];
   skills?: string[];
   contextFiles?: string[];
+  status?: "active" | "archived";
+  archivedAt?: string;
   metadata?: JsonObject;
 };
 

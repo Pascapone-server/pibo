@@ -146,6 +146,30 @@ describe("workflow registry adapter resolution", () => {
     );
   });
 
+  it("rejects archived Agent Designer profile refs when the Workflow Registry marks them archived", () => {
+    const registry = createWorkflowRegistry(workflowFixtureProviders);
+    registerWorkflowAgentProfile(registry, "archived-agent", { status: "archived" });
+    const definition = structuredClone(adapterWorkflowFixture) as WorkflowDefinition;
+    const collectNode = definition.nodes.collect;
+    assert.equal(collectNode.kind, "agent");
+    if (collectNode.kind === "agent") {
+      collectNode.profile = { kind: "fixed", id: "archived-agent" };
+    }
+
+    const result = validateWorkflow(definition, { registry });
+
+    assert.equal(result.ok, false);
+    assert.ok(
+      result.diagnostics.some(
+        (diagnostic) =>
+          diagnostic.code === "WorkflowGraphError.archivedAgentProfileRef" &&
+          diagnostic.nodeId === "collect" &&
+          diagnostic.registryRef === "archived-agent" &&
+          diagnostic.path === "$.nodes.collect.profile.id",
+      ),
+    );
+  });
+
   it("validates edge adapter refs against the Workflow Registry when one is provided", () => {
     const registry = createWorkflowRegistry(workflowFixtureProviders);
 

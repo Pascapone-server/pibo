@@ -1763,6 +1763,63 @@ test("chat web app creates custom agents from the native capability catalog", as
 	}
 });
 
+test("workflow profile picker excludes archived custom agents and reports archived refs", async () => {
+	const { channel, baseURL } = await startWebHostChannel({
+		auth: createFakeAuthService(),
+		profiles: [{ name: "pibo-agent", aliases: ["default"], description: "Global Pibo agent" }],
+	});
+
+	try {
+		const createdAgent = await fetch(`${baseURL}/api/chat/agents`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({
+				displayName: "workflow-reviewer",
+				description: "Reviews workflow drafts.",
+				nativeTools: ["web_search"],
+				skills: ["pi-agent-harness"],
+			}),
+		});
+		assert.equal(createdAgent.status, 201);
+		const createdPayload = await createdAgent.json();
+
+		const archivedAgent = await fetch(`${baseURL}/api/chat/agents/${encodeURIComponent(createdPayload.agent.id)}`, {
+			method: "PATCH",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({ archived: true }),
+		});
+		assert.equal(archivedAgent.status, 200);
+
+		const picker = await fetch(`${baseURL}/api/chat/workflows/pickers/profiles`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(picker.status, 200);
+		const pickerPayload = await picker.json();
+		assert.deepEqual(pickerPayload.options.map((option) => option.id), ["pibo-agent"]);
+		assert.equal(pickerPayload.options[0].source, "global");
+		assert.deepEqual(pickerPayload.options[0].aliases, ["default"]);
+
+		const selectedArchived = await fetch(`${baseURL}/api/chat/workflows/pickers/profiles?selectedProfileId=workflow-reviewer`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(selectedArchived.status, 200);
+		const selectedPayload = await selectedArchived.json();
+		assert.equal(selectedPayload.selectedProfileId, undefined);
+		assert.equal(selectedPayload.diagnostics[0].code, "WorkflowGraphError.archivedAgentProfileRef");
+		assert.equal(selectedPayload.diagnostics[0].registryRef, "workflow-reviewer");
+	} finally {
+		await channel.stop?.();
+	}
+});
+
 test("chat web app surfaces broken custom agent context files and allows cleanup", async () => {
 	const { channel, baseURL } = await startWebHostChannel({
 		auth: createFakeAuthService(),

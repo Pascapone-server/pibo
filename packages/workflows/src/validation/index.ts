@@ -845,19 +845,47 @@ function validateWorkflowAgentNodeRuntimeSelection(
     return;
   }
 
-  if (!options.registry?.profiles || options.registry.profiles.has(profileId)) {
+  if (!options.registry?.profiles) {
     return;
   }
 
-  diagnostics.push({
-    code: "WorkflowGraphError.unknownAgentProfileRef",
-    message: `Workflow agent node '${nodeId}' references Agent Designer profile '${profileId}', but it is not registered in the Workflow Registry.`,
-    severity: "error",
-    nodeId,
-    path: `$.nodes.${nodeId}.profile.id`,
-    registryRef: profileId,
-    hint: "Register the Agent Designer profile with registerWorkflowAgentProfile/createWorkflowRegistry before validating or executing this workflow, or update the node to use a registered fixed profile id.",
-  });
+  const registeredProfile = options.registry.profiles.get(profileId);
+  if (!registeredProfile) {
+    diagnostics.push({
+      code: "WorkflowGraphError.unknownAgentProfileRef",
+      message: `Workflow agent node '${nodeId}' references Agent Designer profile '${profileId}', but it is not registered in the Workflow Registry.`,
+      severity: "error",
+      nodeId,
+      path: `$.nodes.${nodeId}.profile.id`,
+      registryRef: profileId,
+      hint: "Register the Agent Designer profile with registerWorkflowAgentProfile/createWorkflowRegistry before validating or executing this workflow, or update the node to use a registered fixed profile id.",
+    });
+    return;
+  }
+
+  if (isArchivedAgentProfileDefinition(registeredProfile.value)) {
+    diagnostics.push({
+      code: "WorkflowGraphError.archivedAgentProfileRef",
+      message: `Workflow agent node '${nodeId}' references archived Agent Designer profile '${profileId}'.`,
+      severity: "error",
+      nodeId,
+      path: `$.nodes.${nodeId}.profile.id`,
+      registryRef: profileId,
+      hint: "Restore the Agent Designer profile or update the node to select a non-archived fixed profile id before publishing or running this workflow.",
+    });
+  }
+}
+
+function isArchivedAgentProfileDefinition(profile: { status?: string; archivedAt?: string; metadata?: unknown }): boolean {
+  if (profile.status === "archived" || typeof profile.archivedAt === "string") {
+    return true;
+  }
+
+  if (!isRecord(profile.metadata)) {
+    return false;
+  }
+
+  return profile.metadata.archived === true || typeof profile.metadata.archivedAt === "string";
 }
 
 function validateWorkflowAgentNodePromptBuilderRef(

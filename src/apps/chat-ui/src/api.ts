@@ -181,6 +181,41 @@ export async function postProjectMessage(piboSessionId: string, text: string, cl
 	});
 }
 
+export type WorkflowProfilePickerOption = {
+	id: string;
+	displayName: string;
+	description?: string;
+	aliases: string[];
+	source: "custom" | "global";
+	visibility: "private" | "global";
+	archived: false;
+	nativeTools: string[];
+	skills: string[];
+	contextFiles: string[];
+};
+
+export type WorkflowPickerDiagnostic = {
+	code: string;
+	message: string;
+	severity: "error";
+	path: string;
+	registryRef: string;
+	hint: string;
+};
+
+export type WorkflowProfilePickerResponse = {
+	kind: "profiles";
+	options: WorkflowProfilePickerOption[];
+	selectedProfileId?: string;
+	diagnostics: WorkflowPickerDiagnostic[];
+};
+
+export async function getWorkflowProfilePicker(selectedProfileId?: string): Promise<WorkflowProfilePickerResponse> {
+	const params = new URLSearchParams();
+	if (selectedProfileId) params.set("selectedProfileId", selectedProfileId);
+	const suffix = params.size ? `?${params.toString()}` : "";
+	return requestJson<WorkflowProfilePickerResponse>(`/api/chat/workflows/pickers/profiles${suffix}`);
+}
 
 export type CronScheduleInput =
 	| { kind: "in"; value: string }
