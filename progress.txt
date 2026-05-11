@@ -1,4 +1,5 @@
 ## Codebase Patterns
+- Workflow-backed Chat Web sessions should derive display metadata from `PiboProjectSession` plus the live `PiboWebSessionStatus`; keep `simple-chat` sessions unbadged unless they have a workflow run id or non-simple workflow id.
 - Chat Web session tabs are registered through `src/apps/chat-ui/src/session-views/registry.tsx`; project-specific workflow context can flow into any tab via optional `ChatSessionViewProps` fields from `SessionTracePane`.
 - Project UI workflow surfaces should read `projectSessions` from `/api/chat/projects/bootstrap`; `workflowRunId` and `state: "workflow"`/non-`simple-chat` workflow ids identify workflow-backed sessions without coupling Chat Web to the workflow runtime package.
 - Restart-style workflow persistence/inspection tests should write facts, close `SqliteWorkflowRunStore`, reopen the same `pibo-workflows.sqlite`, and then inspect/read facts so recovery regressions are caught.
@@ -853,4 +854,17 @@
   - Chat Web session views are a small plugin registry; add new tabs by extending `chatSessionViewIds`, registering the view in `session-views/registry.tsx`, and passing any extra context through `ChatSessionViewProps`.
   - The Projects area already knows the selected `PiboProjectSession`; workflow-specific UI can use that linkage without importing `packages/workflows` into the browser bundle.
   - Browser verification can use the worker web port with local browser-use (`/apps/chat/projects?view=workflow`); the worker CDP port may not always have an active browser attached.
+---
+
+## 2026-05-11 03:03 UTC - 12.3
+- Added current workflow metadata to the Chat Web session header for workflow-backed Project Sessions, showing workflow id, derived current state, and shortened run id next to the Pibo session id.
+- Updated Project Sessions/Workflow Runs labels to derive state from project-session metadata plus live session status so running/error workflow sessions show current state where available.
+- Browser-verified the worker Projects view shows `WORKFLOW workflow.ui-smoke`, `STATE waiting`, and the workflow run id in the selected session header.
+- Marked task `12.3` complete in the workflow-system task list because the referenced JSON PRDs are absent and progress is tracked in `tasks.md`.
+- Files changed: `src/apps/chat-ui/src/App.tsx`, `docs/specs/changes/pibo-workflow-system-v1/tasks.md`, `progress.txt`.
+- Quality checks: host `npm run chat-ui:typecheck`; host `npm --prefix packages/workflows run typecheck`; host `npm run typecheck`; host `npm run chat-ui:build`; container `/workspace` `npm run chat-ui:typecheck && npm run chat-ui:build`; container `/workspace` `npm --prefix packages/workflows run typecheck && npm --prefix packages/workflows test`; browser-use DOM verification at `http://127.0.0.1:4812/apps/chat/projects?view=workflow`.
+- **Learnings for future iterations:**
+  - `SessionTracePane` already receives `workflowProjectSession`, `selectedSessionStatus`, and the selected trace context, so selected-session workflow badges can be added without new API calls.
+  - The Projects view can derive workflow state from project session `state` first, then live session status for `running`/`failed`, preserving durable Project Session metadata as the default source.
+  - Browser-use against the worker can verify header text after opening `/apps/chat/projects?view=workflow`; the seeded dev workflow session from prior UI smoke work remains useful for workflow header checks.
 ---

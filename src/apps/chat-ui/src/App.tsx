@@ -2174,6 +2174,7 @@ function WorkflowRunsPanel({
 					const sessionNode = findSessionNode(sessionNodes, projectSession.piboSessionId);
 					const title = sessionNode ? sessionNodeTitle(sessionNode) : projectSession.title ?? projectSession.piboSessionId;
 					const selected = projectSession.piboSessionId === selectedPiboSessionId;
+					const stateLabel = workflowStateLabel(projectSession, sessionNode?.status);
 					return (
 						<button
 							key={`${projectSession.workflowRunId ?? projectSession.piboSessionId}:${projectSession.piboSessionId}`}
@@ -2184,7 +2185,7 @@ function WorkflowRunsPanel({
 						>
 							<span className="flex items-center justify-between gap-2">
 								<span className="min-w-0 text-xs font-medium text-slate-200 truncate">{title}</span>
-								<span className={workflowStateBadgeClass(projectSession)}>{workflowStateLabel(projectSession)}</span>
+								<span className={workflowStateBadgeClass(projectSession, sessionNode?.status)}>{stateLabel}</span>
 							</span>
 							<span className="mt-1 block text-[10px] text-slate-500 truncate">{projectSession.workflowId}</span>
 							{projectSession.workflowRunId ? <span className="block text-[10px] font-mono text-slate-500 truncate">run {shortWorkflowId(projectSession.workflowRunId)}</span> : null}
@@ -2203,22 +2204,60 @@ function isWorkflowBackedProjectSession(projectSession: PiboProjectSession): boo
 function workflowSessionLabel(projectSession: PiboProjectSession): string {
 	if (!isWorkflowBackedProjectSession(projectSession)) return `Workflow: ${projectSession.workflowId}`;
 	const run = projectSession.workflowRunId ? ` · run ${shortWorkflowId(projectSession.workflowRunId)}` : "";
-	return `Workflow: ${projectSession.workflowId}${run}`;
+	return `Workflow: ${projectSession.workflowId}${run} · ${workflowStateLabel(projectSession)}`;
 }
 
-function workflowStateLabel(projectSession: PiboProjectSession): string {
+type WorkflowHeaderSummary = {
+	workflowId: string;
+	state: string;
+	workflowRunId?: string;
+};
+
+function createWorkflowHeaderSummary(projectSession: PiboProjectSession, selectedSessionStatus: PiboWebSessionStatus | undefined): WorkflowHeaderSummary {
+	return {
+		workflowId: projectSession.workflowId,
+		state: workflowStateLabel(projectSession, selectedSessionStatus),
+		...(projectSession.workflowRunId ? { workflowRunId: projectSession.workflowRunId } : {}),
+	};
+}
+
+function WorkflowHeaderMeta({ summary }: { summary: WorkflowHeaderSummary }) {
+	return (
+		<>
+			<span className="text-slate-600">·</span>
+			<span className="min-w-0 max-w-52 truncate rounded border border-[#11a4d4]/35 bg-[#11a4d4]/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[#11a4d4]" title={summary.workflowId}>
+				workflow {summary.workflowId}
+			</span>
+			<span className={workflowStateBadgeClassFromLabel(summary.state)}>state {summary.state}</span>
+			{summary.workflowRunId ? (
+				<span className="min-w-0 max-w-40 truncate rounded border border-slate-700 bg-slate-900/40 px-1.5 py-0.5 text-[10px] text-slate-400" title={summary.workflowRunId}>
+					run {shortWorkflowId(summary.workflowRunId)}
+				</span>
+			) : null}
+		</>
+	);
+}
+
+function workflowStateLabel(projectSession: PiboProjectSession, selectedSessionStatus?: PiboWebSessionStatus): string {
 	if (projectSession.archived) return "archived";
+	if (projectSession.state && projectSession.state !== "workflow") return projectSession.state.replace(/_/g, " ");
+	if (selectedSessionStatus === "running") return "running";
+	if (selectedSessionStatus === "error") return "failed";
 	if (projectSession.state) return projectSession.state.replace(/_/g, " ");
 	return projectSession.workflowRunId ? "workflow" : projectSession.kind;
 }
 
-function workflowStateBadgeClass(projectSession: PiboProjectSession): string {
-	const state = workflowStateLabel(projectSession);
+function workflowStateBadgeClass(projectSession: PiboProjectSession, selectedSessionStatus?: PiboWebSessionStatus): string {
+	return workflowStateBadgeClassFromLabel(workflowStateLabel(projectSession, selectedSessionStatus), projectSession.archived);
+}
+
+function workflowStateBadgeClassFromLabel(stateLabel: string, archived = false): string {
+	const state = stateLabel.toLowerCase();
 	const base = "shrink-0 rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide";
-	if (projectSession.archived) return `${base} border-slate-700 text-slate-500`;
+	if (archived) return `${base} border-slate-700 text-slate-500`;
 	if (state.includes("failed") || state.includes("error")) return `${base} border-red-500/40 text-red-300 bg-red-500/10`;
 	if (state.includes("waiting")) return `${base} border-amber-500/40 text-amber-300 bg-amber-500/10`;
-	if (state.includes("complete")) return `${base} border-emerald-500/40 text-emerald-300 bg-emerald-500/10`;
+	if (state.includes("complete") || state.includes("done")) return `${base} border-emerald-500/40 text-emerald-300 bg-emerald-500/10`;
 	return `${base} border-[#11a4d4]/40 text-[#11a4d4] bg-[#11a4d4]/10`;
 }
 
@@ -2722,6 +2761,9 @@ function SessionTracePane({
 
 	const headerPiboSessionId = currentTraceView?.piboSessionId ?? selectedPiboSessionId ?? "";
 	const headerPiboSessionCopied = copiedHeaderPiboSessionId === headerPiboSessionId;
+	const workflowHeader = workflowProjectSession && isWorkflowBackedProjectSession(workflowProjectSession)
+		? createWorkflowHeaderSummary(workflowProjectSession, selectedSessionStatus)
+		: null;
 	const copyHeaderPiboSessionId = () => {
 		if (!headerPiboSessionId) return;
 		void copyTextToClipboard(headerPiboSessionId).catch(() => undefined);
@@ -2766,19 +2808,24 @@ function SessionTracePane({
 						<h1 className="text-base font-semibold truncate">
 							{currentTraceView?.title ?? selectedPiboSessionId ?? bootstrap.room?.name ?? selectedRoomId}
 						</h1>
-						<div className="font-mono text-[11px] text-slate-500 truncate">
-							{bootstrap.room?.name ?? selectedRoomId ?? "Room"} · {headerPiboSessionId ? (
-								<button
-									type="button"
-									onMouseDown={(event) => event.preventDefault()}
-									onClick={() => void copyHeaderPiboSessionId()}
-									title={headerPiboSessionCopied ? "Copied Pibo session ID" : "Copy Pibo session ID"}
-									aria-label={headerPiboSessionCopied ? "Copied Pibo session ID" : "Copy Pibo session ID"}
-									className={`rounded-sm px-1 font-mono underline-offset-2 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-[#11a4d4] ${headerPiboSessionCopied ? "bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-400/50" : "text-slate-400 hover:text-[#11a4d4] hover:underline"}`}
-								>
-									{headerPiboSessionId}
-								</button>
-							) : ""}
+						<div className="flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-slate-500">
+							<span className="truncate">{bootstrap.room?.name ?? selectedRoomId ?? "Room"}</span>
+							{headerPiboSessionId ? (
+								<>
+									<span className="text-slate-600">·</span>
+									<button
+										type="button"
+										onMouseDown={(event) => event.preventDefault()}
+										onClick={() => void copyHeaderPiboSessionId()}
+										title={headerPiboSessionCopied ? "Copied Pibo session ID" : "Copy Pibo session ID"}
+										aria-label={headerPiboSessionCopied ? "Copied Pibo session ID" : "Copy Pibo session ID"}
+										className={`min-w-0 max-w-48 truncate rounded-sm px-1 font-mono underline-offset-2 transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-[#11a4d4] ${headerPiboSessionCopied ? "bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-400/50" : "text-slate-400 hover:text-[#11a4d4] hover:underline"}`}
+									>
+										{headerPiboSessionId}
+									</button>
+								</>
+							) : null}
+							{workflowHeader ? <WorkflowHeaderMeta summary={workflowHeader} /> : null}
 						</div>
 					</div>
 					<div className="flex items-center gap-2">
