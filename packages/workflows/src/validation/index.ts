@@ -183,6 +183,31 @@ export function validateWorkflowOutput(
   });
 }
 
+export function validateWorkflowGlobalState(
+  definition: Pick<WorkflowDefinition, "state">,
+  globalState: Record<string, unknown>,
+  options: WorkflowValueValidationOptions = {},
+): ValidationResult {
+  const diagnostics: WorkflowDiagnostic[] = [];
+  const pathPrefix = options.path ?? "$.state.global";
+
+  for (const [path, field] of Object.entries(definition.state?.global ?? {})) {
+    if (!(path in globalState)) {
+      continue;
+    }
+
+    diagnostics.push(
+      ...validateJsonValueAgainstSchema(field.schema, globalState[path], {
+        path: `${pathPrefix}.${path}`,
+      }),
+    );
+  }
+
+  return diagnostics.some((diagnostic) => diagnostic.severity === "error")
+    ? { ok: false, diagnostics }
+    : { ok: true, diagnostics };
+}
+
 export function validateNodeOutput(
   definition: Pick<WorkflowDefinition, "nodes">,
   nodeId: string,

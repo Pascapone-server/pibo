@@ -519,6 +519,72 @@ describe("one-node agent workflow runtime path", () => {
     }
   });
 
+  it("persists initial global workflow state across restart", async () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), "pibo-workflows-state-test-"));
+    const dbPath = join(tempRoot, "pibo-workflows.sqlite");
+    const store = new SqliteWorkflowRunStore(dbPath);
+    const definition = cloneMinimalWorkflow();
+    definition.state = {
+      global: {
+        projectGoal: { schema: { type: "string" } },
+      },
+    };
+    (definition.nodes.answer as AgentNodeDefinition).promptTemplate = "Goal: {{global.projectGoal}}. Input: {{input}}";
+
+    try {
+      const result = await runOneNodeAgentWorkflow(definition, "Persist global state.", {
+        ownerScope: "user:state",
+        initialGlobalState: { projectGoal: "Ship workflow state" },
+        now: () => "2026-05-11T00:15:00.000Z",
+        createRunId: () => "wfr_global_state",
+        createNodeAttemptId: () => "wna_global_state",
+        store,
+        agentExecutor: (context) => {
+          assert.equal(context.prompt, "Goal: Ship workflow state. Input: Persist global state.");
+          assert.deepEqual(context.run.state.global, { projectGoal: "Ship workflow state" });
+          return { output: "Global state persisted." };
+        },
+      });
+
+      assert.equal(result.ok, true);
+      assert.deepEqual(result.run.state.global, { projectGoal: "Ship workflow state" });
+      store.close();
+
+      const reopened = new SqliteWorkflowRunStore(dbPath);
+      const persisted = reopened.getRun("wfr_global_state");
+      reopened.close();
+
+      assert.ok(persisted);
+      assert.deepEqual(persisted.state.global, { projectGoal: "Ship workflow state" });
+      assert.equal(persisted.status, "completed");
+    } finally {
+      try {
+        store.close();
+      } catch {
+        // Already closed by the reopen check.
+      }
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects invalid initial global workflow state", async () => {
+    const definition = cloneMinimalWorkflow();
+    definition.state = {
+      global: {
+        attempts: { schema: { type: "integer" } },
+      },
+    };
+
+    const result = await runOneNodeAgentWorkflow(definition, "Bad state.", {
+      initialGlobalState: { attempts: "not an integer" },
+      agentExecutor: () => ({ output: "should not run" }),
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "WorkflowRuntimeError.invalidGlobalState");
+    assert.ok(result.diagnostics.some((diagnostic) => diagnostic.path === "$.state.global.attempts"));
+  });
+
   it("rejects workflows outside the one-node agent shape", () => {
     const definition = cloneMinimalWorkflow();
     definition.edges = {

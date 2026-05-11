@@ -1,4 +1,5 @@
 ## Codebase Patterns
+- One-node agent workflow runs accept `initialGlobalState`; validate it with `validateWorkflowGlobalState`, render it through prompt state readers, and persist it in `WorkflowRun.state.global` via the workflow run store.
 - Prompt workflow runtime coverage should include both one-node `promptTemplate` execution and graph-level `promptBuilder` execution after edge transfer so fixed and variable prompt paths stay covered.
 - Agent `promptTemplate` rendering supports `{{input.path}}`, `{{global.path}}`, `{{state.global.path}}`, `{{state.path}}` as a global-state shortcut, and current-node `{{local.path}}` / `{{state.local.path}}`; unresolved placeholders are preserved in the final prompt.
 - Agent `promptBuilder` refs should use `promptBuilderRef("id")` for registered TypeScript prompt builders; registry-backed validation checks `promptBuilders`, rejects unknown refs, and rejects nodes declaring both `promptTemplate` and `promptBuilder`.
@@ -548,4 +549,16 @@
   - For prompt workflow tests, use `runOneNodeAgentWorkflow` to cover fixed prompt templates at workflow start/complete boundaries.
   - For variable prompt workflows, combine `dispatchWorkflowCodeNode`, `recordWorkflowEdgeTransfer`, and `dispatchWorkflowAgentNode` with `edgePayloads` so prompt builders can assert incoming edge data and scoped state access.
   - Register the fixed `pibo-agent` profile in ad hoc registries before calling `validateWorkflow(..., { registry })` on Agent-node workflows.
+---
+
+## 2026-05-11 01:00 UTC - 9.1
+- Added persisted global workflow state support for one-node agent workflow runs via `initialGlobalState`, with schema validation before execution and storage under `WorkflowRun.state.global`.
+- Added restart coverage proving global state survives SQLite reopen and prompt rendering can read persisted run state; added invalid initial global state coverage.
+- Marked task `9.1` complete in the workflow-system task list because no `prd_*.json` files exist in this worktree.
+- Quality checks: `npm --prefix packages/workflows run typecheck`; `npm --prefix packages/workflows test`; `npm run typecheck`; container `docker exec pibo-dev-Workflows ... npm --prefix packages/workflows run typecheck && npm --prefix packages/workflows test && npm run typecheck`.
+- Files changed: `packages/workflows/src/runtime/index.ts`, `packages/workflows/src/validation/index.ts`, `packages/workflows/src/testing/runtime-one-node-agent.test.ts`, `docs/specs/changes/pibo-workflow-system-v1/tasks.md`, `progress.txt`.
+- **Learnings for future iterations:**
+  - Global workflow state is stored on `WorkflowRun.state.global` and serialized through the existing `workflow_runs.state_json` column rather than a separate table/column.
+  - Initial global state validation should use the workflow's `state.global` field schemas but currently only validates declared keys that are present; unknown state-path policy belongs to later read/write declaration stories.
+  - Prompt templates and prompt builders already read global state from the run object, so initial state support automatically feeds both prompt paths once the run is initialized.
 ---

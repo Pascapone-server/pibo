@@ -49,6 +49,7 @@ import {
   validateNodeOutput,
   validateWorkflow,
   validateWorkflowEdgeAdapterOutput,
+  validateWorkflowGlobalState,
   validateWorkflowInput,
   validateWorkflowOutput,
   validateWorkflowPortValue,
@@ -190,6 +191,7 @@ export type OneNodeAgentExecutor = (
 export type OneNodeAgentWorkflowOptions = {
   registry?: Pick<WorkflowRegistry, "promptBuilders">;
   ownerScope?: string;
+  initialGlobalState?: Record<string, JsonValue>;
   now?: () => Date | string;
   createRunId?: () => WorkflowRunId;
   createNodeAttemptId?: () => NodeAttemptId;
@@ -1996,6 +1998,15 @@ export async function runOneNodeAgentWorkflow(
     });
   }
 
+  const initialGlobalState = { ...(options.initialGlobalState ?? {}) };
+  const globalStateResult = validateWorkflowGlobalState(definition, initialGlobalState);
+  if (!globalStateResult.ok) {
+    return runtimeFailure(events, globalStateResult.diagnostics, {
+      code: "WorkflowRuntimeError.invalidGlobalState",
+      message: "Workflow global state failed validation before execution.",
+    });
+  }
+
   const nodeId = toNodeIdArray(definition.initial)[0];
   const node = definition.nodes[nodeId] as AgentNodeDefinition;
   const timestamp = createTimestampFactory(options.now);
@@ -2008,7 +2019,7 @@ export async function runOneNodeAgentWorkflow(
     status: "running",
     current: { nodeId, status: "running" },
     input,
-    state: { global: {} },
+    state: { global: initialGlobalState },
     createdAt,
     updatedAt: createdAt,
   };
