@@ -76,6 +76,8 @@ type WorkflowSessionOverrides = {
 };
 ```
 
+Prompt overrides are eligible only for selected workflow nodes that resolve to Pibo Agent nodes with direct `promptTemplate` values and opt in through `metadata.sessionOverrides.prompt === true`. Model, thinking level, and fast mode are workflow-session-wide settings. Configured-session values are immutable after creation and before start.
+
 Not allowed in V2:
 
 ```ts
@@ -586,5 +588,4 @@ Zod schema layer
 2. What exact snapshot fields are required to keep deleted-workflow runs inspectable?
 3. How should workflow deletion interact with links from old Project sessions?
 4. Which graph library should power the visual editor?
-5. How should model, thinking level, and fast mode apply to multi-agent workflows: globally, per Agent node, or both?
-6. Should prompt asset edits create versions or mutate current prompt assets?
+5. Should prompt asset edits create versions or mutate current prompt assets?

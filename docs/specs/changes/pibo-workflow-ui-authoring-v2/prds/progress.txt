@@ -2,6 +2,7 @@
 - Chat Web top-level product tabs need coordinated updates in `src/apps/chat-ui/src/App.tsx` for `ChatAppRoute`, navigation, and rendering, plus `src/apps/chat-ui/src/main.tsx` for URL parsing and the TanStack route tree.
 - In the `pibo-dev-WorkflowsV2` browser worker, pass `--fresh-profile` to every `browser-use` command when the default `PIBo` Chrome profile is already locked by another browser process.
 - When resolving PRD decision stories, update the focused PRD plus `README.md`, `tasks.md`, and `09-implementation-completeness-contract.md` if they repeat the same TBD or baseline contract.
+- For V2 open-question stories, also clear matching stale open questions in the parent `spec.md` and `design.md` when the decision is now documented.
 
 ## 2026-05-11 22:37 CEST - US-001
 - What was implemented
@@ -57,4 +58,28 @@
 - **Learnings for future iterations:**
   - Registry/store decision stories should update every repeated TBD baseline so future implementation stories do not inherit conflicting guidance.
   - Code workflows are best treated as read-only catalog projections; UI lifecycle mutations apply to UI-authored identities.
+---
+## 2026-05-11 22:49 CEST - US-001
+- What was implemented
+  - Documented V2 Project session prompt override eligibility rules.
+  - Decided model, thinking level, and fast mode are workflow-session-wide settings, not per-Agent-node overrides.
+  - Decided configured-session values are immutable after creation and before first start.
+  - Cleared matching stale open questions in the PRD catalog, completeness contract, source spec, design, and task list.
+- Files changed
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/spec.md`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/design.md`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/tasks.md`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/03-project-session-selection-and-snapshots.md`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/09-implementation-completeness-contract.md`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/README.md`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_03_project_session_selection_and_snapshots.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck'` — passed.
+  - Relevant tests: not run; documentation-only change.
+- Browser verification, if UI changed
+  - Not run; documentation-only change with no UI behavior changes.
+- **Learnings for future iterations:**
+  - Prompt override decisions should name both the eligible IR shape and the disallowed mutation paths so API/UI stories can enforce the same boundary.
+  - Pre-start edit policy affects snapshot design; freezing configured-session values keeps creation, snapshot, and start semantics simple for the first implementation pass.
 ---

@@ -53,6 +53,9 @@ This directory translates the Pibo Workflow UI Authoring V2 proposal, spec, desi
 - Published workflow versions are immutable.
 - Archive applies to the whole workflow. Delete is allowed even when historical runs exist.
 - Historical runs must remain inspectable through snapshots after workflow deletion.
+- Session prompt overrides are node-id-keyed and limited to explicitly opted-in Pibo Agent nodes with direct `promptTemplate` values.
+- Session model, thinking level, and fast mode overrides apply workflow-session-wide to Pibo Agent node sessions; V2 has no per-node model/thinking/fast overrides.
+- Configured-session values are immutable after creation and before start; users create a new configured Project session to change workflow id/version, input, prompt overrides, model, thinking level, or fast mode.
 - UI-authored workflows are global and visible to authenticated users.
 - All authenticated users may archive or delete UI-authored workflows in V2; code workflows remain read-only except duplication.
 - The UI composes existing registered capabilities only. It must not allow inline TypeScript or arbitrary executable code.
@@ -107,8 +110,6 @@ The Workflow Registry/store schema and V2 permission matrix are resolved in `02-
 - deleted-workflow display and link behavior in historical Project run views;
 - exact API route contracts for catalog, drafts, versions, publish, archive, delete, Project session creation, and run start;
 - graph/canvas library for the visual editor;
-- workflow-level versus per-Agent-node behavior for model, thinking level, and fast mode overrides;
-- prompt override eligibility rules for workflow/session nodes;
 - prompt asset mutation versus prompt asset versioning behavior.
 
 ## Second-Pass Coverage Rule

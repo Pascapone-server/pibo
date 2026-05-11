@@ -75,8 +75,13 @@
   - Explicit start validates the snapshot and creates the single workflow run.
   - Nested workflow runs and agent node sessions are linked below the primary Project session when execution creates them.
   - Prompt overrides are stored as node-id-keyed session configuration for nodes that are eligible for prompt override.
-  - Exact prompt override eligibility rules are TBD; implementation must not allow arbitrary node prompt mutation without a documented rule.
-  - Whether allowed session fields remain editable between configured-session creation and first start is TBD; implementation must resolve this before coding the pre-run UX.
+  - V2 prompt override eligibility is conservative and explicit:
+    - The target node must resolve in the selected workflow version, have `kind: "agent"`, use `runtime: "pibo"`, and expose a direct `promptTemplate`.
+    - The node must opt in through Workflow IR metadata with `metadata.sessionOverrides.prompt === true`.
+    - Nodes using `promptBuilder`, nested workflow nodes, human nodes, code nodes, adapter nodes, guards, edges, and state mappings are not prompt-override eligible in V2.
+    - A prompt override replaces only that eligible Agent node's prompt template in the effective session snapshot. It cannot change profile, tools, skills, context files, routing, retry, handler, adapter, guard, schema, or arbitrary options.
+  - Model, thinking level, and fast mode are workflow-session-wide settings in V2. They are stored once on the session snapshot and apply to every Pibo Agent node session started by the primary workflow run or its nested workflow runs. V2 does not expose per-Agent-node model, thinking, or fast-mode overrides.
+  - Configured-session fields are immutable after creation and before first start. The selected workflow id/version, input values, prompt overrides, model, thinking level, and fast mode cannot be edited in place; users create a new configured Project session when they need different values. Start still revalidates the stored snapshot before creating the one allowed run.
 
 - **Integration Points**:
   - Project service/session APIs for session name, Project id, Pibo Session id, workflow metadata, and configured state.

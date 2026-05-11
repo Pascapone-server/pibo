@@ -222,9 +222,11 @@ Disallowed in V2:
 - retry limit overrides;
 - arbitrary option overrides unless later specified.
 
+V2 prompt overrides apply only to explicitly opted-in Pibo Agent nodes with direct `promptTemplate` values. Model selection, thinking level, and fast mode apply workflow-session-wide to Pibo Agent node sessions. Configured-session values are immutable after creation and before start.
+
 #### Acceptance
 
-The run remains inspectable even if the workflow definition changes or is deleted. The snapshot records base workflow id/version/hash plus allowed overrides.
+The run remains inspectable even if the workflow definition changes or is deleted. The snapshot records base workflow id/version/hash plus allowed overrides and their scope rules.
 
 ### Requirement: Project Sessions sidebar shows only real Pibo Sessions
 
@@ -561,6 +563,9 @@ UI editing writes Pibo workflow nodes, edges, ports, adapters, guards, state, an
 - Code-registered workflows can be serialized into editable IR for duplication.
 - Existing JSON Schema subset remains the schema contract.
 - Existing Markdown editor patterns can be reused for prompt assets.
+- Session model, thinking level, and fast mode overrides are workflow-session-wide in V2.
+- Session prompt overrides target only explicitly opted-in Pibo Agent nodes with direct `promptTemplate` values.
+- Configured-session values are immutable after creation and before start.
 
 ### Open Questions
 
@@ -569,7 +574,6 @@ UI editing writes Pibo workflow nodes, edges, ports, adapters, guards, state, an
 - How should deleted workflows appear in historical run views?
 - What exact API routes should expose catalog, drafts, versions, publish, archive, delete, and run start?
 - Which graph/canvas library should V2 use?
-- How should model selection, thinking level, and fast mode map to node-level versus workflow-level execution?
 
 ## Traceability
 

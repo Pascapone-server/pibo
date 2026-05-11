@@ -164,6 +164,8 @@ The implementation MUST support:
 - Project session creation with session name and workflow id/version;
 - allowed session overrides: input, prompt overrides, model, thinking level, fast mode;
 - session-scoped overrides that do not persist back to the workflow definition;
+- prompt overrides keyed by node id and accepted only for explicitly opted-in Pibo Agent nodes with direct `promptTemplate` values;
+- workflow-session-wide model, thinking level, and fast mode settings, not per-Agent-node settings;
 - disallowed V2 overrides: agent profile overrides, retry limit overrides, arbitrary options;
 - configured/not-started state after session creation;
 - explicit start action;
@@ -186,10 +188,13 @@ The snapshot MUST record at minimum:
 - effective definition hash;
 - input values;
 - prompt overrides when present, keyed by node id for nodes eligible for prompt override;
-- model when present;
-- thinking level when present;
-- fast mode when present;
+- prompt override eligibility policy used when the snapshot was created;
+- model when present, with scope `workflow`;
+- thinking level when present, with scope `workflow`;
+- fast mode when present, with scope `workflow`;
 - creation timestamp.
+
+V2 configured-session values are immutable after creation and before first start. The update API MUST NOT change workflow id/version, input values, prompt overrides, model, thinking level, or fast mode in place. Users create a new configured Project session when those values need to change.
 
 ### 4.5 Builder Contract
 
@@ -463,9 +468,9 @@ The implementation MUST resolve and document these source-spec open questions be
 - deleted-workflow display and link behavior in historical Project run views;
 - exact API route contracts for catalog, drafts, versions, publish, archive, delete, Project session creation, and run start;
 - graph/canvas library for the visual editor;
-- workflow-level versus per-Agent-node behavior for model, thinking level, and fast mode overrides;
-- prompt override eligibility rules for workflow/session nodes;
 - prompt asset mutation versus prompt asset versioning behavior.
+
+Resolved Project session override decisions are documented in `03-project-session-selection-and-snapshots.md`: prompt overrides are limited to explicitly opted-in Pibo Agent nodes with direct `promptTemplate` values; model, thinking level, and fast mode are workflow-session-wide; configured-session values are immutable before start.
 
 ## 5. Risks & Roadmap
 
