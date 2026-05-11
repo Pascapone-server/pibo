@@ -49,7 +49,7 @@ export type WorkflowValueValidationOptions = {
 };
 
 export type WorkflowValidationOptions = {
-  registry?: Partial<Pick<WorkflowRegistry, "adapters" | "handlers">>;
+  registry?: Partial<Pick<WorkflowRegistry, "adapters" | "handlers" | "profiles">>;
 };
 
 type SchemaValidationContext = {
@@ -95,7 +95,7 @@ export function validateWorkflowDefinitionSchemas(
 
   for (const [nodeId, node] of Object.entries(definition.nodes)) {
     validateNodeSchemas(nodeId, node, diagnostics);
-    validateWorkflowAgentNodeRuntimeSelection(nodeId, node, diagnostics);
+    validateWorkflowAgentNodeRuntimeSelection(nodeId, node, diagnostics, options);
     validateWorkflowCodeNodeRef(nodeId, node, diagnostics, options);
     validateWorkflowAdapterNodeRef(nodeId, node, diagnostics, options);
   }
@@ -409,6 +409,7 @@ function validateWorkflowAgentNodeRuntimeSelection(
   nodeId: string,
   node: WorkflowNodeDefinition,
   diagnostics: WorkflowDiagnostic[],
+  options: WorkflowValidationOptions,
 ): void {
   if (node.kind !== "agent") {
     return;
@@ -427,10 +428,12 @@ function validateWorkflowAgentNodeRuntimeSelection(
   }
 
   const profile = rawNode.profile;
-  const profileIsFixed =
-    isRecord(profile) && profile.kind === "fixed" && typeof profile.id === "string" && profile.id.length > 0;
+  const profileId =
+    isRecord(profile) && profile.kind === "fixed" && typeof profile.id === "string" && profile.id.length > 0
+      ? profile.id
+      : undefined;
 
-  if (!profileIsFixed) {
+  if (!profileId) {
     diagnostics.push({
       code: "WorkflowGraphError.invalidAgentProfileSelection",
       message: `Workflow agent node '${nodeId}' must select a fixed Agent Designer profile in V1.`,
@@ -439,7 +442,21 @@ function validateWorkflowAgentNodeRuntimeSelection(
       path: `$.nodes.${nodeId}.profile`,
       hint: "Use fixedProfile('pibo-agent') or { kind: 'fixed', id: 'profile-id' }. Dynamic profile selection is not supported in V1.",
     });
+    return;
   }
+
+  if (!options.registry?.profiles || options.registry.profiles.has(profileId)) {
+    return;
+  }
+
+  diagnostics.push({
+    code: "WorkflowGraphError.unknownAgentProfileRef",
+    message: `Workflow agent node '${nodeId}' references Agent Designer profile '${profileId}', but it is not registered in the Workflow Registry.`,
+    severity: "error",
+    nodeId,
+    path: `$.nodes.${nodeId}.profile.id`,
+    hint: "Register the Agent Designer profile with registerWorkflowAgentProfile/createWorkflowRegistry before validating or executing this workflow, or update the node to use a registered fixed profile id.",
+  });
 }
 
 function validateWorkflowCodeNodeRef(

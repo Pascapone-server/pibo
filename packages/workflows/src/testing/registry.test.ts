@@ -6,9 +6,12 @@ import {
   adapterWorkflowFixture,
   createWorkflowRegistry,
   hasWorkflowAdapter,
+  hasWorkflowAgentProfile,
   mixedNodeWorkflowFixture,
   registerWorkflowAdapter,
+  registerWorkflowAgentProfile,
   resolveWorkflowAdapter,
+  resolveWorkflowAgentProfile,
   validateWorkflow,
   workflowFixtureProviders,
   workflowFixtureRegistryRefs,
@@ -16,6 +19,16 @@ import {
 import type { AdapterHandler, WorkflowDefinition } from "../index.js";
 
 describe("workflow registry adapter resolution", () => {
+  it("registers and resolves Agent Designer profiles by fixed profile id", () => {
+    const registry = createWorkflowRegistry(workflowFixtureProviders);
+
+    assert.equal(hasWorkflowAgentProfile(registry, "pibo-agent"), true);
+    assert.deepEqual(resolveWorkflowAgentProfile(registry, "pibo-agent")?.value.tools, ["read", "bash", "edit", "write"]);
+
+    registerWorkflowAgentProfile(registry, "fixture.agent.custom", { skills: ["custom-skill"] });
+    assert.deepEqual(resolveWorkflowAgentProfile(registry, "fixture.agent.custom")?.value.skills, ["custom-skill"]);
+  });
+
   it("registers and resolves deterministic TypeScript adapters by adapter ref", async () => {
     const registry = createWorkflowRegistry(workflowFixtureProviders);
     const ref = adapterRef(workflowFixtureRegistryRefs.adapters.textToTopic);
@@ -44,6 +57,31 @@ describe("workflow registry adapter resolution", () => {
     const entry = registerWorkflowAdapter(registry, "fixture.adapters.duplicate", second, { override: true });
     assert.equal(entry.value, second);
     assert.equal(resolveWorkflowAdapter(registry, "fixture.adapters.duplicate")?.value, second);
+  });
+
+  it("validates fixed Agent Designer profile refs against the Workflow Registry when one is provided", () => {
+    const registry = createWorkflowRegistry(workflowFixtureProviders);
+
+    assert.equal(validateWorkflow(adapterWorkflowFixture, { registry }).ok, true);
+
+    const definition = structuredClone(adapterWorkflowFixture) as WorkflowDefinition;
+    const collectNode = definition.nodes.collect;
+    assert.equal(collectNode.kind, "agent");
+    if (collectNode.kind === "agent") {
+      collectNode.profile = { kind: "fixed", id: "missing-profile" };
+    }
+
+    const result = validateWorkflow(definition, { registry });
+
+    assert.equal(result.ok, false);
+    assert.ok(
+      result.diagnostics.some(
+        (diagnostic) =>
+          diagnostic.code === "WorkflowGraphError.unknownAgentProfileRef" &&
+          diagnostic.nodeId === "collect" &&
+          diagnostic.path === "$.nodes.collect.profile.id",
+      ),
+    );
   });
 
   it("validates edge adapter refs against the Workflow Registry when one is provided", () => {

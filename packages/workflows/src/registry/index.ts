@@ -1,6 +1,7 @@
 import type {
   AdapterHandler,
   AdapterRef,
+  AgentProfileDefinition,
   CodeNodeHandler,
   GuardHandler,
   PromptBuilderHandler,
@@ -22,6 +23,7 @@ export type WorkflowRegistryEntryOptions = WorkflowRegistrationOptions & {
 export function createWorkflowRegistry(providers: WorkflowProviders = {}): WorkflowRegistry {
   const registry: WorkflowRegistry = {
     workflows: new Map(),
+    profiles: new Map(),
     handlers: new Map(),
     adapters: new Map(),
     guards: new Map(),
@@ -38,6 +40,10 @@ export function registerProviders(
   providers: WorkflowProviders,
   options: WorkflowRegistrationOptions = {},
 ): WorkflowRegistry {
+  for (const [id, profile] of Object.entries(providers.profiles ?? {})) {
+    registerWorkflowAgentProfile(registry, id, profile, options);
+  }
+
   for (const [id, handler] of Object.entries(providers.handlers ?? {})) {
     registerWorkflowHandler(registry, id, handler, options);
   }
@@ -99,6 +105,15 @@ export function resolveWorkflowDefinition(
   return [...versions].sort((left, right) => right.version.localeCompare(left.version))[0];
 }
 
+export function registerWorkflowAgentProfile(
+  registry: WorkflowRegistry,
+  id: RegistryRefId,
+  profile: AgentProfileDefinition,
+  options: WorkflowRegistryEntryOptions = {},
+): WorkflowRegistryEntry<AgentProfileDefinition> {
+  return registerRegistryEntry(registry.profiles, "agent profile", id, profile, options);
+}
+
 export function registerWorkflowHandler(
   registry: WorkflowRegistry,
   id: RegistryRefId,
@@ -147,6 +162,17 @@ export function registerWorkflowHumanAction(
 
   registry.humanActions.set(id, humanAction);
   return humanAction;
+}
+
+export function resolveWorkflowAgentProfile(
+  registry: Pick<WorkflowRegistry, "profiles">,
+  ref: RegistryRefId,
+): WorkflowRegistryEntry<AgentProfileDefinition> | undefined {
+  return registry.profiles.get(ref);
+}
+
+export function hasWorkflowAgentProfile(registry: Pick<WorkflowRegistry, "profiles">, ref: RegistryRefId): boolean {
+  return resolveWorkflowAgentProfile(registry, ref) !== undefined;
 }
 
 export function resolveWorkflowHandler(

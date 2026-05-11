@@ -8,6 +8,7 @@ import {
   json,
   recordWorkflowEdgeTransfer,
   registerWorkflowAdapter,
+  registerWorkflowAgentProfile,
   text,
   transferWorkflowEdgeAdapterData,
   transferWorkflowEdgeData,
@@ -348,6 +349,7 @@ describe("workflow edge data transfer", () => {
     definition.nodes.review.input = summaryPort;
     definition.edges["draft-to-review"].adapter = edgeAdapter(adapterRef("test.adapters.textToSummary"), summaryPort);
     const registry = createWorkflowRegistry();
+    registerWorkflowAgentProfile(registry, "pibo-agent", {});
     registerWorkflowAdapter(registry, "test.adapters.textToSummary", ({ input }) => ({
       output: { summary: String(input) },
     }));
@@ -378,6 +380,7 @@ describe("workflow edge data transfer", () => {
     definition.nodes.publish.input = text();
     definition.edges["compose-to-publish"].adapter = edgeAdapter(adapterRef("test.adapters.articleToReviewText"), text());
     const registry = createWorkflowRegistry();
+    registerWorkflowAgentProfile(registry, "pibo-agent", {});
     registerWorkflowAdapter(registry, "test.adapters.articleToReviewText", ({ input }) => {
       assert.equal(typeof input, "object");
       assert.notEqual(input, null);

@@ -85,6 +85,15 @@ export type AgentProfileSelection = {
   id: string;
 };
 
+export type AgentProfileDefinition = {
+  aliases?: string[];
+  tools?: string[];
+  nativeTools?: string[];
+  skills?: string[];
+  contextFiles?: string[];
+  metadata?: JsonObject;
+};
+
 export type SelectionPolicy =
   | { kind: "inherit" }
   | { kind: "only"; ids: string[] }
@@ -383,6 +392,7 @@ export type WorkflowRegistrationOptions = {
 
 export type WorkflowRegistry = {
   workflows: Map<WorkflowId, WorkflowDefinition[]>;
+  profiles: Map<RegistryRefId, WorkflowRegistryEntry<AgentProfileDefinition>>;
   handlers: Map<RegistryRefId, WorkflowRegistryEntry<CodeNodeHandler>>;
   adapters: Map<RegistryRefId, WorkflowRegistryEntry<AdapterHandler>>;
   guards: Map<RegistryRefId, WorkflowRegistryEntry<GuardHandler>>;
@@ -392,7 +402,7 @@ export type WorkflowRegistry = {
 
 export type WorkflowSetupOptions = {
   types?: Record<string, unknown>;
-  profiles?: Record<string, AgentProfileSelection>;
+  profiles?: Record<string, AgentProfileDefinition>;
   handlers?: Record<string, CodeNodeHandler>;
   guards?: Record<string, GuardHandler>;
   adapters?: Record<string, AdapterHandler>;
@@ -407,6 +417,7 @@ export type WorkflowSetup = {
 };
 
 export type WorkflowProviders = {
+  profiles?: Record<string, AgentProfileDefinition>;
   handlers?: Record<string, CodeNodeHandler>;
   adapters?: Record<string, AdapterHandler>;
   guards?: Record<string, GuardHandler>;

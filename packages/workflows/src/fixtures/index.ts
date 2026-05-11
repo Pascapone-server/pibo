@@ -568,6 +568,13 @@ const draftPromptBuilder: PromptBuilderHandler = ({ input }) => {
 };
 
 export const workflowFixtureProviders: WorkflowProviders = {
+  profiles: {
+    "pibo-agent": {
+      tools: ["read", "bash", "edit", "write"],
+      skills: [],
+      contextFiles: [],
+    },
+  },
   handlers: {
     [workflowFixtureRegistryRefs.handlers.makePlan]: makePlanHandler,
     [workflowFixtureRegistryRefs.handlers.reviseDraft]: reviseDraftHandler,
@@ -589,6 +596,7 @@ export const workflowFixtureProviders: WorkflowProviders = {
 };
 
 export const workflowFixtureSetupOptions: WorkflowSetupOptions = {
+  profiles: workflowFixtureProviders.profiles,
   handlers: workflowFixtureProviders.handlers,
   adapters: workflowFixtureProviders.adapters,
   guards: workflowFixtureProviders.guards,
