@@ -111,7 +111,7 @@
 
 ## 13. Documentation
 
-- [ ] 13.1 Add canonical workflow capability docs after implementation decisions are confirmed.
+- [x] 13.1 Add canonical workflow capability docs after implementation decisions are confirmed.
 - [ ] 13.2 Document minimal workflow definition examples.
 - [ ] 13.3 Document interface adapters with examples.
 - [ ] 13.4 Document XState-backed projection semantics.
