@@ -366,6 +366,47 @@ export type WorkflowDefinitionSnapshot = {
 
 export type WorkflowRecordSource = "code" | "ui";
 export type WorkflowRecordStatus = "draft" | "published" | "archived";
+export type WorkflowDraftId = string;
+export type WorkflowVersionIntent = "patch" | "minor" | "major";
+export type WorkflowDraftValidationState = "unknown" | "valid" | "warning" | "error";
+
+export type PartialWorkflowDefinition = Partial<WorkflowDefinition> & {
+  id?: WorkflowId;
+  version?: WorkflowVersion;
+};
+
+export type WorkflowIdentityRecord = {
+  workflowId: WorkflowId;
+  source: "ui";
+  title: string;
+  description?: string;
+  tags: string[];
+  currentDraftId?: WorkflowDraftId;
+  latestVersion?: WorkflowVersion;
+  createdBy?: string;
+  createdAt: string;
+  updatedBy?: string;
+  updatedAt: string;
+};
+
+export type WorkflowDraftRecord = {
+  draftId: WorkflowDraftId;
+  workflowId: WorkflowId;
+  source: "ui";
+  status: "draft";
+  baseWorkflowId?: WorkflowId;
+  baseWorkflowVersion?: WorkflowVersion;
+  baseDefinitionHash?: string;
+  versionIntent: WorkflowVersionIntent;
+  definition: PartialWorkflowDefinition;
+  diagnostics: WorkflowDiagnostic[];
+  validationState: WorkflowDraftValidationState;
+  revision: number;
+  createdBy?: string;
+  createdAt: string;
+  updatedBy?: string;
+  updatedAt: string;
+};
 
 export type WorkflowPublishedVersionRecord = {
   workflowId: WorkflowId;
@@ -378,6 +419,49 @@ export type WorkflowPublishedVersionRecord = {
   publishedBy?: string;
   publishedAt: string;
   createdAt: string;
+};
+
+export type WorkflowArchiveStateRecord = {
+  workflowId: WorkflowId;
+  source: "ui";
+  archived: boolean;
+  archivedAt?: string;
+  archivedBy?: string;
+  archiveReason?: string;
+  updatedAt: string;
+};
+
+export type WorkflowDeleteTombstoneRecord = {
+  workflowId: WorkflowId;
+  source: "ui";
+  deleted: true;
+  deletedAt?: string;
+  deletedBy?: string;
+  lastKnownTitle: string;
+  lastKnownVersion?: WorkflowVersion;
+  lastDefinitionHash?: string;
+  createdAt: string;
+};
+
+export type WorkflowCatalogRecord = {
+  id: string;
+  workflowId: WorkflowId;
+  version?: WorkflowVersion;
+  draftId?: WorkflowDraftId;
+  title: string;
+  description?: string;
+  tags: string[];
+  source: WorkflowRecordSource;
+  status: WorkflowRecordStatus;
+  versions: WorkflowVersion[];
+  currentDraftId?: WorkflowDraftId;
+  validationState?: WorkflowDraftValidationState;
+  diagnostics?: WorkflowDiagnostic[];
+  definitionHash?: string;
+  editable: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  archivedAt?: string;
 };
 
 export type DiagnosticSeverity = "info" | "warning" | "error";

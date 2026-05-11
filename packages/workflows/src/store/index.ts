@@ -9,17 +9,22 @@ import type {
   NodeAttempt,
   NodeAttemptId,
   NodeAttemptStatus,
+  WorkflowArchiveStateRecord,
   WorkflowCheckpoint,
   WorkflowCheckpointId,
   WorkflowDefinition,
   WorkflowDefinitionSnapshot,
   WorkflowDefinitionSnapshotId,
+  WorkflowDeleteTombstoneRecord,
+  WorkflowDraftRecord,
+  WorkflowDraftValidationState,
   WorkflowEventId,
   WorkflowEventRecord,
   WorkflowExecutionEnvironment,
   WorkflowHumanActionId,
-  WorkflowHumanActionRecord,
   WorkflowHumanActionKind,
+  WorkflowHumanActionRecord,
+  WorkflowIdentityRecord,
   WorkflowPublishedVersionRecord,
   WorkflowRecordSource,
   WorkflowRecordStatus,
@@ -35,11 +40,15 @@ import type {
 } from "../types/index.js";
 
 export const WORKFLOW_SQLITE_FILENAME = "pibo-workflows.sqlite";
-export const WORKFLOW_SQLITE_SCHEMA_VERSION = 2;
+export const WORKFLOW_SQLITE_SCHEMA_VERSION = 3;
 
 export const WORKFLOW_SQLITE_TABLES = [
   "workflow_definition_snapshots",
+  "workflow_identities",
+  "workflow_drafts",
   "workflow_published_versions",
+  "workflow_archive_states",
+  "workflow_delete_tombstones",
   "workflow_runs",
   "workflow_events",
   "workflow_node_attempts",
@@ -81,6 +90,30 @@ export type WorkflowDefinitionSnapshotStore = {
   saveDefinitionSnapshot(snapshot: WorkflowDefinitionSnapshot): void | Promise<void>;
   getDefinitionSnapshot(id: WorkflowDefinitionSnapshotId): WorkflowDefinitionSnapshot | undefined | Promise<WorkflowDefinitionSnapshot | undefined>;
   listDefinitionSnapshots(filter?: WorkflowDefinitionSnapshotListFilter): WorkflowDefinitionSnapshot[] | Promise<WorkflowDefinitionSnapshot[]>;
+};
+
+export type WorkflowIdentityStore = {
+  saveWorkflowIdentity(record: WorkflowIdentityRecord): void | Promise<void>;
+  getWorkflowIdentity(workflowId: string): WorkflowIdentityRecord | undefined | Promise<WorkflowIdentityRecord | undefined>;
+  listWorkflowIdentities(filter?: WorkflowIdentityListFilter): WorkflowIdentityRecord[] | Promise<WorkflowIdentityRecord[]>;
+};
+
+export type WorkflowDraftStore = {
+  saveWorkflowDraft(record: WorkflowDraftRecord): void | Promise<void>;
+  getWorkflowDraft(draftId: string): WorkflowDraftRecord | undefined | Promise<WorkflowDraftRecord | undefined>;
+  listWorkflowDrafts(filter?: WorkflowDraftListFilter): WorkflowDraftRecord[] | Promise<WorkflowDraftRecord[]>;
+};
+
+export type WorkflowArchiveStateStore = {
+  saveWorkflowArchiveState(record: WorkflowArchiveStateRecord): void | Promise<void>;
+  getWorkflowArchiveState(workflowId: string): WorkflowArchiveStateRecord | undefined | Promise<WorkflowArchiveStateRecord | undefined>;
+  listWorkflowArchiveStates(filter?: WorkflowArchiveStateListFilter): WorkflowArchiveStateRecord[] | Promise<WorkflowArchiveStateRecord[]>;
+};
+
+export type WorkflowDeleteTombstoneStore = {
+  saveWorkflowDeleteTombstone(record: WorkflowDeleteTombstoneRecord): void | Promise<void>;
+  getWorkflowDeleteTombstone(workflowId: string): WorkflowDeleteTombstoneRecord | undefined | Promise<WorkflowDeleteTombstoneRecord | undefined>;
+  listWorkflowDeleteTombstones(filter?: WorkflowDeleteTombstoneListFilter): WorkflowDeleteTombstoneRecord[] | Promise<WorkflowDeleteTombstoneRecord[]>;
 };
 
 export type CreateWorkflowPublishedVersionRecordInput = Omit<WorkflowPublishedVersionRecord, "source" | "status" | "definitionHash"> & {
@@ -148,6 +181,26 @@ export type WorkflowDefinitionSnapshotListFilter = {
   workflowId?: string;
   workflowVersion?: string;
   hash?: string;
+  limit?: number;
+};
+
+export type WorkflowIdentityListFilter = {
+  workflowId?: string;
+  limit?: number;
+};
+
+export type WorkflowDraftListFilter = {
+  workflowId?: string;
+  validationState?: WorkflowDraftValidationState;
+  limit?: number;
+};
+
+export type WorkflowArchiveStateListFilter = {
+  archived?: boolean;
+  limit?: number;
+};
+
+export type WorkflowDeleteTombstoneListFilter = {
   limit?: number;
 };
 
@@ -244,6 +297,61 @@ type WorkflowDefinitionSnapshotRow = {
   workflow_version: string;
   definition_hash: string;
   compiled_definition_json: string;
+  created_at: string;
+};
+
+type WorkflowIdentityRow = {
+  workflow_id: string;
+  source: WorkflowRecordSource;
+  title: string;
+  description: string | null;
+  tags_json: string;
+  current_draft_id: string | null;
+  latest_version: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_by: string | null;
+  updated_at: string;
+};
+
+type WorkflowDraftRow = {
+  draft_id: string;
+  workflow_id: string;
+  source: WorkflowRecordSource;
+  status: WorkflowRecordStatus;
+  base_workflow_id: string | null;
+  base_workflow_version: string | null;
+  base_definition_hash: string | null;
+  version_intent: "patch" | "minor" | "major";
+  definition_json: string;
+  diagnostics_json: string;
+  validation_state: WorkflowDraftValidationState;
+  revision: number;
+  created_by: string | null;
+  created_at: string;
+  updated_by: string | null;
+  updated_at: string;
+};
+
+type WorkflowArchiveStateRow = {
+  workflow_id: string;
+  source: WorkflowRecordSource;
+  archived: number;
+  archived_at: string | null;
+  archived_by: string | null;
+  archive_reason: string | null;
+  updated_at: string;
+};
+
+type WorkflowDeleteTombstoneRow = {
+  workflow_id: string;
+  source: WorkflowRecordSource;
+  deleted: number;
+  deleted_at: string | null;
+  deleted_by: string | null;
+  last_known_title: string;
+  last_known_version: string | null;
+  last_definition_hash: string | null;
   created_at: string;
 };
 
@@ -397,7 +505,11 @@ function assertPublishedWorkflowVersionIsSame(
 export class SqliteWorkflowRunStore implements
   WorkflowRunStore,
   WorkflowDefinitionSnapshotStore,
+  WorkflowIdentityStore,
+  WorkflowDraftStore,
   WorkflowPublishedVersionStore,
+  WorkflowArchiveStateStore,
+  WorkflowDeleteTombstoneStore,
   WorkflowEventStore,
   WorkflowWaitTokenStore,
   WorkflowNodeAttemptStore,
@@ -429,6 +541,47 @@ export class SqliteWorkflowRunStore implements
       CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_definition_snapshots_hash
         ON workflow_definition_snapshots(workflow_id, workflow_version, definition_hash);
 
+      CREATE TABLE IF NOT EXISTS workflow_identities (
+        workflow_id TEXT PRIMARY KEY,
+        source TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        tags_json TEXT NOT NULL,
+        current_draft_id TEXT,
+        latest_version TEXT,
+        created_by TEXT,
+        created_at TEXT NOT NULL,
+        updated_by TEXT,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_workflow_identities_updated
+        ON workflow_identities(updated_at, workflow_id);
+
+      CREATE TABLE IF NOT EXISTS workflow_drafts (
+        draft_id TEXT PRIMARY KEY,
+        workflow_id TEXT NOT NULL,
+        source TEXT NOT NULL,
+        status TEXT NOT NULL,
+        base_workflow_id TEXT,
+        base_workflow_version TEXT,
+        base_definition_hash TEXT,
+        version_intent TEXT NOT NULL,
+        definition_json TEXT NOT NULL,
+        diagnostics_json TEXT NOT NULL,
+        validation_state TEXT NOT NULL,
+        revision INTEGER NOT NULL,
+        created_by TEXT,
+        created_at TEXT NOT NULL,
+        updated_by TEXT,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_workflow_drafts_workflow
+        ON workflow_drafts(workflow_id, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_workflow_drafts_validation
+        ON workflow_drafts(validation_state, updated_at);
+
       CREATE TABLE IF NOT EXISTS workflow_published_versions (
         workflow_id TEXT NOT NULL,
         version TEXT NOT NULL,
@@ -447,6 +600,34 @@ export class SqliteWorkflowRunStore implements
         ON workflow_published_versions(workflow_id, version);
       CREATE INDEX IF NOT EXISTS idx_workflow_published_versions_published_at
         ON workflow_published_versions(published_at);
+
+      CREATE TABLE IF NOT EXISTS workflow_archive_states (
+        workflow_id TEXT PRIMARY KEY,
+        source TEXT NOT NULL,
+        archived INTEGER NOT NULL,
+        archived_at TEXT,
+        archived_by TEXT,
+        archive_reason TEXT,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_workflow_archive_states_archived
+        ON workflow_archive_states(archived, updated_at);
+
+      CREATE TABLE IF NOT EXISTS workflow_delete_tombstones (
+        workflow_id TEXT PRIMARY KEY,
+        source TEXT NOT NULL,
+        deleted INTEGER NOT NULL,
+        deleted_at TEXT,
+        deleted_by TEXT,
+        last_known_title TEXT NOT NULL,
+        last_known_version TEXT,
+        last_definition_hash TEXT,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_workflow_delete_tombstones_created
+        ON workflow_delete_tombstones(created_at);
 
       CREATE TABLE IF NOT EXISTS workflow_runs (
         id TEXT PRIMARY KEY,
@@ -698,6 +879,250 @@ export class SqliteWorkflowRunStore implements
       .prepare(`SELECT * FROM workflow_definition_snapshots ${where} ORDER BY created_at DESC LIMIT ?`)
       .all(...values, limit) as WorkflowDefinitionSnapshotRow[];
     return rows.map(workflowDefinitionSnapshotFromRow);
+  }
+
+  saveWorkflowIdentity(record: WorkflowIdentityRecord): void {
+    this.db.prepare(`
+      INSERT INTO workflow_identities (
+        workflow_id,
+        source,
+        title,
+        description,
+        tags_json,
+        current_draft_id,
+        latest_version,
+        created_by,
+        created_at,
+        updated_by,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(workflow_id) DO UPDATE SET
+        source = excluded.source,
+        title = excluded.title,
+        description = excluded.description,
+        tags_json = excluded.tags_json,
+        current_draft_id = excluded.current_draft_id,
+        latest_version = excluded.latest_version,
+        created_by = excluded.created_by,
+        created_at = excluded.created_at,
+        updated_by = excluded.updated_by,
+        updated_at = excluded.updated_at
+    `).run(
+      record.workflowId,
+      record.source,
+      record.title,
+      record.description ?? null,
+      serialize(record.tags),
+      record.currentDraftId ?? null,
+      record.latestVersion ?? null,
+      record.createdBy ?? null,
+      record.createdAt,
+      record.updatedBy ?? null,
+      record.updatedAt,
+    );
+  }
+
+  getWorkflowIdentity(workflowId: string): WorkflowIdentityRecord | undefined {
+    const row = this.db.prepare("SELECT * FROM workflow_identities WHERE workflow_id = ?").get(workflowId) as
+      | WorkflowIdentityRow
+      | undefined;
+    return row ? workflowIdentityFromRow(row) : undefined;
+  }
+
+  listWorkflowIdentities(filter: WorkflowIdentityListFilter = {}): WorkflowIdentityRecord[] {
+    const clauses: string[] = [];
+    const values: Array<string | number> = [];
+    if (filter.workflowId !== undefined) {
+      clauses.push("workflow_id = ?");
+      values.push(filter.workflowId);
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    const limit = listLimit(filter.limit);
+    const rows = this.db
+      .prepare(`SELECT * FROM workflow_identities ${where} ORDER BY updated_at DESC, workflow_id ASC LIMIT ?`)
+      .all(...values, limit) as WorkflowIdentityRow[];
+    return rows.map(workflowIdentityFromRow);
+  }
+
+  saveWorkflowDraft(record: WorkflowDraftRecord): void {
+    this.db.prepare(`
+      INSERT INTO workflow_drafts (
+        draft_id,
+        workflow_id,
+        source,
+        status,
+        base_workflow_id,
+        base_workflow_version,
+        base_definition_hash,
+        version_intent,
+        definition_json,
+        diagnostics_json,
+        validation_state,
+        revision,
+        created_by,
+        created_at,
+        updated_by,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(draft_id) DO UPDATE SET
+        workflow_id = excluded.workflow_id,
+        source = excluded.source,
+        status = excluded.status,
+        base_workflow_id = excluded.base_workflow_id,
+        base_workflow_version = excluded.base_workflow_version,
+        base_definition_hash = excluded.base_definition_hash,
+        version_intent = excluded.version_intent,
+        definition_json = excluded.definition_json,
+        diagnostics_json = excluded.diagnostics_json,
+        validation_state = excluded.validation_state,
+        revision = excluded.revision,
+        created_by = excluded.created_by,
+        created_at = excluded.created_at,
+        updated_by = excluded.updated_by,
+        updated_at = excluded.updated_at
+    `).run(
+      record.draftId,
+      record.workflowId,
+      record.source,
+      record.status,
+      record.baseWorkflowId ?? null,
+      record.baseWorkflowVersion ?? null,
+      record.baseDefinitionHash ?? null,
+      record.versionIntent,
+      serialize(record.definition),
+      serialize(record.diagnostics),
+      record.validationState,
+      record.revision,
+      record.createdBy ?? null,
+      record.createdAt,
+      record.updatedBy ?? null,
+      record.updatedAt,
+    );
+  }
+
+  getWorkflowDraft(draftId: string): WorkflowDraftRecord | undefined {
+    const row = this.db.prepare("SELECT * FROM workflow_drafts WHERE draft_id = ?").get(draftId) as WorkflowDraftRow | undefined;
+    return row ? workflowDraftFromRow(row) : undefined;
+  }
+
+  listWorkflowDrafts(filter: WorkflowDraftListFilter = {}): WorkflowDraftRecord[] {
+    const clauses: string[] = [];
+    const values: Array<string | number> = [];
+    if (filter.workflowId !== undefined) {
+      clauses.push("workflow_id = ?");
+      values.push(filter.workflowId);
+    }
+    if (filter.validationState !== undefined) {
+      clauses.push("validation_state = ?");
+      values.push(filter.validationState);
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    const limit = listLimit(filter.limit);
+    const rows = this.db
+      .prepare(`SELECT * FROM workflow_drafts ${where} ORDER BY updated_at DESC, draft_id ASC LIMIT ?`)
+      .all(...values, limit) as WorkflowDraftRow[];
+    return rows.map(workflowDraftFromRow);
+  }
+
+  saveWorkflowArchiveState(record: WorkflowArchiveStateRecord): void {
+    this.db.prepare(`
+      INSERT INTO workflow_archive_states (
+        workflow_id,
+        source,
+        archived,
+        archived_at,
+        archived_by,
+        archive_reason,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(workflow_id) DO UPDATE SET
+        source = excluded.source,
+        archived = excluded.archived,
+        archived_at = excluded.archived_at,
+        archived_by = excluded.archived_by,
+        archive_reason = excluded.archive_reason,
+        updated_at = excluded.updated_at
+    `).run(
+      record.workflowId,
+      record.source,
+      record.archived ? 1 : 0,
+      record.archivedAt ?? null,
+      record.archivedBy ?? null,
+      record.archiveReason ?? null,
+      record.updatedAt,
+    );
+  }
+
+  getWorkflowArchiveState(workflowId: string): WorkflowArchiveStateRecord | undefined {
+    const row = this.db.prepare("SELECT * FROM workflow_archive_states WHERE workflow_id = ?").get(workflowId) as
+      | WorkflowArchiveStateRow
+      | undefined;
+    return row ? workflowArchiveStateFromRow(row) : undefined;
+  }
+
+  listWorkflowArchiveStates(filter: WorkflowArchiveStateListFilter = {}): WorkflowArchiveStateRecord[] {
+    const clauses: string[] = [];
+    const values: Array<string | number> = [];
+    if (filter.archived !== undefined) {
+      clauses.push("archived = ?");
+      values.push(filter.archived ? 1 : 0);
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    const limit = listLimit(filter.limit);
+    const rows = this.db
+      .prepare(`SELECT * FROM workflow_archive_states ${where} ORDER BY updated_at DESC, workflow_id ASC LIMIT ?`)
+      .all(...values, limit) as WorkflowArchiveStateRow[];
+    return rows.map(workflowArchiveStateFromRow);
+  }
+
+  saveWorkflowDeleteTombstone(record: WorkflowDeleteTombstoneRecord): void {
+    this.db.prepare(`
+      INSERT INTO workflow_delete_tombstones (
+        workflow_id,
+        source,
+        deleted,
+        deleted_at,
+        deleted_by,
+        last_known_title,
+        last_known_version,
+        last_definition_hash,
+        created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(workflow_id) DO UPDATE SET
+        source = excluded.source,
+        deleted = excluded.deleted,
+        deleted_at = excluded.deleted_at,
+        deleted_by = excluded.deleted_by,
+        last_known_title = excluded.last_known_title,
+        last_known_version = excluded.last_known_version,
+        last_definition_hash = excluded.last_definition_hash,
+        created_at = excluded.created_at
+    `).run(
+      record.workflowId,
+      record.source,
+      1,
+      record.deletedAt ?? null,
+      record.deletedBy ?? null,
+      record.lastKnownTitle,
+      record.lastKnownVersion ?? null,
+      record.lastDefinitionHash ?? null,
+      record.createdAt,
+    );
+  }
+
+  getWorkflowDeleteTombstone(workflowId: string): WorkflowDeleteTombstoneRecord | undefined {
+    const row = this.db.prepare("SELECT * FROM workflow_delete_tombstones WHERE workflow_id = ?").get(workflowId) as
+      | WorkflowDeleteTombstoneRow
+      | undefined;
+    return row ? workflowDeleteTombstoneFromRow(row) : undefined;
+  }
+
+  listWorkflowDeleteTombstones(filter: WorkflowDeleteTombstoneListFilter = {}): WorkflowDeleteTombstoneRecord[] {
+    const limit = listLimit(filter.limit);
+    const rows = this.db
+      .prepare("SELECT * FROM workflow_delete_tombstones ORDER BY created_at DESC, workflow_id ASC LIMIT ?")
+      .all(limit) as WorkflowDeleteTombstoneRow[];
+    return rows.map(workflowDeleteTombstoneFromRow);
   }
 
   savePublishedWorkflowVersion(record: WorkflowPublishedVersionRecord): void {
@@ -1385,6 +1810,69 @@ function workflowDefinitionSnapshotFromRow(row: WorkflowDefinitionSnapshotRow): 
     workflowVersion: row.workflow_version,
     hash: row.definition_hash,
     definition: parseJson(row.compiled_definition_json),
+    createdAt: row.created_at,
+  };
+}
+
+function workflowIdentityFromRow(row: WorkflowIdentityRow): WorkflowIdentityRecord {
+  return {
+    workflowId: row.workflow_id,
+    source: "ui",
+    title: row.title,
+    ...(row.description ? { description: row.description } : {}),
+    tags: parseJson<string[]>(row.tags_json),
+    ...(row.current_draft_id ? { currentDraftId: row.current_draft_id } : {}),
+    ...(row.latest_version ? { latestVersion: row.latest_version } : {}),
+    ...(row.created_by ? { createdBy: row.created_by } : {}),
+    createdAt: row.created_at,
+    ...(row.updated_by ? { updatedBy: row.updated_by } : {}),
+    updatedAt: row.updated_at,
+  };
+}
+
+function workflowDraftFromRow(row: WorkflowDraftRow): WorkflowDraftRecord {
+  return {
+    draftId: row.draft_id,
+    workflowId: row.workflow_id,
+    source: "ui",
+    status: "draft",
+    ...(row.base_workflow_id ? { baseWorkflowId: row.base_workflow_id } : {}),
+    ...(row.base_workflow_version ? { baseWorkflowVersion: row.base_workflow_version } : {}),
+    ...(row.base_definition_hash ? { baseDefinitionHash: row.base_definition_hash } : {}),
+    versionIntent: row.version_intent,
+    definition: parseJson<WorkflowDraftRecord["definition"]>(row.definition_json),
+    diagnostics: parseJson<WorkflowDraftRecord["diagnostics"]>(row.diagnostics_json),
+    validationState: row.validation_state,
+    revision: row.revision,
+    ...(row.created_by ? { createdBy: row.created_by } : {}),
+    createdAt: row.created_at,
+    ...(row.updated_by ? { updatedBy: row.updated_by } : {}),
+    updatedAt: row.updated_at,
+  };
+}
+
+function workflowArchiveStateFromRow(row: WorkflowArchiveStateRow): WorkflowArchiveStateRecord {
+  return {
+    workflowId: row.workflow_id,
+    source: "ui",
+    archived: Boolean(row.archived),
+    ...(row.archived_at ? { archivedAt: row.archived_at } : {}),
+    ...(row.archived_by ? { archivedBy: row.archived_by } : {}),
+    ...(row.archive_reason ? { archiveReason: row.archive_reason } : {}),
+    updatedAt: row.updated_at,
+  };
+}
+
+function workflowDeleteTombstoneFromRow(row: WorkflowDeleteTombstoneRow): WorkflowDeleteTombstoneRecord {
+  return {
+    workflowId: row.workflow_id,
+    source: "ui",
+    deleted: true,
+    ...(row.deleted_at ? { deletedAt: row.deleted_at } : {}),
+    ...(row.deleted_by ? { deletedBy: row.deleted_by } : {}),
+    lastKnownTitle: row.last_known_title,
+    ...(row.last_known_version ? { lastKnownVersion: row.last_known_version } : {}),
+    ...(row.last_definition_hash ? { lastDefinitionHash: row.last_definition_hash } : {}),
     createdAt: row.created_at,
   };
 }
