@@ -160,7 +160,14 @@ describe("workflow agent node dispatch", () => {
       createNodeAttemptId: () => "wna_agent_resolved_profile",
       profileResolver: ({ selection, nodeId }) => {
         order.push(`resolve:${nodeId}:${selection.id}`);
-        return { id: "writer-profile", requestedId: selection.id, aliases: [selection.id] };
+        return {
+          id: "writer-profile",
+          requestedId: selection.id,
+          aliases: [selection.id],
+          tools: ["read", "web_search"],
+          skills: ["workflow-writing"],
+          contextFiles: ["AGENTS.md"],
+        };
       },
       agentExecutor: createPiboSessionRoutingAgentExecutor({
         routing: {
@@ -192,7 +199,25 @@ describe("workflow agent node dispatch", () => {
     });
 
     assert.equal(result.ok, true);
-    assert.equal(result.nodeAttempt.metadata?.runtime?.profileId, "writer-profile");
+    assert.deepEqual(result.nodeAttempt.metadata?.runtime, {
+      profileId: "writer-profile",
+      requestedProfileId: "writer-alias",
+      selectedProfile: {
+        id: "writer-profile",
+        requestedId: "writer-alias",
+        aliases: ["writer-alias"],
+      },
+      tools: ["read", "web_search"],
+      skills: ["workflow-writing"],
+      contextFiles: ["AGENTS.md"],
+      routing: {
+        parentSessionId: "ps_parent_agent",
+        ownerScope: "user:agent-node",
+        projectId: "project_agent_node",
+        roomId: "room_agent_node",
+        channel: "chat",
+      },
+    });
     assert.deepEqual(order, [
       "resolve:draft:writer-alias",
       "createSession:writer-profile",

@@ -8,6 +8,7 @@ import type {
   EdgeTransfer,
   EdgeTransferId,
   HumanNodeDefinition,
+  JsonObject,
   JsonValue,
   NestedWorkflowNodeDefinition,
   NodeAttempt,
@@ -49,6 +50,11 @@ export type ResolvedAgentProfile = {
   id: string;
   requestedId: string;
   aliases?: string[];
+  tools?: string[];
+  nativeTools?: string[];
+  skills?: string[];
+  contextFiles?: string[];
+  metadata?: JsonObject;
 };
 
 export type AgentProfileResolverContext = {
@@ -640,13 +646,12 @@ export async function dispatchWorkflowAgentNode(
       });
     }
 
-    const runtimeMetadata: RuntimeSelectionMetadata = {
-      profileId: executorResult.effectiveProfile ?? profileResolution.profile.id,
-      ...(executorResult.effectiveTools ? { tools: executorResult.effectiveTools } : {}),
-      ...(executorResult.effectiveSkills ? { skills: executorResult.effectiveSkills } : {}),
-      ...(executorResult.effectiveContextFiles ? { contextFiles: executorResult.effectiveContextFiles } : {}),
-      ...(agentNode.routing ? { routing: agentNode.routing } : {}),
-    };
+    const runtimeMetadata = createAgentRuntimeSelectionMetadata({
+      run,
+      node: agentNode,
+      profile: profileResolution.profile,
+      executorResult,
+    });
 
     const completedAt = timestamp();
     nodeAttempt.status = "completed";
@@ -2069,13 +2074,12 @@ export async function runOneNodeAgentWorkflow(
       });
     }
 
-    const runtimeMetadata: RuntimeSelectionMetadata = {
-      profileId: executorResult.effectiveProfile ?? profileResolution.profile.id,
-      ...(executorResult.effectiveTools ? { tools: executorResult.effectiveTools } : {}),
-      ...(executorResult.effectiveSkills ? { skills: executorResult.effectiveSkills } : {}),
-      ...(executorResult.effectiveContextFiles ? { contextFiles: executorResult.effectiveContextFiles } : {}),
-      ...(node.routing ? { routing: node.routing } : {}),
-    };
+    const runtimeMetadata = createAgentRuntimeSelectionMetadata({
+      run,
+      node,
+      profile: profileResolution.profile,
+      executorResult,
+    });
 
     const completedAt = timestamp();
     nodeAttempt.status = "completed";
@@ -2715,6 +2719,45 @@ async function resolveAgentProfileForRuntime(options: {
       },
     };
   }
+}
+
+function createAgentRuntimeSelectionMetadata(options: {
+  run: WorkflowRun;
+  node: AgentNodeDefinition;
+  profile: ResolvedAgentProfile;
+  executorResult: OneNodeAgentExecutorResult;
+}): RuntimeSelectionMetadata {
+  const tools = options.executorResult.effectiveTools ?? options.profile.tools ?? options.profile.nativeTools;
+  const skills = options.executorResult.effectiveSkills ?? options.profile.skills;
+  const contextFiles = options.executorResult.effectiveContextFiles ?? options.profile.contextFiles;
+
+  return {
+    profileId: options.executorResult.effectiveProfile ?? options.profile.id,
+    requestedProfileId: options.profile.requestedId,
+    selectedProfile: {
+      id: options.profile.id,
+      requestedId: options.profile.requestedId,
+      ...(options.profile.aliases ? { aliases: options.profile.aliases } : {}),
+      ...(options.profile.metadata ? { metadata: options.profile.metadata } : {}),
+    },
+    ...(tools ? { tools } : {}),
+    ...(skills ? { skills } : {}),
+    ...(contextFiles ? { contextFiles } : {}),
+    routing: createAgentRuntimeRoutingMetadata(options.run, options.node.routing),
+  };
+}
+
+function createAgentRuntimeRoutingMetadata(
+  run: WorkflowRun,
+  routing: AgentNodeDefinition["routing"],
+): NonNullable<RuntimeSelectionMetadata["routing"]> {
+  return {
+    ...(routing?.parentSessionId ? { parentSessionId: routing.parentSessionId } : {}),
+    ownerScope: routing?.ownerScope ?? run.ownerScope,
+    ...(routing?.projectId ? { projectId: routing.projectId } : {}),
+    ...(routing?.roomId ? { roomId: routing.roomId } : {}),
+    ...(routing?.channel ? { channel: routing.channel } : {}),
+  };
 }
 
 function buildAgentNodePrompt(node: AgentNodeDefinition, input: WorkflowValue): string {

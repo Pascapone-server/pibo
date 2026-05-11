@@ -103,8 +103,17 @@ export type SessionRoutingPolicy = {
   channel?: string;
 };
 
+export type RuntimeAgentProfileMetadata = {
+  id: string;
+  requestedId: string;
+  aliases?: string[];
+  metadata?: JsonObject;
+};
+
 export type RuntimeSelectionMetadata = {
   profileId: string;
+  requestedProfileId?: string;
+  selectedProfile?: RuntimeAgentProfileMetadata;
   tools?: string[];
   skills?: string[];
   contextFiles?: string[];
