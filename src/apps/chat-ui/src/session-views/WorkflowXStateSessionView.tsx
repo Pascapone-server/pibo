@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Activity, AlertTriangle, CheckCircle2, Circle, Clock3, GitBranch, Layers3, Route, XCircle } from "lucide-react";
+import { Activity, AlertTriangle, CheckCircle2, Circle, Clock3, GitBranch, Layers3, ListChecks, Route, XCircle } from "lucide-react";
 import { JsonRenderer } from "../tracing/JsonRenderer";
 import type { PiboProjectSession, PiboSessionTraceView, PiboWebSessionStatus } from "../types";
 import type { ChatSessionViewProps } from "./types";
@@ -55,7 +55,10 @@ export function WorkflowXStateSessionView({
 				<WorkflowGraph nodes={workflowModel.nodes} edges={workflowModel.edges} />
 				<div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
 					<WorkflowRuntimeSnapshot model={workflowModel} />
-					<WorkflowProjectionFacts model={workflowModel} />
+					<div className="flex min-w-0 flex-col gap-4">
+						<WorkflowNodeStatusList model={workflowModel} />
+						<WorkflowProjectionFacts model={workflowModel} />
+					</div>
 				</div>
 			</div>
 		</section>
@@ -156,6 +159,43 @@ function WorkflowRuntimeSnapshot({ model }: { model: WorkflowProjectSessionUiMod
 	);
 }
 
+function WorkflowNodeStatusList({ model }: { model: WorkflowProjectSessionUiModel }) {
+	return (
+		<div className="rounded-sm border border-slate-800 bg-[#111820] p-4 text-sm">
+			<div className="mb-3 flex items-center justify-between gap-3">
+				<div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500">
+					<ListChecks size={14} />
+					Node Statuses
+				</div>
+				<span className="font-mono text-[11px] text-slate-500">{model.nodes.length} nodes</span>
+			</div>
+			<div className="space-y-2">
+				{model.nodes.map((node) => (
+					<div key={node.id} className={`rounded-sm border px-3 py-2 ${nodeCardClass(node.status)}`}>
+						<div className="flex min-w-0 items-start justify-between gap-3">
+							<div className="flex min-w-0 items-start gap-2">
+								<span className="mt-0.5 shrink-0"><WorkflowStatusIcon status={node.status} /></span>
+								<div className="min-w-0">
+									<div className="truncate text-sm font-semibold text-slate-100">{node.label}</div>
+									<div className="mt-0.5 truncate font-mono text-[11px] text-slate-500">{node.id}</div>
+								</div>
+							</div>
+							<div className="flex shrink-0 flex-col items-end gap-1">
+								<span className={`rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${statusTextClass(node.status)}`}>{node.status}</span>
+								<span className="rounded border border-slate-700 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-400">{node.kind}</span>
+							</div>
+						</div>
+						<p className="mt-2 text-xs text-slate-400">{node.description}</p>
+					</div>
+				))}
+			</div>
+			<p className="mt-3 text-xs text-slate-500">
+				Node status is reconstructed from the workflow run linkage and live session state; persisted kernel records remain the durable source of truth.
+			</p>
+		</div>
+	);
+}
+
 function WorkflowProjectionFacts({ model }: { model: WorkflowProjectSessionUiModel }) {
 	return (
 		<div className="rounded-sm border border-slate-800 bg-[#111820] p-4 text-sm">
@@ -246,6 +286,7 @@ function createProjectSessionWorkflowModel(
 				stateIds: [activeStateId],
 				nodeId: activeStateId === "node.session" ? "session" : undefined,
 			},
+			nodeStatuses: nodes.map((node) => ({ id: node.id, kind: node.kind, status: node.status })),
 			actors: [{ id: "workflow.actor.session", kind: "agent", piboSessionId: projectSession.piboSessionId }],
 		},
 	};
@@ -332,6 +373,14 @@ function nodeCardClass(status: WorkflowNodeStatus): string {
 	if (status === "waiting") return "border-amber-500/40 bg-amber-500/10";
 	if (status === "active") return "border-[#11a4d4]/50 bg-[#11a4d4]/10 shadow-[0_0_0_1px_rgba(17,164,212,0.18)]";
 	return "border-slate-800 bg-[#111820]";
+}
+
+function statusTextClass(status: WorkflowNodeStatus): string {
+	if (status === "completed") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
+	if (status === "failed" || status === "cancelled") return "border-red-500/40 bg-red-500/10 text-red-300";
+	if (status === "waiting") return "border-amber-500/40 bg-amber-500/10 text-amber-300";
+	if (status === "active") return "border-[#11a4d4]/40 bg-[#11a4d4]/10 text-[#11a4d4]";
+	return "border-slate-700 bg-slate-900/50 text-slate-400";
 }
 
 function shortWorkflowValue(value: string): string {

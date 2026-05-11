@@ -9,6 +9,7 @@
 - Workflow fact persistence uses small store interfaces in `packages/workflows/src/store/index.ts`; runtime helpers should persist events/edge transfers only when the injected store supports the corresponding optional `save*` method.
 - Workflow SQLite schema changes belong in `packages/workflows/src/store/index.ts` with `CREATE TABLE IF NOT EXISTS` / additive column migrations and a focused schema contract test under `packages/workflows/src/testing`.
 - Web UI Workflow/XState consumers should use `createWorkflowXStateUiModel(projectWorkflowToXStateProjection(definition), { snapshot | activeStateIds })` to get compact nodes/edges/actors/guards/actions/delays while keeping `contextShape.exposesPrivatePayloads: false` and kernel snapshots as durable truth.
+- Chat Web Workflow/XState UI panels should derive graph and node-status surfaces from the shared workflow UI model (`model.nodes` plus `snapshot.nodeStatuses`) so visual flow, list view, and snapshot facts stay consistent.
 - XState projection snapshot tests should compare normalized full projections for representative fixtures against `packages/workflows/src/testing/__snapshots__/xstate-projection.snap.json`; normalize object keys but preserve transition arrays so snapshot diffs catch semantic projection changes.
 - XState guard/wait/failure/final projection is deterministic: edge/loop guards populate the flat `guards` index, human nodes become `wait` states with durable wait actions/timeouts, node invoke failures target failed or retry-delay states, and `definition.final` nodes add completion transitions to `workflow.completed`.
 - XState workflow projection composes `projectWorkflowNodesToXState` and `projectWorkflowEdgesToXState` inside `projectWorkflowToXStateProjection`: map each workflow node to `node.<id>` plus `workflow.node.<id>` actor metadata, then layer edge transitions/actions without changing node ids.
@@ -867,4 +868,16 @@
   - `SessionTracePane` already receives `workflowProjectSession`, `selectedSessionStatus`, and the selected trace context, so selected-session workflow badges can be added without new API calls.
   - The Projects view can derive workflow state from project session `state` first, then live session status for `running`/`failed`, preserving durable Project Session metadata as the default source.
   - Browser-use against the worker can verify header text after opening `/apps/chat/projects?view=workflow`; the seeded dev workflow session from prior UI smoke work remains useful for workflow header checks.
+---
+
+## 2026-05-11 03:14 UTC - 12.4
+- Added a Workflow/XState node-status list for workflow-backed sessions/runs, showing each projected node id, label, kind, status badge, icon, and description beside the runtime snapshot.
+- Included compact `nodeStatuses` in the UI snapshot so the rendered list and debug snapshot expose the same reconstructed node status facts.
+- Marked task `12.4` complete in the workflow-system task list because the referenced JSON PRDs are absent and progress is tracked in `tasks.md`.
+- Files changed: `src/apps/chat-ui/src/session-views/WorkflowXStateSessionView.tsx`, `docs/specs/changes/pibo-workflow-system-v1/tasks.md`, `progress.txt`.
+- Quality checks: host `npm run chat-ui:typecheck`; host `npm --prefix packages/workflows run typecheck && npm --prefix packages/workflows test`; host `npm run typecheck`; host `npm run chat-ui:build`; container `/workspace` `npm run chat-ui:typecheck && npm run chat-ui:build`; container `/workspace` `npm --prefix packages/workflows run typecheck && npm --prefix packages/workflows test`; browser-use verification at `http://127.0.0.1:4812/apps/chat/projects?view=workflow` after scrolling confirmed `Node Statuses`, `workflow.entry`, `node.session`, and status badges render.
+- **Learnings for future iterations:**
+  - The Workflow/XState tab already has a shared `WorkflowProjectSessionUiModel`; add secondary inspection surfaces by consuming `model.nodes` instead of recomputing workflow state separately.
+  - Browser-use `wait text` checks visible text only; for lower Workflow tab panels, scroll before verifying text that is below the fold.
+  - Restarting the provided Docker worker can leave the gateway stopped; the worker web gateway can be brought back inside the container with the dev-auth `runWebGatewayServer({ devAuth: true, host: "0.0.0.0", web: { host: "0.0.0.0" } })` command.
 ---
