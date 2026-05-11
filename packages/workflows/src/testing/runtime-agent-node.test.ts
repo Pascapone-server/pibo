@@ -5,6 +5,7 @@ import {
   createPiboSessionRoutingAgentExecutor,
   dispatchWorkflowAgentNode,
   json,
+  SqliteWorkflowRunStore,
   text,
 } from "../index.js";
 import type { WorkflowDefinition, WorkflowRun, WorkflowRuntimeEvent } from "../index.js";
@@ -59,11 +60,13 @@ describe("workflow agent node dispatch", () => {
     const createdSessions: unknown[] = [];
     const emittedMessages: unknown[] = [];
     const externalEvents: WorkflowRuntimeEvent[] = [];
+    const store = new SqliteWorkflowRunStore(":memory:");
     const listeners = new Set<(event: { type: string; piboSessionId: string; eventId?: string; text?: string }) => void>();
 
     const result = await dispatchWorkflowAgentNode(definition, createRun(), "draft", "Explain workflows", {
       now: () => "2026-05-10T23:58:01.000Z",
       createNodeAttemptId: () => "wna_agent",
+      store,
       emitEvent: (event) => {
         externalEvents.push(event);
       },
@@ -107,6 +110,8 @@ describe("workflow agent node dispatch", () => {
     assert.equal(result.nodeAttempt.metadata?.piSessionId, "pi_agent_node");
     assert.equal(result.nodeAttempt.metadata?.runtime?.profileId, "pibo-agent");
     assert.deepEqual(result.nodeAttempt.metadata?.runtime?.tools, ["read", "bash"]);
+    assert.deepEqual(store.getNodeAttempt("wna_agent"), result.nodeAttempt);
+    store.close();
     assert.deepEqual(result.run.current, { nodeId: "draft", status: "running" });
     assert.deepEqual(externalEvents, result.events);
     assert.deepEqual(

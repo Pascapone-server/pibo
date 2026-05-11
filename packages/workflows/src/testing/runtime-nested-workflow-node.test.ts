@@ -6,6 +6,7 @@ import {
   dispatchWorkflowNestedWorkflowNode,
   json,
   registerWorkflowDefinition,
+  SqliteWorkflowRunStore,
   validateWorkflow,
 } from "../index.js";
 import type { WorkflowDefinition, WorkflowRun, WorkflowRuntimeEvent } from "../index.js";
@@ -92,6 +93,7 @@ describe("workflow nested workflow node dispatch", () => {
     const childWorkflow = createChildWorkflow();
     const parentWorkflow = createParentWorkflow();
     const externalEvents: WorkflowRuntimeEvent[] = [];
+    const store = new SqliteWorkflowRunStore(":memory:");
     registerWorkflowDefinition(registry, childWorkflow);
 
     assert.equal(validateWorkflow(parentWorkflow).ok, true);
@@ -107,6 +109,7 @@ describe("workflow nested workflow node dispatch", () => {
         now: () => "2026-05-11T00:20:01.000Z",
         createNodeAttemptId: () => "wna_child_node",
         createChildRunId: () => "wfr_child",
+        store,
         emitEvent: (event) => {
           externalEvents.push(event);
         },
@@ -151,6 +154,8 @@ describe("workflow nested workflow node dispatch", () => {
     assert.equal(result.nodeAttempt.status, "completed");
     assert.equal(result.nodeAttempt.metadata?.childRunId, "wfr_child");
     assert.equal(result.nodeAttempt.metadata?.childWorkflowId, childWorkflow.id);
+    assert.deepEqual(store.getNodeAttempt("wna_child_node"), result.nodeAttempt);
+    store.close();
     assert.equal(result.childRun.parentRunId, "wfr_parent");
     assert.equal(result.childRun.parentNodeAttemptId, "wna_child_node");
     assert.deepEqual(result.run.state.global, { parentOnly: "kept" });

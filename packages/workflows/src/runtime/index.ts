@@ -31,7 +31,7 @@ import type {
   WorkflowWaitToken,
   WorkflowWaitTokenId,
 } from "../types/index.js";
-import type { WorkflowRunStore, WorkflowWaitTokenStore } from "../store/index.js";
+import type { WorkflowNodeAttemptStore, WorkflowRunStore, WorkflowWaitTokenStore } from "../store/index.js";
 import { resolveWorkflowAdapter, resolveWorkflowDefinition, resolveWorkflowHandler } from "../registry/index.js";
 import {
   validateJsonValueAgainstSchema,
@@ -507,6 +507,7 @@ export async function dispatchWorkflowAgentNode(
     nodeAttemptId: nodeAttempt.id,
     nodeId,
   });
+  await persistWorkflowNodeAttempt(options.store, nodeAttempt);
   await persistWorkflowRun(options.store, run);
 
   const diagnostics: WorkflowDiagnostic[] = [];
@@ -567,10 +568,10 @@ export async function dispatchWorkflowAgentNode(
 
     const runtimeMetadata: RuntimeSelectionMetadata = {
       profileId: executorResult.effectiveProfile ?? agentNode.profile.id,
-      tools: executorResult.effectiveTools,
-      skills: executorResult.effectiveSkills,
-      contextFiles: executorResult.effectiveContextFiles,
-      routing: agentNode.routing,
+      ...(executorResult.effectiveTools ? { tools: executorResult.effectiveTools } : {}),
+      ...(executorResult.effectiveSkills ? { skills: executorResult.effectiveSkills } : {}),
+      ...(executorResult.effectiveContextFiles ? { contextFiles: executorResult.effectiveContextFiles } : {}),
+      ...(agentNode.routing ? { routing: agentNode.routing } : {}),
     };
 
     const completedAt = timestamp();
@@ -579,8 +580,8 @@ export async function dispatchWorkflowAgentNode(
     nodeAttempt.completedAt = completedAt;
     nodeAttempt.metadata = {
       runtime: runtimeMetadata,
-      piboSessionId: executorResult.piboSessionId,
-      piSessionId: executorResult.piSessionId,
+      ...(executorResult.piboSessionId ? { piboSessionId: executorResult.piboSessionId } : {}),
+      ...(executorResult.piSessionId ? { piSessionId: executorResult.piSessionId } : {}),
     };
     run.current = { nodeId, status: run.status };
     run.updatedAt = completedAt;
@@ -591,6 +592,7 @@ export async function dispatchWorkflowAgentNode(
       nodeAttemptId: nodeAttempt.id,
       output: executorResult.output,
     });
+    await persistWorkflowNodeAttempt(options.store, nodeAttempt);
     await persistWorkflowRun(options.store, run);
 
     return {
@@ -688,6 +690,7 @@ export async function dispatchWorkflowCodeNode(
     nodeAttemptId: nodeAttempt.id,
     nodeId,
   });
+  await persistWorkflowNodeAttempt(options.store, nodeAttempt);
   await persistWorkflowRun(options.store, run);
 
   const handler = resolveWorkflowHandler(options.registry, codeNode.handler);
@@ -802,6 +805,7 @@ export async function dispatchWorkflowCodeNode(
       nodeAttemptId: nodeAttempt.id,
       output: handlerResult.output,
     });
+    await persistWorkflowNodeAttempt(options.store, nodeAttempt);
     await persistWorkflowRun(options.store, run);
 
     return {
@@ -905,6 +909,7 @@ export async function dispatchWorkflowNestedWorkflowNode(
     nodeAttemptId: nodeAttempt.id,
     nodeId,
   });
+  await persistWorkflowNodeAttempt(options.store, nodeAttempt);
   await persistWorkflowRun(options.store, run);
 
   const diagnostics: WorkflowDiagnostic[] = [];
@@ -1058,6 +1063,7 @@ export async function dispatchWorkflowNestedWorkflowNode(
       nodeAttemptId: nodeAttempt.id,
       output: executorResult.output,
     });
+    await persistWorkflowNodeAttempt(options.store, nodeAttempt);
     await persistWorkflowRun(options.store, run);
 
     return {
@@ -1154,6 +1160,7 @@ export async function dispatchWorkflowHumanNode(
     nodeAttemptId: nodeAttempt.id,
     nodeId,
   });
+  await persistWorkflowNodeAttempt(options.store, nodeAttempt);
   await persistWorkflowRun(options.store, run);
 
   const diagnostics: WorkflowDiagnostic[] = [];
@@ -1208,6 +1215,7 @@ export async function dispatchWorkflowHumanNode(
     runId: run.id,
     waitTokenId: waitToken.id,
   });
+  await persistWorkflowNodeAttempt(options.store, nodeAttempt);
   await persistWorkflowRun(options.store, run);
 
   return {
@@ -1744,6 +1752,7 @@ export async function runOneNodeAgentWorkflow(
     nodeAttemptId: nodeAttempt.id,
     nodeId,
   });
+  await persistWorkflowNodeAttempt(options.store, nodeAttempt);
 
   try {
     const prompt = buildAgentNodePrompt(node, input);
@@ -1795,10 +1804,10 @@ export async function runOneNodeAgentWorkflow(
 
     const runtimeMetadata: RuntimeSelectionMetadata = {
       profileId: executorResult.effectiveProfile ?? node.profile.id,
-      tools: executorResult.effectiveTools,
-      skills: executorResult.effectiveSkills,
-      contextFiles: executorResult.effectiveContextFiles,
-      routing: node.routing,
+      ...(executorResult.effectiveTools ? { tools: executorResult.effectiveTools } : {}),
+      ...(executorResult.effectiveSkills ? { skills: executorResult.effectiveSkills } : {}),
+      ...(executorResult.effectiveContextFiles ? { contextFiles: executorResult.effectiveContextFiles } : {}),
+      ...(node.routing ? { routing: node.routing } : {}),
     };
 
     const completedAt = timestamp();
@@ -1807,8 +1816,8 @@ export async function runOneNodeAgentWorkflow(
     nodeAttempt.completedAt = completedAt;
     nodeAttempt.metadata = {
       runtime: runtimeMetadata,
-      piboSessionId: executorResult.piboSessionId,
-      piSessionId: executorResult.piSessionId,
+      ...(executorResult.piboSessionId ? { piboSessionId: executorResult.piboSessionId } : {}),
+      ...(executorResult.piSessionId ? { piSessionId: executorResult.piSessionId } : {}),
     };
 
     await emitWorkflowRuntimeEvent(events, options.emitEvent, {
@@ -1817,6 +1826,7 @@ export async function runOneNodeAgentWorkflow(
       nodeAttemptId: nodeAttempt.id,
       output: executorResult.output,
     });
+    await persistWorkflowNodeAttempt(options.store, nodeAttempt);
 
     run.status = "completed";
     run.current = { nodeId, status: "completed" };
@@ -2109,6 +2119,7 @@ async function failNodeDispatch(options: {
     nodeAttemptId: options.nodeAttempt.id,
     error: options.error,
   });
+  await persistWorkflowNodeAttempt(options.store, options.nodeAttempt);
   await persistWorkflowRun(options.store, options.run);
 
   return {
@@ -2273,6 +2284,7 @@ async function failRunningWorkflow(options: {
     runId: options.run.id,
     error: options.error,
   });
+  await persistWorkflowNodeAttempt(options.store, options.nodeAttempt);
   await persistWorkflowRun(options.store, options.run);
 
   return {
@@ -2311,6 +2323,23 @@ async function emitWorkflowRuntimeEvent(
 
 async function persistWorkflowRun(store: WorkflowRunStore | undefined, run: WorkflowRun): Promise<void> {
   await store?.saveRun(run);
+}
+
+async function persistWorkflowNodeAttempt(
+  store: WorkflowRunStore | undefined,
+  nodeAttempt: NodeAttempt,
+): Promise<void> {
+  if (!hasWorkflowNodeAttemptStore(store)) {
+    return;
+  }
+
+  await store.saveNodeAttempt(nodeAttempt);
+}
+
+function hasWorkflowNodeAttemptStore(
+  store: WorkflowRunStore | undefined,
+): store is WorkflowRunStore & Pick<WorkflowNodeAttemptStore, "saveNodeAttempt"> {
+  return typeof (store as { saveNodeAttempt?: unknown } | undefined)?.saveNodeAttempt === "function";
 }
 
 function buildAgentNodePrompt(node: AgentNodeDefinition, input: WorkflowValue): string {

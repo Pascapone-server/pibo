@@ -124,11 +124,13 @@ describe("workflow human node dispatch", () => {
         expiresAt: "2026-05-11T01:30:01.000Z",
       });
       assert.deepEqual(store.getRun("wfr_human"), result.run);
+      assert.deepEqual(store.getNodeAttempt("wna_human_review"), result.nodeAttempt);
       assert.deepEqual(store.getWaitToken("wwt_human_review"), result.waitToken);
       store.close();
 
       const reopened = new SqliteWorkflowRunStore(dbPath);
       assert.deepEqual(reopened.getRun("wfr_human"), result.run);
+      assert.deepEqual(reopened.getNodeAttempt("wna_human_review"), result.nodeAttempt);
       assert.deepEqual(reopened.getWaitToken("wwt_human_review"), result.waitToken);
       assert.deepEqual(reopened.listWaitTokens({ status: "pending" }), [result.waitToken]);
       reopened.close();
@@ -156,6 +158,7 @@ describe("workflow human node dispatch", () => {
       assert.equal(result.nodeAttempt?.status, "failed");
       assert.equal(result.error.code, "WorkflowRuntimeError.humanNodeDispatchFailed");
       assert.ok(result.diagnostics.some((diagnostic) => diagnostic.code === "WorkflowInterfaceError.valueTypeMismatch"));
+      assert.deepEqual(store.getNodeAttempt("wna_bad_human_input"), result.nodeAttempt);
       assert.deepEqual(store.listWaitTokens(), []);
       assert.deepEqual(result.events.map((event) => event.type), ["node.started", "node.failed"]);
     } finally {

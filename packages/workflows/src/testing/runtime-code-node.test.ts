@@ -6,6 +6,7 @@ import {
   dispatchWorkflowCodeNode,
   json,
   registerWorkflowHandler,
+  SqliteWorkflowRunStore,
   text,
   validateWorkflow,
 } from "../index.js";
@@ -93,6 +94,7 @@ describe("workflow code node dispatch", () => {
     const registry = createWorkflowRegistry();
     const emittedCommands: WorkflowCommand[] = [];
     const externalEvents: WorkflowRuntimeEvent[] = [];
+    const store = new SqliteWorkflowRunStore(":memory:");
 
     registerWorkflowHandler(registry, "test.handlers.normalize", async (ctx) => {
       assert.deepEqual(ctx.input, { topic: "Workflows" });
@@ -117,6 +119,7 @@ describe("workflow code node dispatch", () => {
       registry,
       now: () => "2026-05-10T23:40:01.000Z",
       createNodeAttemptId: () => "wna_code",
+      store,
       edgePayloads: { previous: "edge payload" },
       emitEvent: (event) => {
         externalEvents.push(event);
@@ -130,6 +133,8 @@ describe("workflow code node dispatch", () => {
     assert.deepEqual(result.output, { summary: "Normalized Workflows" });
     assert.equal(result.nodeAttempt.status, "completed");
     assert.equal(result.nodeAttempt.metadata?.handlerId, "test.handlers.normalize");
+    assert.deepEqual(store.getNodeAttempt("wna_code"), result.nodeAttempt);
+    store.close();
     assert.deepEqual(result.nodeAttempt.localState, { seed: "seed-value", lastSummary: "Normalized Workflows" });
     assert.deepEqual(result.run.state.global, { topic: "Workflows", summary: "Normalized Workflows" });
     assert.deepEqual(result.run.current, { nodeId: "normalize", status: "running" });

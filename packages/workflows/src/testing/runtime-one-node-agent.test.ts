@@ -347,10 +347,12 @@ describe("one-node agent workflow runtime path", () => {
 
       assert.equal(result.ok, true);
       assert.deepEqual(store.getRun("wfr_persisted"), result.run);
+      assert.deepEqual(store.getNodeAttempt("wna_persisted"), result.nodeAttempt);
       store.close();
 
       const reopened = new SqliteWorkflowRunStore(dbPath);
       const persisted = reopened.getRun("wfr_persisted");
+      const persistedNodeAttempt = reopened.getNodeAttempt("wna_persisted");
       reopened.close();
 
       assert.ok(persisted);
@@ -361,6 +363,7 @@ describe("one-node agent workflow runtime path", () => {
       assert.deepEqual(persisted.current, { nodeId: "answer", status: "completed" });
       assert.equal(persisted.input, "Persist this run.");
       assert.equal(persisted.output, "Persisted workflow output.");
+      assert.deepEqual(persistedNodeAttempt, result.nodeAttempt);
     } finally {
       try {
         store.close();

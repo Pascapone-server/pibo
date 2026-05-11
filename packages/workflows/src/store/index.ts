@@ -3,6 +3,9 @@ import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import type {
+  NodeAttempt,
+  NodeAttemptId,
+  NodeAttemptStatus,
   WorkflowRun,
   WorkflowRunId,
   WorkflowRunStatus,
@@ -23,6 +26,12 @@ export type WorkflowWaitTokenStore = {
   listWaitTokens(filter?: WorkflowWaitTokenListFilter): WorkflowWaitToken[] | Promise<WorkflowWaitToken[]>;
 };
 
+export type WorkflowNodeAttemptStore = {
+  saveNodeAttempt(nodeAttempt: NodeAttempt): void | Promise<void>;
+  getNodeAttempt(id: NodeAttemptId): NodeAttempt | undefined | Promise<NodeAttempt | undefined>;
+  listNodeAttempts(filter?: WorkflowNodeAttemptListFilter): NodeAttempt[] | Promise<NodeAttempt[]>;
+};
+
 export type WorkflowRunListFilter = {
   workflowId?: string;
   status?: WorkflowRunStatus;
@@ -34,6 +43,14 @@ export type WorkflowWaitTokenListFilter = {
   workflowRunId?: WorkflowRunId;
   status?: WorkflowWaitTokenStatus;
   humanNodeId?: string;
+  limit?: number;
+};
+
+export type WorkflowNodeAttemptListFilter = {
+  workflowRunId?: WorkflowRunId;
+  nodeId?: string;
+  kind?: NodeAttempt["kind"];
+  status?: NodeAttemptStatus;
   limit?: number;
 };
 
@@ -80,7 +97,28 @@ type WorkflowWaitTokenRow = {
   resumed_at: string | null;
 };
 
-export class SqliteWorkflowRunStore implements WorkflowRunStore, WorkflowWaitTokenStore {
+type WorkflowNodeAttemptRow = {
+  id: string;
+  workflow_run_id: string;
+  node_id: string;
+  attempt: number;
+  kind: NodeAttempt["kind"];
+  status: NodeAttemptStatus;
+  input_json: string;
+  output_json: string | null;
+  output_present: number;
+  local_state_json: string | null;
+  metadata_json: string | null;
+  error_json: string | null;
+  lease_json: string | null;
+  started_at: string | null;
+  heartbeat_at: string | null;
+  completed_at: string | null;
+  failed_at: string | null;
+  available_at: string | null;
+};
+
+export class SqliteWorkflowRunStore implements WorkflowRunStore, WorkflowWaitTokenStore, WorkflowNodeAttemptStore {
   private readonly db: DatabaseSync;
 
   constructor(path: string) {
@@ -128,6 +166,34 @@ export class SqliteWorkflowRunStore implements WorkflowRunStore, WorkflowWaitTok
         ON workflow_runs(owner_scope, updated_at);
       CREATE INDEX IF NOT EXISTS idx_workflow_runs_current_node
         ON workflow_runs(current_node_id, updated_at);
+
+      CREATE TABLE IF NOT EXISTS workflow_node_attempts (
+        id TEXT PRIMARY KEY,
+        workflow_run_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        attempt INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        status TEXT NOT NULL,
+        input_json TEXT NOT NULL,
+        output_json TEXT,
+        output_present INTEGER NOT NULL DEFAULT 0,
+        local_state_json TEXT,
+        metadata_json TEXT,
+        error_json TEXT,
+        lease_json TEXT,
+        started_at TEXT,
+        heartbeat_at TEXT,
+        completed_at TEXT,
+        failed_at TEXT,
+        available_at TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_workflow_node_attempts_run
+        ON workflow_node_attempts(workflow_run_id, node_id, attempt);
+      CREATE INDEX IF NOT EXISTS idx_workflow_node_attempts_status
+        ON workflow_node_attempts(status, started_at);
+      CREATE INDEX IF NOT EXISTS idx_workflow_node_attempts_kind
+        ON workflow_node_attempts(kind, started_at);
 
       CREATE TABLE IF NOT EXISTS workflow_wait_tokens (
         id TEXT PRIMARY KEY,
@@ -263,6 +329,104 @@ export class SqliteWorkflowRunStore implements WorkflowRunStore, WorkflowWaitTok
     return rows.map(workflowRunFromRow);
   }
 
+  saveNodeAttempt(nodeAttempt: NodeAttempt): void {
+    this.db.prepare(`
+      INSERT INTO workflow_node_attempts (
+        id,
+        workflow_run_id,
+        node_id,
+        attempt,
+        kind,
+        status,
+        input_json,
+        output_json,
+        output_present,
+        local_state_json,
+        metadata_json,
+        error_json,
+        lease_json,
+        started_at,
+        heartbeat_at,
+        completed_at,
+        failed_at,
+        available_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        workflow_run_id = excluded.workflow_run_id,
+        node_id = excluded.node_id,
+        attempt = excluded.attempt,
+        kind = excluded.kind,
+        status = excluded.status,
+        input_json = excluded.input_json,
+        output_json = excluded.output_json,
+        output_present = excluded.output_present,
+        local_state_json = excluded.local_state_json,
+        metadata_json = excluded.metadata_json,
+        error_json = excluded.error_json,
+        lease_json = excluded.lease_json,
+        started_at = excluded.started_at,
+        heartbeat_at = excluded.heartbeat_at,
+        completed_at = excluded.completed_at,
+        failed_at = excluded.failed_at,
+        available_at = excluded.available_at
+    `).run(
+      nodeAttempt.id,
+      nodeAttempt.workflowRunId,
+      nodeAttempt.nodeId,
+      nodeAttempt.attempt,
+      nodeAttempt.kind,
+      nodeAttempt.status,
+      serialize(nodeAttempt.input),
+      nodeAttempt.output === undefined ? null : serialize(nodeAttempt.output),
+      nodeAttempt.output === undefined ? 0 : 1,
+      serializeOptional(nodeAttempt.localState),
+      serializeOptional(nodeAttempt.metadata),
+      serializeOptional(nodeAttempt.error),
+      serializeOptional(nodeAttempt.lease),
+      nodeAttempt.startedAt ?? null,
+      nodeAttempt.heartbeatAt ?? null,
+      nodeAttempt.completedAt ?? null,
+      nodeAttempt.failedAt ?? null,
+      nodeAttempt.availableAt ?? null,
+    );
+  }
+
+  getNodeAttempt(id: NodeAttemptId): NodeAttempt | undefined {
+    const row = this.db.prepare("SELECT * FROM workflow_node_attempts WHERE id = ?").get(id) as
+      | WorkflowNodeAttemptRow
+      | undefined;
+    return row ? workflowNodeAttemptFromRow(row) : undefined;
+  }
+
+  listNodeAttempts(filter: WorkflowNodeAttemptListFilter = {}): NodeAttempt[] {
+    const clauses: string[] = [];
+    const values: Array<string | number> = [];
+
+    if (filter.workflowRunId !== undefined) {
+      clauses.push("workflow_run_id = ?");
+      values.push(filter.workflowRunId);
+    }
+    if (filter.nodeId !== undefined) {
+      clauses.push("node_id = ?");
+      values.push(filter.nodeId);
+    }
+    if (filter.kind !== undefined) {
+      clauses.push("kind = ?");
+      values.push(filter.kind);
+    }
+    if (filter.status !== undefined) {
+      clauses.push("status = ?");
+      values.push(filter.status);
+    }
+
+    const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    const limit = Math.max(1, Math.min(filter.limit ?? 100, 1000));
+    const rows = this.db
+      .prepare(`SELECT * FROM workflow_node_attempts ${where} ORDER BY started_at DESC, id DESC LIMIT ?`)
+      .all(...values, limit) as WorkflowNodeAttemptRow[];
+    return rows.map(workflowNodeAttemptFromRow);
+  }
+
   saveWaitToken(token: WorkflowWaitToken): void {
     this.db.prepare(`
       INSERT INTO workflow_wait_tokens (
@@ -385,6 +549,28 @@ function workflowWaitTokenFromRow(row: WorkflowWaitTokenRow): WorkflowWaitToken 
     createdAt: row.created_at,
     ...(row.expires_at ? { expiresAt: row.expires_at } : {}),
     ...(row.resumed_at ? { resumedAt: row.resumed_at } : {}),
+  };
+}
+
+function workflowNodeAttemptFromRow(row: WorkflowNodeAttemptRow): NodeAttempt {
+  return {
+    id: row.id,
+    workflowRunId: row.workflow_run_id,
+    nodeId: row.node_id,
+    attempt: row.attempt,
+    kind: row.kind,
+    status: row.status,
+    input: parseJson(row.input_json) as WorkflowValue,
+    ...(row.output_present ? { output: parseJson(row.output_json ?? "null") as WorkflowValue } : {}),
+    ...(row.local_state_json ? { localState: parseJson(row.local_state_json) } : {}),
+    ...(row.metadata_json ? { metadata: parseJson(row.metadata_json) } : {}),
+    ...(row.error_json ? { error: parseJson(row.error_json) } : {}),
+    ...(row.lease_json ? { lease: parseJson(row.lease_json) } : {}),
+    ...(row.started_at ? { startedAt: row.started_at } : {}),
+    ...(row.heartbeat_at ? { heartbeatAt: row.heartbeat_at } : {}),
+    ...(row.completed_at ? { completedAt: row.completed_at } : {}),
+    ...(row.failed_at ? { failedAt: row.failed_at } : {}),
+    ...(row.available_at ? { availableAt: row.available_at } : {}),
   };
 }
 
