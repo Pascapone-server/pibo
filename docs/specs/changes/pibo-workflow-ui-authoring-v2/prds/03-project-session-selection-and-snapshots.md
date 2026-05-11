@@ -63,7 +63,7 @@
   - Integration tests cover configured-session creation without run creation.
   - Start tests assert one run per Project session and reject second-start attempts while preserving allowed parallel node execution inside the run.
   - Immutability tests reject workflow id/version changes after session creation.
-  - Snapshot tests verify base workflow id/version/hash, effective definition hash, inputs, prompt overrides, model, thinking level, fast mode, Project id, Pibo Session id, and timestamp are persisted.
+  - Snapshot tests verify the full V2 snapshot contract: identity fields, owner scope, base and effective workflow definitions, base/effective hashes, inputs, prompt overrides, workflow-wide model/thinking/fast-mode settings, prompt asset pins, validation result, Project id, Pibo Session id, and timestamp are persisted.
   - Create/start validation tests verify blocked actions show diagnostics and leave the session in the correct pre-run state.
   - Deleted-definition tests verify the historical run still renders snapshot data.
 
@@ -82,6 +82,17 @@
     - A prompt override replaces only that eligible Agent node's prompt template in the effective session snapshot. It cannot change profile, tools, skills, context files, routing, retry, handler, adapter, guard, schema, or arbitrary options.
   - Model, thinking level, and fast mode are workflow-session-wide settings in V2. They are stored once on the session snapshot and apply to every Pibo Agent node session started by the primary workflow run or its nested workflow runs. V2 does not expose per-Agent-node model, thinking, or fast-mode overrides.
   - Configured-session fields are immutable after creation and before first start. The selected workflow id/version, input values, prompt overrides, model, thinking level, and fast mode cannot be edited in place; users create a new configured Project session when they need different values. Start still revalidates the stored snapshot before creating the one allowed run.
+
+- **Snapshot Contract Decision**:
+  - The V2 configuration/effective-definition snapshot stores an exact execution and inspection record, not a minimal pointer. It includes snapshot id, schema version, createdAt, createdBy/principal id, owner scope, Project id, Pibo Session id, workflow id/version/source/title/description/tags, base definition hash, effective definition hash, the immutable base `WorkflowDefinition`, the immutable effective `WorkflowDefinition`, input values, node-id-keyed prompt overrides, prompt override eligibility policy and eligible node ids, workflow-scoped model/thinking level/fast mode, prompt asset pins (`assetId`, `revisionId`, `contentHash`, `source`), creation validation diagnostics, and deleted-definition fallback display fields.
+  - The effective definition applies only allowed prompt overrides before hashing. Model, thinking level, and fast mode remain workflow-scoped settings on the snapshot and do not mutate node IR.
+  - Historical run views use the snapshot if the live workflow is archived, changed, missing, or tombstoned; snapshot visibility follows existing Project/session access rules.
+
+- **API Route Contract Decision**:
+  - `POST /api/chat/projects/:projectId/workflow-sessions` creates a configured/not-started workflow Project session and snapshot without creating a workflow run.
+  - `GET /api/chat/projects/:projectId/workflow-sessions/:piboSessionId` returns configured-session or run state, selected workflow metadata, snapshot summary, validation state, run id/status when present, and deleted-definition display state when applicable.
+  - `POST /api/chat/projects/:projectId/workflow-sessions/:piboSessionId/start` revalidates the stored snapshot and creates exactly one workflow run. Repeated start calls return the existing run with `alreadyStarted: true` and never create another run.
+  - The generic Project-session update path may update non-workflow presentation fields such as title/archive state only. It must not update workflow id/version, input values, prompt overrides, model, thinking level, or fast mode.
 
 - **Integration Points**:
   - Project service/session APIs for session name, Project id, Pibo Session id, workflow metadata, and configured state.
@@ -102,6 +113,6 @@
   - v1.2: Deleted-definition display, nested workflow links, and historical snapshot diff/inspection.
 
 - **Technical Risks**:
-  - Snapshot fields are incomplete; mitigate by defining a required snapshot contract and testing deleted-definition inspection.
+  - Snapshot fields drift from implementation; mitigate by treating the snapshot contract above and `09-implementation-completeness-contract.md` Section 4.4 as normative and testing deleted-definition inspection.
   - Start accidentally runs twice; mitigate with unique run-per-session constraints and idempotent start behavior.
   - Session-scoped overrides mutate shared definitions; mitigate by storing overrides only in configuration snapshots.

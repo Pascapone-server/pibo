@@ -5,6 +5,7 @@
 - For V2 open-question stories, also clear matching stale open questions in the parent `spec.md` and `design.md` when the decision is now documented.
 - Workflow Builder canvas state should remain a projection; persist saved layout through existing `WorkflowDefinition.ui.layout` and `WorkflowDefinition.ui.positions`.
 - Prompt asset edits should create managed revisions and pin revision IDs/content hashes in published workflow versions and snapshots.
+- V2 workflow HTTP contracts are documented under Chat Web routes: catalog/lifecycle APIs use `/api/chat/workflows`, while Project workflow session APIs use `/api/chat/projects/:projectId/workflow-sessions`.
 
 ## 2026-05-11 22:37 CEST - US-001
 - What was implemented
@@ -110,4 +111,32 @@
 - **Learnings for future iterations:**
   - The existing workflow type contract already contains `WorkflowDefinition.ui.layout` and `WorkflowDefinition.ui.positions`, so builder layout docs should reuse those fields instead of inventing a new layout store.
   - Prompt asset versioning should follow the same revision/pinning safety principle as immutable workflow versions and session snapshots.
+---
+## 2026-05-11 23:02 CEST - US-001
+- What was implemented
+  - Resolved the remaining V2 open decisions in the implementation completeness contract: exact Chat Web API route contracts, exact configuration/effective-definition snapshot fields, and deleted-workflow historical run display/link behavior.
+  - Updated affected source specs, PRDs, README, and task checklist so dependent implementation stories have a single documented contract.
+  - Marked PRD 09 US-001 passing.
+- Files changed
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/spec.md`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/design.md`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/tasks.md`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/02-workflow-registry-catalog-and-draft-store.md`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/03-project-session-selection-and-snapshots.md`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/06-versioning-archive-delete-lifecycle.md`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/07-project-run-inspection-sidebar-and-human-actions.md`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/09-implementation-completeness-contract.md`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/README.md`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_09_implementation_completeness_contract.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `python3 -m json.tool docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_09_implementation_completeness_contract.json` — passed.
+  - `git diff --check` — passed.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck'` — passed.
+  - Relevant tests: not run; documentation-only decision story.
+- Browser verification, if UI changed
+  - Not run; documentation-only change with no UI behavior changes.
+- **Learnings for future iterations:**
+  - Keep the exact workflow API route contract in PRD 09 Section 4.3 and reference it from focused PRDs instead of repeating divergent endpoint lists.
+  - Snapshot stories should treat the base and effective `WorkflowDefinition` bodies plus hashes and prompt asset pins as the durable inspection boundary for deleted-definition runs.
 ---

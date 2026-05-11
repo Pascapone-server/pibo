@@ -70,6 +70,12 @@
   - Archive applies at workflow identity level and changes catalog visibility/action derivation.
   - Delete removes or tombstones live catalog records while preserving run snapshots and references required for inspection.
   - Lifecycle actions must use the schema and permission matrix defined in `02-workflow-registry-catalog-and-draft-store.md`; any authenticated user may create, edit, publish, archive, or delete UI-authored workflows in V2, while code workflow projections remain read-only except duplicate.
+  - Exact lifecycle API routes are defined in `09-implementation-completeness-contract.md` Section 4.3: catalog and lifecycle routes live under `/api/chat/workflows`, and delete uses `DELETE /api/chat/workflows/:workflowId` with confirmation input.
+
+- **Deleted-Definition Display Decision**:
+  - If a historical Project run references a live or archived workflow identity that still exists, the run view may link to the Workflows tab definition/version and must show archived state when relevant.
+  - If the live workflow identity is tombstoned or missing, the run view must not render a broken Workflows link. It renders a snapshot-only `definition deleted` state using the run snapshot's title, workflow id/version, effective definition hash, and configuration summary.
+  - Tombstoned workflows remain absent from normal catalog, picker, duplicate, publish, archive, and Project-session selection flows. Historical run access is allowed only through the Project/session that owns the snapshot.
 
 - **Integration Points**:
   - Workflow Registry/store for draft, published, archived, deleted/tombstoned records, versions, and hashes.
@@ -91,6 +97,6 @@
   - v1.2: Delete with historical snapshot state, tombstone handling, and deleted-definition UI tests.
 
 - **Technical Risks**:
-  - Deletion breaks run links; mitigate with snapshot completeness and explicit deleted-definition UI state.
+  - Deletion breaks run links; mitigate with the snapshot-only `definition deleted` state and tests that no broken live-definition link is rendered.
   - Version numbers collide under concurrent publish; mitigate with transactional publish/version allocation.
   - Users overuse delete because permissions are broad; mitigate with confirmation copy and immutable run snapshots.

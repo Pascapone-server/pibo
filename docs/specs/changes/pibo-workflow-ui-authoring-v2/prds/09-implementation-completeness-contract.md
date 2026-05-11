@@ -143,19 +143,36 @@ The implementation MUST support:
 - source/status-derived UI actions;
 - missing-reference diagnostics for handlers, adapters, guards, profiles, prompt assets, human actions, and nested workflows.
 
-### 4.3 Catalog and Picker API Contract
+### 4.3 Catalog, Picker, and Lifecycle API Contract
 
-The implementation MUST expose APIs or equivalent routes for:
+The implementation MUST expose these same-origin Chat Web routes under `/api/chat`. All routes require an authenticated web session. Mutating routes MUST require same-origin JSON requests. UI workflow records are global in V2, so authenticated user ids are audit fields rather than ownership gates.
 
-- list workflow definitions, drafts, published versions, and archived workflows when filtered;
-- inspect one workflow version or draft;
-- duplicate workflow to UI draft;
-- save draft;
-- validate draft;
-- publish draft;
-- archive workflow;
-- delete workflow;
-- list registered handlers, adapters, guards, human actions, prompt assets, workflow versions, and non-archived Agent profiles.
+| Method | Route | Purpose | Required behavior |
+|---|---|---|---|
+| `GET` | `/api/chat/workflows` | List catalog records | Returns code projections, UI drafts, UI published versions, and archived workflows only when `includeArchived=true` or a historical link requests them. Supports `source`, `status`, and search/filter query parameters when implemented. |
+| `POST` | `/api/chat/workflows` | Create a new UI workflow draft identity | Creates a global UI workflow identity and active draft from title/description/tags plus optional initial parsed Workflow IR. Does not create executable code. |
+| `GET` | `/api/chat/workflows/:workflowId` | Inspect one workflow identity | Returns source/status, active draft summary, published versions, archive/delete state when visible, diagnostics, and source/status-derived actions. |
+| `GET` | `/api/chat/workflows/:workflowId/versions` | List published versions | Returns immutable published version summaries in deterministic order. Archived identities require `includeArchived=true` or historical access. |
+| `GET` | `/api/chat/workflows/:workflowId/versions/:version` | Inspect one published version | Returns immutable definition metadata, definition hash, validation state, prompt asset pins, and available actions. |
+| `POST` | `/api/chat/workflows/:workflowId/duplicate` | Duplicate a code or UI published version into a UI draft | Body selects `version` when needed and optional title/description/tags. Returns the new UI identity and active draft. The source version is never mutated. |
+| `POST` | `/api/chat/workflows/:workflowId/drafts` | Create or reuse a next-version draft | Creates the one active draft for an editable UI workflow/version path, or returns the existing active draft with `reused: true`. Rejects code projections, deleted workflows, and multiple active drafts. |
+| `GET` | `/api/chat/workflows/drafts/:draftId` | Inspect one draft | Returns the parsed draft IR object, validation state, diagnostics, revision, base version/hash, and editor metadata. |
+| `PATCH` | `/api/chat/workflows/drafts/:draftId` | Save a draft | Accepts parsed Workflow IR draft changes and editor metadata. Drafts may remain incomplete or invalid. Invalid raw JSON text is rejected before replacing the last valid draft object. |
+| `POST` | `/api/chat/workflows/drafts/:draftId/validate` | Validate a draft | Runs the shared workflow validator and returns grouped diagnostics without publishing or starting. |
+| `POST` | `/api/chat/workflows/drafts/:draftId/publish` | Publish a draft | Body may choose `versionIntent: "patch" | "minor" | "major"`. Requires no error diagnostics and creates an immutable published version with a definition hash. |
+| `POST` | `/api/chat/workflows/:workflowId/archive` | Archive a workflow identity | Archives a UI-authored workflow at identity scope. Code projections cannot be archived. Historical links remain inspectable. |
+| `DELETE` | `/api/chat/workflows/:workflowId` | Delete/tombstone a workflow identity | Requires confirmation input. Tombstones a UI-authored workflow without deleting historical snapshots. Tombstoned identities are absent from normal catalog lists. |
+| `GET` | `/api/chat/workflows/pickers/:kind` | List picker options | `:kind` is one of `profiles`, `handlers`, `adapters`, `guards`, `human-actions`, `prompt-assets`, or `workflow-versions`. Picker rows include `id`, `displayName`, `description`, and `paramsSchema` or `null` where applicable. Defaults exclude archived profiles/workflows. |
+
+Project workflow session routes are part of the same contract:
+
+| Method | Route | Purpose | Required behavior |
+|---|---|---|---|
+| `POST` | `/api/chat/projects/:projectId/workflow-sessions` | Create a configured/not-started workflow Project session | Body accepts session name, workflow id/version, input, prompt overrides, model, thinking level, and fast mode. It creates a Pibo Session plus Project session metadata and a configuration/effective-definition snapshot, but no workflow run. |
+| `GET` | `/api/chat/projects/:projectId/workflow-sessions/:piboSessionId` | Inspect configured or run session state | Returns selected workflow metadata, snapshot summary, validation state, run id/status when present, and deleted-definition display state when applicable. |
+| `POST` | `/api/chat/projects/:projectId/workflow-sessions/:piboSessionId/start` | Start the configured workflow session | Revalidates the stored snapshot immediately before run creation. Creates exactly one workflow run. A repeated start returns the existing run with `alreadyStarted: true` and MUST NOT create a second run. |
+
+Project routes MUST enforce existing Project/session access. Catalog routes require authentication but no owner-private workflow gate in V2. API errors use normal Chat Web JSON errors plus structured workflow diagnostics for validation failures; validation-blocked create, publish, or start responses use `422` with diagnostics, missing records use `404`, and lifecycle conflicts use `409`.
 
 ### 4.4 Project Session and Snapshot Contract
 
@@ -177,22 +194,20 @@ The implementation MUST support:
 - blocked create/start UX that shows diagnostics and keeps the session in a safe state;
 - historical run inspectability after workflow edit, archive, or delete.
 
-The snapshot MUST record at minimum:
+The V2 session snapshot contract is exact, not a minimum. A persisted configuration/effective-definition snapshot MUST record:
 
-- snapshot id;
-- Project id;
-- Pibo Session id;
-- workflow id;
-- workflow version;
-- base definition hash;
-- effective definition hash;
-- input values;
+- snapshot id, schema version, creation timestamp, creating principal id, owner scope, Project id, and Pibo Session id;
+- workflow id, workflow version, source (`code` or `ui`), title, description, tags, base definition hash, and effective definition hash;
+- the immutable base `WorkflowDefinition` body selected from the registry and the immutable effective `WorkflowDefinition` body used for execution after allowed prompt overrides are applied;
+- selected input values;
 - prompt overrides when present, keyed by node id for nodes eligible for prompt override;
-- prompt override eligibility policy used when the snapshot was created;
+- prompt override eligibility policy, including `metadata.sessionOverrides.prompt === true`, direct `promptTemplate` requirement, and the eligible node ids computed when the snapshot was created;
 - model when present, with scope `workflow`;
 - thinking level when present, with scope `workflow`;
 - fast mode when present, with scope `workflow`;
-- creation timestamp.
+- prompt asset pins used by the effective definition: prompt asset id, revision id, content hash, and source for each referenced asset;
+- validation result at snapshot creation, including diagnostics and validation timestamp;
+- deleted-definition display fallback fields: snapshot title, workflow id/version, effective definition hash, and optional tombstone label fields copied when a tombstone already exists.
 
 V2 configured-session values are immutable after creation and before first start. The update API MUST NOT change workflow id/version, input values, prompt overrides, model, thinking level, or fast mode in place. Users create a new configured Project session when those values need to change.
 
@@ -282,8 +297,8 @@ The implementation MUST support:
 - run state display for each workflow Project session;
 - current status, current node, node attempts, edge transfers, output, and errors;
 - nested workflow links and session hierarchy;
-- link back to definition when live definition exists;
-- “definition deleted” state when it does not;
+- link back to definition when a live or archived definition still exists and the user has access;
+- snapshot-only “definition deleted” state when the live definition is tombstoned or missing;
 - pending human action display from persisted wait tokens;
 - approve, reject, resume, and cancel actions;
 - resume payload validation before action acceptance;
@@ -403,7 +418,7 @@ The implementation MUST keep Pibo's existing auth, Project/session visibility, p
 
 | Task group | Completeness coverage |
 |---|---|
-| 0. Spec discovery and open questions | Open design questions remain tracked; implementation MUST not assume unstated choices without updating docs. |
+| 0. Spec discovery and open questions | Required decisions are documented: registry/store schema, snapshot fields, deleted-definition display behavior, graph library, prompt assets, override scope, pre-start edit policy, and exact V2 API routes. |
 | 1. Workflow Registry Store and Catalog | Sections 4.2, 4.3, 4.11 Registry checklist. |
 | 2. Version, Archive, Delete Lifecycle | Sections 4.7, 4.11 Lifecycle checklist. |
 | 3. Workflows Main-Nav Tab | Sections 4.1, 4.5, 4.11 Workflows UI checklist. |
@@ -466,19 +481,16 @@ The implementation MUST keep Pibo's existing auth, Project/session visibility, p
 | REQ-040 | Use existing JSON Schema subset | `04, 08, 09` | 4.9, 4.10 |
 | REQ-041 | XState remains visual only | `01, 04, 07, 08, 09` | 4.5, 4.8, 4.10 |
 
-### 4.14 Open Decisions Gate
+### 4.14 Resolved Decisions Gate
 
-The implementation MUST resolve and document these remaining source-spec open questions before coding the affected area:
+All source-spec decisions that block V2 implementation are now documented:
 
-- exact configuration/effective-definition snapshot fields beyond the minimum listed in this PRD;
-- deleted-workflow display and link behavior in historical Project run views;
-- exact API route contracts for catalog, drafts, versions, publish, archive, delete, Project session creation, and run start.
-
-Resolved registry/store decisions are documented in `02-workflow-registry-catalog-and-draft-store.md`: workflow identity, draft record, published version record, archive state, delete/tombstone state, and the V2 permission matrix.
-
-Resolved Project session override decisions are documented in `03-project-session-selection-and-snapshots.md`: prompt overrides are limited to explicitly opted-in Pibo Agent nodes with direct `promptTemplate` values; model, thinking level, and fast mode are workflow-session-wide; configured-session values are immutable before start.
-
-Resolved builder decisions are documented in `04-workflow-builder-and-ir-editing.md`: use `@xyflow/react` for the visual canvas, save layout through existing Workflow IR UI metadata, and persist prompt asset edits as revisions instead of mutating published asset content in place.
+- Registry/store schema and permission decisions are documented in `02-workflow-registry-catalog-and-draft-store.md`: workflow identity, draft record, published version record, archive state, delete/tombstone state, and the V2 permission matrix.
+- Project session override decisions are documented in `03-project-session-selection-and-snapshots.md`: prompt overrides are limited to explicitly opted-in Pibo Agent nodes with direct `promptTemplate` values; model, thinking level, and fast mode are workflow-session-wide; configured-session values are immutable before start.
+- Session snapshot fields are documented in Section 4.4 of this PRD and `03-project-session-selection-and-snapshots.md`: snapshots store the base and effective definitions, hashes, inputs, allowed overrides, scope policy, prompt asset pins, validation result, identity fields, and deleted-definition fallback display fields.
+- Deleted-workflow display and link behavior is documented in Section 4.8 of this PRD plus `06-versioning-archive-delete-lifecycle.md` and `07-project-run-inspection-sidebar-and-human-actions.md`: live or archived definitions can link back to Workflows; tombstoned or missing definitions render a snapshot-only definition-deleted state with no live-definition action.
+- Exact API routes are documented in Section 4.3 of this PRD. Catalog routes live under `/api/chat/workflows`; Project workflow configured-session routes live under `/api/chat/projects/:projectId/workflow-sessions`.
+- Builder decisions are documented in `04-workflow-builder-and-ir-editing.md`: use `@xyflow/react` for the visual canvas, save layout through existing Workflow IR UI metadata, and persist prompt asset edits as revisions instead of mutating published asset content in place.
 
 ## 5. Risks & Roadmap
 

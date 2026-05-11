@@ -93,7 +93,7 @@ This directory translates the Pibo Workflow UI Authoring V2 proposal, spec, desi
 | Validation diagnostics and missing refs | `02`, `04`, `05`, `08`, `09` |
 | Security boundary: no inline TypeScript/arbitrary code | `05`, `08`, `09` |
 | Testing and rollout gates | `08`, `09` |
-| Open design questions / TBD gates | `README`, `09` |
+| Resolved design decisions / implementation gates | `README`, `09` |
 
 ## Discovery Notes
 
@@ -104,13 +104,14 @@ The source specs already answer the PRD discovery questions:
 - **Constraints:** V2 must preserve V1 runtime behavior, use Pibo Workflow IR as truth, avoid inline TypeScript, avoid Zod, keep XState visual-only, and keep execution under Projects.
 - **Budget/deadline:** Not specified in source docs. Rollout is therefore phase- and validation-gated rather than calendar-gated.
 
-## Known Open Questions / TBD Before Implementation
+## Resolved Implementation Decisions
 
-The Workflow Registry/store schema and V2 permission matrix are resolved in `02-workflow-registry-catalog-and-draft-store.md`. The builder graph/canvas and prompt asset persistence decisions are resolved in `04-workflow-builder-and-ir-editing.md`. The PRDs preserve the remaining source specs' open questions instead of choosing silently. Implementation MUST resolve and document these before coding the affected area:
+The source-spec open decisions that block V2 implementation are resolved in the PRDs:
 
-- exact configuration/effective-definition snapshot fields beyond the minimum required for deleted-workflow run inspection;
-- deleted-workflow display and link behavior in historical Project run views;
-- exact API route contracts for catalog, drafts, versions, publish, archive, delete, Project session creation, and run start.
+- Workflow Registry/store schema and the V2 permission matrix are resolved in `02-workflow-registry-catalog-and-draft-store.md`.
+- Project session override scope, prompt override eligibility, and pre-start immutability are resolved in `03-project-session-selection-and-snapshots.md`.
+- Workflow Builder graph/canvas and prompt asset persistence decisions are resolved in `04-workflow-builder-and-ir-editing.md`.
+- Configuration/effective-definition snapshot fields, deleted-workflow display/link behavior, and exact API route contracts are resolved in `09-implementation-completeness-contract.md` Sections 4.3, 4.4, and 4.8, with affected PRDs updated to point to those contracts.
 
 ## Second-Pass Coverage Rule
 

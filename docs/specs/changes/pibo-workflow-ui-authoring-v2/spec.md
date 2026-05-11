@@ -226,7 +226,7 @@ V2 prompt overrides apply only to explicitly opted-in Pibo Agent nodes with dire
 
 #### Acceptance
 
-The run remains inspectable even if the workflow definition changes or is deleted. The snapshot records base workflow id/version/hash plus allowed overrides and their scope rules.
+The run remains inspectable even if the workflow definition changes or is deleted. The snapshot records the exact V2 snapshot contract from `prds/09-implementation-completeness-contract.md` Section 4.4: identity fields, owner scope, base and effective definitions, hashes, input, allowed overrides, scope rules, prompt asset pins, validation result, and deleted-definition fallback display fields.
 
 ### Requirement: Project Sessions sidebar shows only real Pibo Sessions
 
@@ -283,7 +283,7 @@ Workflow runs in Projects MUST link back to their workflow definition in the Wor
 
 #### Acceptance
 
-If the definition was deleted, the run still shows snapshot information and a clear “definition deleted” state.
+If the definition was deleted or is missing, the run shows snapshot information, a clear “definition deleted” state, and no broken live-definition link. If the definition still exists but is archived, the run may link to it and must show archived state.
 
 ### Requirement: UI composes existing capabilities only
 
@@ -555,7 +555,7 @@ UI editing writes Pibo workflow nodes, edges, ports, adapters, guards, state, an
 - [ ] SC-015: Historical runs remain inspectable after workflow deletion.
 - [ ] SC-016: No V2 path allows inline TypeScript, workflow slash commands, templates, TypeScript export, YAML/JSON import/export, or Zod.
 
-## Assumptions and Open Questions
+## Assumptions and Resolved Decisions
 
 ### Assumptions
 
@@ -569,12 +569,12 @@ UI editing writes Pibo workflow nodes, edges, ports, adapters, guards, state, an
 - Session prompt overrides target only explicitly opted-in Pibo Agent nodes with direct `promptTemplate` values.
 - Configured-session values are immutable after creation and before start.
 
-### Open Questions
+### Resolved Decisions
 
-- What is the exact Workflow Registry/store schema for drafts and UI-published workflows?
-- What definition/configuration snapshot fields are required to keep deleted-workflow runs inspectable?
-- How should deleted workflows appear in historical run views?
-- What exact API routes should expose catalog, drafts, versions, publish, archive, delete, and run start?
+- Workflow Registry/store schema and V2 permission decisions are documented in `prds/02-workflow-registry-catalog-and-draft-store.md`.
+- Workflow Builder graph/canvas and prompt asset persistence decisions are documented in `prds/04-workflow-builder-and-ir-editing.md`.
+- Prompt override eligibility, workflow-scoped model/thinking/fast-mode settings, and pre-start configured-session immutability are documented in `prds/03-project-session-selection-and-snapshots.md`.
+- Exact configuration/effective-definition snapshot fields, deleted-workflow display/link behavior, and exact API routes are documented in `prds/09-implementation-completeness-contract.md` Sections 4.3, 4.4, and 4.8.
 
 ## Traceability
 

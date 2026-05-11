@@ -14,8 +14,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Resolved in docs: exact API route contracts, V2 snapshot fields, and deleted-workflow historical run display/link behavior."
     },
     {
       "id": "US-002",

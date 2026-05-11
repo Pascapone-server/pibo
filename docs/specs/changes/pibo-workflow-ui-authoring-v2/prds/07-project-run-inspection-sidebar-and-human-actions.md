@@ -34,8 +34,8 @@
   - Projects do not use Room semantics for Workflow UI; Project is the top container.
   - Sidebar entries use icons or equivalent visual hints for main workflow, nested workflow, agent node, and subagent session types.
   - Non-session logical workflow elements appear only inside Workflow/XState/run views.
-  - Runs link back to their workflow definition in the Workflows tab when the definition still exists.
-  - Deleted definitions produce a clear snapshot-only/deleted-definition state.
+  - Runs link back to their workflow definition in the Workflows tab when the live or archived definition still exists and the user has access.
+  - Deleted or missing definitions produce a clear snapshot-only `definition deleted` state and no broken live-definition link.
   - Configured/not-started workflow sessions show a pre-run state with configuration summary, validation state, Start action, and no current run attempts.
   - Pending human actions list available registered actions and payload requirements.
   - Invalid, missing, expired, already-resolved, or unauthorized wait-token/action refs are rejected with diagnostics.
@@ -67,6 +67,7 @@
   - Workflow views combine V1 XState projection, kernel/run records, snapshots, and human wait state.
   - Terminal views render normal Pibo Session transcript/tool output for agent node and subagent sessions.
   - Human actions use the V1 persisted wait-token/action model.
+  - Definition links use Workflows tab routes only when a live or archived definition/version remains available. Tombstoned or missing definitions render snapshot data from the Project session/run snapshot with a `definition deleted` badge, workflow id/version, effective definition hash, configuration summary, and no live-definition action.
 
 - **Integration Points**:
   - Project service and Pibo Session Store for sidebar hierarchy and selected context.

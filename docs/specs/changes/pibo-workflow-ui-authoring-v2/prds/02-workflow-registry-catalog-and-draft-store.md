@@ -105,7 +105,7 @@
 
 - **Remaining Implementation Details**:
   - Physical database layout may use normalized tables or JSON columns, but the API-facing entities and lifecycle invariants above are normative.
-  - Exact HTTP route paths remain part of the catalog/API implementation stories.
+  - Exact HTTP route paths are defined in `09-implementation-completeness-contract.md` Section 4.3. Catalog and lifecycle routes live under `/api/chat/workflows`.
 
 - **Integration Points**:
   - Workflow Registry/store for code workflow projection, UI drafts, UI-published versions, archive/delete markers, and metadata.
