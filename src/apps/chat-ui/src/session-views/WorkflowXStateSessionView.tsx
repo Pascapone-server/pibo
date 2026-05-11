@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Activity, AlertTriangle, CheckCircle2, Circle, Clock3, GitBranch, Layers3, ListChecks, Route, XCircle } from "lucide-react";
 import { JsonRenderer } from "../tracing/JsonRenderer";
-import type { PiboProjectSession, PiboSessionTraceView, PiboWebSessionStatus } from "../types";
+import type { PiboProjectSession, PiboSessionTraceView, PiboTraceNode, PiboWebSessionStatus } from "../types";
 import type { ChatSessionViewProps } from "./types";
 
 type WorkflowNodeStatus = "idle" | "active" | "waiting" | "completed" | "failed" | "cancelled";
@@ -19,6 +19,19 @@ type WorkflowVisualEdge = {
 	source: string;
 	target: string;
 	label: string;
+};
+
+type WorkflowFinalOutput = {
+	value: unknown;
+	source: string;
+};
+
+type WorkflowValidationError = {
+	id: string;
+	message: string;
+	code?: string;
+	path?: string;
+	source?: string;
 };
 
 export function WorkflowXStateSessionView({
@@ -57,6 +70,7 @@ export function WorkflowXStateSessionView({
 					<WorkflowRuntimeSnapshot model={workflowModel} />
 					<div className="flex min-w-0 flex-col gap-4">
 						<WorkflowNodeStatusList model={workflowModel} />
+						<WorkflowResultAndValidationPanel model={workflowModel} />
 						<WorkflowProjectionFacts model={workflowModel} />
 					</div>
 				</div>
@@ -76,6 +90,8 @@ type WorkflowProjectSessionUiModel = {
 	latestStreamId?: number;
 	nodes: WorkflowVisualNode[];
 	edges: WorkflowVisualEdge[];
+	finalOutput?: WorkflowFinalOutput;
+	validationErrors: WorkflowValidationError[];
 	snapshot: Record<string, unknown>;
 };
 
@@ -196,6 +212,65 @@ function WorkflowNodeStatusList({ model }: { model: WorkflowProjectSessionUiMode
 	);
 }
 
+function WorkflowResultAndValidationPanel({ model }: { model: WorkflowProjectSessionUiModel }) {
+	return (
+		<div className="rounded-sm border border-slate-800 bg-[#111820] p-4 text-sm">
+			<div className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500">
+				<CheckCircle2 size={14} />
+				Final Output & Validation
+			</div>
+			<div className="space-y-4">
+				<div>
+					<div className="mb-2 flex items-center justify-between gap-2">
+						<div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Final output</div>
+						{model.finalOutput ? <span className="rounded border border-slate-700 px-1.5 py-0.5 font-mono text-[10px] text-slate-500">{model.finalOutput.source}</span> : null}
+					</div>
+					{model.finalOutput ? (
+						<div className="rounded-sm border border-slate-800 bg-[#0b0f14] p-2">
+							<JsonRenderer value={model.finalOutput.value} defaultExpandLevel={1} maxHeight="14rem" showControls={false} />
+						</div>
+					) : (
+						<div className="rounded-sm border border-slate-800 bg-[#0b0f14] p-3 text-xs text-slate-500">
+							No final workflow output is available yet. Completed workflow-backed sessions show the final assistant output here.
+						</div>
+					)}
+				</div>
+				<div>
+					<div className="mb-2 flex items-center justify-between gap-2">
+						<div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Validation errors</div>
+						<span className={`rounded border px-1.5 py-0.5 font-mono text-[10px] ${model.validationErrors.length ? "border-red-500/40 bg-red-500/10 text-red-300" : "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"}`}>
+							{model.validationErrors.length ? `${model.validationErrors.length} found` : "none"}
+						</span>
+					</div>
+					{model.validationErrors.length ? (
+						<div className="space-y-2">
+							{model.validationErrors.map((error) => (
+								<div key={error.id} className="rounded-sm border border-red-500/35 bg-red-500/10 p-2">
+									<div className="flex min-w-0 items-start gap-2 text-xs text-red-200">
+										<AlertTriangle size={14} className="mt-0.5 shrink-0 text-red-300" />
+										<div className="min-w-0">
+											<div className="break-words">{error.message}</div>
+											<div className="mt-1 flex flex-wrap gap-1 font-mono text-[10px] text-red-200/70">
+												{error.code ? <span>{error.code}</span> : null}
+												{error.path ? <span>{error.path}</span> : null}
+												{error.source ? <span>{error.source}</span> : null}
+											</div>
+										</div>
+									</div>
+								</div>
+							))}
+						</div>
+					) : (
+						<div className="rounded-sm border border-slate-800 bg-[#0b0f14] p-3 text-xs text-slate-500">
+							No workflow validation diagnostics were found in the current session trace.
+						</div>
+					)}
+				</div>
+			</div>
+		</div>
+	);
+}
+
 function WorkflowProjectionFacts({ model }: { model: WorkflowProjectSessionUiModel }) {
 	return (
 		<div className="rounded-sm border border-slate-800 bg-[#111820] p-4 text-sm">
@@ -233,6 +308,8 @@ function createProjectSessionWorkflowModel(
 	if (!isWorkflowBackedProjectSession(projectSession)) return null;
 	const status = workflowNodeStatus(projectSession, selectedSessionStatus);
 	const activeStateId = stateIdForStatus(status);
+	const finalOutput = collectWorkflowFinalOutput(traceView, status);
+	const validationErrors = collectWorkflowValidationErrors(traceView);
 	const nodes: WorkflowVisualNode[] = [
 		{
 			id: "workflow.entry",
@@ -270,6 +347,8 @@ function createProjectSessionWorkflowModel(
 			{ id: "workflow.transition.entry.session", source: "workflow.entry", target: "node.session", label: "WORKFLOW.START" },
 			{ id: "workflow.transition.session.terminal", source: "node.session", target: terminalStateIdForStatus(status), label: terminalEventForStatus(status) },
 		],
+		...(finalOutput ? { finalOutput } : {}),
+		validationErrors,
 		snapshot: {
 			kind: "pibo.workflow.xstateUiModel",
 			schemaVersion: 1,
@@ -287,9 +366,132 @@ function createProjectSessionWorkflowModel(
 				nodeId: activeStateId === "node.session" ? "session" : undefined,
 			},
 			nodeStatuses: nodes.map((node) => ({ id: node.id, kind: node.kind, status: node.status })),
+			result: {
+				hasFinalOutput: Boolean(finalOutput),
+				validationErrorCount: validationErrors.length,
+			},
 			actors: [{ id: "workflow.actor.session", kind: "agent", piboSessionId: projectSession.piboSessionId }],
 		},
 	};
+}
+
+function collectWorkflowFinalOutput(traceView: PiboSessionTraceView | null, status: WorkflowNodeStatus): WorkflowFinalOutput | undefined {
+	if (status !== "completed" || !traceView) return undefined;
+	const nodes = flattenTraceNodes(traceView.nodes);
+	const assistantOutput = [...nodes]
+		.reverse()
+		.find((node) => node.type === "assistant.message" && node.status === "done" && (node.output !== undefined || node.summary));
+	if (assistantOutput) {
+		return { value: assistantOutput.output ?? assistantOutput.summary ?? "", source: "assistant.message" };
+	}
+	const completedOutput = [...nodes]
+		.reverse()
+		.find((node) => node.status === "done" && node.type !== "user.message" && node.type !== "model.reasoning" && node.output !== undefined);
+	return completedOutput ? { value: completedOutput.output, source: completedOutput.type } : undefined;
+}
+
+function collectWorkflowValidationErrors(traceView: PiboSessionTraceView | null): WorkflowValidationError[] {
+	if (!traceView) return [];
+	const errors: WorkflowValidationError[] = [];
+	for (const node of flattenTraceNodes(traceView.nodes)) {
+		const nodeError = node.error ?? validationMessageFromValue(node.output) ?? validationMessageFromValue(node.summary);
+		if (!nodeError) continue;
+		const validationText = [node.title, node.summary, node.error, node.type].filter((value): value is string => typeof value === "string").join(" ");
+		if (!isValidationLike(validationText) && !isValidationLike(nodeError)) continue;
+		errors.push({
+			id: `node:${node.id}`,
+			message: nodeError,
+			...(node.type ? { source: node.type } : {}),
+		});
+	}
+	for (const event of traceView.rawEvents) {
+		extractValidationDiagnostics(event.payload, `event:${event.id}`, errors);
+	}
+	return dedupeValidationErrors(errors).slice(0, 8);
+}
+
+function flattenTraceNodes(nodes: readonly PiboTraceNode[]): PiboTraceNode[] {
+	const flattened: PiboTraceNode[] = [];
+	const visit = (items: readonly PiboTraceNode[]) => {
+		for (const item of items) {
+			flattened.push(item);
+			visit(item.children);
+		}
+	};
+	visit(nodes);
+	return flattened;
+}
+
+function extractValidationDiagnostics(value: unknown, idPrefix: string, errors: WorkflowValidationError[], depth = 0): void {
+	if (depth > 4 || !isRecord(value)) return;
+	const diagnostics = Array.isArray(value.diagnostics) ? value.diagnostics : undefined;
+	if (diagnostics) {
+		for (const diagnostic of diagnostics) {
+			if (!isRecord(diagnostic)) continue;
+			const message = stringValue(diagnostic.message) ?? validationMessageFromValue(diagnostic);
+			if (!message) continue;
+			errors.push({
+				id: `${idPrefix}:diagnostic:${errors.length}`,
+				message,
+				...(stringValue(diagnostic.code) ? { code: stringValue(diagnostic.code) } : {}),
+				...(stringValue(diagnostic.path) ? { path: stringValue(diagnostic.path) } : {}),
+				source: "workflow.diagnostic",
+			});
+		}
+	}
+	const error = value.error;
+	if (isRecord(error)) {
+		const code = stringValue(error.code);
+		const message = stringValue(error.message) ?? validationMessageFromValue(error);
+		if (message && isValidationLike([code, message].filter(Boolean).join(" "))) {
+			errors.push({
+				id: `${idPrefix}:error:${errors.length}`,
+				message,
+				...(code ? { code } : {}),
+				source: "workflow.error",
+			});
+		}
+	} else if (typeof error === "string" && isValidationLike(error)) {
+		errors.push({ id: `${idPrefix}:error:${errors.length}`, message: error, source: "workflow.error" });
+	}
+	for (const [key, child] of Object.entries(value)) {
+		if (key === "diagnostics" || key === "error") continue;
+		if (key !== "payload" && key !== "output" && key !== "result" && key !== "data") continue;
+		extractValidationDiagnostics(child, `${idPrefix}:${key}`, errors, depth + 1);
+	}
+}
+
+function validationMessageFromValue(value: unknown): string | undefined {
+	if (typeof value === "string") return value;
+	if (!isRecord(value)) return undefined;
+	return stringValue(value.message) ?? stringValue(value.error) ?? stringValue(value.summary);
+}
+
+function isValidationLike(value: string): boolean {
+	const normalized = value.toLowerCase();
+	return normalized.includes("validation")
+		|| normalized.includes("validate")
+		|| normalized.includes("diagnostic")
+		|| normalized.includes("workflowinterfaceerror")
+		|| normalized.includes("workflowruntimeerror.validation");
+}
+
+function dedupeValidationErrors(errors: WorkflowValidationError[]): WorkflowValidationError[] {
+	const seen = new Set<string>();
+	return errors.filter((error) => {
+		const key = `${error.code ?? ""}:${error.path ?? ""}:${error.message}`;
+		if (seen.has(key)) return false;
+		seen.add(key);
+		return true;
+	});
+}
+
+function stringValue(value: unknown): string | undefined {
+	return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function isWorkflowBackedProjectSession(projectSession: PiboProjectSession): boolean {
