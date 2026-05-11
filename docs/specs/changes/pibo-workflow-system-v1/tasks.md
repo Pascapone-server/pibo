@@ -78,7 +78,7 @@
 - [x] 9.5 Reject ambiguous concurrent global state writes unless a merge strategy is declared.
 - [x] 9.6 Add explicit back-edge/retry policy support with max attempts.
 - [x] 9.7 Reject free or unbounded cycles.
-- [ ] 9.8 Test state read/write isolation, edge data transfer, and bounded review/fix loops.
+- [x] 9.8 Test state read/write isolation, edge data transfer, and bounded review/fix loops.
 
 ## 10. Requirement: XState-backed orchestration projection
 
