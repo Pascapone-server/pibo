@@ -14,6 +14,8 @@ import type {
   NodeAttempt,
   NodeAttemptId,
   NodeLocalStateReader,
+  PromptBuilderRef,
+  PromptBuilderResult,
   RuntimeSelectionMetadata,
   ScopedStatePath,
   StatePatch,
@@ -35,7 +37,12 @@ import type {
   WorkflowWaitTokenId,
 } from "../types/index.js";
 import type { WorkflowNodeAttemptStore, WorkflowRunStore, WorkflowWaitTokenStore } from "../store/index.js";
-import { resolveWorkflowAdapter, resolveWorkflowDefinition, resolveWorkflowHandler } from "../registry/index.js";
+import {
+  resolveWorkflowAdapter,
+  resolveWorkflowDefinition,
+  resolveWorkflowHandler,
+  resolveWorkflowPromptBuilder,
+} from "../registry/index.js";
 import {
   validateJsonValueAgainstSchema,
   validateNodeOutput,
@@ -180,6 +187,7 @@ export type OneNodeAgentExecutor = (
 ) => Promise<OneNodeAgentExecutorResult> | OneNodeAgentExecutorResult;
 
 export type OneNodeAgentWorkflowOptions = {
+  registry?: Pick<WorkflowRegistry, "promptBuilders">;
   ownerScope?: string;
   now?: () => Date | string;
   createRunId?: () => WorkflowRunId;
@@ -191,12 +199,14 @@ export type OneNodeAgentWorkflowOptions = {
 };
 
 export type WorkflowAgentNodeDispatchOptions = {
+  registry?: Pick<WorkflowRegistry, "promptBuilders">;
   now?: () => Date | string;
   createNodeAttemptId?: () => NodeAttemptId;
   store?: WorkflowRunStore;
   emitEvent?: WorkflowEventEmitter;
   profileResolver?: AgentProfileResolver;
   agentExecutor: OneNodeAgentExecutor;
+  edgePayloads?: Record<string, WorkflowValue>;
 };
 
 export type WorkflowAgentNodeDispatchSuccess = {
@@ -615,7 +625,26 @@ export async function dispatchWorkflowAgentNode(
       });
     }
 
-    const prompt = buildAgentNodePrompt(agentNode, input, run.state, nodeId);
+    const promptResult = await buildAgentNodePrompt(agentNode, input, {
+      workflow: definition,
+      run,
+      nodeId,
+      registry: options.registry,
+      edgePayloads: options.edgePayloads,
+    });
+    if (!promptResult.ok) {
+      return failAgentNodeDispatch({
+        run,
+        nodeAttempt,
+        events,
+        diagnostics: promptResult.diagnostics,
+        timestamp,
+        store: options.store,
+        emitEvent: options.emitEvent,
+        error: promptResult.error,
+      });
+    }
+
     const executorResult = await options.agentExecutor({
       workflow: definition,
       run,
@@ -623,7 +652,7 @@ export async function dispatchWorkflowAgentNode(
       nodeId,
       node: agentNode,
       input,
-      prompt,
+      prompt: promptResult.prompt,
       profileId: profileResolution.profile.id,
       resolvedProfile: profileResolution.profile,
       routing: agentNode.routing,
@@ -2026,7 +2055,25 @@ export async function runOneNodeAgentWorkflow(
       });
     }
 
-    const prompt = buildAgentNodePrompt(node, input, run.state, nodeId);
+    const promptResult = await buildAgentNodePrompt(node, input, {
+      workflow: definition,
+      run,
+      nodeId,
+      registry: options.registry,
+    });
+    if (!promptResult.ok) {
+      return failRunningWorkflow({
+        run,
+        nodeAttempt,
+        events,
+        diagnostics: promptResult.diagnostics,
+        timestamp,
+        store: options.store,
+        emitEvent: options.emitEvent,
+        error: promptResult.error,
+      });
+    }
+
     const executorResult = await options.agentExecutor({
       workflow: definition,
       run,
@@ -2034,7 +2081,7 @@ export async function runOneNodeAgentWorkflow(
       nodeId,
       node,
       input,
-      prompt,
+      prompt: promptResult.prompt,
       profileId: profileResolution.profile.id,
       resolvedProfile: profileResolution.profile,
       routing: node.routing,
@@ -2760,18 +2807,154 @@ function createAgentRuntimeRoutingMetadata(
   };
 }
 
-function buildAgentNodePrompt(
+type AgentNodePromptBuildResult =
+  | { ok: true; prompt: string }
+  | { ok: false; diagnostics: WorkflowDiagnostic[]; error: WorkflowErrorSummary };
+
+type AgentNodePromptBuildOptions = {
+  workflow: WorkflowDefinition;
+  run: WorkflowRun;
+  nodeId: string;
+  registry?: Pick<WorkflowRegistry, "promptBuilders">;
+  edgePayloads?: Record<string, WorkflowValue>;
+};
+
+async function buildAgentNodePrompt(
   node: AgentNodeDefinition,
   input: WorkflowValue,
-  state: WorkflowRun["state"],
-  nodeId: string,
-): string {
-  const serializedInput = formatPromptTemplateValue(input);
-  if (!node.promptTemplate) {
-    return serializedInput;
+  options: AgentNodePromptBuildOptions,
+): Promise<AgentNodePromptBuildResult> {
+  if (node.promptBuilder !== undefined) {
+    return buildAgentNodePromptWithRegisteredBuilder(node, input, options);
   }
 
-  return renderPromptTemplate(node.promptTemplate, { input, state, nodeId });
+  if (!node.promptTemplate) {
+    return { ok: true, prompt: formatPromptTemplateValue(input) };
+  }
+
+  return {
+    ok: true,
+    prompt: renderPromptTemplate(node.promptTemplate, {
+      input,
+      state: options.run.state,
+      nodeId: options.nodeId,
+    }),
+  };
+}
+
+async function buildAgentNodePromptWithRegisteredBuilder(
+  node: AgentNodeDefinition,
+  input: WorkflowValue,
+  options: AgentNodePromptBuildOptions,
+): Promise<AgentNodePromptBuildResult> {
+  const builderId = getPromptBuilderRefId(node.promptBuilder!);
+  const builder = builderId && options.registry
+    ? resolveWorkflowPromptBuilder(options.registry, node.promptBuilder!)
+    : undefined;
+
+  if (!builderId || !builder) {
+    const diagnostic: WorkflowDiagnostic = {
+      code: "WorkflowRuntimeError.unknownPromptBuilderRef",
+      message: `Workflow agent node '${options.nodeId}' references prompt builder '${builderId ?? "<invalid>"}', but it is not registered in the Workflow Registry.`,
+      severity: "error",
+      nodeId: options.nodeId,
+      path: getPromptBuilderRefPath(node.promptBuilder!, options.nodeId),
+      hint: "Pass a Workflow Registry with the prompt builder registered before dispatching an agent node with promptBuilder.",
+    };
+    return {
+      ok: false,
+      diagnostics: [diagnostic],
+      error: {
+        code: diagnostic.code,
+        message: "Agent node dispatch failed before Pibo Runtime execution because prompt builder resolution failed.",
+      },
+    };
+  }
+
+  try {
+    const result = await builder.value({
+      input,
+      state: options.run.state,
+      global: createPromptBuilderStateReader(options.run.state.global),
+      local: createPromptBuilderStateReader(options.run.state.local?.[options.nodeId] ?? {}),
+      edge: createEdgePayloadReader(options.edgePayloads ?? {}),
+      node,
+      nodeId: options.nodeId,
+      run: options.run,
+      workflow: options.workflow,
+    });
+    const prompt = normalizePromptBuilderResult(result);
+    if (prompt !== undefined) {
+      return { ok: true, prompt };
+    }
+
+    const diagnostic: WorkflowDiagnostic = {
+      code: "WorkflowRuntimeError.invalidPromptBuilderResult",
+      message: `Workflow prompt builder '${builderId}' for agent node '${options.nodeId}' returned an invalid prompt result.`,
+      severity: "error",
+      nodeId: options.nodeId,
+      path: getPromptBuilderRefPath(node.promptBuilder!, options.nodeId),
+      hint: "Return a prompt string or an object with a string prompt property from the registered prompt builder.",
+    };
+    return {
+      ok: false,
+      diagnostics: [diagnostic],
+      error: {
+        code: diagnostic.code,
+        message: "Agent node dispatch failed before Pibo Runtime execution because prompt builder output was invalid.",
+      },
+    };
+  } catch (caught) {
+    const message = caught instanceof Error ? caught.message : "Prompt builder failed with a non-Error value.";
+    const diagnostic: WorkflowDiagnostic = {
+      code: "WorkflowRuntimeError.promptBuilderFailed",
+      message: `Workflow prompt builder '${builderId}' for agent node '${options.nodeId}' failed: ${message}`,
+      severity: "error",
+      nodeId: options.nodeId,
+      path: getPromptBuilderRefPath(node.promptBuilder!, options.nodeId),
+      hint: "Fix the registered prompt builder implementation or replace the promptBuilder ref.",
+    };
+    return {
+      ok: false,
+      diagnostics: [diagnostic],
+      error: {
+        code: diagnostic.code,
+        message: "Agent node dispatch failed before Pibo Runtime execution because prompt builder execution failed.",
+      },
+    };
+  }
+}
+
+function normalizePromptBuilderResult(result: PromptBuilderResult | unknown): string | undefined {
+  if (typeof result === "string") {
+    return result;
+  }
+
+  if (isPromptTemplateObject(result) && typeof result.prompt === "string") {
+    return result.prompt;
+  }
+
+  return undefined;
+}
+
+function createPromptBuilderStateReader(values: Record<string, JsonValue>): WorkflowGlobalStateReader | NodeLocalStateReader {
+  return {
+    get(path) {
+      return values[path];
+    },
+  };
+}
+
+function getPromptBuilderRefId(ref: PromptBuilderRef): string | undefined {
+  if (typeof ref === "string") {
+    return ref.length > 0 ? ref : undefined;
+  }
+
+  return ref.kind === "promptBuilder" && ref.language === "typescript" && ref.id.length > 0 ? ref.id : undefined;
+}
+
+function getPromptBuilderRefPath(ref: PromptBuilderRef, nodeId: string): string {
+  return typeof ref === "string" ? `$.nodes.${nodeId}.promptBuilder` : `$.nodes.${nodeId}.promptBuilder.id`;
 }
 
 type PromptTemplateRenderContext = {

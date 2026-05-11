@@ -3,12 +3,21 @@ import { describe, it } from "node:test";
 
 import {
   createPiboSessionRoutingAgentExecutor,
+  createWorkflowRegistry,
   dispatchWorkflowAgentNode,
   json,
+  promptBuilderRef,
+  registerWorkflowPromptBuilder,
   SqliteWorkflowRunStore,
   text,
 } from "../index.js";
-import type { AgentNodeDefinition, WorkflowDefinition, WorkflowRun, WorkflowRuntimeEvent } from "../index.js";
+import type {
+  AgentNodeDefinition,
+  PromptBuilderHandler,
+  WorkflowDefinition,
+  WorkflowRun,
+  WorkflowRuntimeEvent,
+} from "../index.js";
 
 function createAgentWorkflow(): WorkflowDefinition {
   return {
@@ -212,6 +221,110 @@ describe("workflow agent node dispatch", () => {
 
     assert.equal(result.ok, true);
     assert.equal(result.output, "Prompt rendered.");
+  });
+
+  it("builds agent prompts with registered TypeScript prompt builders", async () => {
+    const topicInput = json({
+      type: "object",
+      required: ["topic"],
+      additionalProperties: false,
+      properties: { topic: { type: "string" } },
+    });
+    const definition: WorkflowDefinition = {
+      id: "test.agent-node-prompt-builder",
+      version: "1.0.0",
+      input: topicInput,
+      output: text(),
+      initial: "draft",
+      final: "draft",
+      nodes: {
+        draft: {
+          kind: "agent",
+          runtime: "pibo",
+          profile: { kind: "fixed", id: "pibo-agent" },
+          input: topicInput,
+          output: text(),
+          promptBuilder: promptBuilderRef("test.promptBuilders.articleDraft"),
+        },
+      },
+      edges: {},
+    };
+    const input = { topic: "registered prompt builders" };
+    const run: WorkflowRun = {
+      id: "wfr_prompt_builder",
+      workflowId: definition.id,
+      workflowVersion: definition.version,
+      ownerScope: "user:prompt-builder",
+      status: "running",
+      current: { nodeId: "draft", status: "running" },
+      input,
+      state: {
+        global: { audience: "workflow authors" },
+        local: { draft: { tone: "concise" } },
+      },
+      createdAt: "2026-05-11T00:46:00.000Z",
+      updatedAt: "2026-05-11T00:46:00.000Z",
+    };
+    const registry = createWorkflowRegistry();
+    const builder: PromptBuilderHandler = (context) => {
+      const builderInput = context.input as typeof input;
+      assert.equal(context.workflow?.id, definition.id);
+      assert.equal(context.run?.id, run.id);
+      assert.equal(context.nodeId, "draft");
+      assert.equal(context.node.kind, "agent");
+      assert.deepEqual(context.input, input);
+      assert.equal(context.global.get("audience"), "workflow authors");
+      assert.equal(context.local.get("tone"), "concise");
+      assert.equal(context.edge.get("incoming"), "edge payload");
+      return {
+        prompt: `Draft about ${builderInput.topic} for ${context.global.get("audience")} in a ${context.local.get("tone")} tone using ${context.edge.get("incoming")}.`,
+        metadata: { source: "unit-test" },
+      };
+    };
+    registerWorkflowPromptBuilder(registry, "test.promptBuilders.articleDraft", builder);
+
+    const result = await dispatchWorkflowAgentNode(definition, run, "draft", input, {
+      registry,
+      createNodeAttemptId: () => "wna_prompt_builder",
+      edgePayloads: { incoming: "edge payload" },
+      agentExecutor: (context) => {
+        assert.equal(
+          context.prompt,
+          "Draft about registered prompt builders for workflow authors in a concise tone using edge payload.",
+        );
+        return { output: "Prompt builder rendered." };
+      },
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.output, "Prompt builder rendered.");
+  });
+
+  it("fails before Pibo Runtime execution when a prompt builder is not registered", async () => {
+    const definition = createAgentWorkflow();
+    const draftNode = definition.nodes.draft as AgentNodeDefinition;
+    delete draftNode.promptTemplate;
+    draftNode.promptBuilder = promptBuilderRef("test.promptBuilders.missing");
+    let executorCalled = false;
+
+    const result = await dispatchWorkflowAgentNode(definition, createRun(), "draft", "Explain workflows", {
+      createNodeAttemptId: () => "wna_missing_prompt_builder",
+      agentExecutor: () => {
+        executorCalled = true;
+        return { output: "should not run" };
+      },
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(executorCalled, false);
+    assert.equal(result.nodeAttempt?.status, "failed");
+    assert.equal(result.run.status, "failed");
+    assert.equal(result.error.code, "WorkflowRuntimeError.unknownPromptBuilderRef");
+    assert.ok(result.diagnostics.some((diagnostic) => diagnostic.code === "WorkflowRuntimeError.unknownPromptBuilderRef"));
+    assert.deepEqual(
+      result.events.map((event) => event.type),
+      ["node.started", "node.failed"],
+    );
   });
 
   it("resolves the fixed Agent Designer profile before Pibo Runtime creation", async () => {

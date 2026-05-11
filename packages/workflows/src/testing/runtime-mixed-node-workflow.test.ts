@@ -91,6 +91,7 @@ describe("mixed node workflow runtime coverage", () => {
         "draft",
         planTransfer.targetInput,
         {
+          registry,
           store,
           now: () => "2026-05-11T02:00:03.000Z",
           createNodeAttemptId: () => "wna_mixed_draft",
