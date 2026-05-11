@@ -103,6 +103,8 @@ export function validateWorkflowDefinitionSchemas(
     validateWorkflowNodeStateAccess(definition, nodeId, node, diagnostics);
   }
 
+  validateWorkflowGlobalStateWriteConflicts(definition, diagnostics);
+
   for (const [edgeId, edge] of Object.entries(definition.edges)) {
     validateWorkflowEdgeNodeRefs(definition, edgeId, edge, diagnostics);
     validateWorkflowEdgeAdapterRef(definition, edgeId, edge, diagnostics, options);
@@ -674,6 +676,47 @@ function validateWorkflowNodeStateAccess(
 
   validateNodeStateAccessList(definition, nodeId, node.state.reads, "reads", diagnostics);
   validateNodeStateAccessList(definition, nodeId, node.state.writes, "writes", diagnostics);
+}
+
+function validateWorkflowGlobalStateWriteConflicts(
+  definition: Pick<WorkflowDefinition, "nodes" | "state">,
+  diagnostics: WorkflowDiagnostic[],
+): void {
+  const writersByPath = new Map<string, Set<string>>();
+
+  for (const [nodeId, node] of Object.entries(definition.nodes)) {
+    for (const writePath of node.state?.writes ?? []) {
+      if (typeof writePath !== "string") {
+        continue;
+      }
+
+      const scopedPath = parseScopedStatePath(writePath);
+      if (scopedPath?.scope !== "global" || !definition.state?.global?.[scopedPath.path]) {
+        continue;
+      }
+
+      const writers = writersByPath.get(scopedPath.path) ?? new Set<string>();
+      writers.add(nodeId);
+      writersByPath.set(scopedPath.path, writers);
+    }
+  }
+
+  for (const [statePath, writers] of writersByPath) {
+    const field = definition.state?.global?.[statePath];
+    if (!field || field.merge || writers.size <= 1) {
+      continue;
+    }
+
+    diagnostics.push({
+      code: "WorkflowStateError.ambiguousConcurrentGlobalStateWrite",
+      message: `Workflow global state path '${statePath}' is written by multiple nodes without an explicit merge policy.`,
+      severity: "error",
+      path: `$.state.global.${statePath}`,
+      hint: `Declare state.global['${statePath}'].merge, or ensure only one node writes '${statePath}'. Writers: ${[
+        ...writers,
+      ].join(", ")}.`,
+    });
+  }
 }
 
 function validateNodeStateAccessList(

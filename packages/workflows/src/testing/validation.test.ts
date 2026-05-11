@@ -376,6 +376,64 @@ describe("workflow definition validation", () => {
     );
   });
 
+  it("rejects ambiguous concurrent global state writes without a merge policy", () => {
+    const definition = withDefinitionMutation((draft) => {
+      draft.state = {
+        global: {
+          summary: { schema: { type: "string" } },
+        },
+      };
+      draft.nodes.answer.state = {
+        writes: ["global.summary"],
+      };
+      draft.nodes.secondWriter = {
+        kind: "code",
+        language: "typescript",
+        handler: "fixture.handlers.secondWriter",
+        output: { kind: "text" },
+        state: {
+          writes: ["global.summary"],
+        },
+      };
+    });
+
+    const result = validateWorkflow(definition);
+
+    assert.equal(result.ok, false);
+    findDiagnostic(
+      result,
+      "WorkflowStateError.ambiguousConcurrentGlobalStateWrite",
+      (diagnostic) => diagnostic.path === "$.state.global.summary",
+    );
+  });
+
+  it("accepts multiple global state writers when an explicit merge policy is declared", () => {
+    const definition = withDefinitionMutation((draft) => {
+      draft.state = {
+        global: {
+          findings: {
+            schema: { type: "array", items: { type: "string" } },
+            merge: { kind: "append" },
+          },
+        },
+      };
+      draft.nodes.answer.state = {
+        writes: ["global.findings"],
+      };
+      draft.nodes.secondWriter = {
+        kind: "code",
+        language: "typescript",
+        handler: "fixture.handlers.secondWriter",
+        output: { kind: "text" },
+        state: {
+          writes: ["global.findings"],
+        },
+      };
+    });
+
+    assert.equal(validateWorkflow(definition).ok, true);
+  });
+
   it("rejects edges that reference missing source or target nodes", () => {
     const definition = withDefinitionMutation((draft) => {
       draft.edges["missing-links"] = {
