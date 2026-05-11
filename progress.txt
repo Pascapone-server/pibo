@@ -1,4 +1,5 @@
 ## Codebase Patterns
+- Workflow DB boundaries should store workflow facts plus lightweight links (`pibo_session_id`, `project_id`) only; normal Pibo/Pi traces, tool calls, spans, transcripts, and session records stay in their existing session stores.
 - Workflow fact persistence uses small store interfaces in `packages/workflows/src/store/index.ts`; runtime helpers should persist events/edge transfers only when the injected store supports the corresponding optional `save*` method.
 - Workflow SQLite schema changes belong in `packages/workflows/src/store/index.ts` with `CREATE TABLE IF NOT EXISTS` / additive column migrations and a focused schema contract test under `packages/workflows/src/testing`.
 - Web UI Workflow/XState consumers should use `createWorkflowXStateUiModel(projectWorkflowToXStateProjection(definition), { snapshot | activeStateIds })` to get compact nodes/edges/actors/guards/actions/delays while keeping `contextShape.exposesPrivatePayloads: false` and kernel snapshots as durable truth.
@@ -773,4 +774,17 @@
   - Keep workflow persistence facts queryable through focused store interfaces instead of forcing every lightweight runtime store to implement every table.
   - Checkpoint records are the current durable state-snapshot representation: they store cursor, global state, pending/completed node ids, and edge payload refs.
   - Runtime event persistence uses generated event ids and wall-clock `createdAt`, so tests should filter by event type/id rather than rely on mixed manually-created and runtime-created event ordering.
+---
+
+## 2026-05-11 02:26 UTC - 11.3
+- Added an explicit workflow SQLite/session-store boundary contract so `pibo-workflows.sqlite` remains limited to workflow facts and lightweight `pibo_session_id` / `project_id` links.
+- Added schema contract coverage that fails if workflow storage introduces normal session trace, transcript, tool-call, span, or session-record tables/columns.
+- Added routed one-node agent runtime coverage proving session trace/tool-call/span/transcript stream events are ignored by workflow event persistence while only the normal assistant reply and session ids are recorded.
+- Marked task `11.3` complete in the workflow-system task list because the referenced JSON PRDs are absent and progress is tracked in `tasks.md`.
+- Quality checks: host `npm --prefix packages/workflows run typecheck && npm --prefix packages/workflows test`; host `npm run typecheck`; container `/workspace` `npm --prefix packages/workflows run typecheck && npm --prefix packages/workflows test && npm run typecheck`.
+- Files changed: `packages/workflows/src/store/index.ts`, `packages/workflows/src/testing/workflow-sqlite-schema.test.ts`, `packages/workflows/src/testing/runtime-one-node-agent.test.ts`, `docs/specs/changes/pibo-workflow-system-v1/tasks.md`, `progress.txt`.
+- **Learnings for future iterations:**
+  - The workflow store should expose only workflow-specific logical tables; add new workflow facts there, but leave Pibo/Pi session tables and trace payload storage in existing stores.
+  - Agent-node workflow persistence should record session linkage (`piboSessionId`, optional `piSessionId`) and workflow events, not routed session tool-call/span/transcript event payloads.
+  - Schema-boundary tests can use storage-name keyword guards while allowing explicit link columns such as `pibo_session_id` for future inspection stories.
 ---

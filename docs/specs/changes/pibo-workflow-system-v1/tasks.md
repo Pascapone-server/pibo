@@ -94,7 +94,7 @@
 
 - [x] 11.1 Design the fresh workflow-specific runtime SQLite schema/store named `pibo-workflows.sqlite`.
 - [x] 11.2 Persist workflow runs, workflow events, node attempts, edge transfers, checkpoints, wakeups, wait tokens, and state snapshots.
-- [ ] 11.3 Keep normal session traces/tool calls/spans/transcripts in the existing session stores.
+- [x] 11.3 Keep normal session traces/tool calls/spans/transcripts in the existing session stores.
 - [ ] 11.4 Link workflow runs to Pibo Sessions and Project Sessions.
 - [ ] 11.5 Add run inspection through debug CLI or internal API.
 - [ ] 11.6 Test inspection of completed and failed runs after restart.

@@ -7,12 +7,18 @@ import { describe, it } from "node:test";
 
 import {
   createWorkflowSqlitePath,
+  isNormalSessionFactStorageName,
   SqliteWorkflowRunStore,
   WORKFLOW_SQLITE_FILENAME,
+  WORKFLOW_SQLITE_SESSION_LINK_COLUMNS,
   WORKFLOW_SQLITE_TABLES,
 } from "../index.js";
 
 type TableInfoRow = {
+  name: string;
+};
+
+type ColumnInfoRow = {
   name: string;
 };
 
@@ -130,7 +136,7 @@ describe("workflow sqlite schema", () => {
             db
               .prepare(`PRAGMA table_info(${table})`)
               .all()
-              .map((row) => (row as TableInfoRow).name),
+              .map((row) => (row as ColumnInfoRow).name),
           );
           assert.deepEqual(
             requiredColumns[table].filter((column) => !columns.has(column)),
@@ -138,6 +144,61 @@ describe("workflow sqlite schema", () => {
             `missing required columns for ${table}`,
           );
         }
+      } finally {
+        db.close();
+      }
+    } finally {
+      try {
+        store.close();
+      } catch {
+        // Store may already be closed before schema inspection.
+      }
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps normal session trace, transcript, tool-call, and span storage out of the workflow database", () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), "pibo-workflows-session-boundary-test-"));
+    const dbPath = createWorkflowSqlitePath(tempRoot);
+    const store = new SqliteWorkflowRunStore(dbPath);
+
+    try {
+      store.close();
+
+      const db = new DatabaseSync(dbPath);
+      try {
+        const storageNames = db
+          .prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'index', 'view', 'trigger')")
+          .all()
+          .map((row) => (row as TableInfoRow).name)
+          .filter((name) => !name.startsWith("sqlite_"));
+
+        assert.deepEqual(
+          storageNames.filter(isNormalSessionFactStorageName),
+          [],
+          "workflow sqlite must not create normal session trace/transcript/tool-call/span storage",
+        );
+
+        const linkColumns = new Set(WORKFLOW_SQLITE_SESSION_LINK_COLUMNS);
+        const disallowedColumns: string[] = [];
+        for (const table of WORKFLOW_SQLITE_TABLES) {
+          const columns = db
+            .prepare(`PRAGMA table_info(${table})`)
+            .all()
+            .map((row) => (row as ColumnInfoRow).name);
+          for (const column of columns) {
+            if (!linkColumns.has(column as (typeof WORKFLOW_SQLITE_SESSION_LINK_COLUMNS)[number])) {
+              const storageName = `${table}.${column}`;
+              if (isNormalSessionFactStorageName(storageName)) disallowedColumns.push(storageName);
+            }
+          }
+        }
+
+        assert.deepEqual(
+          disallowedColumns,
+          [],
+          "workflow sqlite columns may link to existing sessions but must not duplicate normal session facts",
+        );
       } finally {
         db.close();
       }

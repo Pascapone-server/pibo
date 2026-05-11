@@ -116,6 +116,84 @@ describe("one-node agent workflow runtime path", () => {
     assert.deepEqual(result.nodeAttempt.metadata?.runtime?.tools, ["read", "bash"]);
   });
 
+  it("keeps normal session trace/tool-call/span/transcript events in the routed session stream", async () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), "pibo-workflows-session-facts-boundary-"));
+    const dbPath = join(tempRoot, "pibo-workflows.sqlite");
+    const store = new SqliteWorkflowRunStore(dbPath);
+    const listeners = new Set<
+      (event: { type: string; piboSessionId: string; eventId?: string; text?: string; payload?: unknown }) => void
+    >();
+
+    try {
+      const result = await runOneNodeAgentWorkflow(cloneMinimalWorkflow(), "Keep session facts separate.", {
+        ownerScope: "user:session-boundary",
+        now: () => "2026-05-11T02:20:00.000Z",
+        createRunId: () => "wfr_session_boundary",
+        createNodeAttemptId: () => "wna_session_boundary",
+        store,
+        agentExecutor: createPiboSessionRoutingAgentExecutor({
+          routing: {
+            createSession(input) {
+              return { id: "ps_session_boundary", piSessionId: "pi_session_boundary", profile: input.profile };
+            },
+            emit(event) {
+              queueMicrotask(() => {
+                for (const listener of listeners) {
+                  listener({
+                    type: "tool_call_result",
+                    piboSessionId: event.piboSessionId,
+                    eventId: event.id,
+                    payload: { toolCallId: "tc_1", output: "kept in session store" },
+                  });
+                  listener({
+                    type: "span_completed",
+                    piboSessionId: event.piboSessionId,
+                    eventId: event.id,
+                    payload: { spanId: "span_1" },
+                  });
+                  listener({
+                    type: "transcript_delta",
+                    piboSessionId: event.piboSessionId,
+                    eventId: event.id,
+                    payload: { delta: "session transcript data" },
+                  });
+                  listener({
+                    type: "assistant_message",
+                    piboSessionId: event.piboSessionId,
+                    eventId: event.id,
+                    text: "Workflow output from normal session reply.",
+                  });
+                }
+              });
+            },
+            subscribe(listener) {
+              listeners.add(listener);
+              return () => listeners.delete(listener);
+            },
+          },
+          createMessageId: () => "msg_session_boundary",
+        }),
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(result.output, "Workflow output from normal session reply.");
+      assert.equal(result.nodeAttempt.metadata?.piboSessionId, "ps_session_boundary");
+      assert.equal(result.nodeAttempt.metadata?.piSessionId, "pi_session_boundary");
+      assert.deepEqual(
+        store.listEvents({ workflowRunId: "wfr_session_boundary" }).map((event) => event.type),
+        ["workflow.started", "node.started", "node.completed", "workflow.completed"],
+      );
+      assert.deepEqual(store.getNodeAttempt("wna_session_boundary")?.metadata, result.nodeAttempt.metadata);
+    } finally {
+      try {
+        store.close();
+      } catch {
+        // Store may already be closed if the test failed after closing it.
+      }
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("selects the registered fixed pibo-agent Agent Designer profile for one-node execution", async () => {
     const registry = createWorkflowRegistry(workflowFixtureProviders);
     const definition = cloneMinimalWorkflow();

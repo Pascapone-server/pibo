@@ -46,6 +46,22 @@ export const WORKFLOW_SQLITE_TABLES = [
 
 export type WorkflowSqliteTableName = (typeof WORKFLOW_SQLITE_TABLES)[number];
 
+export const WORKFLOW_SQLITE_SESSION_LINK_COLUMNS = ["pibo_session_id", "project_id"] as const;
+
+export const WORKFLOW_SQLITE_NORMAL_SESSION_FACT_KEYWORDS = [
+  "session_record",
+  "session_trace",
+  "session_transcript",
+  "transcript",
+  "tool_call",
+  "span",
+] as const;
+
+export function isNormalSessionFactStorageName(name: string): boolean {
+  const normalized = name.toLowerCase();
+  return WORKFLOW_SQLITE_NORMAL_SESSION_FACT_KEYWORDS.some((keyword) => normalized.includes(keyword));
+}
+
 export function createWorkflowSqlitePath(baseDirectory: string): string {
   return resolve(baseDirectory, WORKFLOW_SQLITE_FILENAME);
 }
