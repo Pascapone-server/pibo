@@ -2160,6 +2160,13 @@ test("chat web app creates configured Project workflow sessions from the workflo
 		assert.equal(pickerPayload.kind, "workflow-versions");
 		assert.ok(pickerPayload.options.some((option) => option.id === "standard-project" && option.version === "1.0.0"));
 
+		const workflowConfiguration = {
+			inputValues: { topic: "Workflow API creation", priority: 2 },
+			promptOverrides: { agent: "Use the provided topic and produce a concise implementation plan." },
+			model: { provider: "openai", id: "gpt-5.1" },
+			thinkingLevel: "medium",
+			fastMode: true,
+		};
 		const createdResponse = await fetch(`${baseURL}/api/chat/projects/${encodeURIComponent(projectPayload.project.id)}/workflow-sessions`, {
 			method: "POST",
 			headers: {
@@ -2172,6 +2179,7 @@ test("chat web app creates configured Project workflow sessions from the workflo
 				workflowId: "standard-project",
 				workflowVersion: "1.0.0",
 				title: "Configured Standard Project",
+				...workflowConfiguration,
 			}),
 		});
 		assert.equal(createdResponse.status, 201);
@@ -2180,6 +2188,21 @@ test("chat web app creates configured Project workflow sessions from the workflo
 		assert.equal(createdPayload.session.metadata.projectWorkflowId, "standard-project");
 		assert.equal(createdPayload.session.metadata.projectWorkflowVersion, "1.0.0");
 		assert.equal(createdPayload.session.metadata.workflowSessionKind, "main_workflow");
+		assert.deepEqual(createdPayload.session.activeModel, workflowConfiguration.model);
+		assert.deepEqual(createdPayload.configuration.inputValues, workflowConfiguration.inputValues);
+		assert.deepEqual(createdPayload.configuration.promptOverrides, workflowConfiguration.promptOverrides);
+		assert.deepEqual(createdPayload.configuration.promptOverrideEligibleNodeIds, ["agent"]);
+		assert.deepEqual(createdPayload.configuration.model, workflowConfiguration.model);
+		assert.equal(createdPayload.configuration.thinkingLevel, "medium");
+		assert.equal(createdPayload.configuration.fastMode, true);
+		assert.deepEqual(createdPayload.configuration.overrideScopes, {
+			promptOverrides: "eligible_agent_node",
+			model: "workflow",
+			thinkingLevel: "workflow",
+			fastMode: "workflow",
+		});
+		assert.deepEqual(createdPayload.projectSession.configuration, createdPayload.configuration);
+		assert.deepEqual(createdPayload.session.metadata.projectWorkflowConfiguration, createdPayload.configuration);
 		assert.equal(createdPayload.projectSession.workflowId, "standard-project");
 		assert.equal(createdPayload.projectSession.workflowVersion, "1.0.0");
 		assert.equal(createdPayload.projectSession.state, "configured");
@@ -2202,6 +2225,7 @@ test("chat web app creates configured Project workflow sessions from the workflo
 		assert.equal(startValidationPayload.validation.trigger, "before_workflow_start");
 		assert.equal(startValidationPayload.validation.ok, true);
 		assert.equal(startValidationPayload.projectSession.state, "configured");
+		assert.deepEqual(startValidationPayload.projectSession.configuration, createdPayload.configuration);
 		assert.equal(startValidationPayload.projectSession.workflowRunId, undefined);
 		assert.equal(emitted.length, 0);
 
@@ -2215,6 +2239,76 @@ test("chat web app creates configured Project workflow sessions from the workflo
 			body: JSON.stringify({ workflowId: "standard-project" }),
 		});
 		assert.equal(legacyRejected.status, 400);
+	} finally {
+		await channel.stop?.();
+	}
+});
+
+test("chat web app rejects unsupported Project workflow session creation inputs", async () => {
+	const { channel, baseURL, emitted, storageDir } = await startWebHostChannel({
+		auth: createFakeAuthService(),
+		profiles: [{ name: "pibo-agent", aliases: ["default"] }],
+	});
+
+	try {
+		const projectResponse = await fetch(`${baseURL}/api/chat/projects`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({
+				name: "Workflow Rejection Project",
+				projectFolder: join(storageDir, "workflow-rejection-project"),
+				createFolder: true,
+			}),
+		});
+		assert.equal(projectResponse.status, 201);
+		const projectPayload = await projectResponse.json();
+		const workflowSessionUrl = `${baseURL}/api/chat/projects/${encodeURIComponent(projectPayload.project.id)}/workflow-sessions`;
+		const postWorkflowSession = (body) => fetch(workflowSessionUrl, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify(body),
+		});
+		const validSelection = {
+			profile: "pibo-agent",
+			workflowId: "standard-project",
+			workflowVersion: "1.0.0",
+		};
+
+		for (const { body, message } of [
+			{ body: { workflowVersion: "1.0.0" }, message: /Workflow id is required/ },
+			{ body: { workflowId: "standard-project" }, message: /Workflow version is required/ },
+			{ body: { workflowId: "missing-workflow", workflowVersion: "9.9.9" }, message: /Unknown workflow version/ },
+			{ body: { workflowId: "standard-project", workflowVersion: 7 }, message: /Workflow version must be a string/ },
+			{ body: { workflowId: "ui-draft-workflow", workflowVersion: "0.1.0-draft" }, message: /not published/ },
+			{ body: { workflowId: "archived-review-workflow", workflowVersion: "1.0.0" }, message: /archived/ },
+			{ body: { ...validSelection, agentProfileOverrides: { agent: "reviewer-agent" } }, message: /Agent profile overrides/ },
+			{ body: { ...validSelection, maxRetries: 3 }, message: /Retry limit overrides/ },
+			{ body: { ...validSelection, handlerOverrides: { code: "fixture.handlers.makePlan" } }, message: /Handler overrides/ },
+			{ body: { ...validSelection, adapterOverrides: { edge: "fixture.adapters.trim" } }, message: /Adapter overrides/ },
+			{ body: { ...validSelection, guardOverrides: { edge: "fixture.guards.ready" } }, message: /Guard overrides/ },
+			{ body: { ...validSelection, options: { temperature: 0.2 } }, message: /Arbitrary options/ },
+			{ body: { ...validSelection, customOption: true }, message: /Unsupported workflow session creation field/ },
+			{ body: { ...validSelection, inputValues: ["not", "object"] }, message: /inputValues must be a JSON object/ },
+			{ body: { ...validSelection, promptOverrides: "agent prompt" }, message: /promptOverrides must be a JSON object/ },
+			{ body: { ...validSelection, promptOverrides: { missing: "No eligible node." } }, message: /not eligible for prompt overrides/ },
+			{ body: { ...validSelection, model: { provider: "openai", id: "gpt-5.1", temperature: 0.2 } }, message: /model contains unsupported field/ },
+			{ body: { ...validSelection, thinkingLevel: "turbo" }, message: /thinkingLevel must be one of/ },
+			{ body: { ...validSelection, fastMode: "yes" }, message: /fastMode must be a boolean/ },
+		]) {
+			const response = await postWorkflowSession(body);
+			assert.equal(response.status, 400);
+			const payload = await response.json();
+			assert.match(payload.error, message);
+		}
+		assert.equal(emitted.length, 0);
 	} finally {
 		await channel.stop?.();
 	}

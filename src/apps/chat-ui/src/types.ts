@@ -75,6 +75,21 @@ export type PiboProjectWorkflowSessionState = "configured" | "running" | "waitin
 export type PiboProjectLegacySessionState = "simple_chat" | "workflow";
 export type PiboProjectSessionState = PiboProjectWorkflowSessionState | PiboProjectLegacySessionState;
 
+export type PiboProjectWorkflowSessionConfiguration = {
+	inputValues: Record<string, unknown>;
+	promptOverrides: Record<string, string>;
+	promptOverrideEligibleNodeIds: string[];
+	overrideScopes: {
+		promptOverrides: "eligible_agent_node";
+		model: "workflow";
+		thinkingLevel: "workflow";
+		fastMode: "workflow";
+	};
+	model?: ModelProfile;
+	thinkingLevel?: ThinkingLevel;
+	fastMode?: boolean;
+};
+
 export type PiboProjectSession = {
 	projectId: string;
 	piboSessionId: string;
@@ -85,6 +100,7 @@ export type PiboProjectSession = {
 	parentMainSessionId?: string;
 	title?: string;
 	state?: PiboProjectSessionState;
+	configuration?: PiboProjectWorkflowSessionConfiguration;
 	retryCount?: number;
 	maxRetries?: number;
 	archived?: boolean;

@@ -76,7 +76,7 @@ import { ChatReadStateService } from "./data/read-state-service.js";
 import { ChatRoomService } from "./data/room-service.js";
 import { ChatSessionQueryService } from "./data/session-query-service.js";
 import { ChatTimelineQueryService } from "./data/timeline-query-service.js";
-import { ChatProjectService, type PiboProject, type PiboProjectSession } from "./data/project-service.js";
+import { ChatProjectService, type PiboProject, type PiboProjectSession, type PiboProjectWorkflowSessionConfiguration } from "./data/project-service.js";
 import { PiboDataStore } from "../../data/pibo-store.js";
 import { createDefaultPiboCronStore, type PiboCronStore } from "../../cron/store.js";
 import { createDefaultPiboRalphStore, type PiboRalphStore } from "../../ralph/store.js";
@@ -256,6 +256,11 @@ type ChatProjectSessionCreateBody = {
 	workflowId?: unknown;
 	workflowVersion?: unknown;
 	title?: unknown;
+	inputValues?: unknown;
+	promptOverrides?: unknown;
+	model?: unknown;
+	thinkingLevel?: unknown;
+	fastMode?: unknown;
 };
 
 type ChatProjectSessionPatchBody = {
@@ -356,14 +361,18 @@ type WorkflowHandlerPickerResponse = {
 	diagnostics: WorkflowPickerDiagnostic[];
 };
 
-type WorkflowVersionPickerOption = {
+type WorkflowCatalogVersionRecord = {
 	id: string;
 	version: string;
 	title: string;
 	description?: string;
 	source: "code" | "ui";
-	status: "published";
+	status: "draft" | "published" | "archived";
 	tags: string[];
+};
+
+type WorkflowVersionPickerOption = WorkflowCatalogVersionRecord & {
+	status: "published";
 };
 
 type WorkflowVersionPickerResponse = {
@@ -1659,6 +1668,7 @@ function createProjectChatSession(input: {
 	workflowVersion?: string;
 	title?: string;
 	configuredWorkflow?: boolean;
+	configuration?: PiboProjectWorkflowSessionConfiguration;
 }): PiboSession {
 	const workflowSelection = resolveProjectWorkflowSelection(input.workflowId, input.workflowVersion);
 	const session = input.context.channelContext.createSession({
@@ -1668,11 +1678,13 @@ function createProjectChatSession(input: {
 		ownerScope: input.webSession.ownerScope,
 		workspace: input.project.projectFolder,
 		...(input.title ? { title: input.title } : {}),
+		...(input.configuration?.model ? { activeModel: input.configuration.model } : {}),
 		metadata: withWorkflowSessionKind({
 			projectId: input.project.id,
 			projectSessionKind: "main",
 			projectWorkflowId: workflowSelection.id,
 			projectWorkflowVersion: workflowSelection.version,
+			...(input.configuration ? { projectWorkflowConfiguration: input.configuration } : {}),
 		}, "main_workflow"),
 	});
 	input.state.projectService.addProjectSession({
@@ -1683,22 +1695,37 @@ function createProjectChatSession(input: {
 		workflowVersion: workflowSelection.version,
 		title: session.title,
 		state: input.configuredWorkflow ? "configured" : undefined,
+		configuration: input.configuration,
 	});
 	input.state.sessionQuery.upsertSession(session);
 	return session;
 }
 
-function resolveProjectWorkflowSelection(workflowIdValue: unknown, workflowVersionValue?: unknown): WorkflowVersionPickerOption {
+function resolveProjectWorkflowSelection(
+	workflowIdValue: unknown,
+	workflowVersionValue?: unknown,
+	options: { requireExplicitWorkflowId?: boolean; requireExplicitVersion?: boolean } = {},
+): WorkflowVersionPickerOption {
+	if (options.requireExplicitWorkflowId && (workflowIdValue === undefined || workflowIdValue === null || workflowIdValue === "")) {
+		throw new PiboWebHttpError("Workflow id is required", 400);
+	}
 	const workflowId = normalizeProjectWorkflowId(workflowIdValue);
 	const workflowVersion = normalizeProjectWorkflowVersion(workflowVersionValue);
-	const options = buildProjectWorkflowVersionOptions();
-	const selected = options.find((option) => (
-		option.id === workflowId && (workflowVersion === undefined || option.version === workflowVersion)
-	));
+	if (options.requireExplicitVersion && !workflowVersion) {
+		throw new PiboWebHttpError("Workflow version is required", 400);
+	}
+	const candidates = buildProjectWorkflowVersionCatalog().filter((option) => option.id === workflowId);
+	const selected = candidates.find((option) => workflowVersion === undefined || option.version === workflowVersion);
 	if (!selected) {
 		throw new PiboWebHttpError(`Unknown workflow version: ${workflowId}${workflowVersion ? `@${workflowVersion}` : ""}`, 400);
 	}
-	return selected;
+	if (selected.status === "archived") {
+		throw new PiboWebHttpError(`Workflow version '${selected.id}@${selected.version}' is archived and cannot create a Project session by default`, 400);
+	}
+	if (selected.status !== "published") {
+		throw new PiboWebHttpError(`Workflow version '${selected.id}@${selected.version}' is not published`, 400);
+	}
+	return selected as WorkflowVersionPickerOption;
 }
 
 function normalizeLegacyProjectWorkflowId(value: unknown): string {
@@ -1717,6 +1744,126 @@ function normalizeProjectWorkflowVersion(value: unknown): string | undefined {
 	if (value === undefined || value === null || value === "") return undefined;
 	if (typeof value !== "string" || !value.trim()) throw new PiboWebHttpError("Workflow version must be a string", 400);
 	return value.trim();
+}
+
+const PROJECT_WORKFLOW_SESSION_CREATE_FIELDS = new Set([
+	"profile",
+	"workflowId",
+	"workflowVersion",
+	"title",
+	"inputValues",
+	"promptOverrides",
+	"model",
+	"thinkingLevel",
+	"fastMode",
+]);
+
+const PROJECT_WORKFLOW_SESSION_DISALLOWED_FIELDS = new Map<string, string>([
+	["agentProfileOverrides", "Agent profile overrides are not supported for V2 workflow sessions"],
+	["profileOverrides", "Agent profile overrides are not supported for V2 workflow sessions"],
+	["profileOverride", "Agent profile overrides are not supported for V2 workflow sessions"],
+	["nodeProfileOverrides", "Agent profile overrides are not supported for V2 workflow sessions"],
+	["retryLimit", "Retry limit overrides are not supported for V2 workflow sessions"],
+	["retryLimits", "Retry limit overrides are not supported for V2 workflow sessions"],
+	["maxRetries", "Retry limit overrides are not supported for V2 workflow sessions"],
+	["retryCount", "Retry limit overrides are not supported for V2 workflow sessions"],
+	["handlerOverrides", "Handler overrides are not supported for V2 workflow sessions"],
+	["handlerOverride", "Handler overrides are not supported for V2 workflow sessions"],
+	["adapterOverrides", "Adapter overrides are not supported for V2 workflow sessions"],
+	["adapterOverride", "Adapter overrides are not supported for V2 workflow sessions"],
+	["guardOverrides", "Guard overrides are not supported for V2 workflow sessions"],
+	["guardOverride", "Guard overrides are not supported for V2 workflow sessions"],
+	["nodeOverrides", "Arbitrary node overrides are not supported for V2 workflow sessions"],
+	["overrides", "Arbitrary overrides are not supported for V2 workflow sessions"],
+	["options", "Arbitrary options are not supported for V2 workflow sessions"],
+	["arbitraryOptions", "Arbitrary options are not supported for V2 workflow sessions"],
+]);
+
+function normalizeProjectWorkflowSessionConfiguration(body: ChatProjectSessionCreateBody, definition: PiboJsonObject): PiboProjectWorkflowSessionConfiguration {
+	assertProjectWorkflowSessionCreateFields(body);
+	const inputValues = normalizeProjectWorkflowInputValues(body.inputValues);
+	const promptOverrideEligibleNodeIds = workflowPromptOverrideEligibleNodeIds(definition);
+	const promptOverrides = normalizeProjectWorkflowPromptOverrides(body.promptOverrides, promptOverrideEligibleNodeIds);
+	const model = normalizeWorkflowSessionModel(body.model);
+	const thinkingLevel = normalizeThinkingLevel(body.thinkingLevel, "thinkingLevel");
+	const fastMode = normalizeOptionalBoolean(body.fastMode, "fastMode");
+	return {
+		inputValues,
+		promptOverrides,
+		promptOverrideEligibleNodeIds,
+		overrideScopes: {
+			promptOverrides: "eligible_agent_node",
+			model: "workflow",
+			thinkingLevel: "workflow",
+			fastMode: "workflow",
+		},
+		...(model ? { model } : {}),
+		...(thinkingLevel ? { thinkingLevel } : {}),
+		...(fastMode !== undefined ? { fastMode } : {}),
+	};
+}
+
+function assertProjectWorkflowSessionCreateFields(body: ChatProjectSessionCreateBody): void {
+	if (!body || typeof body !== "object" || Array.isArray(body)) throw new PiboWebHttpError("Invalid JSON body", 400);
+	for (const key of Object.keys(body)) {
+		const disallowedMessage = PROJECT_WORKFLOW_SESSION_DISALLOWED_FIELDS.get(key);
+		if (disallowedMessage) throw new PiboWebHttpError(disallowedMessage, 400);
+		if (!PROJECT_WORKFLOW_SESSION_CREATE_FIELDS.has(key)) {
+			throw new PiboWebHttpError(`Unsupported workflow session creation field: ${key}`, 400);
+		}
+	}
+}
+
+function normalizeProjectWorkflowInputValues(value: unknown): PiboJsonObject {
+	if (value === undefined || value === null) return {};
+	if (!isJsonObject(value)) throw new PiboWebHttpError("inputValues must be a JSON object", 400);
+	return value;
+}
+
+function normalizeProjectWorkflowPromptOverrides(value: unknown, eligibleNodeIds: string[]): Record<string, string> {
+	if (value === undefined || value === null) return {};
+	if (!isJsonObject(value)) throw new PiboWebHttpError("promptOverrides must be a JSON object keyed by eligible node id", 400);
+	const eligible = new Set(eligibleNodeIds);
+	const promptOverrides: Record<string, string> = {};
+	for (const [nodeId, prompt] of Object.entries(value)) {
+		if (!nodeId.trim()) throw new PiboWebHttpError("promptOverrides cannot contain an empty node id", 400);
+		if (!eligible.has(nodeId)) {
+			throw new PiboWebHttpError(`Node '${nodeId}' is not eligible for prompt overrides in this workflow version`, 400);
+		}
+		if (typeof prompt !== "string") {
+			throw new PiboWebHttpError(`Prompt override for node '${nodeId}' must be a string`, 400);
+		}
+		promptOverrides[nodeId] = prompt;
+	}
+	return promptOverrides;
+}
+
+function normalizeWorkflowSessionModel(value: unknown): ModelProfile | undefined {
+	if (value === undefined || value === null) return undefined;
+	if (!value || typeof value !== "object" || Array.isArray(value)) throw new PiboWebHttpError("model must be an object", 400);
+	const keys = Object.keys(value);
+	const unsupportedKey = keys.find((key) => key !== "provider" && key !== "id");
+	if (unsupportedKey) throw new PiboWebHttpError(`model contains unsupported field: ${unsupportedKey}`, 400);
+	return normalizeModelProfile(value, "model");
+}
+
+function workflowPromptOverrideEligibleNodeIds(definition: PiboJsonObject): string[] {
+	const nodes = definition.nodes;
+	if (!isJsonObject(nodes)) return [];
+	return Object.entries(nodes)
+		.filter(([, node]) => isWorkflowPromptOverrideEligibleNode(node))
+		.map(([nodeId]) => nodeId)
+		.sort();
+}
+
+function isWorkflowPromptOverrideEligibleNode(value: unknown): boolean {
+	if (!isJsonObject(value)) return false;
+	const metadata = isJsonObject(value.metadata) ? value.metadata : undefined;
+	const sessionOverrides = metadata && isJsonObject(metadata.sessionOverrides) ? metadata.sessionOverrides : undefined;
+	return value.kind === "agent"
+		&& value.runtime === "pibo"
+		&& typeof value.promptTemplate === "string"
+		&& sessionOverrides?.prompt === true;
 }
 
 function normalizeProjectPath(value: unknown): string {
@@ -2240,6 +2387,10 @@ function buildWorkflowVersionPicker(selectedWorkflowId?: string, selectedWorkflo
 }
 
 function buildProjectWorkflowVersionOptions(): WorkflowVersionPickerOption[] {
+	return buildProjectWorkflowVersionCatalog().filter((option): option is WorkflowVersionPickerOption => option.status === "published");
+}
+
+function buildProjectWorkflowVersionCatalog(): WorkflowCatalogVersionRecord[] {
 	return [
 		{
 			id: "standard-project",
@@ -2267,6 +2418,24 @@ function buildProjectWorkflowVersionOptions(): WorkflowVersionPickerOption[] {
 			source: "ui",
 			status: "published",
 			tags: ["workflow-ui", "review"],
+		},
+		{
+			id: "ui-draft-workflow",
+			version: "0.1.0-draft",
+			title: "UI Draft Workflow",
+			description: "Unpublished fixture used to enforce Project session creation boundaries.",
+			source: "ui",
+			status: "draft",
+			tags: ["workflow-ui", "draft"],
+		},
+		{
+			id: "archived-review-workflow",
+			version: "1.0.0",
+			title: "Archived Review Workflow",
+			description: "Archived fixture omitted from default Project session creation choices.",
+			source: "ui",
+			status: "archived",
+			tags: ["workflow-ui", "archived"],
 		},
 	];
 }
@@ -2537,6 +2706,7 @@ function createRunnableWorkflowDefinition(input: {
 				runtime: "pibo",
 				profile: { kind: "fixed", id: input.profileId },
 				promptTemplate: "Use the workflow input to produce a concise answer.\n\n{{input}}",
+				metadata: { sessionOverrides: { prompt: true } },
 				ui: { position: { x: 80, y: 80 } },
 			},
 		},
@@ -4974,7 +5144,8 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				const body = await readJsonBody<ChatProjectSessionCreateBody>(request);
 				const project = state.projectService.requireProject(projectResource.projectId);
 				const profile = resolveCreateSessionProfile(context, defaultProfile, body.profile);
-				const workflowSelection = resolveProjectWorkflowSelection(body.workflowId, body.workflowVersion);
+				const workflowSelection = resolveProjectWorkflowSelection(body.workflowId, body.workflowVersion, { requireExplicitWorkflowId: true, requireExplicitVersion: true });
+				const configuration = normalizeProjectWorkflowSessionConfiguration(body, createPublishedWorkflowDefinition(workflowSelection, profile));
 				const validation = validatePublishedWorkflowBoundary({
 					state,
 					context,
@@ -4996,8 +5167,9 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 					workflowVersion: workflowSelection.version,
 					title: normalizeSessionTitle(body.title) ?? undefined,
 					configuredWorkflow: true,
+					configuration,
 				});
-				return responseJson({ session, projectSession: state.projectService.getProjectSession(session.id), workflow: workflowSelection, validation: validation.validation, diagnostics: validation.diagnostics }, { status: 201 });
+				return responseJson({ session, projectSession: state.projectService.getProjectSession(session.id), workflow: workflowSelection, configuration, validation: validation.validation, diagnostics: validation.diagnostics }, { status: 201 });
 			}
 
 			const workflowSessionStart = projectWorkflowSessionStartResource(url.pathname);

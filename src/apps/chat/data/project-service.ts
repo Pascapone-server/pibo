@@ -3,12 +3,30 @@ import { mkdirSync, rmSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { piboHomePath } from "../../../core/pibo-home.js";
+import type { PiboJsonObject } from "../../../core/events.js";
+import type { ModelProfile } from "../../../core/profiles.js";
+import type { PiboThinkingLevel } from "../../../core/thinking.js";
 
 export type PiboProjectWorkflowId = "simple-chat" | "standard-project" | string;
 export type PiboProjectSessionKind = "main" | "sub";
 export type PiboProjectWorkflowSessionState = "configured" | "running" | "waiting" | "completed" | "failed" | "cancelled";
 export type PiboProjectLegacySessionState = "simple_chat" | "workflow";
 export type PiboProjectSessionState = PiboProjectWorkflowSessionState | PiboProjectLegacySessionState;
+
+export type PiboProjectWorkflowSessionConfiguration = {
+	inputValues: PiboJsonObject;
+	promptOverrides: Record<string, string>;
+	promptOverrideEligibleNodeIds: string[];
+	overrideScopes: {
+		promptOverrides: "eligible_agent_node";
+		model: "workflow";
+		thinkingLevel: "workflow";
+		fastMode: "workflow";
+	};
+	model?: ModelProfile;
+	thinkingLevel?: PiboThinkingLevel;
+	fastMode?: boolean;
+};
 
 export type PiboProject = {
 	id: string;
@@ -34,6 +52,7 @@ export type PiboProjectSession = {
 	parentMainSessionId?: string;
 	title?: string;
 	state?: PiboProjectSessionState;
+	configuration?: PiboProjectWorkflowSessionConfiguration;
 	retryCount?: number;
 	maxRetries?: number;
 	archived?: boolean;
@@ -140,14 +159,14 @@ export class ChatProjectService {
 		return row ? projectSessionFromRow(row) : undefined;
 	}
 
-	addProjectSession(input: { projectId: string; piboSessionId: string; kind?: PiboProjectSessionKind; workflowId?: PiboProjectWorkflowId; workflowVersion?: string; workflowRunId?: string; parentMainSessionId?: string; title?: string; state?: PiboProjectSessionState }): PiboProjectSession {
+	addProjectSession(input: { projectId: string; piboSessionId: string; kind?: PiboProjectSessionKind; workflowId?: PiboProjectWorkflowId; workflowVersion?: string; workflowRunId?: string; parentMainSessionId?: string; title?: string; state?: PiboProjectSessionState; configuration?: PiboProjectWorkflowSessionConfiguration }): PiboProjectSession {
 		const now = new Date().toISOString();
 		const kind = input.kind ?? "main";
 		const state = normalizeProjectSessionState(input.state);
-		this.db.prepare(`INSERT INTO project_sessions (project_id, pibo_session_id, kind, workflow_id, workflow_version, workflow_run_id, parent_main_session_id, title, state, archived, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
-			ON CONFLICT(pibo_session_id) DO UPDATE SET project_id = excluded.project_id, kind = excluded.kind, workflow_id = excluded.workflow_id, workflow_version = COALESCE(excluded.workflow_version, workflow_version), workflow_run_id = COALESCE(excluded.workflow_run_id, workflow_run_id), parent_main_session_id = excluded.parent_main_session_id, title = excluded.title, state = COALESCE(excluded.state, state), updated_at = excluded.updated_at`)
-			.run(input.projectId, input.piboSessionId, kind, input.workflowId ?? "simple-chat", normalizeOptionalString(input.workflowVersion) ?? null, input.workflowRunId ?? null, input.parentMainSessionId ?? null, input.title ?? null, state, now, now);
+		this.db.prepare(`INSERT INTO project_sessions (project_id, pibo_session_id, kind, workflow_id, workflow_version, workflow_run_id, parent_main_session_id, title, state, configuration_json, archived, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+			ON CONFLICT(pibo_session_id) DO UPDATE SET project_id = excluded.project_id, kind = excluded.kind, workflow_id = excluded.workflow_id, workflow_version = COALESCE(excluded.workflow_version, workflow_version), workflow_run_id = COALESCE(excluded.workflow_run_id, workflow_run_id), parent_main_session_id = excluded.parent_main_session_id, title = excluded.title, state = COALESCE(excluded.state, state), configuration_json = COALESCE(excluded.configuration_json, configuration_json), updated_at = excluded.updated_at`)
+			.run(input.projectId, input.piboSessionId, kind, input.workflowId ?? "simple-chat", normalizeOptionalString(input.workflowVersion) ?? null, input.workflowRunId ?? null, input.parentMainSessionId ?? null, input.title ?? null, state, serializeProjectSessionConfiguration(input.configuration), now, now);
 		if (kind === "main") {
 			this.db.prepare("UPDATE projects SET current_main_session_id = ?, updated_at = ? WHERE id = ?").run(input.piboSessionId, now, input.projectId);
 		}
@@ -201,6 +220,7 @@ export class ChatProjectService {
 				parent_main_session_id TEXT,
 				title TEXT,
 				state TEXT,
+				configuration_json TEXT,
 				retry_count INTEGER,
 				max_retries INTEGER,
 				archived INTEGER NOT NULL DEFAULT 0,
@@ -210,12 +230,20 @@ export class ChatProjectService {
 			CREATE INDEX IF NOT EXISTS project_sessions_project_id_idx ON project_sessions(project_id, archived, created_at);
 		`);
 		this.ensureProjectSessionWorkflowVersionColumn();
+		this.ensureProjectSessionConfigurationColumn();
 	}
 
 	private ensureProjectSessionWorkflowVersionColumn(): void {
 		const columns = this.db.prepare("PRAGMA table_info(project_sessions)").all() as Array<{ name: string }>;
 		if (!columns.some((column) => column.name === "workflow_version")) {
 			this.db.exec("ALTER TABLE project_sessions ADD COLUMN workflow_version TEXT");
+		}
+	}
+
+	private ensureProjectSessionConfigurationColumn(): void {
+		const columns = this.db.prepare("PRAGMA table_info(project_sessions)").all() as Array<{ name: string }>;
+		if (!columns.some((column) => column.name === "configuration_json")) {
+			this.db.exec("ALTER TABLE project_sessions ADD COLUMN configuration_json TEXT");
 		}
 	}
 
@@ -254,6 +282,7 @@ type ProjectSessionRow = {
 	parent_main_session_id: string | null;
 	title: string | null;
 	state: PiboProjectSessionState | null;
+	configuration_json: string | null;
 	retry_count: number | null;
 	max_retries: number | null;
 	archived: number;
@@ -278,6 +307,7 @@ function projectFromRow(row: ProjectRow): PiboProject {
 }
 
 function projectSessionFromRow(row: ProjectSessionRow): PiboProjectSession {
+	const configuration = safeWorkflowSessionConfiguration(row.configuration_json);
 	return {
 		projectId: row.project_id,
 		piboSessionId: row.pibo_session_id,
@@ -288,6 +318,7 @@ function projectSessionFromRow(row: ProjectSessionRow): PiboProjectSession {
 		...(row.parent_main_session_id ? { parentMainSessionId: row.parent_main_session_id } : {}),
 		...(row.title ? { title: row.title } : {}),
 		...(row.state ? { state: row.state } : {}),
+		...(configuration ? { configuration } : {}),
 		...(row.retry_count !== null ? { retryCount: row.retry_count } : {}),
 		...(row.max_retries !== null ? { maxRetries: row.max_retries } : {}),
 		archived: row.archived === 1,
@@ -329,6 +360,18 @@ function normalizeProjectSessionState(value: PiboProjectSessionState | undefined
 	const state = value ?? "simple_chat";
 	if (!PROJECT_SESSION_STATES.has(state)) throw new Error(`Unsupported project session state: ${state}`);
 	return state;
+}
+
+function serializeProjectSessionConfiguration(configuration: PiboProjectWorkflowSessionConfiguration | undefined): string | null {
+	return configuration ? JSON.stringify(configuration) : null;
+}
+
+function safeWorkflowSessionConfiguration(value: string | null): PiboProjectWorkflowSessionConfiguration | undefined {
+	if (!value) return undefined;
+	const parsed = safeJsonObject(value);
+	if (!parsed.inputValues || typeof parsed.inputValues !== "object" || Array.isArray(parsed.inputValues)) return undefined;
+	if (!parsed.promptOverrides || typeof parsed.promptOverrides !== "object" || Array.isArray(parsed.promptOverrides)) return undefined;
+	return parsed as PiboProjectWorkflowSessionConfiguration;
 }
 
 function normalizeOptionalString(value: unknown): string | undefined {

@@ -19,6 +19,7 @@
 - Chat Web API state that must survive multiple HTTP requests in tests should use durable storage; scaffold-only in-memory state needs a shared cache because the web-channel test harness may recreate `createChatWebApp` through `getWebApps`.
 - V2 validation triggers should preserve non-validation builder diagnostics while replacing stale validation diagnostics for each draft load, edit, validate, publish, Project create, or start boundary.
 - Chat Web workflow draft routes should persist UI drafts in a durable workflow registry/store table through `PiboDataStore` instead of module-level caches so drafts survive `createChatWebApp` recreation.
+- Project workflow session creation should whitelist request fields, reject disallowed override families/arbitrary options before persistence, and store allowed input/prompt/model/thinking/fast config in `project_sessions.configuration_json` with explicit workflow/eligible-node scopes.
 
 ## 2026-05-11 22:37 CEST - US-001
 - What was implemented
@@ -542,4 +543,29 @@
 - **Learnings for future iterations:**
   - Use the durable `workflow_ui_drafts` table for builder draft state; the web-channel harness may recreate `createChatWebApp`, so module-level draft maps are not a safe persistence boundary.
   - Validation calls should save updated diagnostics and validation summaries immediately so invalid-but-parsed drafts remain inspectable across later requests.
+---
+## 2026-05-12 01:21 CEST - US-003
+- What was implemented
+  - Implemented the Project workflow-session creation API contract for allowed V2 session configuration: input values, eligible node prompt overrides, workflow-scoped model, thinking level, and fast mode.
+  - Added rejection paths for missing/invalid/unpublished/archived workflow versions, disallowed profile/retry/handler/adapter/guard override families, and arbitrary option fields.
+  - Persisted normalized configuration on Project workflow session records and mirrored it into Pibo Session metadata, while keeping run creation separate.
+- Files changed
+  - `src/apps/chat/web-app.ts`
+  - `src/apps/chat/data/project-service.ts`
+  - `src/apps/chat-ui/src/api.ts`
+  - `src/apps/chat-ui/src/types.ts`
+  - `test/web-channel.test.mjs`
+  - `test/project-service-workflow-link.test.mjs`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_03_project_session_selection_and_snapshots.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck'` — passed.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run build && node --test test/project-service-workflow-link.test.mjs test/web-channel.test.mjs'` — passed, 59/59 tests.
+  - `python3 -m json.tool docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_03_project_session_selection_and_snapshots.json` — passed.
+  - `git diff --check` — passed.
+- Browser verification, if UI changed
+  - Not run; this story changed the Project workflow-session API, persistence, types, and tests only, with no visible UI behavior changes.
+- **Learnings for future iterations:**
+  - Keep V2 session config as structured Project-session data with explicit override scopes so the next snapshot/start story can consume one normalized boundary.
+  - `profile` remains the Chat runtime profile selector; Agent-node profile override attempts must use explicit disallowed fields and be rejected by the workflow-session creation whitelist.
 ---

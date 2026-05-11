@@ -18,6 +18,20 @@ test("project workflow session records persist selection metadata before runs st
 			createFolder: true,
 		});
 
+		const configuration = {
+			inputValues: { topic: "Persist configuration" },
+			promptOverrides: { agent: "Use the persisted session prompt." },
+			promptOverrideEligibleNodeIds: ["agent"],
+			overrideScopes: {
+				promptOverrides: "eligible_agent_node",
+				model: "workflow",
+				thinkingLevel: "workflow",
+				fastMode: "workflow",
+			},
+			model: { provider: "openai", id: "gpt-5.1" },
+			thinkingLevel: "low",
+			fastMode: false,
+		};
 		const configured = service.addProjectSession({
 			projectId: project.id,
 			piboSessionId: "ps_configured_workflow",
@@ -26,6 +40,7 @@ test("project workflow session records persist selection metadata before runs st
 			workflowVersion: "1.0.0",
 			title: "Configured Standard Project",
 			state: "configured",
+			configuration,
 		});
 
 		assert.equal(configured.projectId, project.id);
@@ -34,6 +49,8 @@ test("project workflow session records persist selection metadata before runs st
 		assert.equal(configured.workflowId, "standard-project");
 		assert.equal(configured.workflowVersion, "1.0.0");
 		assert.equal(configured.state, "configured");
+		assert.deepEqual(configured.configuration, configuration);
+		assert.deepEqual(service.getProjectSession("ps_configured_workflow")?.configuration, configuration);
 		assert.equal(configured.workflowRunId, undefined);
 
 		for (const state of ["running", "waiting", "completed", "failed", "cancelled"]) {

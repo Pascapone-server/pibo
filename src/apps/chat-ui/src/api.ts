@@ -170,6 +170,11 @@ export type CreateProjectWorkflowSessionInput = {
 	workflowId: string;
 	workflowVersion: string;
 	title?: string;
+	inputValues?: Record<string, unknown>;
+	promptOverrides?: Record<string, string>;
+	model?: ModelProfile;
+	thinkingLevel?: CustomAgent["thinkingLevel"] | null;
+	fastMode?: boolean;
 };
 
 export async function postProjectWorkflowSession(projectId: string, input: CreateProjectWorkflowSessionInput): Promise<CreateSessionData> {
