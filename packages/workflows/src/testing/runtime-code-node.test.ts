@@ -64,6 +64,7 @@ function createCodeWorkflow(): WorkflowDefinition {
     edges: {},
     state: {
       global: {
+        topic: { schema: { type: "string" } },
         summary: { schema: { type: "string" } },
       },
     },

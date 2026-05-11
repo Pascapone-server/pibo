@@ -73,7 +73,7 @@
 
 - [x] 9.1 Add persisted global workflow state.
 - [x] 9.2 Add persisted local node state.
-- [ ] 9.3 Add read/write path declarations for nodes.
+- [x] 9.3 Add read/write path declarations for nodes.
 - [ ] 9.4 Enforce local state isolation by default.
 - [ ] 9.5 Reject ambiguous concurrent global state writes unless a merge strategy is declared.
 - [ ] 9.6 Add explicit back-edge/retry policy support with max attempts.

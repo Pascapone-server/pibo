@@ -1,4 +1,5 @@
 ## Codebase Patterns
+- Node state access declarations live under `node.state.reads` / `node.state.writes` as scoped strings (`global.*`, `local.*`, `edge.*`); validation rejects unknown global paths and edge writes because edge payloads are immutable.
 - One-node agent workflow runs accept `initialGlobalState`; validate it with `validateWorkflowGlobalState`, render it through prompt state readers, and persist it in `WorkflowRun.state.global` via the workflow run store.
 - Local node state is stored under `WorkflowRun.state.local[nodeId]`; dispatch helpers snapshot the current node state into `NodeAttempt.localState` at start and terminal/waiting boundaries so restart inspection can recover the current node state.
 - Prompt workflow runtime coverage should include both one-node `promptTemplate` execution and graph-level `promptBuilder` execution after edge transfer so fixed and variable prompt paths stay covered.
@@ -575,4 +576,17 @@
   - Use `initialLocalState: { [nodeId]: { ... } }` for one-node runtime tests that need persisted local state before dispatch.
   - Persist local state snapshots only when a node actually has local state; adding explicit `localState: undefined` changes deep-equality expectations because SQLite reload omits absent optional fields.
   - `WorkflowRun.state.local` remains a per-node map, while `NodeAttempt.localState` stores only the current node snapshot for inspection/restart.
+---
+
+## 2026-05-11 01:10 UTC - 9.3
+- Implemented validation for node `state.reads` / `state.writes` declarations, including scoped path syntax checks, declared global state path checks, and rejection of writes to immutable edge payloads.
+- Added validation tests for accepted scoped global/local/edge reads and global/local writes, plus malformed state declarations and unknown global state references.
+- Updated the code-node runtime fixture to declare the global `topic` state path it reads.
+- Marked task `9.3` complete in the workflow-system task list because the referenced JSON PRDs are absent and progress is tracked in `tasks.md`.
+- Quality checks: `npm --prefix packages/workflows run typecheck`; `npm --prefix packages/workflows test`; `npm run typecheck`; container `docker exec pibo-dev-Workflows ... npm --prefix packages/workflows run typecheck && npm --prefix packages/workflows test && npm run typecheck`.
+- Files changed: `packages/workflows/src/validation/index.ts`, `packages/workflows/src/testing/validation.test.ts`, `packages/workflows/src/testing/runtime-code-node.test.ts`, `docs/specs/changes/pibo-workflow-system-v1/tasks.md`, `progress.txt`.
+- **Learnings for future iterations:**
+  - The workflow definition validator is the right place for static state declaration checks; runtime code-node checks still enforce actual handler reads/writes at execution boundaries.
+  - Global state access declarations should correspond to `definition.state.global` schema entries before a workflow validates.
+  - `edge.*` can be declared as a read scope, but edge payloads are immutable and `state.writes` must not target `edge.*`.
 ---

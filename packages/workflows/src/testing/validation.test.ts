@@ -316,6 +316,66 @@ describe("workflow definition validation", () => {
     );
   });
 
+  it("accepts scoped node state read/write declarations", () => {
+    const definition = withDefinitionMutation((draft) => {
+      draft.state = {
+        global: {
+          projectGoal: { schema: { type: "string" } },
+          summary: { schema: { type: "string" } },
+        },
+      };
+      draft.nodes.answer.state = {
+        reads: ["global.projectGoal", "local.previousDraft", "edge.answer-to-next"],
+        writes: ["global.summary", "local.lastSummary"],
+      };
+    });
+
+    assert.equal(validateWorkflow(definition).ok, true);
+  });
+
+  it("rejects invalid node state declarations", () => {
+    const definition = withDefinitionMutation((draft) => {
+      draft.state = {
+        global: {
+          projectGoal: { schema: { type: "string" } },
+        },
+      };
+      draft.nodes.answer.state = {
+        reads: ["global.missing", "unknown.projectGoal" as `global.${string}`, "local.", 42 as unknown as `global.${string}`],
+        writes: ["edge.answer-to-next", "global.summary"],
+      };
+    });
+
+    const result = validateWorkflow(definition);
+
+    assert.equal(result.ok, false);
+    findDiagnostic(
+      result,
+      "WorkflowStateError.unknownGlobalStatePath",
+      (diagnostic) => diagnostic.nodeId === "answer" && diagnostic.path === "$.nodes.answer.state.reads.0",
+    );
+    findDiagnostic(
+      result,
+      "WorkflowStateError.invalidStatePath",
+      (diagnostic) => diagnostic.nodeId === "answer" && diagnostic.path === "$.nodes.answer.state.reads.1",
+    );
+    findDiagnostic(
+      result,
+      "WorkflowStateError.invalidStateAccessDeclaration",
+      (diagnostic) => diagnostic.nodeId === "answer" && diagnostic.path === "$.nodes.answer.state.reads.3",
+    );
+    findDiagnostic(
+      result,
+      "WorkflowStateError.edgeStateWriteNotAllowed",
+      (diagnostic) => diagnostic.nodeId === "answer" && diagnostic.path === "$.nodes.answer.state.writes.0",
+    );
+    findDiagnostic(
+      result,
+      "WorkflowStateError.unknownGlobalStatePath",
+      (diagnostic) => diagnostic.nodeId === "answer" && diagnostic.path === "$.nodes.answer.state.writes.1",
+    );
+  });
+
   it("rejects edges that reference missing source or target nodes", () => {
     const definition = withDefinitionMutation((draft) => {
       draft.edges["missing-links"] = {
