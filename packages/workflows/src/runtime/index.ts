@@ -5,6 +5,7 @@ import type {
   EdgeTransfer,
   EdgeTransferId,
   JsonValue,
+  NestedWorkflowNodeDefinition,
   NodeAttempt,
   NodeAttemptId,
   NodeLocalStateReader,
@@ -27,7 +28,7 @@ import type {
   WorkflowValue,
 } from "../types/index.js";
 import type { WorkflowRunStore } from "../store/index.js";
-import { resolveWorkflowAdapter, resolveWorkflowHandler } from "../registry/index.js";
+import { resolveWorkflowAdapter, resolveWorkflowDefinition, resolveWorkflowHandler } from "../registry/index.js";
 import {
   validateJsonValueAgainstSchema,
   validateNodeOutput,
@@ -197,6 +198,38 @@ export type WorkflowCodeNodeDispatchOptions = {
   edgePayloads?: Record<string, WorkflowValue>;
 };
 
+export type NestedWorkflowExecutorContext = {
+  workflow: WorkflowDefinition;
+  run: WorkflowRun;
+  nodeAttemptId: NodeAttemptId;
+  nodeId: string;
+  node: NestedWorkflowNodeDefinition;
+  childWorkflow: WorkflowDefinition;
+  childRunId: WorkflowRunId;
+  input: WorkflowValue;
+  namespace?: string;
+};
+
+export type NestedWorkflowExecutorResult = {
+  output: WorkflowValue;
+  childRun: WorkflowRun;
+  events?: WorkflowRuntimeEvent[];
+};
+
+export type NestedWorkflowExecutor = (
+  context: NestedWorkflowExecutorContext,
+) => Promise<NestedWorkflowExecutorResult> | NestedWorkflowExecutorResult;
+
+export type WorkflowNestedWorkflowNodeDispatchOptions = {
+  registry: Pick<WorkflowRegistry, "workflows">;
+  now?: () => Date | string;
+  createNodeAttemptId?: () => NodeAttemptId;
+  createChildRunId?: () => WorkflowRunId;
+  store?: WorkflowRunStore;
+  emitEvent?: WorkflowEventEmitter;
+  nestedWorkflowExecutor: NestedWorkflowExecutor;
+};
+
 export type WorkflowCodeNodeDispatchSuccess = {
   ok: true;
   run: WorkflowRun;
@@ -217,6 +250,29 @@ export type WorkflowCodeNodeDispatchFailure = {
 };
 
 export type WorkflowCodeNodeDispatchResult = WorkflowCodeNodeDispatchSuccess | WorkflowCodeNodeDispatchFailure;
+
+export type WorkflowNestedWorkflowNodeDispatchSuccess = {
+  ok: true;
+  run: WorkflowRun;
+  nodeAttempt: NodeAttempt;
+  events: WorkflowRuntimeEvent[];
+  output: WorkflowValue;
+  childRun: WorkflowRun;
+};
+
+export type WorkflowNestedWorkflowNodeDispatchFailure = {
+  ok: false;
+  run: WorkflowRun;
+  nodeAttempt?: NodeAttempt;
+  events: WorkflowRuntimeEvent[];
+  diagnostics: WorkflowDiagnostic[];
+  error: WorkflowErrorSummary;
+  childRun?: WorkflowRun;
+};
+
+export type WorkflowNestedWorkflowNodeDispatchResult =
+  | WorkflowNestedWorkflowNodeDispatchSuccess
+  | WorkflowNestedWorkflowNodeDispatchFailure;
 
 export type WorkflowEdgeTransferOptions = {
   now?: () => Date | string;
@@ -737,6 +793,260 @@ export async function dispatchWorkflowCodeNode(
       store: options.store,
       emitEvent: options.emitEvent,
       error: codeNodeErrorSummaryFromCaught(caught),
+    });
+  }
+}
+
+export async function dispatchWorkflowNestedWorkflowNode(
+  definition: WorkflowDefinition,
+  run: WorkflowRun,
+  nodeId: string,
+  input: WorkflowValue,
+  options: WorkflowNestedWorkflowNodeDispatchOptions,
+): Promise<WorkflowNestedWorkflowNodeDispatchResult> {
+  const events: WorkflowRuntimeEvent[] = [];
+  const timestamp = createTimestampFactory(options.now);
+  const node = definition.nodes[nodeId];
+
+  if (!node) {
+    return nestedWorkflowNodeDispatchFailure({
+      run,
+      events,
+      diagnostics: [
+        {
+          code: "WorkflowRuntimeError.unknownNode",
+          message: `Workflow node '${nodeId}' does not exist, so it cannot be dispatched as a nested workflow node.`,
+          severity: "error",
+          nodeId,
+          path: `$.nodes.${nodeId}`,
+        },
+      ],
+      error: {
+        code: "WorkflowRuntimeError.unknownNode",
+        message: "Nested workflow node dispatch failed because the node is not declared.",
+      },
+    });
+  }
+
+  if (node.kind !== "workflow") {
+    return nestedWorkflowNodeDispatchFailure({
+      run,
+      events,
+      diagnostics: [
+        {
+          code: "WorkflowRuntimeError.workflowNodeRequired",
+          message: `Workflow node '${nodeId}' is '${node.kind}', but nested workflow dispatch requires a workflow node.`,
+          severity: "error",
+          nodeId,
+          path: `$.nodes.${nodeId}.kind`,
+        },
+      ],
+      error: {
+        code: "WorkflowRuntimeError.workflowNodeRequired",
+        message: "Nested workflow node dispatch failed because the selected node is not a workflow node.",
+      },
+    });
+  }
+
+  const workflowNode = node as NestedWorkflowNodeDefinition;
+  const startedAt = timestamp();
+  const nodeAttempt: NodeAttempt = {
+    id: options.createNodeAttemptId?.() ?? createId("wna"),
+    workflowRunId: run.id,
+    nodeId,
+    attempt: 1,
+    kind: "workflow",
+    status: "running",
+    input,
+    startedAt,
+    metadata: {
+      workflowId: workflowNode.workflowId,
+      ...(workflowNode.workflowVersion ? { workflowVersion: workflowNode.workflowVersion } : {}),
+      ...(workflowNode.namespace ? { namespace: workflowNode.namespace } : {}),
+    },
+  };
+  run.current = { nodeId, status: "running" };
+  run.updatedAt = startedAt;
+
+  await emitWorkflowRuntimeEvent(events, options.emitEvent, {
+    type: "node.started",
+    runId: run.id,
+    nodeAttemptId: nodeAttempt.id,
+    nodeId,
+  });
+  await persistWorkflowRun(options.store, run);
+
+  const diagnostics: WorkflowDiagnostic[] = [];
+  const childWorkflow = resolveWorkflowDefinition(options.registry, workflowNode.workflowId, workflowNode.workflowVersion);
+
+  if (!childWorkflow) {
+    diagnostics.push({
+      code: "WorkflowGraphError.unknownWorkflowRef",
+      message: `Workflow node '${nodeId}' references child workflow '${workflowNode.workflowId}${workflowNode.workflowVersion ? `@${workflowNode.workflowVersion}` : ""}', but it is not registered in the Workflow Registry.`,
+      severity: "error",
+      nodeId,
+      path: `$.nodes.${nodeId}.workflowId`,
+      hint: "Register the child workflow definition before dispatching the nested workflow node.",
+    });
+  }
+
+  if (workflowNode.input) {
+    diagnostics.push(
+      ...validateWorkflowPortValue(workflowNode.input, input, { path: `$.nodes.${nodeId}.input` }).diagnostics.map(
+        (diagnostic) => ({ ...diagnostic, nodeId }),
+      ),
+    );
+  }
+
+  if (childWorkflow) {
+    diagnostics.push(
+      ...validateWorkflowInput(childWorkflow, input, { path: `$.nodes.${nodeId}.childInput` }).diagnostics.map(
+        (diagnostic) => ({ ...diagnostic, nodeId }),
+      ),
+    );
+  }
+
+  if (diagnostics.some((diagnostic) => diagnostic.severity === "error")) {
+    return failNestedWorkflowNodeDispatch({
+      run,
+      nodeAttempt,
+      events,
+      diagnostics,
+      timestamp,
+      store: options.store,
+      emitEvent: options.emitEvent,
+      error: {
+        code: "WorkflowRuntimeError.workflowNodeDispatchFailed",
+        message: "Nested workflow node dispatch failed before child workflow execution.",
+      },
+    });
+  }
+
+  const childRunId = options.createChildRunId?.() ?? createId("wfr");
+
+  try {
+    const executorResult = await options.nestedWorkflowExecutor({
+      workflow: definition,
+      run,
+      nodeAttemptId: nodeAttempt.id,
+      nodeId,
+      node: workflowNode,
+      childWorkflow: childWorkflow!,
+      childRunId,
+      input,
+      namespace: workflowNode.namespace,
+    });
+
+    if (executorResult.events?.length) {
+      events.push(...executorResult.events);
+    }
+
+    nodeAttempt.metadata = {
+      ...nodeAttempt.metadata,
+      childRunId: executorResult.childRun.id,
+      childWorkflowId: executorResult.childRun.workflowId,
+      childWorkflowVersion: executorResult.childRun.workflowVersion,
+    };
+
+    if (executorResult.childRun.status !== "completed") {
+      return failNestedWorkflowNodeDispatch({
+        run,
+        nodeAttempt,
+        events,
+        diagnostics: [
+          {
+            code: "WorkflowRuntimeError.childWorkflowIncomplete",
+            message: `Child workflow run '${executorResult.childRun.id}' ended with status '${executorResult.childRun.status}' instead of 'completed'.`,
+            severity: "error",
+            nodeId,
+            path: `$.nodes.${nodeId}.workflowId`,
+            hint: "Nested workflow nodes must wait for the child workflow to complete successfully before producing output.",
+          },
+        ],
+        timestamp,
+        store: options.store,
+        emitEvent: options.emitEvent,
+        error: {
+          code: executorResult.childRun.status === "failed"
+            ? "WorkflowRuntimeError.childWorkflowFailed"
+            : "WorkflowRuntimeError.childWorkflowIncomplete",
+          message: "Nested workflow node dispatch failed because the child workflow did not complete successfully.",
+        },
+        childRun: executorResult.childRun,
+      });
+    }
+
+    const childOutputResult = validateWorkflowOutput(childWorkflow!, executorResult.output, {
+      path: `$.nodes.${nodeId}.childOutput`,
+    });
+    if (!childOutputResult.ok) {
+      return failNestedWorkflowNodeDispatch({
+        run,
+        nodeAttempt,
+        events,
+        diagnostics: childOutputResult.diagnostics.map((diagnostic) => ({ ...diagnostic, nodeId })),
+        timestamp,
+        store: options.store,
+        emitEvent: options.emitEvent,
+        error: {
+          code: "WorkflowRuntimeError.invalidChildWorkflowOutput",
+          message: "Child workflow output failed validation before parent node completion.",
+        },
+        childRun: executorResult.childRun,
+      });
+    }
+
+    const nodeOutputResult = validateNodeOutput(definition, nodeId, executorResult.output);
+    if (!nodeOutputResult.ok) {
+      return failNestedWorkflowNodeDispatch({
+        run,
+        nodeAttempt,
+        events,
+        diagnostics: nodeOutputResult.diagnostics,
+        timestamp,
+        store: options.store,
+        emitEvent: options.emitEvent,
+        error: {
+          code: "WorkflowRuntimeError.invalidNodeOutput",
+          message: "Nested workflow node output failed validation before downstream use.",
+        },
+        childRun: executorResult.childRun,
+      });
+    }
+
+    const completedAt = timestamp();
+    nodeAttempt.status = "completed";
+    nodeAttempt.output = executorResult.output;
+    nodeAttempt.completedAt = completedAt;
+    run.current = { nodeId, status: run.status };
+    run.updatedAt = completedAt;
+
+    await emitWorkflowRuntimeEvent(events, options.emitEvent, {
+      type: "node.completed",
+      runId: run.id,
+      nodeAttemptId: nodeAttempt.id,
+      output: executorResult.output,
+    });
+    await persistWorkflowRun(options.store, run);
+
+    return {
+      ok: true,
+      run,
+      nodeAttempt,
+      events,
+      output: executorResult.output,
+      childRun: executorResult.childRun,
+    };
+  } catch (caught) {
+    return failNestedWorkflowNodeDispatch({
+      run,
+      nodeAttempt,
+      events,
+      diagnostics: [],
+      timestamp,
+      store: options.store,
+      emitEvent: options.emitEvent,
+      error: nestedWorkflowErrorSummaryFromCaught(caught),
     });
   }
 }
@@ -1578,6 +1888,29 @@ async function failCodeNodeDispatch(options: {
   };
 }
 
+async function failNestedWorkflowNodeDispatch(options: {
+  run: WorkflowRun;
+  nodeAttempt: NodeAttempt;
+  events: WorkflowRuntimeEvent[];
+  diagnostics: WorkflowDiagnostic[];
+  timestamp: () => string;
+  store?: WorkflowRunStore;
+  emitEvent?: WorkflowEventEmitter;
+  error: WorkflowErrorSummary;
+  childRun?: WorkflowRun;
+}): Promise<WorkflowNestedWorkflowNodeDispatchFailure> {
+  const failure = await failNodeDispatch(options);
+  return {
+    ok: false,
+    run: failure.run,
+    nodeAttempt: failure.nodeAttempt,
+    events: failure.events,
+    diagnostics: failure.diagnostics,
+    error: failure.error,
+    ...(options.childRun ? { childRun: options.childRun } : {}),
+  };
+}
+
 async function failNodeDispatch(options: {
   run: WorkflowRun;
   nodeAttempt: NodeAttempt;
@@ -1625,6 +1958,21 @@ function codeNodeDispatchFailure(options: {
   diagnostics: WorkflowDiagnostic[];
   error: WorkflowErrorSummary;
 }): WorkflowCodeNodeDispatchFailure {
+  return {
+    ok: false,
+    run: options.run,
+    events: options.events,
+    diagnostics: options.diagnostics,
+    error: options.error,
+  };
+}
+
+function nestedWorkflowNodeDispatchFailure(options: {
+  run: WorkflowRun;
+  events: WorkflowRuntimeEvent[];
+  diagnostics: WorkflowDiagnostic[];
+  error: WorkflowErrorSummary;
+}): WorkflowNestedWorkflowNodeDispatchFailure {
   return {
     ok: false,
     run: options.run,
@@ -1813,6 +2161,20 @@ function codeNodeErrorSummaryFromCaught(caught: unknown): WorkflowErrorSummary {
   return {
     code: "WorkflowRuntimeError.codeHandlerFailed",
     message: "Code node handler failed with a non-Error value.",
+  };
+}
+
+function nestedWorkflowErrorSummaryFromCaught(caught: unknown): WorkflowErrorSummary {
+  if (caught instanceof Error) {
+    return {
+      code: "WorkflowRuntimeError.nestedWorkflowExecutorFailed",
+      message: caught.message,
+    };
+  }
+
+  return {
+    code: "WorkflowRuntimeError.nestedWorkflowExecutorFailed",
+    message: "Nested workflow executor failed with a non-Error value.",
   };
 }
 
