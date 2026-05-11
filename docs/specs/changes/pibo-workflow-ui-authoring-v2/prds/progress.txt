@@ -8,6 +8,7 @@
 - V2 workflow HTTP contracts are documented under Chat Web routes: catalog/lifecycle APIs use `/api/chat/workflows`, while Project workflow session APIs use `/api/chat/projects/:projectId/workflow-sessions`.
 - Use `createWorkflowDiagnosticReport` from `@pasko70/pibo-workflows` validation exports for V2 diagnostic grouping across Workflow Library, Builder, Project session creation, run start, and runtime failure surfaces.
 - Workflow session routing metadata uses the stable Pibo Session metadata key `workflowSessionKind` with values `main_workflow`, `nested_workflow`, `agent_node`, and `subagent`; Chat sidebar nodes expose it as `PiboWebSessionNode.workflowSessionKind`.
+- Published workflow versions use `hashWorkflowDefinition` plus `SqliteWorkflowRunStore.savePublishedWorkflowVersion`; saving the same body is idempotent, while changing a published `workflowId@version` body throws to preserve immutability.
 
 ## 2026-05-11 22:37 CEST - US-001
 - What was implemented
@@ -193,4 +194,31 @@
 - **Learnings for future iterations:**
   - Preserve legacy subagent metadata lookup paths when adding new session metadata keys; otherwise existing thread-keyed subagent sessions can be duplicated.
   - Project sidebar routing should consume real `PiboWebSessionNode.workflowSessionKind` values instead of inferring from logical workflow node ids.
+---
+## 2026-05-11 23:27 CEST - US-001
+- What was implemented
+  - Added deterministic WorkflowDefinition hashing for immutable published UI workflow versions.
+  - Added published workflow version record types, SQLite persistence, idempotent same-body saves, and mutation rejection for an existing `workflowId@version` body.
+  - Added registry hydration helpers so persisted published records are resolvable by workflow id/version through the Workflow Registry.
+- Files changed
+  - `packages/workflows/src/definition-hash.ts`
+  - `packages/workflows/src/index.ts`
+  - `packages/workflows/src/types/index.ts`
+  - `packages/workflows/src/store/index.ts`
+  - `packages/workflows/src/registry/index.ts`
+  - `packages/workflows/src/testing/workflow-published-versions.test.ts`
+  - `packages/workflows/src/testing/workflow-sqlite-schema.test.ts`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_06_versioning_archive_delete_lifecycle.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm --prefix packages/workflows run typecheck'` — passed.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm --prefix packages/workflows test -- src/testing/workflow-published-versions.test.ts src/testing/workflow-sqlite-schema.test.ts'` — passed, 131/131 workflow package tests.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck'` — passed.
+  - `python3 -m json.tool docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_06_versioning_archive_delete_lifecycle.json` — passed.
+  - `git diff --check` — passed.
+- Browser verification, if UI changed
+  - Not run; this story changed workflow package persistence/registry behavior only, with no visible UI behavior changes.
+- **Learnings for future iterations:**
+  - Published version records should be created through `createWorkflowPublishedVersionRecord` so the persisted definition hash always matches the canonical Workflow IR body.
+  - The package test script currently runs all workflow package tests even when explicit test file paths are appended after the script command.
 ---

@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
+import { canonicalWorkflowDefinitionJson, hashWorkflowDefinition } from "../definition-hash.js";
 import type {
   EdgeTransfer,
   EdgeTransferId,
@@ -10,6 +11,7 @@ import type {
   NodeAttemptStatus,
   WorkflowCheckpoint,
   WorkflowCheckpointId,
+  WorkflowDefinition,
   WorkflowDefinitionSnapshot,
   WorkflowDefinitionSnapshotId,
   WorkflowEventId,
@@ -18,6 +20,9 @@ import type {
   WorkflowHumanActionId,
   WorkflowHumanActionRecord,
   WorkflowHumanActionKind,
+  WorkflowPublishedVersionRecord,
+  WorkflowRecordSource,
+  WorkflowRecordStatus,
   WorkflowRun,
   WorkflowRunId,
   WorkflowRunStatus,
@@ -30,10 +35,11 @@ import type {
 } from "../types/index.js";
 
 export const WORKFLOW_SQLITE_FILENAME = "pibo-workflows.sqlite";
-export const WORKFLOW_SQLITE_SCHEMA_VERSION = 1;
+export const WORKFLOW_SQLITE_SCHEMA_VERSION = 2;
 
 export const WORKFLOW_SQLITE_TABLES = [
   "workflow_definition_snapshots",
+  "workflow_published_versions",
   "workflow_runs",
   "workflow_events",
   "workflow_node_attempts",
@@ -75,6 +81,18 @@ export type WorkflowDefinitionSnapshotStore = {
   saveDefinitionSnapshot(snapshot: WorkflowDefinitionSnapshot): void | Promise<void>;
   getDefinitionSnapshot(id: WorkflowDefinitionSnapshotId): WorkflowDefinitionSnapshot | undefined | Promise<WorkflowDefinitionSnapshot | undefined>;
   listDefinitionSnapshots(filter?: WorkflowDefinitionSnapshotListFilter): WorkflowDefinitionSnapshot[] | Promise<WorkflowDefinitionSnapshot[]>;
+};
+
+export type CreateWorkflowPublishedVersionRecordInput = Omit<WorkflowPublishedVersionRecord, "source" | "status" | "definitionHash"> & {
+  source?: "ui";
+  status?: "published";
+  definitionHash?: string;
+};
+
+export type WorkflowPublishedVersionStore = {
+  savePublishedWorkflowVersion(record: WorkflowPublishedVersionRecord): void | Promise<void>;
+  getPublishedWorkflowVersion(workflowId: string, version: string): WorkflowPublishedVersionRecord | undefined | Promise<WorkflowPublishedVersionRecord | undefined>;
+  listPublishedWorkflowVersions(filter?: WorkflowPublishedVersionListFilter): WorkflowPublishedVersionRecord[] | Promise<WorkflowPublishedVersionRecord[]>;
 };
 
 export type WorkflowEventStore = {
@@ -130,6 +148,11 @@ export type WorkflowDefinitionSnapshotListFilter = {
   workflowId?: string;
   workflowVersion?: string;
   hash?: string;
+  limit?: number;
+};
+
+export type WorkflowPublishedVersionListFilter = {
+  workflowId?: string;
   limit?: number;
 };
 
@@ -221,6 +244,19 @@ type WorkflowDefinitionSnapshotRow = {
   workflow_version: string;
   definition_hash: string;
   compiled_definition_json: string;
+  created_at: string;
+};
+
+type WorkflowPublishedVersionRow = {
+  workflow_id: string;
+  version: string;
+  source: WorkflowRecordSource;
+  status: WorkflowRecordStatus;
+  definition_hash: string;
+  definition_json: string;
+  published_from_draft_id: string | null;
+  published_by: string | null;
+  published_at: string;
   created_at: string;
 };
 
@@ -320,9 +356,48 @@ type WorkflowHumanActionRow = {
   created_at: string;
 };
 
+export function createWorkflowPublishedVersionRecord(
+  input: CreateWorkflowPublishedVersionRecordInput,
+): WorkflowPublishedVersionRecord {
+  const record: WorkflowPublishedVersionRecord = {
+    ...input,
+    source: input.source ?? "ui",
+    status: input.status ?? "published",
+    definitionHash: input.definitionHash ?? hashWorkflowDefinition(input.definition),
+  };
+  assertPublishedWorkflowVersionRecord(record);
+  return record;
+}
+
+export function assertPublishedWorkflowVersionRecord(record: WorkflowPublishedVersionRecord): void {
+  if (record.source !== "ui" || record.status !== "published") {
+    throw new Error(`Workflow '${record.workflowId}@${record.version}' is not a UI published version record.`);
+  }
+  if (record.definition.id !== record.workflowId || record.definition.version !== record.version) {
+    throw new Error(`Workflow '${record.workflowId}@${record.version}' published record does not match its definition id/version.`);
+  }
+  const computedHash = hashWorkflowDefinition(record.definition);
+  if (record.definitionHash !== computedHash) {
+    throw new Error(`Workflow '${record.workflowId}@${record.version}' published record has an invalid definition hash.`);
+  }
+}
+
+function assertPublishedWorkflowVersionIsSame(
+  existing: WorkflowPublishedVersionRecord,
+  next: WorkflowPublishedVersionRecord,
+): void {
+  if (
+    existing.definitionHash !== next.definitionHash ||
+    canonicalWorkflowDefinitionJson(existing.definition) !== canonicalWorkflowDefinitionJson(next.definition)
+  ) {
+    throw new Error(`Published workflow '${next.workflowId}@${next.version}' is immutable and cannot be replaced.`);
+  }
+}
+
 export class SqliteWorkflowRunStore implements
   WorkflowRunStore,
   WorkflowDefinitionSnapshotStore,
+  WorkflowPublishedVersionStore,
   WorkflowEventStore,
   WorkflowWaitTokenStore,
   WorkflowNodeAttemptStore,
@@ -353,6 +428,25 @@ export class SqliteWorkflowRunStore implements
 
       CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_definition_snapshots_hash
         ON workflow_definition_snapshots(workflow_id, workflow_version, definition_hash);
+
+      CREATE TABLE IF NOT EXISTS workflow_published_versions (
+        workflow_id TEXT NOT NULL,
+        version TEXT NOT NULL,
+        source TEXT NOT NULL,
+        status TEXT NOT NULL,
+        definition_hash TEXT NOT NULL,
+        definition_json TEXT NOT NULL,
+        published_from_draft_id TEXT,
+        published_by TEXT,
+        published_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (workflow_id, version)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_workflow_published_versions_workflow
+        ON workflow_published_versions(workflow_id, version);
+      CREATE INDEX IF NOT EXISTS idx_workflow_published_versions_published_at
+        ON workflow_published_versions(published_at);
 
       CREATE TABLE IF NOT EXISTS workflow_runs (
         id TEXT PRIMARY KEY,
@@ -604,6 +698,63 @@ export class SqliteWorkflowRunStore implements
       .prepare(`SELECT * FROM workflow_definition_snapshots ${where} ORDER BY created_at DESC LIMIT ?`)
       .all(...values, limit) as WorkflowDefinitionSnapshotRow[];
     return rows.map(workflowDefinitionSnapshotFromRow);
+  }
+
+  savePublishedWorkflowVersion(record: WorkflowPublishedVersionRecord): void {
+    const normalized = createWorkflowPublishedVersionRecord(record);
+    const existing = this.getPublishedWorkflowVersion(normalized.workflowId, normalized.version);
+    if (existing) {
+      assertPublishedWorkflowVersionIsSame(existing, normalized);
+      return;
+    }
+
+    this.db.prepare(`
+      INSERT INTO workflow_published_versions (
+        workflow_id,
+        version,
+        source,
+        status,
+        definition_hash,
+        definition_json,
+        published_from_draft_id,
+        published_by,
+        published_at,
+        created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      normalized.workflowId,
+      normalized.version,
+      normalized.source,
+      normalized.status,
+      normalized.definitionHash,
+      canonicalWorkflowDefinitionJson(normalized.definition),
+      normalized.publishedFromDraftId ?? null,
+      normalized.publishedBy ?? null,
+      normalized.publishedAt,
+      normalized.createdAt,
+    );
+  }
+
+  getPublishedWorkflowVersion(workflowId: string, version: string): WorkflowPublishedVersionRecord | undefined {
+    const row = this.db.prepare("SELECT * FROM workflow_published_versions WHERE workflow_id = ? AND version = ?").get(workflowId, version) as
+      | WorkflowPublishedVersionRow
+      | undefined;
+    return row ? workflowPublishedVersionFromRow(row) : undefined;
+  }
+
+  listPublishedWorkflowVersions(filter: WorkflowPublishedVersionListFilter = {}): WorkflowPublishedVersionRecord[] {
+    const clauses: string[] = [];
+    const values: Array<string | number> = [];
+    if (filter.workflowId !== undefined) {
+      clauses.push("workflow_id = ?");
+      values.push(filter.workflowId);
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    const limit = listLimit(filter.limit);
+    const rows = this.db
+      .prepare(`SELECT * FROM workflow_published_versions ${where} ORDER BY workflow_id ASC, version ASC LIMIT ?`)
+      .all(...values, limit) as WorkflowPublishedVersionRow[];
+    return rows.map(workflowPublishedVersionFromRow);
   }
 
   saveRun(run: WorkflowRun): void {
@@ -1234,6 +1385,21 @@ function workflowDefinitionSnapshotFromRow(row: WorkflowDefinitionSnapshotRow): 
     workflowVersion: row.workflow_version,
     hash: row.definition_hash,
     definition: parseJson(row.compiled_definition_json),
+    createdAt: row.created_at,
+  };
+}
+
+function workflowPublishedVersionFromRow(row: WorkflowPublishedVersionRow): WorkflowPublishedVersionRecord {
+  return {
+    workflowId: row.workflow_id,
+    version: row.version,
+    source: "ui",
+    status: "published",
+    definitionHash: row.definition_hash,
+    definition: parseJson<WorkflowDefinition>(row.definition_json),
+    ...(row.published_from_draft_id ? { publishedFromDraftId: row.published_from_draft_id } : {}),
+    ...(row.published_by ? { publishedBy: row.published_by } : {}),
+    publishedAt: row.published_at,
     createdAt: row.created_at,
   };
 }

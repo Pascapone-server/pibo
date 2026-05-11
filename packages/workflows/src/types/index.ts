@@ -362,6 +362,22 @@ export type WorkflowDefinitionSnapshot = {
   createdAt: string;
 };
 
+export type WorkflowRecordSource = "code" | "ui";
+export type WorkflowRecordStatus = "draft" | "published" | "archived";
+
+export type WorkflowPublishedVersionRecord = {
+  workflowId: WorkflowId;
+  version: WorkflowVersion;
+  source: "ui";
+  status: "published";
+  definition: WorkflowDefinition;
+  definitionHash: string;
+  publishedFromDraftId?: string;
+  publishedBy?: string;
+  publishedAt: string;
+  createdAt: string;
+};
+
 export type DiagnosticSeverity = "info" | "warning" | "error";
 
 export type WorkflowDiagnostic = {

@@ -31,6 +31,18 @@ const requiredColumns: Record<(typeof WORKFLOW_SQLITE_TABLES)[number], string[]>
     "compiled_definition_json",
     "created_at",
   ],
+  workflow_published_versions: [
+    "workflow_id",
+    "version",
+    "source",
+    "status",
+    "definition_hash",
+    "definition_json",
+    "published_from_draft_id",
+    "published_by",
+    "published_at",
+    "created_at",
+  ],
   workflow_runs: [
     "id",
     "workflow_id",
