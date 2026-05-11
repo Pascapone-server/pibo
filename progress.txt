@@ -1,4 +1,5 @@
 ## Codebase Patterns
+- Chat Web session tabs are registered through `src/apps/chat-ui/src/session-views/registry.tsx`; project-specific workflow context can flow into any tab via optional `ChatSessionViewProps` fields from `SessionTracePane`.
 - Project UI workflow surfaces should read `projectSessions` from `/api/chat/projects/bootstrap`; `workflowRunId` and `state: "workflow"`/non-`simple-chat` workflow ids identify workflow-backed sessions without coupling Chat Web to the workflow runtime package.
 - Restart-style workflow persistence/inspection tests should write facts, close `SqliteWorkflowRunStore`, reopen the same `pibo-workflows.sqlite`, and then inspect/read facts so recovery regressions are caught.
 - Workflow run inspection is package-level and store-interface based: use `inspectWorkflowRun(store, runId)` to aggregate persisted run, attempts, events, edge transfers, checkpoints, wakeups, wait tokens, and human actions; use `formatWorkflowRunInspection` for compact text output.
@@ -839,4 +840,17 @@
   - The Chat Web root TypeScript build only includes `src`, so Project UI workflow metadata should come through product-level project-session records unless a later story explicitly wires a workflow-store API into `src`.
   - The Docker worker `/workspace` is not automatically updated from the host worktree in this task setup; copy changed files into the container before container typecheck/browser verification.
   - After `docker restart pibo-dev-Workflows`, the provided worker needed the web gateway restarted manually with the dev-auth web gateway command before browser checks.
+---
+
+## 2026-05-11 02:59 UTC - 12.2
+- Added an active Chat Web `Workflow` session tab registered alongside the Terminal view.
+- Implemented a dedicated Workflow/XState visualization surface for workflow-backed project sessions, including workflow/run badges, XState-style state flow, current UI snapshot JSON, and projection facts while preserving kernel records as durable truth.
+- Passed selected project-session workflow linkage into session views so the Workflow tab can render project workflow context without coupling to the workflow runtime package.
+- Marked task `12.2` complete in the workflow-system task list because no `prd_*.json` files exist in this worktree.
+- Quality checks: `npm run chat-ui:typecheck`; `npm --prefix packages/workflows run typecheck`; `npm --prefix packages/workflows test`; root `npm run typecheck`; `npm run chat-ui:build`; container `docker exec pibo-dev-Workflows ... npm run chat-ui:typecheck && npm run chat-ui:build`; browser-use smoke test at `http://127.0.0.1:4812/apps/chat/projects?view=workflow` verified the Workflow tab renders the visualization.
+- Files changed: `src/apps/chat-ui/src/session-views/WorkflowXStateSessionView.tsx`, `src/apps/chat-ui/src/session-views/registry.tsx`, `src/apps/chat-ui/src/session-views/types.ts`, `src/apps/chat-ui/src/App.tsx`, `docs/specs/changes/pibo-workflow-system-v1/tasks.md`, `progress.txt`.
+- **Learnings for future iterations:**
+  - Chat Web session views are a small plugin registry; add new tabs by extending `chatSessionViewIds`, registering the view in `session-views/registry.tsx`, and passing any extra context through `ChatSessionViewProps`.
+  - The Projects area already knows the selected `PiboProjectSession`; workflow-specific UI can use that linkage without importing `packages/workflows` into the browser bundle.
+  - Browser verification can use the worker web port with local browser-use (`/apps/chat/projects?view=workflow`); the worker CDP port may not always have an active browser attached.
 ---

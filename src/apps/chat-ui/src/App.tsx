@@ -2114,6 +2114,7 @@ function ProjectsArea({
 				selectedPiboSessionId={selectedPiboSessionId}
 				selectedRoomId={null}
 				selectedRoomArchived={Boolean(selectedProject?.archivedAt)}
+				workflowProjectSession={selectedProjectSession}
 				selectedSessionProfile={selectedSessionProfile}
 				selectedSessionActiveModel={resolveSessionActiveModelLabel(traceBootstrap, selectedSessionNode ?? { profile: selectedSessionProfile })}
 				selectedSessionStatus={selectedSessionNode?.status}
@@ -2353,6 +2354,7 @@ function SessionTracePane({
 	selectedSessionActiveModel,
 	selectedSessionStatus,
 	selectedSessionSignal,
+	workflowProjectSession,
 	sessionViewId,
 	sessionViews,
 	currentSessionView,
@@ -2387,6 +2389,7 @@ function SessionTracePane({
 	selectedSessionActiveModel?: string;
 	selectedSessionStatus?: PiboWebSessionStatus;
 	selectedSessionSignal?: PiboSignalSnapshot["sessions"][string];
+	workflowProjectSession?: PiboProjectSession;
 	sessionViewId: ChatSessionViewId;
 	sessionViews: ReturnType<typeof listChatSessionViews>;
 	currentSessionView: ReturnType<typeof getChatSessionView>;
@@ -2850,6 +2853,7 @@ function SessionTracePane({
 						sessionActiveModel: sessionActiveModelBadge,
 						selectedSessionStatus,
 						selectedSessionSignal,
+						workflowProjectSession,
 						sessionBreadcrumbs,
 						originSession,
 						derivedSessions,
