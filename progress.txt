@@ -989,3 +989,14 @@
   - The root typecheck includes `tsc -p tsconfig.json --noEmit`, `chat-ui:typecheck`, and `context-files-ui:typecheck`, so it covers both backend TypeScript and the two UI TypeScript projects.
   - For this Docker worker, the container project path is `/workspace`; use `docker exec pibo-dev-Workflows bash -lc 'cd /workspace && ...'` for container validation.
 ---
+
+## 2026-05-11 03:58 UTC - 14.2
+- Ran the workflow package unit test suite and verified all current workflow tests pass (`126` tests across `24` suites).
+- Also reran workflow package typecheck, root typecheck, and the workflow unit tests inside the `pibo-dev-Workflows` Docker worker.
+- Marked task `14.2` complete in the workflow-system task list because no `prd_*.json` files exist in this worktree.
+- Files changed: `docs/specs/changes/pibo-workflow-system-v1/tasks.md`, `progress.txt`.
+- **Learnings for future iterations:**
+  - `npm --prefix packages/workflows test` is the focused workflow unit test command and currently covers runtime, validation, persistence facts/schema, inspection, human actions, XState projection, and UI projection models.
+  - The Docker worker path is `/workspace`; use `docker exec pibo-dev-Workflows bash -lc 'cd /workspace && ...'` for container verification.
+  - Story 14.3 should use persistence-specific tests/manual assertions beyond the full unit suite because the unit suite already includes some persistence coverage but does not separately certify completed, failed, waiting, and resumed run scenarios as a validation checklist.
+---
