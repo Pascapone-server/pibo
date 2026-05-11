@@ -656,7 +656,7 @@ export async function dispatchWorkflowAgentNode(
 
     const executorResult = await options.agentExecutor({
       workflow: definition,
-      run,
+      run: createNodeScopedWorkflowRun(run, nodeId),
       nodeAttemptId: nodeAttempt.id,
       nodeId,
       node: agentNode,
@@ -1084,7 +1084,7 @@ export async function dispatchWorkflowNestedWorkflowNode(
   try {
     const executorResult = await options.nestedWorkflowExecutor({
       workflow: definition,
-      run,
+      run: createNodeScopedWorkflowRun(run, nodeId),
       nodeAttemptId: nodeAttempt.id,
       nodeId,
       node: workflowNode,
@@ -1467,7 +1467,7 @@ export async function dispatchWorkflowAdapterNode(
   }
 
   try {
-    const adapterResult = await adapter!.value({ input, run });
+    const adapterResult = await adapter!.value({ input, run: createNodeScopedWorkflowRun(run, nodeId) });
     const nodeOutputResult = validateNodeOutput(definition, nodeId, adapterResult.output);
     if (!nodeOutputResult.ok) {
       return failAdapterNodeDispatch({
@@ -1849,7 +1849,7 @@ export async function transferWorkflowEdgeAdapterData(
 
   let adaptedOutput: WorkflowValue;
   try {
-    const adapterResult = await adapter!.value({ input: payload, edge, run });
+    const adapterResult = await adapter!.value({ input: payload, edge, run: createWorkflowRunWithoutLocalState(run) });
     adaptedOutput = adapterResult.output;
   } catch (caught) {
     return edgeTransferFailure(diagnostics, adapterErrorSummaryFromCaught(caught));
@@ -2107,7 +2107,7 @@ export async function runOneNodeAgentWorkflow(
 
     const executorResult = await options.agentExecutor({
       workflow: definition,
-      run,
+      run: createNodeScopedWorkflowRun(run, nodeId),
       nodeAttemptId: nodeAttempt.id,
       nodeId,
       node,
@@ -2242,6 +2242,32 @@ function cloneLocalStateMap(
   return Object.fromEntries(
     entries.map(([nodeId, nodeState]) => [nodeId, structuredClone(nodeState) as Record<string, JsonValue>]),
   );
+}
+
+function createNodeScopedWorkflowRun(run: WorkflowRun, nodeId: string): WorkflowRun {
+  return {
+    ...run,
+    state: createNodeScopedWorkflowRunState(run, nodeId),
+  };
+}
+
+function createWorkflowRunWithoutLocalState(run: WorkflowRun): WorkflowRun {
+  return {
+    ...run,
+    state: { global: run.state.global },
+  };
+}
+
+function createNodeScopedWorkflowRunState(run: WorkflowRun, nodeId: string): WorkflowRun["state"] {
+  const localState = cloneLocalStateForNode(run, nodeId);
+  return localState ? { global: run.state.global, local: { [nodeId]: localState } } : { global: run.state.global };
+}
+
+function createCurrentNodeStateView(state: WorkflowRun["state"], nodeId: string): WorkflowRun["state"] {
+  const localState = state.local?.[nodeId];
+  return localState
+    ? { global: state.global, local: { [nodeId]: structuredClone(localState) as Record<string, JsonValue> } }
+    : { global: state.global };
 }
 
 function createStateReader(
@@ -2945,13 +2971,13 @@ async function buildAgentNodePromptWithRegisteredBuilder(
   try {
     const result = await builder.value({
       input,
-      state: options.run.state,
+      state: createCurrentNodeStateView(options.run.state, options.nodeId),
       global: createPromptBuilderStateReader(options.run.state.global),
       local: createPromptBuilderStateReader(options.run.state.local?.[options.nodeId] ?? {}),
       edge: createEdgePayloadReader(options.edgePayloads ?? {}),
       node,
       nodeId: options.nodeId,
-      run: options.run,
+      run: createNodeScopedWorkflowRun(options.run, options.nodeId),
       workflow: options.workflow,
     });
     const normalized = normalizePromptBuilderResult(result);
@@ -3104,10 +3130,7 @@ function resolvePromptTemplateExpression(
 
   if (root === "state") {
     if (rest.length === 0) {
-      return {
-        global: context.state.global,
-        ...(context.state.local ? { local: context.state.local } : {}),
-      };
+      return createCurrentNodeStateView(context.state, context.nodeId) as JsonValue;
     }
 
     const [scope, ...statePath] = rest;

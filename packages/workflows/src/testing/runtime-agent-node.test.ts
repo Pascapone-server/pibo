@@ -195,7 +195,7 @@ describe("workflow agent node dispatch", () => {
           input: topicInput,
           output: text(),
           promptTemplate:
-            "Draft {{input.topic}} for {{state.projectGoal}} / {{global.projectGoal}}. Previous: {{state.local.previousDraft}}. First tag: {{input.tags.0}}.",
+            "Draft {{input.topic}} for {{state.projectGoal}} / {{global.projectGoal}}. Previous: {{state.local.previousDraft}}. Foreign: {{state.local.source.debugNotes}}. First tag: {{input.tags.0}}.",
         },
       },
       edges: {},
@@ -211,7 +211,7 @@ describe("workflow agent node dispatch", () => {
       input,
       state: {
         global: { projectGoal: "ship workflow v1" },
-        local: { draft: { previousDraft: "outline v0" } },
+        local: { source: { debugNotes: "do not leak" }, draft: { previousDraft: "outline v0" } },
       },
       createdAt: "2026-05-11T00:40:00.000Z",
       updatedAt: "2026-05-11T00:40:00.000Z",
@@ -222,7 +222,7 @@ describe("workflow agent node dispatch", () => {
       agentExecutor: (context) => {
         assert.equal(
           context.prompt,
-          "Draft workflow prompts for ship workflow v1 / ship workflow v1. Previous: outline v0. First tag: runtime.",
+          "Draft workflow prompts for ship workflow v1 / ship workflow v1. Previous: outline v0. Foreign: {{state.local.source.debugNotes}}. First tag: runtime.",
         );
         return { output: "Prompt rendered." };
       },
@@ -269,7 +269,7 @@ describe("workflow agent node dispatch", () => {
       input,
       state: {
         global: { audience: "workflow authors" },
-        local: { draft: { tone: "concise" } },
+        local: { source: { debugNotes: "do not leak" }, draft: { tone: "concise" } },
       },
       createdAt: "2026-05-11T00:46:00.000Z",
       updatedAt: "2026-05-11T00:46:00.000Z",
@@ -279,6 +279,8 @@ describe("workflow agent node dispatch", () => {
       const builderInput = context.input as typeof input;
       assert.equal(context.workflow?.id, definition.id);
       assert.equal(context.run?.id, run.id);
+      assert.deepEqual(context.state.local, { draft: { tone: "concise" } });
+      assert.deepEqual(context.run?.state.local, { draft: { tone: "concise" } });
       assert.equal(context.nodeId, "draft");
       assert.equal(context.node.kind, "agent");
       assert.deepEqual(context.input, input);
@@ -297,6 +299,7 @@ describe("workflow agent node dispatch", () => {
       createNodeAttemptId: () => "wna_prompt_builder",
       edgePayloads: { incoming: "edge payload" },
       agentExecutor: (context) => {
+        assert.deepEqual(context.run.state.local, { draft: { tone: "concise" } });
         assert.equal(
           context.prompt,
           "Draft about registered prompt builders for workflow authors in a concise tone using edge payload.",

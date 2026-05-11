@@ -1,4 +1,5 @@
 ## Codebase Patterns
+- Runtime contexts exposed to node/plugin code must be node-scoped for local state: pass only the current node's `run.state.local[nodeId]`, keep prompt-builder `state.local` current-node-only, and hide all local state from edge adapters unless explicit mapping is added.
 - Node state access declarations live under `node.state.reads` / `node.state.writes` as scoped strings (`global.*`, `local.*`, `edge.*`); validation rejects unknown global paths and edge writes because edge payloads are immutable.
 - One-node agent workflow runs accept `initialGlobalState`; validate it with `validateWorkflowGlobalState`, render it through prompt state readers, and persist it in `WorkflowRun.state.global` via the workflow run store.
 - Local node state is stored under `WorkflowRun.state.local[nodeId]`; dispatch helpers snapshot the current node state into `NodeAttempt.localState` at start and terminal/waiting boundaries so restart inspection can recover the current node state.
@@ -589,4 +590,17 @@
   - The workflow definition validator is the right place for static state declaration checks; runtime code-node checks still enforce actual handler reads/writes at execution boundaries.
   - Global state access declarations should correspond to `definition.state.global` schema entries before a workflow validates.
   - `edge.*` can be declared as a read scope, but edge payloads are immutable and `state.writes` must not target `edge.*`.
+---
+
+## 2026-05-11 01:16 UTC - 9.4
+- Enforced default local node state isolation at runtime by passing node-scoped workflow run views into Agent executors, nested workflow executors, visible adapter nodes, and prompt builders.
+- Hid all workflow local state from edge adapter handlers, since edge adapters should consume the edge payload and explicit inputs rather than another node's private local state.
+- Updated prompt rendering so `{{state}}` exposes only global state plus the current node's local state, and added tests proving foreign node local state remains unresolved/hidden.
+- Marked task `9.4` complete in the workflow-system task list because the referenced JSON PRDs are absent and progress is tracked in `tasks.md`.
+- Quality checks: `npm --prefix packages/workflows run typecheck`; `npm --prefix packages/workflows test`; `npm run typecheck`; container `/workspace` `npm --prefix packages/workflows run typecheck && npm --prefix packages/workflows test && npm run typecheck`.
+- Files changed: `packages/workflows/src/runtime/index.ts`, `packages/workflows/src/testing/runtime-agent-node.test.ts`, `packages/workflows/src/testing/runtime-edge-transfer.test.ts`, `docs/specs/changes/pibo-workflow-system-v1/tasks.md`, `progress.txt`.
+- **Learnings for future iterations:**
+  - Use node-scoped `WorkflowRun` views whenever invoking workflow-provided executors or prompt builders; the durable run can keep all node local state, but user/plugin code should only see current-node local state by default.
+  - Prompt templates already resolve `{{local.*}}` and `{{state.local.*}}` against the current node; `{{state}}` needed the same scoped projection to avoid dumping the entire local-state map.
+  - Edge adapter handlers currently receive no local state in their `run` context; future explicit state-mapping stories should add narrowly-scoped inputs instead of exposing `run.state.local` wholesale.
 ---

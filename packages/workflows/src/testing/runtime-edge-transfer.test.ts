@@ -350,16 +350,20 @@ describe("workflow edge data transfer", () => {
     definition.edges["draft-to-review"].adapter = edgeAdapter(adapterRef("test.adapters.textToSummary"), summaryPort);
     const registry = createWorkflowRegistry();
     registerWorkflowAgentProfile(registry, "pibo-agent", {});
-    registerWorkflowAdapter(registry, "test.adapters.textToSummary", ({ input }) => ({
-      output: { summary: String(input) },
-    }));
+    registerWorkflowAdapter(registry, "test.adapters.textToSummary", ({ input, run }) => {
+      assert.deepEqual(run?.state.local, undefined);
+      return { output: { summary: String(input) } };
+    });
 
     const definitionValidation = validateWorkflow(definition, { registry });
     assert.equal(definitionValidation.ok, true);
 
     const result = await transferWorkflowEdgeAdapterData(
       definition,
-      createRun(),
+      {
+        ...createRun(),
+        state: { global: {}, local: { draft: { debugNotes: "do not leak" }, review: { tone: "formal" } } },
+      },
       "draft-to-review",
       createSourceAttempt(),
       {
