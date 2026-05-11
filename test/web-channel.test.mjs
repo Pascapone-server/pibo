@@ -1906,6 +1906,20 @@ test("workflow builder draft loader opens starter and duplicated UI draft wrappe
 		assert.equal(duplicatePayload.draft.definition.ui.layout, "auto");
 		assert.match(duplicatePayload.builderPath, /^\/apps\/chat\/workflows\/drafts\/draft_standard-project_1-0-0_/);
 
+		const duplicateAgainResponse = await fetch(`${baseURL}/api/chat/workflows/standard-project/duplicate`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({ version: "1.0.0" }),
+		});
+		assert.equal(duplicateAgainResponse.status, 201);
+		const duplicateAgainPayload = await duplicateAgainResponse.json();
+		assert.equal(duplicateAgainPayload.draft.draftId, duplicatePayload.draft.draftId);
+		assert.equal(duplicateAgainPayload.draft.workflowId, "ui-standard-project-copy");
+
 		const loadedDuplicateResponse = await fetch(`${baseURL}/api/chat/workflows/drafts/${encodeURIComponent(duplicatePayload.draft.draftId)}`, {
 			headers: { "x-test-user": "user-1" },
 		});
@@ -2007,6 +2021,14 @@ test("workflow validation pipeline runs on draft load, edit, validate, and publi
 		assert.equal(invalidPatchPayload.validation.ok, false);
 		assert.equal(invalidPatchPayload.draft.validationState, "error");
 		assert.ok(invalidPatchPayload.diagnostics.some((diagnostic) => diagnostic.code === "WorkflowGraphError.unknownAgentProfileRef"));
+
+		const reloadedInvalidResponse = await fetch(`${baseURL}/api/chat/workflows/drafts/${encodeURIComponent(draftId)}`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(reloadedInvalidResponse.status, 200);
+		const reloadedInvalidPayload = await reloadedInvalidResponse.json();
+		assert.equal(reloadedInvalidPayload.draft.definition.nodes.agent.profile.id, "missing-workflow-profile");
+		assert.equal(reloadedInvalidPayload.draft.validationState, "error");
 
 		const validateResponse = await fetch(`${baseURL}/api/chat/workflows/drafts/${encodeURIComponent(draftId)}/validate`, {
 			method: "POST",

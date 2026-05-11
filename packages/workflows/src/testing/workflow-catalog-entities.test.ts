@@ -137,6 +137,91 @@ describe("workflow catalog entity persistence", () => {
     }
   });
 
+  it("persists partial invalid UI drafts and enforces one active draft per workflow identity", () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), "pibo-workflows-draft-store-"));
+    const store = new SqliteWorkflowRunStore(join(tempRoot, "pibo-workflows.sqlite"));
+    const definition = createDefinition({ id: "workflow.ui.draft-store" });
+    const identity: WorkflowIdentityRecord = {
+      workflowId: definition.id,
+      source: "ui",
+      title: "Draft store workflow",
+      tags: ["drafts"],
+      createdBy: "user:catalog",
+      createdAt,
+      updatedBy: "user:catalog",
+      updatedAt: createdAt,
+    };
+    const draft: WorkflowDraftRecord = {
+      draftId: "wfd_draft_store_1",
+      workflowId: definition.id,
+      source: "ui",
+      status: "draft",
+      baseWorkflowId: definition.id,
+      baseWorkflowVersion: definition.version,
+      baseDefinitionHash: hashWorkflowDefinition(definition),
+      versionIntent: "patch",
+      definition: {
+        id: definition.id,
+        title: "Incomplete draft can still be saved",
+      },
+      diagnostics: [
+        {
+          code: "WorkflowValidationError.missingNodes",
+          message: "Workflow IR must include a nodes object.",
+          severity: "error",
+          path: "$.nodes",
+        },
+      ],
+      validationState: "error",
+      revision: 1,
+      createdBy: "user:catalog",
+      createdAt,
+      updatedBy: "user:catalog",
+      updatedAt,
+    };
+
+    try {
+      store.saveWorkflowIdentity(identity);
+      store.saveWorkflowDraft(draft);
+
+      assert.deepEqual(store.getWorkflowDraft(draft.draftId), draft);
+      assert.deepEqual(store.listWorkflowDrafts({ workflowId: definition.id }), [draft]);
+      assert.equal(store.getWorkflowIdentity(definition.id)?.currentDraftId, draft.draftId);
+
+      const conflictingDraft: WorkflowDraftRecord = {
+        ...draft,
+        draftId: "wfd_draft_store_2",
+        revision: 1,
+        updatedAt: "2026-05-11T05:02:00.000Z",
+      };
+      assert.throws(
+        () => store.saveWorkflowDraft(conflictingDraft),
+        /Workflow 'workflow\.ui\.draft-store' already has an active draft 'wfd_draft_store_1'\./,
+      );
+
+      const updatedDraft: WorkflowDraftRecord = {
+        ...draft,
+        revision: 2,
+        diagnostics: [
+          {
+            code: "WorkflowDraft.partial",
+            message: "Draft remains incomplete but parsed.",
+            severity: "warning",
+            path: "$.output",
+          },
+        ],
+        validationState: "warning",
+        updatedAt: "2026-05-11T05:03:00.000Z",
+      };
+      store.saveWorkflowDraft(updatedDraft);
+      assert.deepEqual(store.getWorkflowDraft(draft.draftId), updatedDraft);
+      assert.deepEqual(store.listWorkflowDrafts({ workflowId: definition.id }), [updatedDraft]);
+    } finally {
+      store.close();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it("records delete tombstones without removing historical definition snapshots", () => {
     const tempRoot = mkdtempSync(join(tmpdir(), "pibo-workflows-catalog-tombstone-"));
     const store = new SqliteWorkflowRunStore(join(tempRoot, "pibo-workflows.sqlite"));

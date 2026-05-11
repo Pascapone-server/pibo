@@ -945,6 +945,13 @@ export class SqliteWorkflowRunStore implements
   }
 
   saveWorkflowDraft(record: WorkflowDraftRecord): void {
+    const conflict = this.db
+      .prepare("SELECT draft_id FROM workflow_drafts WHERE workflow_id = ? AND status = 'draft' AND draft_id <> ? LIMIT 1")
+      .get(record.workflowId, record.draftId) as { draft_id: string } | undefined;
+    if (conflict) {
+      throw new Error(`Workflow '${record.workflowId}' already has an active draft '${conflict.draft_id}'.`);
+    }
+
     this.db.prepare(`
       INSERT INTO workflow_drafts (
         draft_id,
@@ -998,6 +1005,14 @@ export class SqliteWorkflowRunStore implements
       record.updatedBy ?? null,
       record.updatedAt,
     );
+
+    this.db.prepare(`
+      UPDATE workflow_identities
+      SET current_draft_id = ?,
+          updated_by = COALESCE(?, updated_by),
+          updated_at = ?
+      WHERE workflow_id = ?
+    `).run(record.draftId, record.updatedBy ?? null, record.updatedAt, record.workflowId);
   }
 
   getWorkflowDraft(draftId: string): WorkflowDraftRecord | undefined {

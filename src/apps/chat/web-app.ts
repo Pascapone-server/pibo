@@ -183,9 +183,7 @@ type ChatWebAppState = {
 	persistenceMetrics: ChatPersistenceMetrics;
 	userSkillManager: UserSkillManager;
 	syncedUserSkillNames?: Set<string>;
-	workflowDrafts: Map<string, OwnedWorkflowDraftRecord>;
-	workflowDuplicateDrafts: Map<string, string>;
-	workflowEditDrafts: Map<string, string>;
+	workflowDraftStore: ChatWorkflowDraftStore;
 };
 
 type ChatBootstrapCatalog = {
@@ -462,9 +460,159 @@ type WorkflowDraftPublishBody = {
 	versionIntent?: unknown;
 };
 
-const WORKFLOW_DRAFT_CACHE = new Map<string, OwnedWorkflowDraftRecord>();
-const WORKFLOW_DUPLICATE_DRAFT_CACHE = new Map<string, string>();
-const WORKFLOW_EDIT_DRAFT_CACHE = new Map<string, string>();
+type WorkflowDraftStoreRow = {
+	draft_id: string;
+	workflow_id: string;
+	owner_scope: string;
+	source: "ui";
+	status: "draft";
+	base_workflow_id: string | null;
+	base_workflow_version: string | null;
+	base_definition_hash: string | null;
+	target_workflow_version: string | null;
+	version_intent: "patch" | "minor" | "major";
+	definition_json: string;
+	diagnostics_json: string;
+	validation_json: string | null;
+	validation_state: "unknown" | "valid" | "warning" | "error";
+	revision: number;
+	created_at: string;
+	updated_at: string;
+};
+
+class ChatWorkflowDraftStore {
+	constructor(private readonly dataStore: PiboDataStore) {
+		this.dataStore.db.exec(`
+			CREATE TABLE IF NOT EXISTS workflow_ui_drafts (
+				draft_id TEXT PRIMARY KEY,
+				workflow_id TEXT NOT NULL,
+				owner_scope TEXT NOT NULL,
+				source TEXT NOT NULL,
+				status TEXT NOT NULL,
+				base_workflow_id TEXT,
+				base_workflow_version TEXT,
+				base_definition_hash TEXT,
+				target_workflow_version TEXT,
+				version_intent TEXT NOT NULL,
+				definition_json TEXT NOT NULL,
+				diagnostics_json TEXT NOT NULL,
+				validation_json TEXT,
+				validation_state TEXT NOT NULL,
+				revision INTEGER NOT NULL,
+				created_at TEXT NOT NULL,
+				updated_at TEXT NOT NULL
+			);
+
+			CREATE UNIQUE INDEX IF NOT EXISTS idx_workflow_ui_drafts_one_active
+				ON workflow_ui_drafts(workflow_id)
+				WHERE status = 'draft';
+			CREATE INDEX IF NOT EXISTS idx_workflow_ui_drafts_updated
+				ON workflow_ui_drafts(updated_at, draft_id);
+		`);
+	}
+
+	getDraft(draftId: string): OwnedWorkflowDraftRecord | undefined {
+		const row = this.dataStore.db.prepare("SELECT * FROM workflow_ui_drafts WHERE draft_id = ?").get(draftId) as WorkflowDraftStoreRow | undefined;
+		return row ? workflowDraftFromStoreRow(row) : undefined;
+	}
+
+	findActiveDraftByWorkflowId(workflowId: string): OwnedWorkflowDraftRecord | undefined {
+		const row = this.dataStore.db
+			.prepare("SELECT * FROM workflow_ui_drafts WHERE workflow_id = ? AND status = 'draft' ORDER BY updated_at DESC, draft_id ASC LIMIT 1")
+			.get(workflowId) as WorkflowDraftStoreRow | undefined;
+		return row ? workflowDraftFromStoreRow(row) : undefined;
+	}
+
+	saveDraft(record: OwnedWorkflowDraftRecord): void {
+		this.dataStore.transaction(() => {
+			const conflict = this.dataStore.db
+				.prepare("SELECT draft_id FROM workflow_ui_drafts WHERE workflow_id = ? AND status = 'draft' AND draft_id <> ? LIMIT 1")
+				.get(record.workflowId, record.draftId) as { draft_id: string } | undefined;
+			if (conflict) {
+				throw new PiboWebHttpError(`Workflow '${record.workflowId}' already has an active draft '${conflict.draft_id}'`, 409);
+			}
+
+			this.dataStore.db.prepare(`
+				INSERT INTO workflow_ui_drafts (
+					draft_id,
+					workflow_id,
+					owner_scope,
+					source,
+					status,
+					base_workflow_id,
+					base_workflow_version,
+					base_definition_hash,
+					target_workflow_version,
+					version_intent,
+					definition_json,
+					diagnostics_json,
+					validation_json,
+					validation_state,
+					revision,
+					created_at,
+					updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				ON CONFLICT(draft_id) DO UPDATE SET
+					workflow_id = excluded.workflow_id,
+					owner_scope = excluded.owner_scope,
+					source = excluded.source,
+					status = excluded.status,
+					base_workflow_id = excluded.base_workflow_id,
+					base_workflow_version = excluded.base_workflow_version,
+					base_definition_hash = excluded.base_definition_hash,
+					target_workflow_version = excluded.target_workflow_version,
+					version_intent = excluded.version_intent,
+					definition_json = excluded.definition_json,
+					diagnostics_json = excluded.diagnostics_json,
+					validation_json = excluded.validation_json,
+					validation_state = excluded.validation_state,
+					revision = excluded.revision,
+					created_at = excluded.created_at,
+					updated_at = excluded.updated_at
+			`).run(
+				record.draftId,
+				record.workflowId,
+				record.ownerScope,
+				record.source,
+				record.status,
+				record.baseWorkflowId ?? null,
+				record.baseWorkflowVersion ?? null,
+				record.baseDefinitionHash ?? null,
+				record.targetWorkflowVersion ?? null,
+				record.versionIntent,
+				JSON.stringify(record.definition),
+				JSON.stringify(record.diagnostics),
+				record.validation ? JSON.stringify(record.validation) : null,
+				record.validationState,
+				record.revision,
+				record.createdAt,
+				record.updatedAt,
+			);
+		});
+	}
+}
+
+function workflowDraftFromStoreRow(row: WorkflowDraftStoreRow): OwnedWorkflowDraftRecord {
+	return {
+		draftId: row.draft_id,
+		workflowId: row.workflow_id,
+		source: row.source,
+		status: row.status,
+		...(row.base_workflow_id ? { baseWorkflowId: row.base_workflow_id } : {}),
+		...(row.base_workflow_version ? { baseWorkflowVersion: row.base_workflow_version } : {}),
+		...(row.base_definition_hash ? { baseDefinitionHash: row.base_definition_hash } : {}),
+		...(row.target_workflow_version ? { targetWorkflowVersion: row.target_workflow_version } : {}),
+		versionIntent: row.version_intent,
+		definition: JSON.parse(row.definition_json) as PiboJsonObject,
+		diagnostics: JSON.parse(row.diagnostics_json) as WorkflowDraftDiagnostic[],
+		...(row.validation_json ? { validation: JSON.parse(row.validation_json) as WorkflowValidationSummary } : {}),
+		validationState: row.validation_state,
+		revision: row.revision,
+		createdAt: row.created_at,
+		updatedAt: row.updated_at,
+		ownerScope: row.owner_scope,
+	};
+}
 
 type ChatMcpServerDescriptionBody = {
 	description?: unknown;
@@ -2161,15 +2309,15 @@ function duplicateWorkflowIntoDraft(
 	const published = selectPublishedWorkflowVersion(workflowId, workflowVersion);
 	if (!published) throw new PiboWebHttpError("Published workflow version not found", 404);
 
-	const duplicateKey = `${webSession.ownerScope}:${published.id}@${published.version}`;
-	const existingDraftId = state.workflowDuplicateDrafts.get(duplicateKey);
-	if (existingDraftId) return requireWorkflowDraft(state, webSession, existingDraftId);
+	const copyWorkflowId = `ui-${published.id}-copy`;
+	const existingDraft = state.workflowDraftStore.findActiveDraftByWorkflowId(copyWorkflowId);
+	if (existingDraft) return serializeWorkflowDraft(existingDraft);
 
 	const now = new Date().toISOString();
 	const draftId = `draft_${published.id.replace(/[^a-zA-Z0-9_-]/g, "-")}_${published.version.replace(/[^a-zA-Z0-9_-]/g, "-")}_${randomUUID().slice(0, 8)}`;
 	const draft: OwnedWorkflowDraftRecord = {
 		draftId,
-		workflowId: `ui-${published.id}-copy`,
+		workflowId: copyWorkflowId,
 		source: "ui",
 		status: "draft",
 		baseWorkflowId: published.id,
@@ -2192,8 +2340,7 @@ function duplicateWorkflowIntoDraft(
 		updatedAt: now,
 		ownerScope: webSession.ownerScope,
 	};
-	state.workflowDrafts.set(draftId, draft);
-	state.workflowDuplicateDrafts.set(duplicateKey, draftId);
+	state.workflowDraftStore.saveDraft(draft);
 	return serializeWorkflowDraft(draft);
 }
 
@@ -2211,19 +2358,9 @@ function createNextVersionDraftFromPublishedWorkflow(
 		throw new PiboWebHttpError("Code workflow projections are read-only; duplicate them to a UI draft before editing", 409);
 	}
 
-	const activeDraftKey = `${webSession.ownerScope}:${published.id}`;
-	const existingDraftId = state.workflowEditDrafts.get(activeDraftKey);
-	if (existingDraftId) {
-		return { draft: requireWorkflowDraft(state, webSession, existingDraftId), reused: true };
-	}
-
-	const strayActiveDraft = [...state.workflowDrafts.values()].find((draft) => (
-		draft.ownerScope === webSession.ownerScope
-		&& draft.workflowId === published.id
-		&& draft.status === "draft"
-	));
-	if (strayActiveDraft) {
-		throw new PiboWebHttpError(`Workflow '${published.id}' already has an active draft`, 409);
+	const existingDraft = state.workflowDraftStore.findActiveDraftByWorkflowId(published.id);
+	if (existingDraft) {
+		return { draft: serializeWorkflowDraft(existingDraft), reused: true };
 	}
 
 	const now = new Date().toISOString();
@@ -2255,8 +2392,7 @@ function createNextVersionDraftFromPublishedWorkflow(
 		updatedAt: now,
 		ownerScope: webSession.ownerScope,
 	};
-	state.workflowDrafts.set(draftId, draft);
-	state.workflowEditDrafts.set(activeDraftKey, draftId);
+	state.workflowDraftStore.saveDraft(draft);
 	return { draft: serializeWorkflowDraft(draft), reused: false };
 }
 
@@ -2481,12 +2617,12 @@ function parseRawWorkflowDefinitionText(value: unknown): unknown {
 }
 
 function requireMutableWorkflowDraft(state: ChatWebAppState, webSession: PiboWebSession, draftId: string): OwnedWorkflowDraftRecord {
-	const existing = state.workflowDrafts.get(draftId);
-	if (draftId === WORKFLOW_STARTER_DRAFT_ID && (!existing || existing.ownerScope !== webSession.ownerScope)) {
-		state.workflowDrafts.set(draftId, createStarterWorkflowDraft(webSession));
+	let record = state.workflowDraftStore.getDraft(draftId);
+	if (!record && draftId === WORKFLOW_STARTER_DRAFT_ID) {
+		record = createStarterWorkflowDraft(webSession);
+		state.workflowDraftStore.saveDraft(record);
 	}
-	const record = state.workflowDrafts.get(draftId);
-	if (!record || record.ownerScope !== webSession.ownerScope) throw new PiboWebHttpError("Workflow draft not found", 404);
+	if (!record) throw new PiboWebHttpError("Workflow draft not found", 404);
 	return record;
 }
 
@@ -2506,6 +2642,7 @@ function runWorkflowDraftValidation(
 	record.validationState = validation.validationState;
 	record.validation = validation;
 	record.updatedAt = validation.checkedAt;
+	state.workflowDraftStore.saveDraft(record);
 	return { validation, diagnostics };
 }
 
@@ -4555,9 +4692,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 		activeTraceSessions: new Set(),
 		persistenceMetrics: createPersistenceMetrics(),
 		userSkillManager: new UserSkillManager(os.homedir()),
-		workflowDrafts: WORKFLOW_DRAFT_CACHE,
-		workflowDuplicateDrafts: WORKFLOW_DUPLICATE_DRAFT_CACHE,
-		workflowEditDrafts: WORKFLOW_EDIT_DRAFT_CACHE,
+		workflowDraftStore: new ChatWorkflowDraftStore(dataStore),
 	};
 
 	const requireSession = (request: Request, context: PiboWebAppContext): Promise<PiboWebSession> =>
