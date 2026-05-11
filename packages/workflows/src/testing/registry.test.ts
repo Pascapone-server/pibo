@@ -7,14 +7,18 @@ import {
   createWorkflowRegistry,
   hasWorkflowAdapter,
   hasWorkflowAgentProfile,
+  hasWorkflowHumanAction,
   hasWorkflowPromptBuilder,
+  humanWaitWorkflowFixture,
   mixedNodeWorkflowFixture,
   promptBuilderRef,
   registerWorkflowAdapter,
   registerWorkflowAgentProfile,
+  registerWorkflowHumanAction,
   registerWorkflowPromptBuilder,
   resolveWorkflowAdapter,
   resolveWorkflowAgentProfile,
+  resolveWorkflowHumanAction,
   resolveWorkflowPromptBuilder,
   validateWorkflow,
   workflowFixtureProviders,
@@ -83,6 +87,22 @@ describe("workflow registry adapter resolution", () => {
       nodeId: "draft",
     });
     assert.equal(result, "Write a draft from the workflow plan for: Registry prompt builders");
+  });
+
+  it("registers and resolves extensible human actions", () => {
+    const registry = createWorkflowRegistry(workflowFixtureProviders);
+    const approveId = workflowFixtureRegistryRefs.humanActions.approve;
+
+    assert.equal(hasWorkflowHumanAction(registry, approveId), true);
+    assert.equal(resolveWorkflowHumanAction(registry, approveId)?.kind, "approve");
+
+    const custom = registerWorkflowHumanAction(registry, "fixture.humanActions.escalate", {
+      id: "fixture.humanActions.escalate",
+      kind: "escalate",
+      title: "Escalate",
+    });
+    assert.equal(custom.kind, "escalate");
+    assert.equal(resolveWorkflowHumanAction(registry, "fixture.humanActions.escalate")?.title, "Escalate");
   });
 
   it("rejects duplicate prompt builder registrations unless override is explicit", () => {
@@ -178,6 +198,42 @@ describe("workflow registry adapter resolution", () => {
       result.diagnostics.some(
         (diagnostic) =>
           diagnostic.code === "WorkflowGraphError.ambiguousAgentPromptSource" && diagnostic.nodeId === "draft",
+      ),
+    );
+  });
+
+  it("validates human action refs against the Workflow Registry when one is provided", () => {
+    const registry = createWorkflowRegistry(workflowFixtureProviders);
+
+    assert.equal(validateWorkflow(humanWaitWorkflowFixture, { registry }).ok, true);
+
+    const missingRegistryResult = validateWorkflow(humanWaitWorkflowFixture, { registry: createWorkflowRegistry() });
+
+    assert.equal(missingRegistryResult.ok, false);
+    assert.ok(
+      missingRegistryResult.diagnostics.some(
+        (diagnostic) =>
+          diagnostic.code === "WorkflowGraphError.unknownHumanActionRef" &&
+          diagnostic.nodeId === "review" &&
+          diagnostic.path === "$.nodes.review.actions.0.id",
+      ),
+    );
+
+    const mismatched = structuredClone(humanWaitWorkflowFixture) as WorkflowDefinition;
+    const reviewNode = mismatched.nodes.review;
+    assert.equal(reviewNode.kind, "human");
+    if (reviewNode.kind === "human" && reviewNode.actions) {
+      reviewNode.actions[0] = { ...reviewNode.actions[0], kind: "reject" };
+    }
+
+    const mismatchResult = validateWorkflow(mismatched, { registry });
+    assert.equal(mismatchResult.ok, false);
+    assert.ok(
+      mismatchResult.diagnostics.some(
+        (diagnostic) =>
+          diagnostic.code === "WorkflowGraphError.humanActionKindMismatch" &&
+          diagnostic.nodeId === "review" &&
+          diagnostic.path === "$.nodes.review.actions.0.kind",
       ),
     );
   });

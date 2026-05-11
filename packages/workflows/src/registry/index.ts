@@ -165,6 +165,17 @@ export function registerWorkflowHumanAction(
   return humanAction;
 }
 
+export function resolveWorkflowHumanAction(
+  registry: Pick<WorkflowRegistry, "humanActions">,
+  ref: RegistryRefId,
+): WorkflowHumanActionDefinition | undefined {
+  return registry.humanActions.get(ref);
+}
+
+export function hasWorkflowHumanAction(registry: Pick<WorkflowRegistry, "humanActions">, ref: RegistryRefId): boolean {
+  return resolveWorkflowHumanAction(registry, ref) !== undefined;
+}
+
 export function resolveWorkflowAgentProfile(
   registry: Pick<WorkflowRegistry, "profiles">,
   ref: RegistryRefId,

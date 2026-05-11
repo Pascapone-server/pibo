@@ -1,4 +1,5 @@
 ## Codebase Patterns
+- Human wait actions should go through registry-backed refs on the wait token, then `applyWorkflowHumanAction` to validate availability/payloads, record `workflow_human_actions`, resolve the token, and schedule a human wakeup for resumed waits.
 - Workflow/XState tab secondary inspection panels should derive final output and validation diagnostics from the selected `traceView` inside `WorkflowProjectSessionUiModel`, then summarize only counts/availability in the safe UI snapshot.
 - Workflow-backed Chat Web sessions should derive display metadata from `PiboProjectSession` plus the live `PiboWebSessionStatus`; keep `simple-chat` sessions unbadged unless they have a workflow run id or non-simple workflow id.
 - Chat Web session tabs are registered through `src/apps/chat-ui/src/session-views/registry.tsx`; project-specific workflow context can flow into any tab via optional `ChatSessionViewProps` fields from `SessionTracePane`.
@@ -892,4 +893,17 @@
   - The Workflow/XState tab can keep adding inspection surfaces through `WorkflowProjectSessionUiModel`; keep payload-heavy details in rendered panels and only expose booleans/counts in the snapshot object.
   - Final workflow output is only meaningful when the derived workflow status is completed; waiting/running workflow-backed sessions should show an explicit pending message.
   - Raw trace events may not be visible by default, so validation diagnostic collection should use `traceView.rawEvents` opportunistically and fall back to trace node errors.
+---
+
+## 2026-05-11 03:28 UTC - 12.6
+- Implemented registry-backed human action resolution helpers plus `applyWorkflowHumanAction` for approve/reject/resume/cancel and custom action kinds.
+- Added action application validation for pending wait tokens, run ownership, registry availability, action kind mismatches, registered action input/output ports, resume payload schemas, and human node output compatibility.
+- Persisted accepted human actions, resolved/cancelled wait tokens, node attempt/run status updates, `wait.resumed`/`workflow.cancelled` events, and human wakeups for resumed waits.
+- Added registry and runtime tests for extensible human action registration/resolution, validation against registries, approve resolution with actor/action/wakeup records, invalid resume payload rejection, and cancel handling with a custom action set.
+- Files changed: `packages/workflows/src/registry/index.ts`, `packages/workflows/src/runtime/index.ts`, `packages/workflows/src/validation/index.ts`, `packages/workflows/src/testing/registry.test.ts`, `packages/workflows/src/testing/runtime-human-node.test.ts`, `docs/specs/changes/pibo-workflow-system-v1/tasks.md`, `progress.txt`.
+- Quality checks: `npm --prefix packages/workflows run typecheck`; `npm --prefix packages/workflows test`; `npm run typecheck`; container `docker exec pibo-dev-Workflows ... npm --prefix packages/workflows run typecheck && npm --prefix packages/workflows test`; container `docker exec pibo-dev-Workflows ... npm run typecheck`.
+- **Learnings for future iterations:**
+  - Wait-token action refs should be treated as the UI/CLI-facing availability list, but accepted actions must still resolve through the Workflow Registry before mutating durable wait/run state.
+  - Resume action payloads need both action-port validation and the human node schema validation so bad human input cannot resolve the wait token.
+  - Human action resumption schedules `WorkflowWakeup` rows with the `WorkflowHumanActionRecord.id` as `correlationId`, giving later orchestration paths a durable resume cue without process-local callbacks.
 ---

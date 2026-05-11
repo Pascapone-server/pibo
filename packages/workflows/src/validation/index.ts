@@ -10,6 +10,7 @@ import type {
   WorkflowDefinition,
   WorkflowDiagnostic,
   WorkflowEdgeDefinition,
+  WorkflowHumanActionRef,
   WorkflowNodeDefinition,
   WorkflowPort,
   WorkflowRegistry,
@@ -53,7 +54,7 @@ export type WorkflowValueValidationOptions = {
 };
 
 export type WorkflowValidationOptions = {
-  registry?: Partial<Pick<WorkflowRegistry, "adapters" | "guards" | "handlers" | "profiles" | "promptBuilders">>;
+  registry?: Partial<Pick<WorkflowRegistry, "adapters" | "guards" | "handlers" | "profiles" | "promptBuilders" | "humanActions">>;
 };
 
 type SchemaValidationContext = {
@@ -106,6 +107,7 @@ export function validateWorkflowDefinitionSchemas(
     validateWorkflowAgentNodePromptBuilderRef(nodeId, node, diagnostics, options);
     validateWorkflowCodeNodeRef(nodeId, node, diagnostics, options);
     validateWorkflowAdapterNodeRef(nodeId, node, diagnostics, options);
+    validateWorkflowHumanActionRefs(nodeId, node, diagnostics, options);
     validateWorkflowNodeStateAccess(definition, nodeId, node, diagnostics);
   }
 
@@ -976,6 +978,61 @@ function validateWorkflowAdapterNodeRef(
     path: `$.nodes.${nodeId}.handler.id`,
     ownerLabel: `Workflow adapter node '${nodeId}'`,
   });
+}
+
+function validateWorkflowHumanActionRefs(
+  nodeId: string,
+  node: WorkflowNodeDefinition,
+  diagnostics: WorkflowDiagnostic[],
+  options: WorkflowValidationOptions,
+): void {
+  if (node.kind !== "human" || !node.actions) {
+    return;
+  }
+
+  node.actions.forEach((action, index) => {
+    const path = `$.nodes.${nodeId}.actions.${index}`;
+    const actionId = getHumanActionRefId(action);
+    if (!actionId) {
+      diagnostics.push({
+        code: "WorkflowGraphError.invalidHumanActionRef",
+        message: `Workflow human node '${nodeId}' declares an invalid human action ref at index ${index}.`,
+        severity: "error",
+        nodeId,
+        path,
+        hint: "Human action refs must contain a non-empty registry action id.",
+      });
+      return;
+    }
+
+    const registered = options.registry?.humanActions?.get(actionId);
+    if (options.registry?.humanActions && !registered) {
+      diagnostics.push({
+        code: "WorkflowGraphError.unknownHumanActionRef",
+        message: `Workflow human node '${nodeId}' references human action '${actionId}', but it is not registered in the Workflow Registry.`,
+        severity: "error",
+        nodeId,
+        path: `${path}.id`,
+        hint: "Register approve/reject/resume/cancel or custom actions with registerWorkflowHumanAction/createWorkflowRegistry before validating the workflow.",
+      });
+      return;
+    }
+
+    if (registered && action.kind && registered.kind !== action.kind) {
+      diagnostics.push({
+        code: "WorkflowGraphError.humanActionKindMismatch",
+        message: `Workflow human node '${nodeId}' action '${actionId}' declares kind '${action.kind}', but the registry defines kind '${registered.kind}'.`,
+        severity: "error",
+        nodeId,
+        path: `${path}.kind`,
+        hint: "Keep wait-token action refs aligned with their registered action definitions.",
+      });
+    }
+  });
+}
+
+function getHumanActionRefId(ref: WorkflowHumanActionRef): string | undefined {
+  return ref && typeof ref.id === "string" && ref.id.length > 0 ? ref.id : undefined;
 }
 
 function validateRegisteredAdapterExists(
