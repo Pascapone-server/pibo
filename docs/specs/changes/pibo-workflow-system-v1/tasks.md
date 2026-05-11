@@ -101,7 +101,7 @@
 
 ## 12. UI / Inspection V1
 
-- [ ] 12.1 Add Project UI surface for workflow-backed sessions/runs.
+- [x] 12.1 Add Project UI surface for workflow-backed sessions/runs.
 - [ ] 12.2 Add dedicated Web UI Workflow/XState tab for visualization.
 - [ ] 12.3 Show current workflow id and state for workflow-backed sessions.
 - [ ] 12.4 Show node status list for a workflow run.

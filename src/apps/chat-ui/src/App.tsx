@@ -44,7 +44,7 @@ import {
 } from "lucide-react";
 import { createUserSkill, deleteCustomAgent, deletePiPackage, deleteProject, deleteRoom, deleteSession, deleteUserSkill, fetchSignalTree, downloadChatFile, getBootstrap, getNavigation, getProjectsBootstrap, getSessionPage, getTrace, getTraceSummary, getUserSettings, getUserSkill, installUserSkill, listUserSkills, markSessionRead, patchCustomAgent, patchModelDefaults, patchPiPackage, patchProject, patchProjectSession, patchRoom, patchSession, patchUserSettings, postAction, postContextFile, postCustomAgent, postMessage, postPiPackage, postProject, postProjectMessage, postProjectSession, postRoom, postSession, signInWithGoogle, signOut, subscribeSignalTree, updateUserSkill, type SaveCustomAgentInput, type UserSettings } from "./api";
 import { THINKING_LEVELS } from "./types";
-import type { AgentCatalog, BootstrapData, CustomAgent, CustomAgentSubagent, ModelCatalog, ModelDefaults, ModelProfile, NavigationData, PiboProject, ProjectsBootstrapData, PiboRoom, PiboSession, PiboSessionTraceSummary, PiboSessionTraceView, PiboSignalPatch, PiboSignalSnapshot, PiboTraceNode, PiboTraceOrderKey, PiboWebSessionNode, PiboWebSessionStatus, ThinkingLevel, UserSkill } from "./types";
+import type { AgentCatalog, BootstrapData, CustomAgent, CustomAgentSubagent, ModelCatalog, ModelDefaults, ModelProfile, NavigationData, PiboProject, PiboProjectSession, ProjectsBootstrapData, PiboRoom, PiboSession, PiboSessionTraceSummary, PiboSessionTraceView, PiboSignalPatch, PiboSignalSnapshot, PiboTraceNode, PiboTraceOrderKey, PiboWebSessionNode, PiboWebSessionStatus, ThinkingLevel, UserSkill } from "./types";
 import type { ChatWebStoredEvent } from "../../../shared/trace-types.js";
 import { collectBackendNodes, isTraceSnapshotCollectionEnabled } from "./tracing/snapshotCollector";
 import { type SessionBreadcrumbItem, type SessionDerivationLink, type SessionOriginLink } from "./tracing/TraceTimeline";
@@ -1943,6 +1943,9 @@ function ProjectsArea({
 	const selectedPiboSessionId = data?.selectedPiboSessionId ?? null;
 	const selectedSessionNode = selectedPiboSessionId && data ? findSessionNode(data.sessions, selectedPiboSessionId) : undefined;
 	const selectedSessionProfile = selectedSessionNode?.profile ?? defaultProfileFromBootstrap(baseBootstrap);
+	const projectSessions = data?.projectSessions ?? [];
+	const selectedProjectSession = selectedPiboSessionId ? projectSessions.find((projectSession) => projectSession.piboSessionId === selectedPiboSessionId) : undefined;
+	const workflowProjectSessions = projectSessions.filter(isWorkflowBackedProjectSession);
 	const activeProjects = data?.projects.filter((project) => !project.archivedAt) ?? [];
 	const archivedProjects = data?.projects.filter((project) => project.archivedAt) ?? [];
 	const sessionGroups = useMemo(() => data ? splitSessionNodesByArchive(data.sessions, showArchivedSessions) : { active: [], archived: [] }, [data, showArchivedSessions]);
@@ -2081,11 +2084,19 @@ function ProjectsArea({
 						{activeProjects.length === 0 ? <div className="px-2 py-3 text-xs text-slate-500 border border-dashed border-slate-700 rounded-sm">No projects</div> : null}
 						{showArchivedProjects ? <div className="mt-3"><div className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Archived Projects</div>{archivedProjects.map((project) => <ProjectRow key={project.id} project={project} selected={selectedProject?.id === project.id} onSelect={() => onNavigate(project.id, undefined)} onRename={(name) => void renameProject(project, name)} onArchive={() => void setProjectArchived(project, false)} onDelete={() => void deleteArchivedProject(project)} archived />)}</div> : null}
 					</div>
+					{workflowProjectSessions.length > 0 ? (
+						<WorkflowRunsPanel
+							projectSessions={workflowProjectSessions}
+							sessionNodes={data!.sessions}
+							selectedPiboSessionId={selectedPiboSessionId}
+							onSelect={(piboSessionId) => onNavigate(selectedProject?.id, piboSessionId)}
+						/>
+					) : null}
 					<div>
 						<div className="flex items-center justify-between gap-2 px-1 pb-1">
 							<div>
 								<div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Project Sessions</div>
-								<div className="text-[10px] text-slate-500">Workflow: simple-chat</div>
+								<div className="text-[10px] text-slate-500">{selectedProjectSession ? workflowSessionLabel(selectedProjectSession) : "Workflow: simple-chat"}</div>
 							</div>
 							<div className="flex items-center gap-1">
 								<button type="button" onClick={() => void createProjectSession()} disabled={creatingSession || !selectedProject} title="New Project Session" aria-label="New Project Session" className="h-6 w-6 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4] disabled:opacity-50"><Plus size={14} /></button>
@@ -2138,6 +2149,80 @@ function ProjectsArea({
 			/>
 		</>
 	);
+}
+
+function WorkflowRunsPanel({
+	projectSessions,
+	sessionNodes,
+	selectedPiboSessionId,
+	onSelect,
+}: {
+	projectSessions: PiboProjectSession[];
+	sessionNodes: PiboWebSessionNode[];
+	selectedPiboSessionId: string | null;
+	onSelect: (piboSessionId: string) => void;
+}) {
+	return (
+		<div>
+			<div className="flex items-center justify-between gap-2 px-1 pb-1">
+				<div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Workflow Runs</div>
+				<div className="text-[10px] text-slate-500">{projectSessions.length}</div>
+			</div>
+			<div className="space-y-1">
+				{projectSessions.map((projectSession) => {
+					const sessionNode = findSessionNode(sessionNodes, projectSession.piboSessionId);
+					const title = sessionNode ? sessionNodeTitle(sessionNode) : projectSession.title ?? projectSession.piboSessionId;
+					const selected = projectSession.piboSessionId === selectedPiboSessionId;
+					return (
+						<button
+							key={`${projectSession.workflowRunId ?? projectSession.piboSessionId}:${projectSession.piboSessionId}`}
+							type="button"
+							onClick={() => onSelect(projectSession.piboSessionId)}
+							className={`w-full text-left rounded-sm border px-2 py-2 transition-colors ${selected ? "border-[#11a4d4] bg-[#11a4d4]/10" : "border-slate-800 hover:border-slate-700 hover:bg-slate-800/40"}`}
+							title={projectSession.workflowRunId ?? projectSession.workflowId}
+						>
+							<span className="flex items-center justify-between gap-2">
+								<span className="min-w-0 text-xs font-medium text-slate-200 truncate">{title}</span>
+								<span className={workflowStateBadgeClass(projectSession)}>{workflowStateLabel(projectSession)}</span>
+							</span>
+							<span className="mt-1 block text-[10px] text-slate-500 truncate">{projectSession.workflowId}</span>
+							{projectSession.workflowRunId ? <span className="block text-[10px] font-mono text-slate-500 truncate">run {shortWorkflowId(projectSession.workflowRunId)}</span> : null}
+						</button>
+					);
+				})}
+			</div>
+		</div>
+	);
+}
+
+function isWorkflowBackedProjectSession(projectSession: PiboProjectSession): boolean {
+	return Boolean(projectSession.workflowRunId) || projectSession.state === "workflow" || projectSession.workflowId !== "simple-chat";
+}
+
+function workflowSessionLabel(projectSession: PiboProjectSession): string {
+	if (!isWorkflowBackedProjectSession(projectSession)) return `Workflow: ${projectSession.workflowId}`;
+	const run = projectSession.workflowRunId ? ` · run ${shortWorkflowId(projectSession.workflowRunId)}` : "";
+	return `Workflow: ${projectSession.workflowId}${run}`;
+}
+
+function workflowStateLabel(projectSession: PiboProjectSession): string {
+	if (projectSession.archived) return "archived";
+	if (projectSession.state) return projectSession.state.replace(/_/g, " ");
+	return projectSession.workflowRunId ? "workflow" : projectSession.kind;
+}
+
+function workflowStateBadgeClass(projectSession: PiboProjectSession): string {
+	const state = workflowStateLabel(projectSession);
+	const base = "shrink-0 rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide";
+	if (projectSession.archived) return `${base} border-slate-700 text-slate-500`;
+	if (state.includes("failed") || state.includes("error")) return `${base} border-red-500/40 text-red-300 bg-red-500/10`;
+	if (state.includes("waiting")) return `${base} border-amber-500/40 text-amber-300 bg-amber-500/10`;
+	if (state.includes("complete")) return `${base} border-emerald-500/40 text-emerald-300 bg-emerald-500/10`;
+	return `${base} border-[#11a4d4]/40 text-[#11a4d4] bg-[#11a4d4]/10`;
+}
+
+function shortWorkflowId(value: string): string {
+	return value.length > 18 ? `${value.slice(0, 10)}…${value.slice(-6)}` : value;
 }
 
 function ProjectRow({ project, selected, archived, onSelect, onRename, onArchive, onDelete }: { project: PiboProject; selected: boolean; archived?: boolean; onSelect: () => void; onRename?: (name: string) => void; onArchive?: () => void; onDelete?: () => void }) {
