@@ -11,3 +11,4 @@ export * from "./store/index.js";
 export * from "./registry/index.js";
 export * from "./fixtures/index.js";
 export * from "./xstate/index.js";
+export * from "./inspection/index.js";

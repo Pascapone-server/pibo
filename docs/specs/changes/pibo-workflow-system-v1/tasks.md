@@ -96,7 +96,7 @@
 - [x] 11.2 Persist workflow runs, workflow events, node attempts, edge transfers, checkpoints, wakeups, wait tokens, and state snapshots.
 - [x] 11.3 Keep normal session traces/tool calls/spans/transcripts in the existing session stores.
 - [x] 11.4 Link workflow runs to Pibo Sessions and Project Sessions.
-- [ ] 11.5 Add run inspection through debug CLI or internal API.
+- [x] 11.5 Add run inspection through debug CLI or internal API.
 - [ ] 11.6 Test inspection of completed and failed runs after restart.
 
 ## 12. UI / Inspection V1
