@@ -149,6 +149,71 @@ describe("workflow agent node dispatch", () => {
     ]);
   });
 
+  it("renders prompt templates from JSON input and workflow state", async () => {
+    const topicInput = json({
+      type: "object",
+      required: ["topic", "tags"],
+      additionalProperties: false,
+      properties: {
+        topic: { type: "string" },
+        tags: {
+          type: "array",
+          items: { type: "string" },
+        },
+      },
+    });
+    const definition: WorkflowDefinition = {
+      id: "test.agent-node-prompt-template",
+      version: "1.0.0",
+      input: topicInput,
+      output: text(),
+      initial: "draft",
+      final: "draft",
+      nodes: {
+        draft: {
+          kind: "agent",
+          runtime: "pibo",
+          profile: { kind: "fixed", id: "pibo-agent" },
+          input: topicInput,
+          output: text(),
+          promptTemplate:
+            "Draft {{input.topic}} for {{state.projectGoal}} / {{global.projectGoal}}. Previous: {{state.local.previousDraft}}. First tag: {{input.tags.0}}.",
+        },
+      },
+      edges: {},
+    };
+    const input = { topic: "workflow prompts", tags: ["runtime", "templates"] };
+    const run: WorkflowRun = {
+      id: "wfr_prompt_template",
+      workflowId: definition.id,
+      workflowVersion: definition.version,
+      ownerScope: "user:prompt-template",
+      status: "running",
+      current: { nodeId: "draft", status: "running" },
+      input,
+      state: {
+        global: { projectGoal: "ship workflow v1" },
+        local: { draft: { previousDraft: "outline v0" } },
+      },
+      createdAt: "2026-05-11T00:40:00.000Z",
+      updatedAt: "2026-05-11T00:40:00.000Z",
+    };
+
+    const result = await dispatchWorkflowAgentNode(definition, run, "draft", input, {
+      createNodeAttemptId: () => "wna_prompt_template",
+      agentExecutor: (context) => {
+        assert.equal(
+          context.prompt,
+          "Draft workflow prompts for ship workflow v1 / ship workflow v1. Previous: outline v0. First tag: runtime.",
+        );
+        return { output: "Prompt rendered." };
+      },
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.output, "Prompt rendered.");
+  });
+
   it("resolves the fixed Agent Designer profile before Pibo Runtime creation", async () => {
     const definition = createAgentWorkflow();
     (definition.nodes.draft as AgentNodeDefinition).profile = { kind: "fixed", id: "writer-alias" };

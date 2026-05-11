@@ -63,7 +63,7 @@
 
 ## 8. Requirement: Prompts can be fixed or built at runtime
 
-- [ ] 8.1 Implement `promptTemplate` rendering from input and state.
+- [x] 8.1 Implement `promptTemplate` rendering from input and state.
 - [ ] 8.2 Define `promptBuilder` contract.
 - [ ] 8.3 Implement prompt builders through registered handlers or TypeScript code nodes.
 - [ ] 8.4 Record final prompt according to existing trace privacy rules.

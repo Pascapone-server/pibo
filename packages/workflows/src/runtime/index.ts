@@ -615,7 +615,7 @@ export async function dispatchWorkflowAgentNode(
       });
     }
 
-    const prompt = buildAgentNodePrompt(agentNode, input);
+    const prompt = buildAgentNodePrompt(agentNode, input, run.state, nodeId);
     const executorResult = await options.agentExecutor({
       workflow: definition,
       run,
@@ -2026,7 +2026,7 @@ export async function runOneNodeAgentWorkflow(
       });
     }
 
-    const prompt = buildAgentNodePrompt(node, input);
+    const prompt = buildAgentNodePrompt(node, input, run.state, nodeId);
     const executorResult = await options.agentExecutor({
       workflow: definition,
       run,
@@ -2760,9 +2760,127 @@ function createAgentRuntimeRoutingMetadata(
   };
 }
 
-function buildAgentNodePrompt(node: AgentNodeDefinition, input: WorkflowValue): string {
-  const serializedInput = typeof input === "string" ? input : JSON.stringify(input);
-  return node.promptTemplate?.replaceAll("{{input}}", serializedInput) ?? serializedInput;
+function buildAgentNodePrompt(
+  node: AgentNodeDefinition,
+  input: WorkflowValue,
+  state: WorkflowRun["state"],
+  nodeId: string,
+): string {
+  const serializedInput = formatPromptTemplateValue(input);
+  if (!node.promptTemplate) {
+    return serializedInput;
+  }
+
+  return renderPromptTemplate(node.promptTemplate, { input, state, nodeId });
+}
+
+type PromptTemplateRenderContext = {
+  input: WorkflowValue;
+  state: WorkflowRun["state"];
+  nodeId: string;
+};
+
+function renderPromptTemplate(template: string, context: PromptTemplateRenderContext): string {
+  return template.replace(/{{\s*([^{}]+?)\s*}}/g, (placeholder, expression: string) => {
+    const resolved = resolvePromptTemplateExpression(expression.trim(), context);
+    return resolved === undefined ? placeholder : formatPromptTemplateValue(resolved);
+  });
+}
+
+function resolvePromptTemplateExpression(
+  expression: string,
+  context: PromptTemplateRenderContext,
+): WorkflowValue | JsonValue | undefined {
+  const path = expression.split(".").map((part) => part.trim()).filter(Boolean);
+  const [root, ...rest] = path;
+
+  if (!root) {
+    return undefined;
+  }
+
+  if (root === "input") {
+    return resolvePromptTemplatePath(context.input, rest);
+  }
+
+  if (root === "global") {
+    return resolvePromptTemplatePath(context.state.global, rest);
+  }
+
+  if (root === "local") {
+    return resolvePromptTemplatePath(context.state.local?.[context.nodeId] ?? {}, rest);
+  }
+
+  if (root === "state") {
+    if (rest.length === 0) {
+      return {
+        global: context.state.global,
+        ...(context.state.local ? { local: context.state.local } : {}),
+      };
+    }
+
+    const [scope, ...statePath] = rest;
+    if (scope === "global") {
+      return resolvePromptTemplatePath(context.state.global, statePath);
+    }
+
+    if (scope === "local") {
+      return resolvePromptTemplatePath(context.state.local?.[context.nodeId] ?? {}, statePath);
+    }
+
+    return resolvePromptTemplatePath(context.state.global, rest);
+  }
+
+  return undefined;
+}
+
+function resolvePromptTemplatePath(value: unknown, path: string[]): WorkflowValue | JsonValue | undefined {
+  let current = value;
+  for (const segment of path) {
+    if (Array.isArray(current)) {
+      const index = Number(segment);
+      if (!Number.isInteger(index) || index < 0 || index >= current.length) {
+        return undefined;
+      }
+      current = current[index];
+      continue;
+    }
+
+    if (!isPromptTemplateObject(current) || !(segment in current)) {
+      return undefined;
+    }
+
+    current = current[segment];
+  }
+
+  return isPromptTemplateValue(current) ? current : undefined;
+}
+
+function formatPromptTemplateValue(value: WorkflowValue | JsonValue): string {
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+function isPromptTemplateObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isPromptTemplateValue(value: unknown): value is WorkflowValue | JsonValue {
+  if (value === null) {
+    return true;
+  }
+
+  switch (typeof value) {
+    case "string":
+    case "number":
+    case "boolean":
+      return true;
+    case "object":
+      if (Array.isArray(value)) {
+        return value.every(isPromptTemplateValue);
+      }
+      return Object.values(value).every(isPromptTemplateValue);
+    default:
+      return false;
+  }
 }
 
 function toNodeIdArray(value: string | string[]): string[] {
