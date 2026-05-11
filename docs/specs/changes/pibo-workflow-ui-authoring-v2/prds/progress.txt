@@ -494,3 +494,26 @@
   - Validation routes can update draft diagnostics without bumping the draft revision; save/patch routes should bump the revision only when a valid parsed draft object replaces the previous object.
   - The current start route is a validation boundary stub that returns accepted validation metadata; run creation and one-run enforcement remain for the Project start story.
 ---
+## 2026-05-12 01:05 CEST - US-003
+- What was implemented
+  - Added a configured/not-started Project workflow session review panel with selected workflow/version, empty run-history state, and an explicit `Start workflow` action.
+  - Wired the Start action to the existing Project workflow-session start validation route and preserved the no-run-record state until real run creation is implemented by the focused start story.
+  - Added API/test coverage asserting the start boundary still returns the configured Project session without a workflow run id.
+- Files changed
+  - `src/apps/chat-ui/src/api.ts`
+  - `src/apps/chat-ui/src/App.tsx`
+  - `test/web-channel.test.mjs`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_01_product_overview.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck'` — passed.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run build && node --test --test-name-pattern "configured Project workflow sessions" test/web-channel.test.mjs'` — passed, 1/1 targeted test.
+- Browser verification, if UI changed
+  - Restarted the container gateway from rebuilt `/workspace/dist` and verified `http://127.0.0.1:4802/apps/chat` returned OK.
+  - Created a dev-auth Project workflow session `Configured Start Check` for `standard-project@1.0.0` and opened it with `browser-use --fresh-profile` inside `pibo-dev-WorkflowsV2`.
+  - Verified the authenticated Projects page shows `Ready to start workflow`, `Start workflow`, `configured/not-started`, and `No workflow run record yet`.
+  - Clicked `Start workflow` and verified `Start accepted after validation. No workflow run record exists yet.` remains visible with no run id shown.
+  - Saved screenshot: `/tmp/ralph-v2-configured-start-action.png` inside the container.
+- **Learnings for future iterations:**
+  - The existing start route is still a validation boundary stub; UI stories can call it for explicit Start affordances, but one-run creation/idempotency remains owned by the Project start story.
+---

@@ -43,7 +43,7 @@ import {
 	Wrench,
 	X,
 } from "lucide-react";
-import { createUserSkill, deleteCustomAgent, deletePiPackage, deleteProject, deleteRoom, deleteSession, deleteUserSkill, fetchSignalTree, downloadChatFile, getBootstrap, getNavigation, getProjectsBootstrap, getSessionPage, getTrace, getTraceSummary, getUserSettings, getUserSkill, getWorkflowVersionPicker, installUserSkill, listUserSkills, markRoomRead, markSessionRead, patchCustomAgent, patchModelDefaults, patchPiPackage, patchProject, patchProjectSession, patchRoom, patchSession, patchUserSettings, postAction, postContextFile, postCustomAgent, postMessage, postPiPackage, postProject, postProjectMessage, postProjectSession, postProjectWorkflowSession, postRoom, postSession, signInWithGoogle, signOut, subscribeSignalTree, updateUserSkill, type SaveCustomAgentInput, type UserSettings, type WorkflowVersionPickerOption } from "./api";
+import { createUserSkill, deleteCustomAgent, deletePiPackage, deleteProject, deleteRoom, deleteSession, deleteUserSkill, fetchSignalTree, downloadChatFile, getBootstrap, getNavigation, getProjectsBootstrap, getSessionPage, getTrace, getTraceSummary, getUserSettings, getUserSkill, getWorkflowVersionPicker, installUserSkill, listUserSkills, markRoomRead, markSessionRead, patchCustomAgent, patchModelDefaults, patchPiPackage, patchProject, patchProjectSession, patchRoom, patchSession, patchUserSettings, postAction, postContextFile, postCustomAgent, postMessage, postPiPackage, postProject, postProjectMessage, postProjectSession, postProjectWorkflowSession, postProjectWorkflowSessionStart, postRoom, postSession, signInWithGoogle, signOut, subscribeSignalTree, updateUserSkill, type SaveCustomAgentInput, type UserSettings, type WorkflowVersionPickerOption } from "./api";
 import { THINKING_LEVELS } from "./types";
 import type { AgentCatalog, BootstrapData, CustomAgent, CustomAgentSubagent, ModelCatalog, ModelDefaults, ModelProfile, NavigationData, PiboProject, PiboProjectSession, ProjectsBootstrapData, PiboRoom, PiboSession, PiboSessionTraceSummary, PiboSessionTraceView, PiboSignalPatch, PiboSignalSnapshot, PiboTraceNode, PiboTraceOrderKey, PiboWebSessionNode, PiboWebSessionStatus, ThinkingLevel, UserSkill } from "./types";
 import type { ChatWebStoredEvent } from "../../../shared/trace-types.js";
@@ -1946,6 +1946,8 @@ function ProjectsArea({
 	const [workflowVersionOptions, setWorkflowVersionOptions] = useState<WorkflowVersionPickerOption[]>([]);
 	const [selectedWorkflowVersionKey, setSelectedWorkflowVersionKey] = useState("");
 	const [workflowSessionTitle, setWorkflowSessionTitle] = useState("");
+	const [startingWorkflowSessionId, setStartingWorkflowSessionId] = useState<string | null>(null);
+	const [workflowStartMessages, setWorkflowStartMessages] = useState<Record<string, string>>({});
 	const [autoRenameSessionId, setAutoRenameSessionId] = useState<string | null>(null);
 	const [composerText, setComposerText] = useState(() => routePiboSessionId ? readStoredComposerDraft(routePiboSessionId) : "");
 	const [composerFocusSignal, setComposerFocusSignal] = useState(0);
@@ -2081,6 +2083,24 @@ function ProjectsArea({
 		}
 	};
 
+	const startWorkflowProjectSession = async (projectSession: PiboProjectSession) => {
+		if (!selectedProject) return;
+		setStartingWorkflowSessionId(projectSession.piboSessionId);
+		try {
+			const response = await postProjectWorkflowSessionStart(selectedProject.id, projectSession.piboSessionId);
+			const message = response.projectSession.workflowRunId
+				? "Workflow run started."
+				: "Start accepted after validation. No workflow run record exists yet.";
+			setWorkflowStartMessages((current) => ({ ...current, [projectSession.piboSessionId]: message }));
+			onError(null);
+			await load({ projectId: selectedProject.id, piboSessionId: projectSession.piboSessionId });
+		} catch (caught) {
+			onError(errorMessage(caught));
+		} finally {
+			setStartingWorkflowSessionId(null);
+		}
+	};
+
 	const renameSession = async (piboSessionId: string, title: string | null) => {
 		try {
 			await patchProjectSession(piboSessionId, { title });
@@ -2131,6 +2151,15 @@ function ProjectsArea({
 		await load({ projectId: selectedProject?.id, piboSessionId: selectedPiboSessionId });
 		return true;
 	};
+
+	const workflowStartPanel = selectedProject && selectedProjectSession && isConfiguredWorkflowSessionPending(selectedProjectSession) ? (
+		<ConfiguredWorkflowStartPanel
+			projectSession={selectedProjectSession}
+			starting={startingWorkflowSessionId === selectedProjectSession.piboSessionId}
+			message={workflowStartMessages[selectedProjectSession.piboSessionId] ?? null}
+			onStart={() => void startWorkflowProjectSession(selectedProjectSession)}
+		/>
+	) : null;
 
 	if (loading && !data) {
 		return <main className="min-h-0 grid place-items-center text-slate-400">Loading Projects...</main>;
@@ -2218,6 +2247,7 @@ function ProjectsArea({
 						onCreate={() => void createWorkflowProjectSession()}
 					/>
 				) : null}
+				workflowStartPanel={workflowStartPanel}
 				selectedSessionProfile={selectedSessionProfile}
 				selectedSessionActiveModel={resolveSessionActiveModelLabel(traceBootstrap, selectedSessionNode ?? { profile: selectedSessionProfile })}
 				selectedSessionStatus={selectedSessionNode?.status}
@@ -2343,6 +2373,59 @@ function ProjectWorkflowSessionCreatePanel({
 	);
 }
 
+function ConfiguredWorkflowStartPanel({
+	projectSession,
+	starting,
+	message,
+	onStart,
+}: {
+	projectSession: PiboProjectSession;
+	starting: boolean;
+	message: string | null;
+	onStart: () => void;
+}) {
+	return (
+		<section className="rounded-sm border border-[#11a4d4]/35 bg-[#111820] p-4 shadow-lg shadow-black/10" aria-labelledby="project-workflow-start-title">
+			<div className="flex flex-wrap items-start justify-between gap-4">
+				<div className="min-w-0 max-w-2xl">
+					<div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.16em] text-[#11a4d4]"><Power size={13} />Configured/not-started</div>
+					<h2 id="project-workflow-start-title" className="mt-1 text-sm font-bold text-slate-100">Ready to start workflow</h2>
+					<p className="mt-1 text-xs leading-5 text-slate-500">
+						This Project session is saved for review. Start explicitly when the configuration is ready.
+					</p>
+				</div>
+				<button
+					type="button"
+					onClick={onStart}
+					disabled={starting}
+					className="inline-flex min-h-10 items-center justify-center gap-2 rounded-sm border border-emerald-500/60 bg-emerald-500/10 px-3 py-2 text-xs font-bold uppercase tracking-wide text-emerald-300 transition hover:bg-emerald-500/15 disabled:cursor-not-allowed disabled:border-slate-700 disabled:bg-slate-900/40 disabled:text-slate-500"
+				>
+					{starting ? <Loader2 size={14} className="animate-spin" /> : <Power size={14} />}
+					Start workflow
+				</button>
+			</div>
+			<div className="mt-4 grid gap-2 text-xs md:grid-cols-3">
+				<div className="rounded-sm border border-slate-800 bg-[#101d22]/70 p-3">
+					<div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Workflow</div>
+					<div className="mt-1 truncate font-mono text-slate-300" title={projectSession.workflowId}>{projectSession.workflowId}</div>
+					{projectSession.workflowVersion ? <div className="mt-1 text-slate-500">version {projectSession.workflowVersion}</div> : null}
+				</div>
+				<div className="rounded-sm border border-slate-800 bg-[#101d22]/70 p-3">
+					<div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Session state</div>
+					<div className="mt-1 text-slate-300">configured/not-started</div>
+					<div className="mt-1 text-slate-500">Validation runs again when Start is accepted.</div>
+				</div>
+				<div className="rounded-sm border border-slate-800 bg-[#101d22]/70 p-3">
+					<div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Run history</div>
+					<div className="mt-1 text-slate-300">No workflow run record yet</div>
+					<div className="mt-1 text-slate-500">Creation and Start remain separate actions.</div>
+				</div>
+			</div>
+			{message ? <div className="mt-3 rounded-sm border border-emerald-500/40 bg-emerald-500/10 p-3 text-xs text-emerald-200" role="status">{message}</div> : null}
+		</section>
+	);
+}
+
 function workflowVersionOptionKey(option: WorkflowVersionPickerOption): string {
 	return `${option.id}@${option.version}`;
 }
@@ -2398,6 +2481,10 @@ function WorkflowRunsPanel({
 
 function isWorkflowBackedProjectSession(projectSession: PiboProjectSession): boolean {
 	return Boolean(projectSession.workflowRunId) || projectSession.state === "workflow" || projectSession.workflowId !== "simple-chat";
+}
+
+function isConfiguredWorkflowSessionPending(projectSession: PiboProjectSession): boolean {
+	return isWorkflowBackedProjectSession(projectSession) && projectSession.state === "configured" && !projectSession.workflowRunId;
 }
 
 function workflowSessionLabel(projectSession: PiboProjectSession): string {
@@ -2594,6 +2681,7 @@ function SessionTracePane({
 	selectedSessionSignal,
 	workflowProjectSession,
 	projectSessionCreatePanel,
+	workflowStartPanel,
 	sessionViewId,
 	sessionViews,
 	currentSessionView,
@@ -2630,6 +2718,7 @@ function SessionTracePane({
 	selectedSessionSignal?: PiboSignalSnapshot["sessions"][string];
 	workflowProjectSession?: PiboProjectSession;
 	projectSessionCreatePanel?: ReactNode;
+	workflowStartPanel?: ReactNode;
 	sessionViewId: ChatSessionViewId;
 	sessionViews: ReturnType<typeof listChatSessionViews>;
 	currentSessionView: ReturnType<typeof getChatSessionView>;
@@ -3079,6 +3168,11 @@ function SessionTracePane({
 				{projectSessionCreatePanel ? (
 					<div className="border-b border-slate-800 bg-[#101d22] px-4 py-3">
 						{projectSessionCreatePanel}
+					</div>
+				) : null}
+				{workflowStartPanel ? (
+					<div className="border-b border-slate-800 bg-[#101d22] px-4 py-3">
+						{workflowStartPanel}
 					</div>
 				) : null}
 				{currentTraceView?.hasOlderEvents ? (

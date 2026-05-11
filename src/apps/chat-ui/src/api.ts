@@ -1,4 +1,4 @@
-import type { AgentCatalog, BootstrapData, ChatSessionPage, CreateSessionData, CustomAgent, ModelDefaults, ModelProfile, NavigationData, PiboCronJob, PiboCronRun, PiboCronSchedule, PiboCronStatus, PiboCronTarget, PiboProject, ProjectsBootstrapData, PiboRoom, PiboSession, PiboSessionTraceSummary, PiboSessionTraceView, UserSkill, PiboSignalPatch, PiboSignalSnapshot, PiboRalphJob, PiboRalphRun, PiboRalphStatus, PiboRalphTarget } from "./types";
+import type { AgentCatalog, BootstrapData, ChatSessionPage, CreateSessionData, CustomAgent, ModelDefaults, ModelProfile, NavigationData, PiboCronJob, PiboCronRun, PiboCronSchedule, PiboCronStatus, PiboCronTarget, PiboProject, PiboProjectSession, ProjectsBootstrapData, PiboRoom, PiboSession, PiboSessionTraceSummary, PiboSessionTraceView, UserSkill, PiboSignalPatch, PiboSignalSnapshot, PiboRalphJob, PiboRalphRun, PiboRalphStatus, PiboRalphTarget } from "./types";
 
 const DOWNLOAD_FILENAME_RE = /filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i;
 
@@ -320,6 +320,20 @@ export type WorkflowValidationResponse = {
 	validation: WorkflowValidationSummary;
 	diagnostics: WorkflowDraftDiagnostic[];
 };
+
+export type ProjectWorkflowSessionStartResponse = WorkflowValidationResponse & {
+	projectSession: PiboProjectSession;
+	workflow?: unknown;
+	message?: string;
+};
+
+export async function postProjectWorkflowSessionStart(projectId: string, piboSessionId: string): Promise<ProjectWorkflowSessionStartResponse> {
+	return requestJson<ProjectWorkflowSessionStartResponse>(`/api/chat/projects/${encodeURIComponent(projectId)}/workflow-sessions/${encodeURIComponent(piboSessionId)}/start`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({}),
+	});
+}
 
 export type WorkflowDraftDefinition = Record<string, unknown>;
 

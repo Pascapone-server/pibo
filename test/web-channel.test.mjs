@@ -2179,6 +2179,8 @@ test("chat web app creates configured Project workflow sessions from the workflo
 		const startValidationPayload = await startValidationResponse.json();
 		assert.equal(startValidationPayload.validation.trigger, "before_workflow_start");
 		assert.equal(startValidationPayload.validation.ok, true);
+		assert.equal(startValidationPayload.projectSession.state, "configured");
+		assert.equal(startValidationPayload.projectSession.workflowRunId, undefined);
 		assert.equal(emitted.length, 0);
 
 		const legacyRejected = await fetch(`${baseURL}/api/chat/projects/${encodeURIComponent(projectPayload.project.id)}/sessions`, {
