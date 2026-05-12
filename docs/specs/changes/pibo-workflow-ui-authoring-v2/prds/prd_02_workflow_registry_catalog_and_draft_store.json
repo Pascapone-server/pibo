@@ -136,8 +136,8 @@
         "Typecheck passes"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Version history responses now carry source/status-derived actions and editability, Workflow Library rows render those action labels/buttons, and tests assert code, UI draft, and UI-published action matrices."
     },
     {
       "id": "US-010",

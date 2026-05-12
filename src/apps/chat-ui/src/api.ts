@@ -353,9 +353,14 @@ export type WorkflowVersionPickerResponse = {
 	diagnostics: WorkflowPickerDiagnostic[];
 };
 
+export type WorkflowVersionHistoryOption = WorkflowCatalogVersionRecord & {
+	actions: WorkflowCatalogAction[];
+	editability: WorkflowCatalogEditability;
+};
+
 export type WorkflowVersionHistoryResponse = {
 	kind: "version-history";
-	options: WorkflowCatalogVersionRecord[];
+	options: WorkflowVersionHistoryOption[];
 	selectedWorkflowId?: string;
 	selectedWorkflowVersion?: string;
 	diagnostics: WorkflowPickerDiagnostic[];

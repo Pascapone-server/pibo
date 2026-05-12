@@ -40,6 +40,7 @@ import {
 	postWorkflowNextDraft,
 	postWorkflowPromptAssetRevision,
 	type SaveState,
+	type WorkflowCatalogAction,
 	type WorkflowCatalogVersionRecord,
 	type WorkflowDraftDefinition,
 	type WorkflowDraftDiagnostic,
@@ -55,6 +56,7 @@ import {
 	type WorkflowValidationTrigger,
 	type WorkflowVersionPickerOption,
 	type WorkflowVersionPickerResponse,
+	type WorkflowVersionHistoryOption,
 	type WorkflowVersionHistoryResponse,
 } from "./api";
 import { MarkdownEditor } from "./context/MarkdownEditor";
@@ -178,7 +180,7 @@ type WorkflowVersionHistoryGroup = {
 	workflowId: string;
 	title: string;
 	source: WorkflowCatalogVersionRecord["source"];
-	records: WorkflowCatalogVersionRecord[];
+	records: WorkflowVersionHistoryOption[];
 };
 
 type WorkflowLifecycleConfirmationTarget = {
@@ -239,7 +241,7 @@ export function WorkflowsArea({ draftId, viewWorkflowId, viewWorkflowVersion }: 
 }
 
 function WorkflowLibraryPanel({ activeDraftId }: { activeDraftId?: string }) {
-	const [historyRows, setHistoryRows] = useState<WorkflowCatalogVersionRecord[]>([]);
+	const [historyRows, setHistoryRows] = useState<WorkflowVersionHistoryOption[]>([]);
 	const [historyLoadState, setHistoryLoadState] = useState<"loading" | "loaded" | "error">("loading");
 	const [historyErrorMessage, setHistoryErrorMessage] = useState<string | undefined>();
 	const [duplicatingKey, setDuplicatingKey] = useState<string | undefined>();
@@ -504,7 +506,7 @@ function WorkflowVersionHistoryRow({
 	onArchive,
 	onDelete,
 }: {
-	record: WorkflowCatalogVersionRecord;
+	record: WorkflowVersionHistoryOption;
 	busy: boolean;
 	duplicatingKey?: string;
 	editingKey?: string;
@@ -517,8 +519,12 @@ function WorkflowVersionHistoryRow({
 }) {
 	const key = workflowVersionSelectionKey(record.id, record.version);
 	const published = record.status === "published";
-	const archivable = published && record.source === "ui";
-	const deletable = published && record.source === "ui";
+	const canCreateNextDraft = hasWorkflowCatalogAction(record, "create_next_draft");
+	const canDuplicate = hasWorkflowCatalogAction(record, "duplicate");
+	const canCreateProjectSession = hasWorkflowCatalogAction(record, "create_project_session");
+	const canView = hasWorkflowCatalogAction(record, "view");
+	const canArchive = published && hasWorkflowCatalogAction(record, "archive");
+	const canDelete = published && hasWorkflowCatalogAction(record, "delete");
 	return (
 		<div className="rounded-sm border border-slate-800 bg-[#151f24]/70 p-3 text-xs leading-5 text-slate-400">
 			<div className="flex flex-wrap items-start justify-between gap-3">
@@ -531,67 +537,85 @@ function WorkflowVersionHistoryRow({
 					</div>
 					{record.description ? <div className="mt-2 text-slate-500">{record.description}</div> : null}
 					<div className={`mt-2 text-[11px] ${published ? "text-emerald-300" : "text-amber-200"}`}>{workflowHistoryStatusDescription(record)}</div>
+					<WorkflowCatalogActionList actions={record.actions} />
 				</div>
 				<div className="flex shrink-0 flex-col gap-2">
-					{published ? (
-						<>
-							{record.source === "ui" ? (
-								<button
-									type="button"
-									className="inline-flex items-center justify-center gap-1 rounded-sm border border-[#11a4d4]/50 px-3 py-1.5 text-xs font-semibold text-[#8bdcf4] transition hover:border-[#11a4d4] hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-									onClick={() => void onEditPublished(record.id, record.version)}
-									disabled={busy}
-								>
-									{editingKey === key ? <Loader2 size={13} className="animate-spin" /> : <Layers size={13} />}
-									Edit published
-								</button>
-							) : null}
-							<button
-								type="button"
-								className="inline-flex items-center justify-center gap-1 rounded-sm border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-[#11a4d4]/60 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-								onClick={() => void onDuplicate(record.id, record.version)}
-								disabled={busy}
-							>
-								{duplicatingKey === key ? <Loader2 size={13} className="animate-spin" /> : <CopyPlus size={13} />}
-								Duplicate to draft
-							</button>
-							<a
-								className="inline-flex items-center justify-center gap-1 rounded-sm border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-[#11a4d4]/60 hover:text-slate-100"
-								href={workflowVersionViewerPath(record.id, record.version)}
-							>
-								<ExternalLink size={13} />
-								View details
-							</a>
-							{archivable ? (
-								<button
-									type="button"
-									className="inline-flex items-center justify-center gap-1 rounded-sm border border-amber-700/70 px-3 py-1.5 text-xs font-semibold text-amber-100 transition hover:border-amber-500 hover:text-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
-									onClick={() => onArchive(record.id, record.title)}
-									disabled={busy}
-								>
-									{archivingWorkflowId === record.id ? <Loader2 size={13} className="animate-spin" /> : <Archive size={13} />}
-									Archive workflow
-								</button>
-							) : null}
-							{deletable ? (
-								<button
-									type="button"
-									className="inline-flex items-center justify-center gap-1 rounded-sm border border-red-800/80 px-3 py-1.5 text-xs font-semibold text-red-100 transition hover:border-red-500 hover:text-red-50 disabled:cursor-not-allowed disabled:opacity-50"
-									onClick={() => onDelete(record.id, record.title)}
-									disabled={busy}
-								>
-									{deletingWorkflowId === record.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
-									Delete workflow
-								</button>
-							) : null}
-						</>
+					{canCreateNextDraft ? (
+						<button
+							type="button"
+							className="inline-flex items-center justify-center gap-1 rounded-sm border border-[#11a4d4]/50 px-3 py-1.5 text-xs font-semibold text-[#8bdcf4] transition hover:border-[#11a4d4] hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+							onClick={() => void onEditPublished(record.id, record.version)}
+							disabled={busy}
+						>
+							{editingKey === key ? <Loader2 size={13} className="animate-spin" /> : <Layers size={13} />}
+							Edit published
+						</button>
+					) : null}
+					{canDuplicate ? (
+						<button
+							type="button"
+							className="inline-flex items-center justify-center gap-1 rounded-sm border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-[#11a4d4]/60 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+							onClick={() => void onDuplicate(record.id, record.version)}
+							disabled={busy}
+						>
+							{duplicatingKey === key ? <Loader2 size={13} className="animate-spin" /> : <CopyPlus size={13} />}
+							Duplicate to draft
+						</button>
+					) : null}
+					{canCreateProjectSession ? (
+						<a
+							className="inline-flex items-center justify-center gap-1 rounded-sm border border-emerald-700/70 px-3 py-1.5 text-xs font-semibold text-emerald-100 transition hover:border-emerald-500 hover:text-emerald-50"
+							href="/apps/chat/projects"
+						>
+							<MoveRight size={13} />
+							Create Project session
+						</a>
 					) : (
 						<div className="max-w-44 rounded-sm border border-amber-800/70 bg-amber-950/20 p-2 text-[11px] text-amber-100">
 							Unavailable for Project session selection.
 						</div>
 					)}
+					{canView ? (
+						<a
+							className="inline-flex items-center justify-center gap-1 rounded-sm border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-[#11a4d4]/60 hover:text-slate-100"
+							href={workflowVersionViewerPath(record.id, record.version)}
+						>
+							<ExternalLink size={13} />
+							View details
+						</a>
+					) : null}
+					{canArchive ? (
+						<button
+							type="button"
+							className="inline-flex items-center justify-center gap-1 rounded-sm border border-amber-700/70 px-3 py-1.5 text-xs font-semibold text-amber-100 transition hover:border-amber-500 hover:text-amber-50 disabled:cursor-not-allowed disabled:opacity-50"
+							onClick={() => onArchive(record.id, record.title)}
+							disabled={busy}
+						>
+							{archivingWorkflowId === record.id ? <Loader2 size={13} className="animate-spin" /> : <Archive size={13} />}
+							Archive workflow
+						</button>
+					) : null}
+					{canDelete ? (
+						<button
+							type="button"
+							className="inline-flex items-center justify-center gap-1 rounded-sm border border-red-800/80 px-3 py-1.5 text-xs font-semibold text-red-100 transition hover:border-red-500 hover:text-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+							onClick={() => onDelete(record.id, record.title)}
+							disabled={busy}
+						>
+							{deletingWorkflowId === record.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+							Delete workflow
+						</button>
+					) : null}
 				</div>
 			</div>
+		</div>
+	);
+}
+
+function WorkflowCatalogActionList({ actions }: { actions: WorkflowCatalogAction[] }) {
+	return (
+		<div className="mt-3 flex flex-wrap gap-1" aria-label="Workflow Library source/status actions">
+			{actions.map((action) => <WorkflowPill key={action} label={workflowCatalogActionLabel(action)} />)}
 		</div>
 	);
 }
@@ -3082,7 +3106,7 @@ function WorkflowVersionDiagnostics({ diagnostics, ariaLabel }: { diagnostics: W
 	);
 }
 
-function groupWorkflowVersionHistory(rows: WorkflowCatalogVersionRecord[]): WorkflowVersionHistoryGroup[] {
+function groupWorkflowVersionHistory(rows: WorkflowVersionHistoryOption[]): WorkflowVersionHistoryGroup[] {
 	const groups = new Map<string, WorkflowVersionHistoryGroup>();
 	for (const row of rows) {
 		const existing = groups.get(row.id);
@@ -3109,6 +3133,25 @@ function workflowHistoryStatusDescription(record: WorkflowCatalogVersionRecord):
 	if (record.status === "archived") return "Archived workflow version — shown for lifecycle history but hidden from default Project session creation choices.";
 	if (record.status === "deleted") return "Deleted workflow definition — historical runs must render from immutable snapshots instead of live catalog links.";
 	return "Draft workflow version — not published and unavailable for Project session creation.";
+}
+
+function hasWorkflowCatalogAction(record: { actions: WorkflowCatalogAction[] }, action: WorkflowCatalogAction): boolean {
+	return record.actions.includes(action);
+}
+
+function workflowCatalogActionLabel(action: WorkflowCatalogAction): string {
+	switch (action) {
+		case "view": return "View";
+		case "duplicate": return "Duplicate";
+		case "create_project_session": return "Create Project session";
+		case "edit_draft": return "Edit draft";
+		case "validate": return "Validate";
+		case "publish": return "Publish";
+		case "create_next_draft": return "Create next draft";
+		case "version_history": return "Version history";
+		case "archive": return "Archive";
+		case "delete": return "Delete";
+	}
 }
 
 function WorkflowGraphNodeCard({ data, selected }: NodeProps<WorkflowGraphFlowNode>) {

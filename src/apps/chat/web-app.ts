@@ -436,9 +436,14 @@ type WorkflowVersionPickerResponse = {
 	diagnostics: WorkflowPickerDiagnostic[];
 };
 
+type WorkflowVersionHistoryOption = WorkflowCatalogVersionRecord & {
+	actions: WorkflowCatalogAction[];
+	editability: WorkflowCatalogEditability;
+};
+
 type WorkflowVersionHistoryResponse = {
 	kind: "version-history";
-	options: WorkflowCatalogVersionRecord[];
+	options: WorkflowVersionHistoryOption[];
 	selectedWorkflowId?: string;
 	selectedWorkflowVersion?: string;
 	diagnostics: WorkflowPickerDiagnostic[];
@@ -3985,7 +3990,8 @@ function buildWorkflowVersionPicker(state: ChatWebAppState, selectedWorkflowId?:
 function buildWorkflowVersionHistory(state: ChatWebAppState, selectedWorkflowId?: string, selectedWorkflowVersion?: string): WorkflowVersionHistoryResponse {
 	const options = [...buildProjectWorkflowVersionCatalog(state)]
 		.filter((option) => option.status !== "deleted")
-		.sort(compareWorkflowCatalogVersionRecords);
+		.sort(compareWorkflowCatalogVersionRecords)
+		.map(workflowVersionHistoryOptionFromCatalogRecord);
 	const normalizedWorkflowId = selectedWorkflowId?.trim() || undefined;
 	const normalizedWorkflowVersion = selectedWorkflowVersion?.trim() || undefined;
 	const selected = normalizedWorkflowId
@@ -4021,6 +4027,15 @@ function workflowVersionPickerOptionFromCatalogRecord(record: WorkflowCatalogVer
 		...record,
 		displayName: record.title,
 		paramsSchema: null,
+	};
+}
+
+function workflowVersionHistoryOptionFromCatalogRecord(record: WorkflowCatalogVersionRecord): WorkflowVersionHistoryOption {
+	const actions = workflowCatalogActionsFor(record);
+	return {
+		...record,
+		actions,
+		editability: workflowCatalogEditability(actions),
 	};
 }
 

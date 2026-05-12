@@ -2086,6 +2086,17 @@ test("workflow version picker lists published nested workflow refs and reports m
 			"ui-draft-workflow@0.1.0-draft:draft",
 			"ui-review-workflow@2.0.0:published",
 		]);
+		const historyByKey = new Map(historyPayload.options.map((option) => [`${option.id}@${option.version}`, option]));
+		const codeHistoryRow = historyByKey.get("standard-project@1.0.0");
+		assert.ok(codeHistoryRow);
+		assert.deepEqual(codeHistoryRow.actions, ["view", "duplicate", "create_project_session", "version_history"]);
+		assert.equal(codeHistoryRow.editability.canPublish, false);
+		const draftHistoryRow = historyByKey.get("ui-draft-workflow@0.1.0-draft");
+		assert.ok(draftHistoryRow);
+		assert.deepEqual(draftHistoryRow.actions, ["view", "edit_draft", "validate", "publish", "archive", "delete"]);
+		const uiPublishedHistoryRow = historyByKey.get("ui-review-workflow@2.0.0");
+		assert.ok(uiPublishedHistoryRow);
+		assert.deepEqual(uiPublishedHistoryRow.actions, ["view", "duplicate", "create_project_session", "version_history", "create_next_draft", "archive", "delete"]);
 
 		const archivedHistory = await fetch(`${baseURL}/api/chat/workflows/pickers/version-history?selectedWorkflowId=archived-review-workflow&selectedWorkflowVersion=1.0.0`, {
 			headers: { "x-test-user": "user-1" },
@@ -2136,8 +2147,23 @@ test("workflow catalog list and inspect APIs expose source/status, diagnostics, 
 		assert.deepEqual(standardWorkflow.missingRefs, []);
 		assert.equal(standardWorkflow.editability.canDuplicate, true);
 		assert.equal(standardWorkflow.editability.canEditDraft, false);
+		assert.ok(standardWorkflow.actions.includes("view"));
 		assert.ok(standardWorkflow.actions.includes("duplicate"));
+		assert.ok(standardWorkflow.actions.includes("create_project_session"));
+		assert.ok(standardWorkflow.actions.includes("version_history"));
+		assert.equal(standardWorkflow.actions.includes("edit_draft"), false);
 		assert.equal(standardWorkflow.actions.includes("publish"), false);
+		assert.equal(standardWorkflow.actions.includes("archive"), false);
+		assert.equal(standardWorkflow.actions.includes("delete"), false);
+		const uiPublishedWorkflow = catalogPayload.workflows.find((workflow) => workflow.id === "ui-review-workflow");
+		assert.ok(uiPublishedWorkflow);
+		assert.equal(uiPublishedWorkflow.source, "ui");
+		assert.equal(uiPublishedWorkflow.status, "published");
+		for (const action of ["view", "duplicate", "version_history", "create_next_draft", "create_project_session", "archive", "delete"]) {
+			assert.ok(uiPublishedWorkflow.actions.includes(action));
+		}
+		assert.equal(uiPublishedWorkflow.actions.includes("edit_draft"), false);
+		assert.equal(uiPublishedWorkflow.actions.includes("publish"), false);
 		assert.equal(catalogPayload.workflows.some((workflow) => workflow.id === "archived-review-workflow"), false);
 
 		const archivedResponse = await fetch(`${baseURL}/api/chat/workflows?includeArchived=true`, {
@@ -2179,7 +2205,11 @@ test("workflow catalog list and inspect APIs expose source/status, diagnostics, 
 		assert.equal(copiedWorkflow.validationState, "error");
 		assert.ok(copiedWorkflow.missingRefs.some((diagnostic) => diagnostic.registryRef === "missing-catalog-profile"));
 		assert.equal(copiedWorkflow.editability.canEditDraft, true);
-		assert.ok(copiedWorkflow.actions.includes("publish"));
+		for (const action of ["view", "edit_draft", "validate", "publish", "archive", "delete"]) {
+			assert.ok(copiedWorkflow.actions.includes(action));
+		}
+		assert.equal(copiedWorkflow.actions.includes("duplicate"), false);
+		assert.equal(copiedWorkflow.actions.includes("create_project_session"), false);
 
 		const inspectDraftResponse = await fetch(`${baseURL}/api/chat/workflows/ui-standard-project-copy`, {
 			headers: { "x-test-user": "user-1" },

@@ -1,4 +1,5 @@
 ## Codebase Patterns
+- Workflow Library buttons and labels should consume source/status-derived API `actions`/`editability` metadata rather than re-deriving code/UI mutation rules in React rows.
 - Rollout-gate docs should pair each phase with required automated test families and reference canonical product smoke checklists instead of duplicating behavior contracts.
 - Run inspection checklist tests can combine a source-level UI coverage matrix with targeted `workflow-session-kind` and `web-channel` flows; seed missing registered human action refs to cover disabled controls and diagnostics.
 - Workflow Builder publish panels should disable the Publish action from `validation.blocksPublish`/error diagnostics while leaving draft save and manual Validate available; the backend `before_publish` route remains the authoritative gate.
@@ -1897,4 +1898,36 @@
   - Not run; documentation-only change with no UI behavior changes.
 - **Learnings for future iterations:**
   - Historical lifecycle smoke checks should exercise archive filtering before delete, then verify the same Project run falls back to the snapshot-only `definition deleted` state without broken Workflows links.
+---
+
+## 2026-05-12 14:47 CEST - US-009
+- What was implemented
+  - Added source/status-derived `actions` and `editability` metadata to Workflow version-history API rows.
+  - Updated Workflow Library version rows to render action metadata and primary controls from API actions instead of UI source/status special cases.
+  - Added catalog/version-history assertions for code, UI draft, and UI-published action matrices plus a source-level UI action metadata test.
+- Files changed
+  - `src/apps/chat/web-app.ts`
+  - `src/apps/chat-ui/src/api.ts`
+  - `src/apps/chat-ui/src/WorkflowsArea.tsx`
+  - `test/web-channel.test.mjs`
+  - `test/workflow-v2-library-actions-ui.test.mjs`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_02_workflow_registry_catalog_and_draft_store.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck'` — passed.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run build'` — passed.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && node --test test/web-channel.test.mjs'` — passed.
+  - `node --test test/workflow-v2-library-actions-ui.test.mjs` — passed.
+- Browser verification, if UI changed
+  - Restarted the container web gateway after the build and verified `http://127.0.0.1:4802/apps/chat` returned OK.
+  - Used `browser-use --fresh-profile` inside `pibo-dev-WorkflowsV2` with dev auth to open `/apps/chat/workflows`.
+  - Verified the page title `Pibo Web Chat`, Workflow Library presence, `Create Project session`, `Create next draft`, `Duplicate`, `Archive`, and `Delete` labels, and source/status action chip groups for code, draft, archived, and UI-published rows.
+  - Saved screenshot: `/tmp/ralph-v2-workflow-actions.png` inside the container.
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - Version-history rows can carry the same derived action/editability contract as catalog records so the UI can display stable action metadata without source/status conditionals.
+  - Gotchas encountered
+    - The default browser-use profile was locked by another Chrome process; `--fresh-profile` was required for every browser-use command in the session.
+  - Useful context
+    - The Workflow Library source/status action chip aria-label is `Workflow Library source/status actions`, which makes browser checks straightforward.
 ---
