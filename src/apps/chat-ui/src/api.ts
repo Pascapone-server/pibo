@@ -304,6 +304,31 @@ export async function getWorkflowPromptAssetPicker(selectedRefId?: string): Prom
 	return requestJson<WorkflowRegisteredRefPickerResponse>(`/api/chat/workflows/pickers/prompt-assets${suffix}`);
 }
 
+export type WorkflowPromptAssetDocument = {
+	id: string;
+	displayName: string;
+	description?: string;
+	source: "code" | "ui";
+	readOnly: boolean;
+	revisionId: string;
+	contentHash: string;
+	markdown: string;
+	createdAt: string;
+	updatedAt: string;
+};
+
+export async function getWorkflowPromptAsset(assetId: string): Promise<{ asset: WorkflowPromptAssetDocument }> {
+	return requestJson<{ asset: WorkflowPromptAssetDocument }>(`/api/chat/workflows/prompt-assets/${encodeURIComponent(assetId)}`);
+}
+
+export async function postWorkflowPromptAssetRevision(input: { assetId?: string; sourceRefId?: string; displayName?: string; description?: string; markdown: string }): Promise<{ asset: WorkflowPromptAssetDocument }> {
+	return requestJson<{ asset: WorkflowPromptAssetDocument }>("/api/chat/workflows/prompt-assets", {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify(input),
+	});
+}
+
 export type WorkflowCatalogVersionRecord = {
 	id: string;
 	version: string;

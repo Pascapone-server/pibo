@@ -1494,3 +1494,29 @@
   - Configured Project workflow UI state spans both the top Start panel and the Workflow/XState projection view; verify both because the Start panel owns the blocking action while the projection view owns run inspection details.
   - Browser verification can reuse the seeded blocked configured session from earlier observability work to validate diagnostic rendering without creating new archived-profile fixtures.
 ---
+## 2026-05-12 09:00 CEST - US-007
+- What was implemented
+  - Added managed Workflow Builder prompt asset revision persistence under `/api/chat/workflows/prompt-assets` and included managed UI prompt assets in the prompt-asset picker and validation boundary.
+  - Added an Agent node prompt asset Markdown editor that reuses the Context Files Markdown editor, copies code/plugin prompt assets into managed UI revisions, and patches draft Pibo Workflow IR `promptBuilder` refs with revision/content-hash pins.
+  - Kept direct prompt template editing in the node inspector and changed Agent/Human node saves to use the `prompt_edit` validation trigger.
+- Files changed
+  - `src/apps/chat/web-app.ts`
+  - `src/apps/chat-ui/src/api.ts`
+  - `src/apps/chat-ui/src/WorkflowsArea.tsx`
+  - `test/web-channel.test.mjs`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_04_workflow_builder_and_ir_editing.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck'` — passed.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run build && node --test test/web-channel.test.mjs'` — passed, 70/70 tests.
+  - `git diff --check` — passed.
+- Browser verification, if UI changed
+  - Restarted the container web gateway from `/workspace` and verified `http://127.0.0.1:4802/apps/chat` returned OK.
+  - Used `browser-use --fresh-profile --session ralph-v2` inside `pibo-dev-WorkflowsV2` with dev auth to open `/apps/chat/workflows/drafts/draft_standard-project_1-0-0_d2823f93`.
+  - Selected the Agent node and verified the node inspector renders direct `Prompt template` editing plus the `Prompt asset Markdown editor`.
+  - Selected `fixture.promptBuilders.draftPrompt` and verified the Markdown editor loaded `Draft a concise response from the workflow input` and showed the code prompt asset revision pin.
+  - Saved screenshot: `/tmp/ralph-v2-prompt-asset-editor.png` inside the container.
+- **Learnings for future iterations:**
+  - Existing long-lived gateway Node processes may appear with command name `MainThread`; when restarting the container gateway, verify listeners/PIDs rather than filtering only `comm == node`.
+  - Static prompt assets should remain copy-on-write: UI edits create managed `ui.promptAssets.*` revisions and the draft patch pins the selected revision/hash in Workflow IR metadata.
+---

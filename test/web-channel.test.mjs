@@ -2888,6 +2888,130 @@ test("workflow security boundary validates registered refs and rejects inline ex
 	}
 });
 
+test("workflow prompt asset revisions create managed assets and draft prompt refs", async () => {
+	const { channel, baseURL } = await startWebHostChannel({
+		auth: createFakeAuthService(),
+		profiles: [{ name: "pibo-agent", aliases: ["default"] }],
+	});
+
+	const jsonHeaders = {
+		"content-type": "application/json",
+		origin: baseURL,
+		"x-test-user": "user-1",
+	};
+
+	try {
+		const duplicateResponse = await fetch(`${baseURL}/api/chat/workflows/standard-project/duplicate`, {
+			method: "POST",
+			headers: jsonHeaders,
+			body: JSON.stringify({ version: "1.0.0" }),
+		});
+		assert.equal(duplicateResponse.status, 201);
+		const duplicatePayload = await duplicateResponse.json();
+		const draftId = duplicatePayload.draft.draftId;
+
+		const saveAssetResponse = await fetch(`${baseURL}/api/chat/workflows/prompt-assets`, {
+			method: "POST",
+			headers: jsonHeaders,
+			body: JSON.stringify({
+				sourceRefId: "fixture.promptBuilders.draftPrompt",
+				displayName: "Agent prompt asset",
+				description: "Managed prompt asset from the Workflow Builder Markdown editor.",
+				markdown: "# Draft prompt\n\nUse {{input}} to write a crisp answer.",
+			}),
+		});
+		assert.equal(saveAssetResponse.status, 201);
+		const saveAssetPayload = await saveAssetResponse.json();
+		assert.match(saveAssetPayload.asset.id, /^ui\.promptAssets\./);
+		assert.equal(saveAssetPayload.asset.source, "ui");
+		assert.equal(saveAssetPayload.asset.readOnly, false);
+		assert.match(saveAssetPayload.asset.revisionId, /^wpar_/);
+		assert.match(saveAssetPayload.asset.contentHash, /^sha256:/);
+		assert.equal(saveAssetPayload.asset.markdown, "# Draft prompt\n\nUse {{input}} to write a crisp answer.");
+
+		const promptAssetResponse = await fetch(`${baseURL}/api/chat/workflows/prompt-assets/${encodeURIComponent(saveAssetPayload.asset.id)}`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(promptAssetResponse.status, 200);
+		const promptAssetPayload = await promptAssetResponse.json();
+		assert.equal(promptAssetPayload.asset.revisionId, saveAssetPayload.asset.revisionId);
+
+		const pickerResponse = await fetch(`${baseURL}/api/chat/workflows/pickers/prompt-assets?selectedRefId=${encodeURIComponent(saveAssetPayload.asset.id)}`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(pickerResponse.status, 200);
+		const pickerPayload = await pickerResponse.json();
+		assert.equal(pickerPayload.selectedRefId, saveAssetPayload.asset.id);
+		assert.ok(pickerPayload.options.some((option) => option.id === saveAssetPayload.asset.id && option.kind === "ui"));
+
+		const definition = structuredClone(duplicatePayload.draft.definition);
+		definition.nodes.agent = {
+			...definition.nodes.agent,
+			promptBuilder: {
+				kind: "promptBuilder",
+				language: "typescript",
+				id: saveAssetPayload.asset.id,
+				revisionId: saveAssetPayload.asset.revisionId,
+				contentHash: saveAssetPayload.asset.contentHash,
+				source: saveAssetPayload.asset.source,
+			},
+			metadata: {
+				...(definition.nodes.agent.metadata ?? {}),
+				promptAssetRefs: [saveAssetPayload.asset.id],
+				promptAssetPins: [{
+					assetId: saveAssetPayload.asset.id,
+					revisionId: saveAssetPayload.asset.revisionId,
+					contentHash: saveAssetPayload.asset.contentHash,
+					source: saveAssetPayload.asset.source,
+				}],
+			},
+		};
+		delete definition.nodes.agent.promptTemplate;
+		definition.metadata = {
+			...(definition.metadata ?? {}),
+			promptAssetRefs: [saveAssetPayload.asset.id],
+			promptAssetPins: [{
+				assetId: saveAssetPayload.asset.id,
+				revisionId: saveAssetPayload.asset.revisionId,
+				contentHash: saveAssetPayload.asset.contentHash,
+				source: saveAssetPayload.asset.source,
+			}],
+		};
+
+		const patchResponse = await fetch(`${baseURL}/api/chat/workflows/drafts/${encodeURIComponent(draftId)}`, {
+			method: "PATCH",
+			headers: jsonHeaders,
+			body: JSON.stringify({ definition, editTrigger: "prompt_edit" }),
+		});
+		assert.equal(patchResponse.status, 200);
+		const patchPayload = await patchResponse.json();
+		assert.equal(patchPayload.validation.trigger, "prompt_edit");
+		assert.equal(patchPayload.validation.ok, true);
+		assert.equal(patchPayload.draft.definition.nodes.agent.promptBuilder.id, saveAssetPayload.asset.id);
+		assert.equal(patchPayload.draft.definition.nodes.agent.promptTemplate, undefined);
+		assert.equal(patchPayload.draft.definition.nodes.agent.metadata.promptAssetPins[0].revisionId, saveAssetPayload.asset.revisionId);
+		assert.equal(patchPayload.draft.definition.metadata.promptAssetPins[0].contentHash, saveAssetPayload.asset.contentHash);
+
+		const secondRevisionResponse = await fetch(`${baseURL}/api/chat/workflows/prompt-assets`, {
+			method: "POST",
+			headers: jsonHeaders,
+			body: JSON.stringify({
+				assetId: saveAssetPayload.asset.id,
+				displayName: "Agent prompt asset",
+				markdown: "# Draft prompt\n\nUse {{input}} and include acceptance criteria.",
+			}),
+		});
+		assert.equal(secondRevisionResponse.status, 201);
+		const secondRevisionPayload = await secondRevisionResponse.json();
+		assert.equal(secondRevisionPayload.asset.id, saveAssetPayload.asset.id);
+		assert.notEqual(secondRevisionPayload.asset.revisionId, saveAssetPayload.asset.revisionId);
+		assert.notEqual(secondRevisionPayload.asset.contentHash, saveAssetPayload.asset.contentHash);
+		assert.equal(secondRevisionPayload.asset.markdown, "# Draft prompt\n\nUse {{input}} and include acceptance criteria.");
+	} finally {
+		await channel.stop?.();
+	}
+});
+
 test("workflow builder draft loader opens starter and duplicated UI draft wrappers", async () => {
 	const { channel, baseURL } = await startWebHostChannel({
 		auth: createFakeAuthService(),

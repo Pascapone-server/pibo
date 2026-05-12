@@ -110,8 +110,8 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Prompt template saves now use prompt_edit validation, and Agent node inspectors include a Markdown prompt asset editor that creates managed UI prompt asset revisions, updates draft promptBuilder refs, and pins revision/content hashes in Workflow IR metadata."
     },
     {
       "id": "US-008",

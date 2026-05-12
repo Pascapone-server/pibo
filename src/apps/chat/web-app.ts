@@ -188,6 +188,7 @@ type ChatWebAppState = {
 	workflowArchiveStore: ChatWorkflowArchiveStore;
 	workflowTombstoneStore: ChatWorkflowTombstoneStore;
 	workflowLifecycleEventStore: ChatWorkflowLifecycleEventStore;
+	workflowPromptAssetStore: ChatWorkflowPromptAssetStore;
 };
 
 type ChatBootstrapCatalog = {
@@ -380,6 +381,19 @@ type WorkflowRegisteredRefPickerResponse = {
 	options: WorkflowRegisteredRefOption[];
 	selectedRefId?: string;
 	diagnostics: WorkflowPickerDiagnostic[];
+};
+
+type WorkflowPromptAssetDocument = {
+	id: string;
+	displayName: string;
+	description?: string;
+	source: "code" | "ui";
+	readOnly: boolean;
+	revisionId: string;
+	contentHash: string;
+	markdown: string;
+	createdAt: string;
+	updatedAt: string;
 };
 
 type WorkflowHumanActionOption = WorkflowRegisteredRefOption & {
@@ -616,6 +630,14 @@ type WorkflowDraftPublishBody = {
 	versionIntent?: unknown;
 };
 
+type WorkflowPromptAssetSaveBody = {
+	assetId?: unknown;
+	sourceRefId?: unknown;
+	displayName?: unknown;
+	description?: unknown;
+	markdown?: unknown;
+};
+
 type WorkflowDraftStoreRow = {
 	draft_id: string;
 	workflow_id: string;
@@ -647,6 +669,50 @@ type WorkflowPublishedVersionRecord = {
 	publishedBy?: string;
 	publishedAt: string;
 	createdAt: string;
+};
+
+type WorkflowPromptAssetRecord = {
+	assetId: string;
+	ownerScope: string;
+	source: "ui";
+	displayName: string;
+	description?: string;
+	activeRevisionId?: string;
+	createdAt: string;
+	updatedAt: string;
+};
+
+type WorkflowPromptAssetRevisionRecord = {
+	revisionId: string;
+	assetId: string;
+	ownerScope: string;
+	contentHash: string;
+	markdown: string;
+	createdAt: string;
+	createdBy?: string;
+	basedOnRevisionId?: string;
+};
+
+type WorkflowPromptAssetStoreRow = {
+	asset_id: string;
+	owner_scope: string;
+	source: "ui";
+	display_name: string;
+	description: string | null;
+	active_revision_id: string | null;
+	created_at: string;
+	updated_at: string;
+};
+
+type WorkflowPromptAssetRevisionStoreRow = {
+	revision_id: string;
+	asset_id: string;
+	owner_scope: string;
+	content_hash: string;
+	markdown: string;
+	created_at: string;
+	created_by: string | null;
+	based_on_revision_id: string | null;
 };
 
 type WorkflowPublishedVersionStoreRow = {
@@ -1089,6 +1155,174 @@ function workflowPublishedVersionFromStoreRow(row: WorkflowPublishedVersionStore
 		...(row.published_by ? { publishedBy: row.published_by } : {}),
 		publishedAt: row.published_at,
 		createdAt: row.created_at,
+	};
+}
+
+class ChatWorkflowPromptAssetStore {
+	constructor(private readonly dataStore: PiboDataStore) {
+		this.dataStore.db.exec(`
+			CREATE TABLE IF NOT EXISTS workflow_prompt_assets (
+				asset_id TEXT PRIMARY KEY,
+				owner_scope TEXT NOT NULL,
+				source TEXT NOT NULL,
+				display_name TEXT NOT NULL,
+				description TEXT,
+				active_revision_id TEXT,
+				created_at TEXT NOT NULL,
+				updated_at TEXT NOT NULL
+			);
+
+			CREATE TABLE IF NOT EXISTS workflow_prompt_asset_revisions (
+				revision_id TEXT PRIMARY KEY,
+				asset_id TEXT NOT NULL,
+				owner_scope TEXT NOT NULL,
+				content_hash TEXT NOT NULL,
+				markdown TEXT NOT NULL,
+				created_at TEXT NOT NULL,
+				created_by TEXT,
+				based_on_revision_id TEXT
+			);
+
+			CREATE INDEX IF NOT EXISTS idx_workflow_prompt_assets_owner
+				ON workflow_prompt_assets(owner_scope, updated_at DESC);
+			CREATE INDEX IF NOT EXISTS idx_workflow_prompt_asset_revisions_asset
+				ON workflow_prompt_asset_revisions(asset_id, created_at DESC);
+		`);
+	}
+
+	listAssets(ownerScope: string): WorkflowPromptAssetRecord[] {
+		const rows = this.dataStore.db
+			.prepare("SELECT * FROM workflow_prompt_assets WHERE owner_scope = ? ORDER BY display_name ASC, asset_id ASC")
+			.all(ownerScope) as WorkflowPromptAssetStoreRow[];
+		return rows.map(workflowPromptAssetFromStoreRow);
+	}
+
+	getAsset(ownerScope: string, assetId: string): WorkflowPromptAssetRecord | undefined {
+		const row = this.dataStore.db
+			.prepare("SELECT * FROM workflow_prompt_assets WHERE owner_scope = ? AND asset_id = ?")
+			.get(ownerScope, assetId) as WorkflowPromptAssetStoreRow | undefined;
+		return row ? workflowPromptAssetFromStoreRow(row) : undefined;
+	}
+
+	getActiveRevision(ownerScope: string, assetId: string): WorkflowPromptAssetRevisionRecord | undefined {
+		const asset = this.getAsset(ownerScope, assetId);
+		if (!asset?.activeRevisionId) return undefined;
+		const row = this.dataStore.db
+			.prepare("SELECT * FROM workflow_prompt_asset_revisions WHERE owner_scope = ? AND asset_id = ? AND revision_id = ?")
+			.get(ownerScope, assetId, asset.activeRevisionId) as WorkflowPromptAssetRevisionStoreRow | undefined;
+		return row ? workflowPromptAssetRevisionFromStoreRow(row) : undefined;
+	}
+
+	saveRevision(input: {
+		ownerScope: string;
+		assetId?: string;
+		displayName: string;
+		description?: string;
+		markdown: string;
+		actorId?: string;
+	}): WorkflowPromptAssetDocument {
+		return this.dataStore.transaction(() => {
+			const now = new Date().toISOString();
+			const assetId = input.assetId?.trim() || `ui.promptAssets.${randomUUID()}`;
+			const ownerRow = this.dataStore.db
+				.prepare("SELECT owner_scope FROM workflow_prompt_assets WHERE asset_id = ?")
+				.get(assetId) as { owner_scope: string } | undefined;
+			if (ownerRow && ownerRow.owner_scope !== input.ownerScope) throw new PiboWebHttpError("Workflow prompt asset not found", 404);
+			const existing = this.getAsset(input.ownerScope, assetId);
+			const revisionId = `wpar_${randomUUID()}`;
+			const contentHash = hashPromptAssetMarkdown(input.markdown);
+			this.dataStore.db.prepare(`
+				INSERT INTO workflow_prompt_assets (
+					asset_id,
+					owner_scope,
+					source,
+					display_name,
+					description,
+					active_revision_id,
+					created_at,
+					updated_at
+				) VALUES (?, ?, 'ui', ?, ?, ?, ?, ?)
+				ON CONFLICT(asset_id) DO UPDATE SET
+					display_name = excluded.display_name,
+					description = excluded.description,
+					active_revision_id = excluded.active_revision_id,
+					updated_at = excluded.updated_at
+			`).run(
+				assetId,
+				input.ownerScope,
+				normalizeWorkflowPromptAssetLabel(input.displayName),
+				input.description?.trim() || null,
+				revisionId,
+				existing?.createdAt ?? now,
+				now,
+			);
+			this.dataStore.db.prepare(`
+				INSERT INTO workflow_prompt_asset_revisions (
+					revision_id,
+					asset_id,
+					owner_scope,
+					content_hash,
+					markdown,
+					created_at,
+					created_by,
+					based_on_revision_id
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			`).run(
+				revisionId,
+				assetId,
+				input.ownerScope,
+				contentHash,
+				input.markdown,
+				now,
+				input.actorId ?? null,
+				existing?.activeRevisionId ?? null,
+			);
+			const asset = this.getAsset(input.ownerScope, assetId);
+			const revision = this.getActiveRevision(input.ownerScope, assetId);
+			if (!asset || !revision) throw new Error(`Failed to save workflow prompt asset '${assetId}'`);
+			return workflowPromptAssetDocumentFromRecords(asset, revision);
+		});
+	}
+}
+
+function workflowPromptAssetFromStoreRow(row: WorkflowPromptAssetStoreRow): WorkflowPromptAssetRecord {
+	return {
+		assetId: row.asset_id,
+		ownerScope: row.owner_scope,
+		source: row.source,
+		displayName: row.display_name,
+		...(row.description ? { description: row.description } : {}),
+		...(row.active_revision_id ? { activeRevisionId: row.active_revision_id } : {}),
+		createdAt: row.created_at,
+		updatedAt: row.updated_at,
+	};
+}
+
+function workflowPromptAssetRevisionFromStoreRow(row: WorkflowPromptAssetRevisionStoreRow): WorkflowPromptAssetRevisionRecord {
+	return {
+		revisionId: row.revision_id,
+		assetId: row.asset_id,
+		ownerScope: row.owner_scope,
+		contentHash: row.content_hash,
+		markdown: row.markdown,
+		createdAt: row.created_at,
+		...(row.created_by ? { createdBy: row.created_by } : {}),
+		...(row.based_on_revision_id ? { basedOnRevisionId: row.based_on_revision_id } : {}),
+	};
+}
+
+function workflowPromptAssetDocumentFromRecords(asset: WorkflowPromptAssetRecord, revision: WorkflowPromptAssetRevisionRecord): WorkflowPromptAssetDocument {
+	return {
+		id: asset.assetId,
+		displayName: asset.displayName,
+		...(asset.description ? { description: asset.description } : {}),
+		source: asset.source,
+		readOnly: false,
+		revisionId: revision.revisionId,
+		contentHash: revision.contentHash,
+		markdown: revision.markdown,
+		createdAt: asset.createdAt,
+		updatedAt: asset.updatedAt,
 	};
 }
 
@@ -1618,6 +1852,18 @@ function workflowPickerKind(pathname: string): string | undefined {
 		return decodeURIComponent(encodedKind);
 	} catch {
 		throw new PiboWebHttpError("Invalid workflow picker kind", 400);
+	}
+}
+
+function workflowPromptAssetResourceId(pathname: string): string | undefined {
+	const prefix = `${CHAT_WEB_API_PREFIX}/workflows/prompt-assets/`;
+	if (!pathname.startsWith(prefix)) return undefined;
+	const encodedId = pathname.slice(prefix.length);
+	if (!encodedId || encodedId.includes("/")) return undefined;
+	try {
+		return decodeURIComponent(encodedId);
+	} catch {
+		throw new PiboWebHttpError("Invalid workflow prompt asset id", 400);
 	}
 }
 
@@ -3479,8 +3725,13 @@ const WORKFLOW_PROMPT_ASSET_REF_OPTIONS: WorkflowRegisteredRefOption[] = [
 		displayName: "Draft prompt builder",
 		description: "Registered prompt asset/prompt-builder ref from the workflow fixtures registry.",
 		paramsSchema: null,
+		kind: "code",
 	},
 ];
+
+const WORKFLOW_STATIC_PROMPT_ASSET_MARKDOWN: Record<string, string> = {
+	"fixture.promptBuilders.draftPrompt": "Draft a concise response from the workflow input.\n\n{{input}}",
+};
 
 const WORKFLOW_HUMAN_ACTION_REF_OPTIONS: WorkflowHumanActionOption[] = [
 	{
@@ -3546,6 +3797,89 @@ function buildWorkflowRegisteredRefPicker(
 		...(activeSelection ? { selectedRefId: activeSelection } : {}),
 		diagnostics,
 	};
+}
+
+function buildWorkflowPromptAssetPicker(
+	state: ChatWebAppState,
+	webSession: PiboWebSession,
+	selectedRefId: string | undefined,
+): WorkflowRegisteredRefPickerResponse {
+	const uiOptions = state.workflowPromptAssetStore.listAssets(webSession.ownerScope).map((asset): WorkflowRegisteredRefOption => ({
+		id: asset.assetId,
+		displayName: asset.displayName,
+		...(asset.description ? { description: asset.description } : {}),
+		paramsSchema: null,
+		kind: "ui",
+	}));
+	return buildWorkflowRegisteredRefPicker("prompt-assets", [...WORKFLOW_PROMPT_ASSET_REF_OPTIONS, ...uiOptions], selectedRefId);
+}
+
+function getWorkflowPromptAssetDocument(state: ChatWebAppState, webSession: PiboWebSession, assetId: string): WorkflowPromptAssetDocument | undefined {
+	const staticOption = WORKFLOW_PROMPT_ASSET_REF_OPTIONS.find((option) => option.id === assetId);
+	if (staticOption) {
+		const markdown = WORKFLOW_STATIC_PROMPT_ASSET_MARKDOWN[assetId] ?? "";
+		const now = "code";
+		return {
+			id: staticOption.id,
+			displayName: staticOption.displayName,
+			...(staticOption.description ? { description: staticOption.description } : {}),
+			source: "code",
+			readOnly: true,
+			revisionId: `code:${staticOption.id}:1`,
+			contentHash: hashPromptAssetMarkdown(markdown),
+			markdown,
+			createdAt: now,
+			updatedAt: now,
+		};
+	}
+	const asset = state.workflowPromptAssetStore.getAsset(webSession.ownerScope, assetId);
+	const revision = asset ? state.workflowPromptAssetStore.getActiveRevision(webSession.ownerScope, assetId) : undefined;
+	return asset && revision ? workflowPromptAssetDocumentFromRecords(asset, revision) : undefined;
+}
+
+function isWorkflowPromptAssetRegistered(state: ChatWebAppState, webSession: PiboWebSession, assetId: string): boolean {
+	return WORKFLOW_PROMPT_ASSET_REF_OPTIONS.some((option) => option.id === assetId)
+		|| Boolean(state.workflowPromptAssetStore.getAsset(webSession.ownerScope, assetId));
+}
+
+function saveWorkflowPromptAssetRevision(
+	state: ChatWebAppState,
+	webSession: PiboWebSession,
+	body: WorkflowPromptAssetSaveBody,
+): WorkflowPromptAssetDocument {
+	const markdown = typeof body.markdown === "string" ? body.markdown : undefined;
+	if (markdown === undefined) throw new PiboWebHttpError("Workflow prompt asset markdown is required", 400);
+	const requestedAssetId = typeof body.assetId === "string" && body.assetId.trim() ? body.assetId.trim() : undefined;
+	const sourceRefId = typeof body.sourceRefId === "string" && body.sourceRefId.trim() ? body.sourceRefId.trim() : undefined;
+	if (requestedAssetId && !requestedAssetId.startsWith("ui.promptAssets.")) {
+		throw new PiboWebHttpError("Only managed UI prompt assets can receive new revisions", 400);
+	}
+	if (!requestedAssetId && sourceRefId && !isWorkflowPromptAssetRegistered(state, webSession, sourceRefId)) {
+		throw new PiboWebHttpError(`Workflow prompt asset '${sourceRefId}' is not registered`, 404);
+	}
+	const sourceDocument = sourceRefId ? getWorkflowPromptAssetDocument(state, webSession, sourceRefId) : undefined;
+	const displayName = normalizeWorkflowPromptAssetLabel(body.displayName ?? (sourceDocument ? `${sourceDocument.displayName} copy` : undefined));
+	const description = typeof body.description === "string" && body.description.trim()
+		? body.description.trim()
+		: sourceDocument?.description ?? "Managed Workflow Builder prompt asset revision.";
+	return state.workflowPromptAssetStore.saveRevision({
+		ownerScope: webSession.ownerScope,
+		assetId: requestedAssetId,
+		displayName,
+		description,
+		markdown,
+		actorId: webSession.authSession.identity.userId,
+	});
+}
+
+function hashPromptAssetMarkdown(markdown: string): string {
+	return `sha256:${createHash("sha256").update(markdown, "utf8").digest("hex")}`;
+}
+
+function normalizeWorkflowPromptAssetLabel(value: unknown): string {
+	if (typeof value !== "string") return "Workflow prompt asset";
+	const trimmed = value.trim();
+	return trimmed ? trimmed.slice(0, 120) : "Workflow prompt asset";
 }
 
 function workflowRegisteredRefPickerDiagnostic(kind: WorkflowRegisteredRefPickerResponse["kind"], registryRef: string): WorkflowPickerDiagnostic {
@@ -5132,7 +5466,7 @@ function validateWorkflowAgentNodeLike(
 			hint: "Use either direct promptTemplate text or a registered prompt asset/prompt-builder ref, not both.",
 		});
 	}
-	if (node.promptBuilder !== undefined) validateWorkflowPromptAssetRefLike(nodeId, node.promptBuilder, diagnostics);
+	if (node.promptBuilder !== undefined) validateWorkflowPromptAssetRefLike(nodeId, node.promptBuilder, input, diagnostics);
 }
 
 function validateWorkflowCodeNodeLike(nodeId: string, node: PiboJsonObject, diagnostics: WorkflowDraftDiagnostic[]): void {
@@ -5325,7 +5659,12 @@ function workflowDiagnosticOwnerLabel(target: Pick<WorkflowDraftDiagnostic, "nod
 	return "Workflow definition";
 }
 
-function validateWorkflowPromptAssetRefLike(nodeId: string, value: unknown, diagnostics: WorkflowDraftDiagnostic[]): void {
+function validateWorkflowPromptAssetRefLike(
+	nodeId: string,
+	value: unknown,
+	input: { state: ChatWebAppState; context: PiboWebAppContext; webSession: PiboWebSession },
+	diagnostics: WorkflowDraftDiagnostic[],
+): void {
 	const path = `$.nodes.${nodeId}.promptBuilder`;
 	const ref = readPromptAssetRef(value);
 	if (!ref.id) {
@@ -5351,7 +5690,7 @@ function validateWorkflowPromptAssetRefLike(nodeId: string, value: unknown, diag
 		});
 		return;
 	}
-	if (!WORKFLOW_PROMPT_ASSET_REF_OPTIONS.some((option) => option.id === ref.id)) {
+	if (!isWorkflowPromptAssetRegistered(input.state, input.webSession, ref.id)) {
 		diagnostics.push({
 			code: "WorkflowGraphError.unknownPromptBuilderRef",
 			message: `Agent node '${nodeId}' references prompt asset '${ref.id}', but it is not registered in the Workflow Registry.`,
@@ -7844,6 +8183,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 		workflowArchiveStore: new ChatWorkflowArchiveStore(dataStore),
 		workflowTombstoneStore: new ChatWorkflowTombstoneStore(dataStore),
 		workflowLifecycleEventStore: new ChatWorkflowLifecycleEventStore(dataStore),
+		workflowPromptAssetStore: new ChatWorkflowPromptAssetStore(dataStore),
 	};
 
 	const requireSession = (request: Request, context: PiboWebAppContext): Promise<PiboWebSession> =>
@@ -8405,6 +8745,21 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				return responseJson(deleteWorkflowIdentity(state, context, webSession, workflowCatalogId, body));
 			}
 
+			const workflowPromptAssetId = workflowPromptAssetResourceId(url.pathname);
+			if (workflowPromptAssetId && request.method === "GET") {
+				const webSession = await requireSession(request, context);
+				const asset = getWorkflowPromptAssetDocument(state, webSession, workflowPromptAssetId);
+				if (!asset) throw new PiboWebHttpError("Workflow prompt asset not found", 404);
+				return responseJson({ asset });
+			}
+
+			if (url.pathname === `${CHAT_WEB_API_PREFIX}/workflows/prompt-assets` && request.method === "POST") {
+				requireSameOriginJsonRequest(request);
+				const webSession = await requireSession(request, context);
+				const body = await readJsonBody<WorkflowPromptAssetSaveBody>(request);
+				return responseJson({ asset: saveWorkflowPromptAssetRevision(state, webSession, body) }, { status: 201 });
+			}
+
 			const workflowDraftAction = workflowDraftActionResource(url.pathname);
 			if (workflowDraftAction && request.method === "POST") {
 				requireSameOriginJsonRequest(request);
@@ -8582,9 +8937,9 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 					));
 				}
 				if (pickerKind === "prompt-assets") {
-					return responseJson(buildWorkflowRegisteredRefPicker(
-						"prompt-assets",
-						WORKFLOW_PROMPT_ASSET_REF_OPTIONS,
+					return responseJson(buildWorkflowPromptAssetPicker(
+						state,
+						webSession,
 						url.searchParams.get("selectedRefId") ?? undefined,
 					));
 				}
