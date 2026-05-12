@@ -122,8 +122,8 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Project workflow session creation supports configured/not-started sessions with session title, workflow id/version, allowed input/prompt/model/thinking/fast configuration, and request rejection for disallowed override families."
     },
     {
       "id": "US-009",

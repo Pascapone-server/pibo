@@ -1863,3 +1863,19 @@
 - **Learnings for future iterations:**
   - Rollout-gate documentation should tie each phase to specific automated test families plus the canonical manual flows, while keeping detailed step expectations in the product smoke checklists.
 ---
+## 2026-05-12 14:25 CEST - US-008
+- What was implemented
+  - Completed the implementation-completeness contract story for Project workflow session creation by verifying the existing configured-session route and tests satisfy the contract.
+  - Marked PRD 09 US-008 passing with notes covering session title, workflow id/version, allowed configuration, configured/not-started persistence, and rejection of disallowed override families.
+- Files changed
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_09_implementation_completeness_contract.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck && npm run build && node --test --test-name-pattern "configured Project workflow sessions|unsupported Project workflow session creation inputs" test/web-channel.test.mjs'` — passed, 2/2 targeted tests.
+  - `python3 -m json.tool docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_09_implementation_completeness_contract.json` — passed.
+  - `git diff --check` — passed.
+- Browser verification, if UI changed
+  - Not run; this iteration only marked an already implemented backend/API completeness contract story and did not change UI behavior.
+- **Learnings for future iterations:**
+  - Completeness-contract Project session creation can be validated against the existing `configured Project workflow sessions` and `unsupported Project workflow session creation inputs` web-channel tests before marking the PRD 09 story complete.
+---
