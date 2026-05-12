@@ -350,6 +350,8 @@ The implementation MUST keep Pibo's existing auth, Project/session visibility, p
 
 ### 4.11 Implementation Checklist
 
+Reviewer rule: every unchecked MUST item in this section is an independent pass/fail item. Mark an item passing only when implementation evidence and the mapped validation gate exist; otherwise fail the V2 completeness review.
+
 ### Registry, Catalog, and Store
 
 - [ ] MUST add source/status metadata to workflow catalog records.
@@ -416,26 +418,30 @@ The implementation MUST keep Pibo's existing auth, Project/session visibility, p
 
 ### 4.12 Traceability to Task Groups
 
-| Task group | Completeness coverage |
-|---|---|
-| 0. Spec discovery and open questions | Required decisions are documented: registry/store schema, snapshot fields, deleted-definition display behavior, graph library, prompt assets, override scope, pre-start edit policy, and exact V2 API routes. |
-| 1. Workflow Registry Store and Catalog | Sections 4.2, 4.3, 4.11 Registry checklist. |
-| 2. Version, Archive, Delete Lifecycle | Sections 4.7, 4.11 Lifecycle checklist. |
-| 3. Workflows Main-Nav Tab | Sections 4.1, 4.5, 4.11 Workflows UI checklist. |
-| 4. Project Session Creation and Workflow Selection | Sections 4.4, 4.11 Project Session checklist. |
-| 5. Project Sessions Sidebar and Views | Sections 4.1, 4.8, 4.11 Projects Run View checklist. |
-| 6. Workflow Draft Duplication | Sections 4.2, 4.5, 4.11 Registry/Builder checklist. |
-| 7. Visual Workflow Builder | Sections 4.5, 4.11 Workflows UI checklist. |
-| 8. Node Editing | Sections 4.6, 4.11 Composition checklist. |
-| 9. Adapter, Guard, and State Editing | Sections 4.6, 4.11 Composition checklist. |
-| 10. Schema, Prompt, and Prompt Asset Editing | Sections 4.5, 4.9, 4.11 Workflows UI checklist. |
-| 11. Raw Workflow IR Editor | Sections 4.5, 4.9, 4.11 Workflows UI checklist. |
-| 12. Validation Panel | Sections 4.9, 4.10, 4.11 Validation checklist. |
-| 13. Run History and Human Actions in Projects | Sections 4.8, 4.11 Projects Run View checklist. |
-| 14. Testing and Validation | Sections 3, 4.9, 4.10, 4.11 Validation checklist. |
-| 15. Explicit V3 Deferrals | Sections 2 Non-Goals, 4.10, 4.11 Validation checklist. |
+Each task group from `../tasks.md` maps to an implementation area and a validation gate. A task-group row is incomplete if either column is empty or if the validation gate does not name reviewable evidence.
+
+| Task group | Implementation area | Validation gate |
+|---|---|---|
+| 0. Spec discovery and open questions | Resolved-decision docs across PRDs 02, 03, 04, 06, 07, and 09. | PRD 09 US-001 decision review, JSON validation, and typecheck for doc-only decision changes. |
+| 1. Workflow Registry Store and Catalog | Sections 4.2, 4.3, and 4.11 Registry checklist. | Catalog/lifecycle checklist tests, workflow package store tests, `web-channel` catalog API tests, and typecheck. |
+| 2. Version, Archive, Delete Lifecycle | Sections 4.7 and 4.11 Lifecycle checklist. | Lifecycle checklist tests, published-version package tests, archive/delete `web-channel` tests, and typecheck. |
+| 3. Workflows Main-Nav Tab | Sections 4.1, 4.5, and 4.11 Workflows UI checklist. | Workflows UI source tests, browser smoke for `/apps/chat/workflows`, Chat UI build, and typecheck. |
+| 4. Project Session Creation and Workflow Selection | Sections 4.4 and 4.11 Project Session checklist. | Project service tests, configured-session UI tests, Project workflow `web-channel` tests, and typecheck. |
+| 5. Project Sessions Sidebar and Views | Sections 4.1, 4.8, and 4.11 Projects Run View checklist. | Session-kind tests, run-inspection source tests, Project bootstrap `web-channel` tests, browser smoke, and typecheck. |
+| 6. Workflow Draft Duplication | Sections 4.2, 4.3, 4.5, and 4.11 Registry/Builder checklist. | Duplicate-to-draft `web-channel` tests, builder loader tests, lifecycle checklist tests, and typecheck. |
+| 7. Visual Workflow Builder | Sections 4.5 and 4.11 Workflows UI checklist. | Builder source tests, Chat UI build, browser smoke for builder panels, and typecheck. |
+| 8. Node Editing | Sections 4.6 and 4.11 Composition checklist. | Builder/security checklist tests, composition-boundary tests, picker `web-channel` tests, and typecheck. |
+| 9. Adapter, Guard, and State Editing | Sections 4.6 and 4.11 Composition checklist. | Composition-boundary tests, state-mapping UI tests, guard/adapter `web-channel` tests, and typecheck. |
+| 10. Schema, Prompt, and Prompt Asset Editing | Sections 4.5, 4.9, and 4.11 Workflows UI checklist. | Builder raw/schema/prompt tests, prompt asset `web-channel` tests, and typecheck. |
+| 11. Raw Workflow IR Editor | Sections 4.5, 4.9, and 4.11 Workflows UI checklist. | Builder raw IR tests, validation pipeline `web-channel` tests, raw-XState negative tests, and typecheck. |
+| 12. Validation Panel | Sections 4.9, 4.10, and 4.11 Validation checklist. | Validation-pipeline `web-channel` tests, diagnostic source tests, security-boundary tests, and typecheck. |
+| 13. Run History and Human Actions in Projects | Sections 4.8 and 4.11 Projects Run View checklist. | Project/run-view checklist tests, runtime human-node package tests, human-action `web-channel` tests, browser smoke, and typecheck. |
+| 14. Testing and Validation | Sections 3, 4.9, 4.10, and 4.11 Validation checklist. | Release coverage tests, targeted workflow/package/Chat Web tests, browser smoke checklists, and typecheck. |
+| 15. Explicit V3 Deferrals | Sections 2 Non-Goals, 4.10, and 4.11 Validation checklist. | Deferral source tests, security-boundary tests, explicit non-goal browser scan, and typecheck. |
 
 ### 4.13 Requirement Traceability
+
+Each requirement from `../spec.md` maps by REQ id to PRD coverage and one or more numbered completeness sections. A row is incomplete if the PRD coverage or completeness-section cell is empty.
 
 | Requirement | Source requirement | PRD coverage | Completeness sections |
 |---|---|---|---|

@@ -389,8 +389,8 @@
         "Typecheck passes"
       ],
       "priority": 25,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added focused traceability checklist tests that parse spec requirements, tasks.md task groups, and PRD 09 MUST checklist rows to ensure every requirement maps to PRD coverage and completeness sections, every task group maps to an implementation area and validation gate, and each MUST item remains independently reviewable."
     }
   ]
 }

@@ -12,6 +12,7 @@
 - Catalog missingRefs should filter to explicit missing/unavailable reference diagnostic codes; diagnostics that carry `registryRef` for params or kind mismatch context should stay in full diagnostics only.
 - Workflow Builder manual Validate controls should call the draft validate route without `before_publish`; the publish route owns the `before_publish` trigger, while manual validation uses the route fallback/edit triggers.
 - Broad V2 release-gate tests can assert a PRD coverage matrix across package tests, web-channel integration tests, and source-level UI surfaces instead of duplicating long flows.
+- Traceability completeness stories can use a source-level doc parser test to bind spec requirements, task groups, and MUST checklist reviewability to the canonical PRD contract.
 - Workflow lifecycle archive/delete UI should use in-page confirmation panels with copy that names default catalog/picker effects and historical Project snapshot behavior so browser checks can verify the safeguards.
 - Workflow state mapping UI should write simple scoped `state.reads`/`state.writes` arrays through dropdown controls, trigger `state_edit` validation, and leave complex state DSL edits to raw Pibo Workflow IR.
 - Project workflow create/start diagnostics should render sanitized diagnostic metadata (`code`, `path`, `nodeId`, `edgeId`, `registryRef`, `hint`) near the blocking action, not only in a global error banner.
@@ -2383,4 +2384,24 @@
   - Saved screenshot: `/tmp/ralph-v2-us024-builder-security-checklist.png` inside the container.
 - **Learnings for future iterations:**
   - Builder/security checklist coverage can stay focused by binding existing builder, composition, state-mapping, deferral, security-boundary, and targeted web-channel tests instead of adding another long browser-only authoring flow.
+---
+## 2026-05-12 21:17 CEST - US-025
+- What was implemented
+  - Added focused traceability checks for the V2 completeness contract.
+  - Expanded PRD 09 task traceability so every `tasks.md` group maps to an implementation area and validation gate.
+  - Added reviewer pass/fail guidance for PRD 09 MUST checklist items and marked PRD 09 US-025 passing.
+  - Confirmed all 93 V2 PRD stories now have `passes: true`.
+- Files changed
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/09-implementation-completeness-contract.md`
+  - `test/workflow-v2-traceability-checklist.test.mjs`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_09_implementation_completeness_contract.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `node --test test/workflow-v2-traceability-checklist.test.mjs` — passed, 3/3 tests.
+  - `docker exec pibo-dev-WorkflowsV2Resume bash -lc 'cd /workspace && npm run typecheck && node --test test/workflow-v2-traceability-checklist.test.mjs && python3 -m json.tool docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_09_implementation_completeness_contract.json >/dev/null'` — passed.
+  - `git diff --check` — passed.
+- Browser verification, if UI changed
+  - Not run; this story changed docs and a source-level traceability test only, with no UI behavior changes.
+- **Learnings for future iterations:**
+  - Traceability completeness can be kept reviewable by parsing the canonical spec requirement headings, `tasks.md` task-group headings, and PRD checklist tables rather than duplicating implementation flows.
 ---
