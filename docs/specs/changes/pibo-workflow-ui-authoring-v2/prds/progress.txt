@@ -1,4 +1,5 @@
 ## Codebase Patterns
+- Security-boundary aggregate stories should pair visible scope-boundary copy with focused source coverage and targeted web-channel auth/redaction/inline-validation tests, including raw-XState rejection.
 - Project workflow creation/start validation should resolve persisted UI-published Workflow IR from the registry/store; only static code projections should synthesize runnable definitions with the selected session profile.
 - Completeness-contract aggregate stories can be verified with focused source-level coverage tests that bind existing source/API/browser surfaces to the contract before marking the aggregate story passing.
 - For browser checks of Project human action controls, create/start a Project workflow session through the dev-auth API, seed persisted wait tokens in the container Project store, then open the Project session with `?view=workflow`.
@@ -2287,4 +2288,36 @@
 - **Learnings for future iterations:**
   - Project workflow validation boundaries must use the same persisted Workflow IR that snapshots and runs use; otherwise UI-published definitions can be accidentally replaced by static projection fixtures during validation.
   - For UI-published workflow Project sessions, the Project session profile is session routing metadata and must not overwrite Agent node profile refs stored in the published Workflow IR.
+---
+## 2026-05-12 18:06 CEST - US-021
+- What was implemented
+  - Completed the implementation-completeness security boundary story for Workflow UI Authoring V2.
+  - Expanded the visible Workflows security-boundary panel to name existing Chat Web auth, Project/Pibo Session visibility, profile/tool/skill/context/MCP/compute-worker boundaries, and sensitive workflow data classes.
+  - Added root Workflow IR validation diagnostics that reject raw XState authoring fields and root inline executable fields while preserving Pibo Workflow IR as the source of truth.
+  - Added focused security-boundary source coverage tying visible UI copy, backend auth/session gates, registered-ref validation, redaction, and existing negative UI tests together.
+  - Marked PRD 09 US-021 passing.
+- Files changed
+  - `src/apps/chat-ui/src/WorkflowsArea.tsx`
+  - `src/apps/chat/web-app.ts`
+  - `test/web-channel.test.mjs`
+  - `test/workflow-v2-security-boundary.test.mjs`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_09_implementation_completeness_contract.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `node --test test/workflow-v2-security-boundary.test.mjs` — passed, 2/2 tests.
+  - `python3 -m json.tool docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_09_implementation_completeness_contract.json >/dev/null` — passed.
+  - `git diff --check` — passed.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck && node --test test/workflow-v2-security-boundary.test.mjs test/workflow-v2-deferrals.test.mjs && npm run chat-ui:build && npm run build && node --test --test-name-pattern "workflow security boundary validates registered refs and rejects inline execution paths|workflow diagnostics are redacted and scoped to owning Project sessions|workflow catalog authentication and permission baseline treats UI workflows as global|chat web app rejects unsupported Project workflow session creation inputs" test/web-channel.test.mjs'` — passed, including typecheck, source security/deferral tests, Chat UI build, full build, and 4/4 targeted web-channel tests.
+- Browser verification, if UI changed
+  - Restarted the container web gateway from rebuilt `/workspace/dist` without touching host gateways and verified `http://127.0.0.1:4802/apps/chat` returned OK.
+  - Used `browser-use --fresh-profile --session ralph-v2-us021` inside `pibo-dev-WorkflowsV2` with dev auth (`dev@pibo.local`) to open `/apps/chat/workflows`.
+  - Verified the Workflows page shows the registered capability security boundary, existing auth/session visibility copy, profile/tool/skill/context/MCP/compute-worker boundary copy, no-inline-executable copy, XState projection-only copy, and sensitive workflow data/sanitized diagnostics copy.
+  - Saved screenshot inside the container: `/tmp/ralph-v2-us021-security-boundary.png`.
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - Security-boundary aggregate coverage can stay focused by pairing visible scope-boundary copy with source-level assertions and targeted web-channel tests for auth, Project/session visibility, unsupported override rejection, redaction, inline executable rejection, and raw-XState rejection.
+  - Gotchas encountered
+    - Styled uppercase headings may not match exact-case `innerText` checks; use case-insensitive browser verification for panel headings.
+  - Useful context
+    - Root raw-XState fields now produce `WorkflowSecurityError.rawXStateAuthoring`; root inline executable fields use the existing `WorkflowSecurityError.inlineExecutableCode` diagnostic.
 ---

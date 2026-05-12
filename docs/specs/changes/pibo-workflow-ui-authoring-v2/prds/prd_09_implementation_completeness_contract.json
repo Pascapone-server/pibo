@@ -328,8 +328,8 @@
         "Typecheck passes"
       ],
       "priority": 21,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Security boundary contract is implemented through visible Workflows security copy, root/raw-XState validation diagnostics, registered-ref/inline-execution publish blocking, existing auth and Project/session visibility gates, redacted diagnostics, and focused source/API coverage."
     },
     {
       "id": "US-022",

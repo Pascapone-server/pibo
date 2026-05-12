@@ -5339,6 +5339,7 @@ function validateWorkflowDefinitionForV2(
 	input: { state: ChatWebAppState; context: PiboWebAppContext; webSession: PiboWebSession },
 ): WorkflowDraftDiagnostic[] {
 	const diagnostics: WorkflowDraftDiagnostic[] = [];
+	validateWorkflowDefinitionSecurityBoundary(definition, diagnostics);
 	validateRequiredString(definition, "id", "$.id", diagnostics);
 	validateRequiredString(definition, "version", "$.version", diagnostics);
 	validateWorkflowPortLike(definition.input, "$.input", diagnostics);
@@ -5386,6 +5387,21 @@ function validateWorkflowDefinitionForV2(
 	}
 
 	return sanitizeWorkflowDiagnostics(diagnostics);
+}
+
+function validateWorkflowDefinitionSecurityBoundary(definition: PiboJsonObject, diagnostics: WorkflowDraftDiagnostic[]): void {
+	validateNoInlineExecutableCode(definition, "$", diagnostics, {});
+	validateNoHiddenLlmCoercion(definition, "$", diagnostics, {});
+	for (const key of Object.keys(definition)) {
+		if (!RAW_XSTATE_FIELD_NAMES.has(key.replace(/[^a-zA-Z0-9]/g, "").toLowerCase())) continue;
+		diagnostics.push({
+			code: "WorkflowSecurityError.rawXStateAuthoring",
+			message: `Workflow definition declares raw XState field '${key}', which is projection-only and not editable in Workflow UI Authoring V2.`,
+			severity: "error",
+			path: `$.${key}`,
+			hint: "Edit and publish Pibo Workflow IR only; XState is generated as a visualization/projection from workflow run records.",
+		});
+	}
 }
 
 function validateWorkflowInitialLike(value: unknown, nodeIds: ReadonlySet<string>, diagnostics: WorkflowDraftDiagnostic[]): void {
@@ -5668,6 +5684,13 @@ const HIDDEN_LLM_COERCION_FIELD_NAMES = new Set([
 	"hiddenllmcoercion",
 	"autocoerce",
 	"llmadapter",
+]);
+
+const RAW_XSTATE_FIELD_NAMES = new Set([
+	"xstate",
+	"xstatemachine",
+	"xstatesource",
+	"xstatejson",
 ]);
 
 function validateNoInlineExecutableCode(

@@ -3101,6 +3101,8 @@ test("workflow security boundary validates registered refs and rejects inline ex
 		assert.ok(incompatibleAdapterOutputPayload.diagnostics.some((diagnostic) => diagnostic.code === "WorkflowGraphError.incompatibleEdgeAdapterOutput" && diagnostic.path === "$.edges.plan-to-review.adapter.output" && diagnostic.edgeId === "plan-to-review"));
 
 		const invalidDefinition = structuredClone(secureDefinition);
+		invalidDefinition.xstate = { states: { injected: {} } };
+		invalidDefinition.script = "echo bypass compute worker isolation";
 		invalidDefinition.nodes.collect.profile.id = "missing.profiles.inline";
 		invalidDefinition.nodes.plan.handler = "missing.handlers.inline";
 		invalidDefinition.nodes.plan.inlineTypeScript = "return await eval(input);";
@@ -3155,6 +3157,9 @@ test("workflow security boundary validates registered refs and rejects inline ex
 		assert.ok(diagnosticCodes.has("WorkflowGraphError.incompatibleEdgePorts"));
 		assert.ok(diagnosticCodes.has("WorkflowSecurityError.inlineExecutableCode"));
 		assert.ok(diagnosticCodes.has("WorkflowSecurityError.hiddenLlmCoercion"));
+		assert.ok(diagnosticCodes.has("WorkflowSecurityError.rawXStateAuthoring"));
+		assert.ok(invalidPatchPayload.diagnostics.some((diagnostic) => diagnostic.code === "WorkflowSecurityError.inlineExecutableCode" && diagnostic.path === "$.script"));
+		assert.ok(invalidPatchPayload.diagnostics.some((diagnostic) => diagnostic.code === "WorkflowSecurityError.rawXStateAuthoring" && diagnostic.path === "$.xstate"));
 		assertStructuredMissingRefDiagnostic(invalidPatchPayload.diagnostics, {
 			code: "WorkflowGraphError.unknownAgentProfileRef",
 			registryRef: "missing.profiles.inline",

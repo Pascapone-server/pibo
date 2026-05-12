@@ -796,9 +796,12 @@ function WorkflowSecurityBoundaryPanel() {
 				V2 authoring composes registered refs only: non-archived Agent profiles, code handlers, adapters, guards, nested workflows, human actions, and prompt assets.
 			</p>
 			<ul className="mt-3 grid gap-1 text-[11px] text-emerald-100/75">
+				<li>Existing Chat Web auth plus Project and Pibo Session visibility rules still gate workflow catalog, Project workflow sessions, snapshots, lifecycle events, prompt assets, and human actions.</li>
+				<li>Agent nodes select profile refs only; the UI does not grant extra tools, skills, context files, native tools, MCP servers, or compute-worker access beyond the selected runtime profile.</li>
 				<li>No inline JavaScript, TypeScript, shell, eval, arbitrary executable nodes, or raw handler bodies are created by the UI.</li>
 				<li>Incompatible schemas must use a visible registered adapter node or edge adapter; hidden LLM coercion is not used.</li>
 				<li>XState remains projection-only; Pibo Workflow IR is the persisted source of truth.</li>
+				<li>Workflow inputs, outputs, prompts, prompt assets, state, edge payloads, snapshots, and human action payloads remain sensitive workflow data; normal diagnostics expose only sanitized metadata.</li>
 			</ul>
 		</div>
 	);
