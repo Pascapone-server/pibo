@@ -45,7 +45,7 @@ import {
 } from "lucide-react";
 import { createUserSkill, deleteCustomAgent, deletePiPackage, deleteProject, deleteRoom, deleteSession, deleteUserSkill, fetchSignalTree, downloadChatFile, getBootstrap, getNavigation, getProjectsBootstrap, getSessionPage, getTrace, getTraceSummary, getUserSettings, getUserSkill, getWorkflowVersionPicker, installUserSkill, listUserSkills, markRoomRead, markSessionRead, patchCustomAgent, patchModelDefaults, patchPiPackage, patchProject, patchProjectSession, patchRoom, patchSession, patchUserSettings, postAction, postContextFile, postCustomAgent, postMessage, postPiPackage, postProject, postProjectMessage, postProjectSession, postProjectWorkflowSession, postProjectWorkflowSessionStart, postRoom, postSession, signInWithGoogle, signOut, subscribeSignalTree, updateUserSkill, type SaveCustomAgentInput, type UserSettings, type WorkflowVersionPickerOption } from "./api";
 import { THINKING_LEVELS } from "./types";
-import type { AgentCatalog, BootstrapData, CustomAgent, CustomAgentSubagent, ModelCatalog, ModelDefaults, ModelProfile, NavigationData, PiboProject, PiboProjectSession, ProjectsBootstrapData, PiboRoom, PiboSession, PiboSessionTraceSummary, PiboSessionTraceView, PiboSignalPatch, PiboSignalSnapshot, PiboTraceNode, PiboTraceOrderKey, PiboWebSessionNode, PiboWebSessionStatus, ThinkingLevel, UserSkill } from "./types";
+import type { AgentCatalog, BootstrapData, CustomAgent, CustomAgentSubagent, ModelCatalog, ModelDefaults, ModelProfile, NavigationData, PiboProject, PiboProjectSession, ProjectsBootstrapData, PiboRoom, PiboSession, PiboSessionTraceSummary, PiboSessionTraceView, PiboSignalPatch, PiboSignalSnapshot, PiboTraceNode, PiboTraceOrderKey, PiboWebSessionNode, PiboWebSessionStatus, ThinkingLevel, UserSkill, WorkflowLifecycleEventRecord } from "./types";
 import type { ChatWebStoredEvent } from "../../../shared/trace-types.js";
 import { collectBackendNodes, isTraceSnapshotCollectionEnabled } from "./tracing/snapshotCollector";
 import { type SessionBreadcrumbItem, type SessionDerivationLink, type SessionOriginLink } from "./tracing/TraceTimeline";
@@ -2108,7 +2108,16 @@ function ProjectsArea({
 			onError(null);
 			await load({ projectId: selectedProject.id, piboSessionId: projectSession.piboSessionId });
 		} catch (caught) {
+			const diagnostics = workflowDiagnosticsFromError(caught);
+			if (diagnostics.length) {
+				const codes = diagnostics.map((diagnostic) => diagnostic.code).filter(Boolean).slice(0, 3).join(", ");
+				setWorkflowStartMessages((current) => ({
+					...current,
+					[projectSession.piboSessionId]: `Start blocked: ${codes || "validation diagnostics"}`,
+				}));
+			}
 			onError(errorMessage(caught));
+			await load({ projectId: selectedProject.id, piboSessionId: projectSession.piboSessionId });
 		} finally {
 			setStartingWorkflowSessionId(null);
 		}
@@ -2246,6 +2255,7 @@ function ProjectsArea({
 				selectedRoomId={null}
 				selectedRoomArchived={Boolean(selectedProject?.archivedAt)}
 				workflowProjectSession={projectSessionViewRouting.workflowProjectSession}
+				workflowLifecycleEvents={data?.workflowLifecycleEvents ?? []}
 				projectSessionCreatePanel={selectedProject ? (
 					<ProjectWorkflowSessionCreatePanel
 						project={selectedProject}
@@ -2783,6 +2793,7 @@ function SessionTracePane({
 	selectedSessionStatus,
 	selectedSessionSignal,
 	workflowProjectSession,
+	workflowLifecycleEvents,
 	projectSessionCreatePanel,
 	workflowStartPanel,
 	sessionViewId,
@@ -2821,6 +2832,7 @@ function SessionTracePane({
 	selectedSessionStatus?: PiboWebSessionStatus;
 	selectedSessionSignal?: PiboSignalSnapshot["sessions"][string];
 	workflowProjectSession?: PiboProjectSession;
+	workflowLifecycleEvents?: readonly WorkflowLifecycleEventRecord[];
 	projectSessionCreatePanel?: ReactNode;
 	workflowStartPanel?: ReactNode;
 	sessionViewId: ChatSessionViewId;
@@ -3311,6 +3323,7 @@ function SessionTracePane({
 						selectedSessionStatus,
 						selectedSessionSignal,
 						workflowProjectSession,
+						workflowLifecycleEvents,
 						sessionBreadcrumbs,
 						originSession,
 						derivedSessions,
@@ -3696,6 +3709,15 @@ function trimLiveOverlayForBaseTrace(overlay: LiveTraceOverlay | null, baseTrace
 
 function errorMessage(caught: unknown): string {
 	return caught instanceof Error ? caught.message : String(caught);
+}
+
+function workflowDiagnosticsFromError(caught: unknown): Array<{ code?: string; message?: string }> {
+	if (!caught || typeof caught !== "object" || !("data" in caught)) return [];
+	const data = (caught as { data?: unknown }).data;
+	if (!data || typeof data !== "object" || !("diagnostics" in data)) return [];
+	const diagnostics = (data as { diagnostics?: unknown }).diagnostics;
+	if (!Array.isArray(diagnostics)) return [];
+	return diagnostics.filter((diagnostic): diagnostic is { code?: string; message?: string } => Boolean(diagnostic) && typeof diagnostic === "object");
 }
 
 function SignedOut({ message }: { message: string }) {

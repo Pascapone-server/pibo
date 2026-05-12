@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { Activity, AlertTriangle, CheckCircle2, Circle, Clock3, Database, GitBranch, History, Layers3, ListChecks, Route, XCircle } from "lucide-react";
 import { JsonRenderer } from "../tracing/JsonRenderer";
-import type { PiboProjectSession, PiboSessionSignalSnapshot, PiboSessionTraceView, PiboTraceNode, PiboWebSessionStatus } from "../types";
+import type { PiboProjectSession, PiboSessionSignalSnapshot, PiboSessionTraceView, PiboTraceNode, PiboWebSessionStatus, WorkflowLifecycleEventRecord } from "../types";
 import type { ChatSessionViewProps } from "./types";
 
 type WorkflowNodeStatus = "idle" | "active" | "waiting" | "completed" | "failed" | "cancelled";
@@ -75,8 +75,9 @@ export function WorkflowXStateSessionView({
 	selectedSessionStatus,
 	selectedSessionSignal,
 	workflowProjectSession,
+	workflowLifecycleEvents,
 }: ChatSessionViewProps) {
-	const workflowModel = workflowProjectSession ? createProjectSessionWorkflowModel(workflowProjectSession, traceView, selectedSessionStatus, selectedSessionSignal) : null;
+	const workflowModel = workflowProjectSession ? createProjectSessionWorkflowModel(workflowProjectSession, traceView, selectedSessionStatus, selectedSessionSignal, workflowLifecycleEvents ?? []) : null;
 
 	if (!workflowModel) {
 		return (
@@ -613,13 +614,17 @@ function createProjectSessionWorkflowModel(
 	traceView: PiboSessionTraceView | null,
 	selectedSessionStatus: PiboWebSessionStatus | undefined,
 	selectedSessionSignal: PiboSessionSignalSnapshot | undefined,
+	workflowLifecycleEvents: readonly WorkflowLifecycleEventRecord[],
 ): WorkflowProjectSessionUiModel | null {
 	if (!isWorkflowBackedProjectSession(projectSession)) return null;
 	const state = workflowStateLabel(projectSession, selectedSessionStatus);
 	const status = workflowNodeStatus(projectSession, selectedSessionStatus);
 	const activeStateId = stateIdForStatus(status);
 	const finalOutput = collectWorkflowFinalOutput(traceView, status);
-	const validationErrors = collectWorkflowValidationErrors(traceView);
+	const validationErrors = [
+		...collectWorkflowValidationErrors(traceView),
+		...collectWorkflowLifecycleValidationErrors(projectSession, workflowLifecycleEvents),
+	];
 	const runHistory = collectWorkflowRunHistory(projectSession, state, activeStateId);
 	const nodeAttempts = collectWorkflowNodeAttempts(traceView, projectSession.workflowRunId);
 	const edgeTransfers = collectWorkflowEdgeTransfers(traceView, projectSession.workflowRunId);
@@ -864,6 +869,28 @@ function collectWorkflowFinalOutput(traceView: PiboSessionTraceView | null, stat
 		.reverse()
 		.find((node) => node.status === "done" && node.type !== "user.message" && node.type !== "model.reasoning" && node.output !== undefined);
 	return completedOutput ? { value: completedOutput.output, source: completedOutput.type } : undefined;
+}
+
+function collectWorkflowLifecycleValidationErrors(
+	projectSession: PiboProjectSession,
+	workflowLifecycleEvents: readonly WorkflowLifecycleEventRecord[],
+): WorkflowValidationError[] {
+	const errors: WorkflowValidationError[] = [];
+	for (const event of workflowLifecycleEvents) {
+		if (event.piboSessionId !== projectSession.piboSessionId) continue;
+		if (event.type !== "project.workflow_start.blocked" && event.validation?.trigger !== "before_workflow_start") continue;
+		for (const diagnostic of event.diagnostics) {
+			if (diagnostic.severity !== "error") continue;
+			errors.push({
+				id: `lifecycle:${event.id}:${errors.length}`,
+				message: diagnostic.message,
+				code: diagnostic.code,
+				path: diagnostic.path,
+				source: "start lifecycle event",
+			});
+		}
+	}
+	return dedupeValidationErrors(errors).slice(0, 8);
 }
 
 function collectWorkflowValidationErrors(traceView: PiboSessionTraceView | null): WorkflowValidationError[] {

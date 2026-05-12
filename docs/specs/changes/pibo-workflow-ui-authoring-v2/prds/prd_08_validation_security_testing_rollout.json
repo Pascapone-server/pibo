@@ -61,8 +61,8 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented durable Chat Web workflow lifecycle events for draft save, validation, publish, Project workflow-session creation, start accepted, and start blocked; Project run inspection now surfaces blocked-start diagnostics from lifecycle events."
     },
     {
       "id": "US-005",

@@ -108,6 +108,43 @@ export type PiboProjectSession = {
 	updatedAt: string;
 };
 
+export type WorkflowLifecycleEventRecord = {
+	id: string;
+	type: string;
+	ownerScope: string;
+	actorId?: string;
+	workflowId?: string;
+	workflowVersion?: string;
+	draftId?: string;
+	projectId?: string;
+	piboSessionId?: string;
+	workflowRunId?: string;
+	status?: string;
+	validation?: {
+		trigger: string;
+		checkedAt: string;
+		ok: boolean;
+		validationState: "valid" | "warning" | "error";
+		errorCount: number;
+		warningCount: number;
+		infoCount: number;
+		blocksPublish: boolean;
+		blocksRun: boolean;
+	};
+	diagnostics: Array<{
+		code: string;
+		message: string;
+		severity: "info" | "warning" | "error";
+		path?: string;
+		nodeId?: string;
+		edgeId?: string;
+		registryRef?: string;
+		hint?: string;
+	}>;
+	payload?: Record<string, unknown>;
+	createdAt: string;
+};
+
 export type PiboSession = {
 	id: string;
 	piSessionId: string;
@@ -240,6 +277,7 @@ export type ProjectsBootstrapData = {
 	project?: PiboProject;
 	projects: PiboProject[];
 	projectSessions: PiboProjectSession[];
+	workflowLifecycleEvents: WorkflowLifecycleEventRecord[];
 	session?: PiboSession;
 	selectedProjectId: string;
 	selectedPiboSessionId?: string;

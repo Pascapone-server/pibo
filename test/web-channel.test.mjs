@@ -138,6 +138,9 @@ async function startWebHostChannel(options = {}) {
 		emitOutput(event) {
 			for (const listener of listeners) listener(event);
 		},
+		setProfiles(nextProfiles) {
+			profiles = [...nextProfiles];
+		},
 		sessions,
 		storageDir,
 		dataStorePath,
@@ -2734,6 +2737,140 @@ test("chat web app creates configured Project workflow sessions from the workflo
 			body: JSON.stringify({ workflowId: "standard-project" }),
 		});
 		assert.equal(legacyRejected.status, 400);
+	} finally {
+		await channel.stop?.();
+	}
+});
+
+test("workflow lifecycle observability records draft, publish, Project start, and blocked diagnostics", async () => {
+	const { channel, baseURL, setProfiles, dataStorePath, storageDir } = await startWebHostChannel({
+		auth: createFakeAuthService(),
+		profiles: [{ name: "pibo-agent", aliases: ["default"] }, { name: "unstable-agent" }],
+	});
+
+	const jsonHeaders = {
+		"content-type": "application/json",
+		origin: baseURL,
+		"x-test-user": "user-1",
+	};
+
+	try {
+		const duplicateResponse = await fetch(`${baseURL}/api/chat/workflows/standard-project/duplicate`, {
+			method: "POST",
+			headers: jsonHeaders,
+			body: JSON.stringify({ version: "1.0.0" }),
+		});
+		assert.equal(duplicateResponse.status, 201);
+		const duplicatePayload = await duplicateResponse.json();
+
+		const loadDraftResponse = await fetch(`${baseURL}/api/chat/workflows/drafts/${encodeURIComponent(duplicatePayload.draft.draftId)}`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(loadDraftResponse.status, 200);
+
+		const publishResponse = await fetch(`${baseURL}/api/chat/workflows/drafts/${encodeURIComponent(duplicatePayload.draft.draftId)}/publish`, {
+			method: "POST",
+			headers: jsonHeaders,
+			body: JSON.stringify({ versionIntent: "patch" }),
+		});
+		assert.equal(publishResponse.status, 201);
+
+		const projectResponse = await fetch(`${baseURL}/api/chat/projects`, {
+			method: "POST",
+			headers: jsonHeaders,
+			body: JSON.stringify({
+				name: "Workflow Observability Project",
+				projectFolder: join(storageDir, "workflow-observability-project"),
+				createFolder: true,
+			}),
+		});
+		assert.equal(projectResponse.status, 201);
+		const projectPayload = await projectResponse.json();
+
+		const acceptedSessionResponse = await fetch(`${baseURL}/api/chat/projects/${encodeURIComponent(projectPayload.project.id)}/workflow-sessions`, {
+			method: "POST",
+			headers: jsonHeaders,
+			body: JSON.stringify({
+				profile: "pibo-agent",
+				workflowId: "standard-project",
+				workflowVersion: "1.0.0",
+				title: "Observable accepted start",
+			}),
+		});
+		assert.equal(acceptedSessionResponse.status, 201);
+		const acceptedSessionPayload = await acceptedSessionResponse.json();
+
+		const acceptedStartResponse = await fetch(`${baseURL}/api/chat/projects/${encodeURIComponent(projectPayload.project.id)}/workflow-sessions/${encodeURIComponent(acceptedSessionPayload.session.id)}/start`, {
+			method: "POST",
+			headers: jsonHeaders,
+			body: JSON.stringify({}),
+		});
+		assert.equal(acceptedStartResponse.status, 202);
+
+		const blockedSessionResponse = await fetch(`${baseURL}/api/chat/projects/${encodeURIComponent(projectPayload.project.id)}/workflow-sessions`, {
+			method: "POST",
+			headers: jsonHeaders,
+			body: JSON.stringify({
+				profile: "unstable-agent",
+				workflowId: "standard-project",
+				workflowVersion: "1.0.0",
+				title: "Observable blocked start",
+			}),
+		});
+		assert.equal(blockedSessionResponse.status, 201);
+		const blockedSessionPayload = await blockedSessionResponse.json();
+
+		setProfiles([{ name: "pibo-agent", aliases: ["default"] }]);
+		const blockedStartResponse = await fetch(`${baseURL}/api/chat/projects/${encodeURIComponent(projectPayload.project.id)}/workflow-sessions/${encodeURIComponent(blockedSessionPayload.session.id)}/start`, {
+			method: "POST",
+			headers: jsonHeaders,
+			body: JSON.stringify({}),
+		});
+		assert.equal(blockedStartResponse.status, 422);
+		const blockedStartPayload = await blockedStartResponse.json();
+		assert.equal(blockedStartPayload.validation.trigger, "before_workflow_start");
+		assert.ok(blockedStartPayload.diagnostics.some((diagnostic) => diagnostic.code === "WorkflowGraphError.unknownAgentProfileRef"));
+
+		const lifecycleResponse = await fetch(`${baseURL}/api/chat/workflows/lifecycle-events?projectId=${encodeURIComponent(projectPayload.project.id)}&limit=200`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(lifecycleResponse.status, 200);
+		const lifecyclePayload = await lifecycleResponse.json();
+		const eventTypes = new Set(lifecyclePayload.events.map((event) => event.type));
+		assert.ok(eventTypes.has("project.workflow_session.created"));
+		assert.ok(eventTypes.has("project.workflow_start.accepted"));
+		assert.ok(eventTypes.has("project.workflow_start.blocked"));
+		assert.ok(eventTypes.has("workflow.validation.completed"));
+		const blockedEvent = lifecyclePayload.events.find((event) => event.type === "project.workflow_start.blocked" && event.piboSessionId === blockedSessionPayload.session.id);
+		assert.ok(blockedEvent);
+		assert.equal(blockedEvent.validation.trigger, "before_workflow_start");
+		assert.ok(blockedEvent.diagnostics.some((diagnostic) => diagnostic.code === "WorkflowGraphError.unknownAgentProfileRef"));
+
+		const draftLifecycleResponse = await fetch(`${baseURL}/api/chat/workflows/lifecycle-events?draftId=${encodeURIComponent(duplicatePayload.draft.draftId)}&limit=200`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(draftLifecycleResponse.status, 200);
+		const draftLifecyclePayload = await draftLifecycleResponse.json();
+		const draftEventTypes = new Set(draftLifecyclePayload.events.map((event) => event.type));
+		assert.ok(draftEventTypes.has("workflow.draft.saved"));
+		assert.ok(draftEventTypes.has("workflow.validation.completed"));
+		assert.ok(draftEventTypes.has("workflow.publish.accepted"));
+
+		const bootstrapResponse = await fetch(`${baseURL}/api/chat/projects/bootstrap?projectId=${encodeURIComponent(projectPayload.project.id)}&piboSessionId=${encodeURIComponent(blockedSessionPayload.session.id)}`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(bootstrapResponse.status, 200);
+		const bootstrapPayload = await bootstrapResponse.json();
+		assert.ok(bootstrapPayload.workflowLifecycleEvents.some((event) => event.type === "project.workflow_start.blocked" && event.piboSessionId === blockedSessionPayload.session.id));
+
+		const db = new DatabaseSync(dataStorePath, { readOnly: true });
+		try {
+			const rows = db.prepare("SELECT type, pibo_session_id FROM workflow_lifecycle_events ORDER BY created_at").all();
+			assert.ok(rows.some((row) => row.type === "project.workflow_start.accepted" && row.pibo_session_id === acceptedSessionPayload.session.id));
+			assert.ok(rows.some((row) => row.type === "project.workflow_start.blocked" && row.pibo_session_id === blockedSessionPayload.session.id));
+		} finally {
+			db.close();
+		}
 	} finally {
 		await channel.stop?.();
 	}

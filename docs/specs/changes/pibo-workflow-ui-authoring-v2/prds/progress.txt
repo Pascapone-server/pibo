@@ -1,4 +1,5 @@
 ## Codebase Patterns
+- Workflow lifecycle observability for Chat Web belongs in durable `workflow_lifecycle_events` records and Project bootstrap data so configured-session run inspection can surface start-blocked diagnostics without a workflow run id.
 - Project Workflow/XState run inspection panels should render status, current node, run history, node attempts, edge transfers, output, and error sections with explicit empty states for configured/not-started sessions while labeling XState as projection-only.
 - Workflow Builder inspectors should patch the same draft Pibo Workflow IR through existing draft PATCH validation triggers; capability refs in inspectors should come from picker APIs instead of free-text fields.
 - Nested workflow node UI should reuse the workflow-version picker API, store only `workflowId`/`workflowVersion` refs in parent graph IR, and navigate to a separate workflow viewer instead of inline-expanding child graphs.
@@ -928,4 +929,32 @@
   - Saved screenshot: `/tmp/ralph-v2-prd09-sidebar-markers.png` inside the container.
 - **Learnings for future iterations:**
   - Completeness-contract stories may be satisfied by focused PRD stories; rerun the focused tests/browser checks and mark only the corresponding completeness story.
+---
+## 2026-05-12 04:06 CEST - US-004
+- What was implemented
+  - Added durable Chat Web `workflow_lifecycle_events` records and an authenticated lifecycle-events API for V2 draft save, validation, publish, Project workflow-session creation, workflow start accepted, and workflow start blocked boundaries.
+  - Included Project workflow lifecycle events in Project bootstrap data and surfaced start-blocked diagnostics in the Workflow/XState run inspection error and validation sections before any workflow run id exists.
+  - Added regression coverage for lifecycle event persistence, listing, Project bootstrap exposure, accepted start signals, and blocked-start diagnostic families.
+- Files changed
+  - `src/apps/chat/web-app.ts`
+  - `src/apps/chat-ui/src/App.tsx`
+  - `src/apps/chat-ui/src/types.ts`
+  - `src/apps/chat-ui/src/session-views/types.ts`
+  - `src/apps/chat-ui/src/session-views/WorkflowXStateSessionView.tsx`
+  - `test/web-channel.test.mjs`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_08_validation_security_testing_rollout.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck'` — passed.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run build && node --test --test-name-pattern "workflow lifecycle observability" test/web-channel.test.mjs'` — passed, 1/1 targeted test.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && node --test test/web-channel.test.mjs'` — passed, 62/62 tests.
+- Browser verification, if UI changed
+  - Restarted the container web gateway from rebuilt `/workspace/dist` and verified `http://127.0.0.1:4802/apps/chat` returned OK.
+  - Created a dev-auth Project workflow session using a temporary Agent Designer profile, archived that profile, and invoked Start once to create a blocked-start lifecycle event.
+  - Used `browser-use --fresh-profile` inside `pibo-dev-WorkflowsV2` to open `/apps/chat/projects/<projectId>/sessions/<piboSessionId>?view=workflow`.
+  - Verified the authenticated Workflow/XState run inspection shows `Workflow run inspection`, the blocked-start diagnostic `WorkflowGraphError.archivedAgentProfileRef`, and `start lifecycle event` before a workflow run id exists.
+  - Saved screenshot: `/tmp/ralph-v2-lifecycle-observability.png` inside the container.
+- **Learnings for future iterations:**
+  - Start-blocked diagnostics need durable Project-scoped lifecycle events because configured sessions can be blocked before `workflowRunId` is assigned.
+  - Browser routes for Project sessions use `/apps/chat/projects/:projectId/sessions/:piboSessionId?view=workflow`; query-only `projectId`/`piboSessionId` does not select the session route.
 ---
