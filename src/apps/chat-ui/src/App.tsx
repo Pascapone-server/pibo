@@ -124,6 +124,11 @@ const SESSION_DELETE_CONFIRM_TEXT = "Delete this session";
 const RECENT_SESSION_ACTIVITY_SIGNAL_MS = 3_000;
 const SESSION_PAGE_SIZE = 120;
 const ARCHIVED_SESSION_PAGE_SIZE = 60;
+const PROJECT_ROUTING_UNKNOWN_TIMESTAMP = "1970-01-01T00:00:00.000Z";
+const PROJECT_SESSION_VIEW_ALLOWED_IDS: Record<ChatSessionViewId, readonly ChatSessionViewId[]> = {
+	terminal: ["terminal"],
+	workflow: ["workflow"],
+};
 
 type StoredSelection = {
 	roomId?: string;
@@ -1482,7 +1487,6 @@ export function App({ route }: { route: ChatAppRoute }) {
 						routePiboSessionId={routePiboSessionId}
 						sessionViewId={sessionViewId}
 						sessionViews={sessionViews}
-						currentSessionView={currentSessionView}
 						showRawEvents={showRawEvents}
 						showThinking={showThinking}
 						expandThinking={expandThinking}
@@ -1902,7 +1906,6 @@ function ProjectsArea({
 	routePiboSessionId,
 	sessionViewId,
 	sessionViews,
-	currentSessionView,
 	showRawEvents,
 	showThinking,
 	expandThinking,
@@ -1923,7 +1926,6 @@ function ProjectsArea({
 	routePiboSessionId?: string;
 	sessionViewId: ChatSessionViewId;
 	sessionViews: ReturnType<typeof listChatSessionViews>;
-	currentSessionView: ReturnType<typeof getChatSessionView>;
 	showRawEvents: boolean;
 	showThinking: boolean;
 	expandThinking: boolean;
@@ -2030,6 +2032,13 @@ function ProjectsArea({
 		capabilities: data?.capabilities ?? baseBootstrap.capabilities,
 		sessions: data?.sessions ?? [],
 	}) as BootstrapData, [baseBootstrap, data]);
+	const projectSessionViewRouting = useMemo(() => resolveProjectSessionViewRouting({
+		selectedSessionNode,
+		selectedProjectSession,
+		selectedSession: data?.session,
+		selectedProject,
+	}), [data?.session, selectedProject, selectedProjectSession, selectedSessionNode]);
+	const projectCurrentSessionView = useMemo(() => getChatSessionView(projectSessionViewRouting.viewId), [projectSessionViewRouting.viewId]);
 
 	const createProject = async () => {
 		const name = window.prompt("Project name");
@@ -2236,7 +2245,7 @@ function ProjectsArea({
 				selectedPiboSessionId={selectedPiboSessionId}
 				selectedRoomId={null}
 				selectedRoomArchived={Boolean(selectedProject?.archivedAt)}
-				workflowProjectSession={selectedProjectSession}
+				workflowProjectSession={projectSessionViewRouting.workflowProjectSession}
 				projectSessionCreatePanel={selectedProject ? (
 					<ProjectWorkflowSessionCreatePanel
 						project={selectedProject}
@@ -2255,9 +2264,10 @@ function ProjectsArea({
 				selectedSessionProfile={selectedSessionProfile}
 				selectedSessionActiveModel={resolveSessionActiveModelLabel(traceBootstrap, selectedSessionNode ?? { profile: selectedSessionProfile })}
 				selectedSessionStatus={selectedSessionNode?.status}
-				sessionViewId={sessionViewId}
+				sessionViewId={projectSessionViewRouting.viewId}
 				sessionViews={sessionViews}
-				currentSessionView={currentSessionView}
+				currentSessionView={projectCurrentSessionView}
+				allowedSessionViewIds={PROJECT_SESSION_VIEW_ALLOWED_IDS[projectSessionViewRouting.viewId]}
 				creatingSession={creatingSession || creatingWorkflowSession}
 				showRawEvents={showRawEvents}
 				showThinking={showThinking}
@@ -2491,6 +2501,95 @@ function isConfiguredWorkflowSessionPending(projectSession: PiboProjectSession):
 	return isWorkflowBackedProjectSession(projectSession) && projectSession.state === "configured" && !projectSession.workflowRunId;
 }
 
+type ProjectSessionViewRouting = {
+	viewId: ChatSessionViewId;
+	workflowProjectSession?: PiboProjectSession;
+};
+
+function resolveProjectSessionViewRouting(input: {
+	selectedSessionNode?: PiboWebSessionNode;
+	selectedProjectSession?: PiboProjectSession;
+	selectedSession?: PiboSession;
+	selectedProject?: PiboProject;
+}): ProjectSessionViewRouting {
+	const workflowSessionKind = input.selectedSessionNode?.workflowSessionKind ?? workflowSessionKindFromProjectMetadata(input.selectedSession?.metadata);
+	if (workflowSessionKind === "main_workflow" || workflowSessionKind === "nested_workflow") {
+		if (input.selectedProjectSession && !isWorkflowBackedProjectSession(input.selectedProjectSession)) {
+			return { viewId: "terminal" };
+		}
+		if (!input.selectedProjectSession && workflowSessionKind === "main_workflow" && selectedMetadataWorkflowId(input.selectedSession?.metadata) === "simple-chat") {
+			return { viewId: "terminal" };
+		}
+		const workflowProjectSession = input.selectedProjectSession && isWorkflowBackedProjectSession(input.selectedProjectSession)
+			? input.selectedProjectSession
+			: createWorkflowViewProjectSession({
+				selectedSessionNode: input.selectedSessionNode,
+				selectedSession: input.selectedSession,
+				selectedProject: input.selectedProject,
+				workflowSessionKind,
+			});
+		return { viewId: "workflow", ...(workflowProjectSession ? { workflowProjectSession } : {}) };
+	}
+	if (workflowSessionKind === "agent_node" || workflowSessionKind === "subagent") {
+		return { viewId: "terminal" };
+	}
+	if (input.selectedProjectSession && isWorkflowBackedProjectSession(input.selectedProjectSession)) {
+		return { viewId: "workflow", workflowProjectSession: input.selectedProjectSession };
+	}
+	return { viewId: "terminal" };
+}
+
+function workflowSessionKindFromProjectMetadata(metadata: PiboSession["metadata"] | undefined): PiboWebSessionNode["workflowSessionKind"] {
+	const kind = metadataString(metadata, "workflowSessionKind");
+	if (kind === "main_workflow" || kind === "nested_workflow" || kind === "agent_node" || kind === "subagent") return kind;
+	if (metadataString(metadata, "projectSessionKind") === "main") return "main_workflow";
+	return undefined;
+}
+
+function selectedMetadataWorkflowId(metadata: PiboSession["metadata"] | undefined): string | undefined {
+	return metadataString(metadata, "projectWorkflowId") ?? metadataString(metadata, "workflowId");
+}
+
+function createWorkflowViewProjectSession(input: {
+	selectedSessionNode?: PiboWebSessionNode;
+	selectedSession?: PiboSession;
+	selectedProject?: PiboProject;
+	workflowSessionKind: "main_workflow" | "nested_workflow";
+}): PiboProjectSession | undefined {
+	const piboSessionId = input.selectedSessionNode?.piboSessionId ?? input.selectedSession?.id;
+	if (!piboSessionId) return undefined;
+	const metadata = input.selectedSession?.metadata;
+	const workflowId = selectedMetadataWorkflowId(metadata)
+		?? (input.workflowSessionKind === "nested_workflow" ? "nested-workflow-session" : "workflow-session");
+	const workflowVersion = metadataString(metadata, "projectWorkflowVersion") ?? metadataString(metadata, "workflowVersion");
+	const workflowRunId = metadataString(metadata, "workflowRunId");
+	return {
+		projectId: input.selectedProject?.id ?? metadataString(metadata, "projectId") ?? "project",
+		piboSessionId,
+		kind: input.workflowSessionKind === "nested_workflow" ? "sub" : "main",
+		workflowId,
+		...(workflowVersion ? { workflowVersion } : {}),
+		...(workflowRunId ? { workflowRunId } : {}),
+		...(input.selectedSessionNode?.parentId ? { parentMainSessionId: input.selectedSessionNode.parentId } : {}),
+		...(input.selectedSessionNode?.title || input.selectedSession?.title ? { title: input.selectedSessionNode?.title ?? input.selectedSession?.title } : {}),
+		state: workflowStateFromSessionNode(input.selectedSessionNode, workflowRunId),
+		...(input.selectedSessionNode?.archived !== undefined ? { archived: input.selectedSessionNode.archived } : {}),
+		createdAt: input.selectedSession?.createdAt ?? PROJECT_ROUTING_UNKNOWN_TIMESTAMP,
+		updatedAt: input.selectedSession?.updatedAt ?? input.selectedSessionNode?.lastActivityAt ?? PROJECT_ROUTING_UNKNOWN_TIMESTAMP,
+	};
+}
+
+function workflowStateFromSessionNode(sessionNode: PiboWebSessionNode | undefined, workflowRunId: string | undefined): PiboProjectSession["state"] {
+	if (sessionNode?.status === "error") return "failed";
+	if (sessionNode?.status === "running") return "running";
+	return workflowRunId ? "workflow" : "configured";
+}
+
+function metadataString(metadata: PiboSession["metadata"] | undefined, key: string): string | undefined {
+	const value = metadata?.[key];
+	return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
 function workflowSessionLabel(projectSession: PiboProjectSession): string {
 	if (!isWorkflowBackedProjectSession(projectSession)) return `Workflow: ${projectSession.workflowId}`;
 	const run = projectSession.workflowRunId ? ` · run ${shortWorkflowId(projectSession.workflowRunId)}` : "";
@@ -2689,6 +2788,7 @@ function SessionTracePane({
 	sessionViewId,
 	sessionViews,
 	currentSessionView,
+	allowedSessionViewIds,
 	creatingSession,
 	showRawEvents,
 	showThinking,
@@ -2726,6 +2826,7 @@ function SessionTracePane({
 	sessionViewId: ChatSessionViewId;
 	sessionViews: ReturnType<typeof listChatSessionViews>;
 	currentSessionView: ReturnType<typeof getChatSessionView>;
+	allowedSessionViewIds?: readonly ChatSessionViewId[];
 	creatingSession: boolean;
 	showRawEvents: boolean;
 	showThinking: boolean;
@@ -3058,6 +3159,7 @@ function SessionTracePane({
 	const workflowHeader = workflowProjectSession && isWorkflowBackedProjectSession(workflowProjectSession)
 		? createWorkflowHeaderSummary(workflowProjectSession, selectedSessionStatus)
 		: null;
+	const allowedSessionViewIdSet = useMemo(() => allowedSessionViewIds ? new Set(allowedSessionViewIds) : null, [allowedSessionViewIds]);
 	const copyHeaderPiboSessionId = () => {
 		if (!headerPiboSessionId) return;
 		void copyTextToClipboard(headerPiboSessionId).catch(() => undefined);
@@ -3124,22 +3226,26 @@ function SessionTracePane({
 					</div>
 					<div className="flex items-center gap-2">
 						<div className="flex items-center rounded-sm border border-slate-700 bg-[#0e1116] p-0.5">
-							{sessionViews.map((view) => (
-								<button
-									key={view.id}
-									type="button"
-									onClick={() => onSelectSessionView(view.id)}
-									title={view.description ?? view.label}
-									aria-label={`Switch to ${view.label} view`}
-									className={`min-w-20 px-2.5 py-1 text-[11px] font-bold tracking-wide max-[980px]:min-w-0 max-[980px]:px-1.5 ${
-										sessionViewId === view.id
-											? "bg-[#11a4d4]/10 text-[#11a4d4]"
-											: "text-slate-400 hover:text-[#11a4d4]"
-									}`}
-								>
-									{view.label}
-								</button>
-							))}
+							{sessionViews.map((view) => {
+								const disabledByRouting = Boolean(allowedSessionViewIdSet && !allowedSessionViewIdSet.has(view.id));
+								return (
+									<button
+										key={view.id}
+										type="button"
+										onClick={() => { if (!disabledByRouting) onSelectSessionView(view.id); }}
+										disabled={disabledByRouting}
+										title={disabledByRouting ? `Project session routing uses the ${currentSessionView.label} view for this session kind.` : view.description ?? view.label}
+										aria-label={disabledByRouting ? `${view.label} view unavailable for this Project session kind` : `Switch to ${view.label} view`}
+										className={`min-w-20 px-2.5 py-1 text-[11px] font-bold tracking-wide max-[980px]:min-w-0 max-[980px]:px-1.5 disabled:cursor-not-allowed disabled:text-slate-600 ${
+											sessionViewId === view.id
+												? "bg-[#11a4d4]/10 text-[#11a4d4]"
+												: "text-slate-400 hover:text-[#11a4d4] disabled:hover:text-slate-600"
+										}`}
+									>
+										{view.label}
+									</button>
+								);
+							})}
 						</div>
 						<HeaderIconButton
 							onClick={onToggleRawEvents}
