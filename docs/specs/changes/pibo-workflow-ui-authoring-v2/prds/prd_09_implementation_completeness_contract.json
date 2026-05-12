@@ -107,8 +107,8 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Capability picker APIs are implemented through /api/chat/workflows/pickers/:kind for handlers, adapters, guards, human actions, prompt assets, workflow versions, and active Agent profiles with uniform displayName/description/paramsSchema response fields and archived item filtering."
     },
     {
       "id": "US-008",

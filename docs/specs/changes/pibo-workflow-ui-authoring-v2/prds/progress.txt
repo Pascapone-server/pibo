@@ -1652,3 +1652,19 @@
   - Project human-action UI should consume durable Project wait-token records rather than signal-only waiting state; signal-only waits should remain a non-actionable fallback.
   - Browser-use `--fresh-profile` can isolate authentication state per command/session; re-open dev auth before Project workflow checks when a fresh profile shows `Unauthenticated`.
 ---
+## 2026-05-12 12:35 CEST - US-007
+- What was implemented
+  - Marked the implementation completeness contract for capability picker APIs as passing after verifying the existing picker API surfaces cover handlers, adapters, guards, human actions, prompt assets, workflow versions, and active Agent profiles.
+  - Recorded the uniform picker response contract for `displayName`, optional description, nullable `paramsSchema`, and archived item filtering in the PRD notes.
+- Files changed
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_09_implementation_completeness_contract.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck && npm run build && node --test --test-name-pattern "workflow .*picker" test/web-channel.test.mjs'` — passed, 5/5 targeted picker tests.
+  - `python3 -m json.tool docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_09_implementation_completeness_contract.json` — passed.
+  - `git diff --check` — passed.
+- Browser verification, if UI changed
+  - Not run; this completion-contract update validated existing backend/API picker behavior and did not change visible UI.
+- **Learnings for future iterations:**
+  - Completeness-contract stories can be marked after the focused PRD story is already implemented, but the matching targeted test family should be re-run before updating the contract PRD.
+---
