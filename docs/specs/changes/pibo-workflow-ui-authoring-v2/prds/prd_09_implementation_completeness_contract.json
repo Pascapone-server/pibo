@@ -201,8 +201,8 @@
         "Typecheck passes"
       ],
       "priority": 13,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Verified core node refs through registered Agent profile, code handler, and published workflow-version pickers, plus separate Open workflow navigation and focused coverage tests."
     },
     {
       "id": "US-014",
