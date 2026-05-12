@@ -3199,6 +3199,23 @@ test("workflow builder draft loader opens starter and duplicated UI draft wrappe
 		assert.ok(starterPayload.draft.diagnostics.some((diagnostic) => diagnostic.code === "WorkflowValidationError.emptyGraph"));
 		assert.equal(starterPayload.draft.definition.xstate, undefined);
 
+		const starterPublishResponse = await fetch(`${baseURL}/api/chat/workflows/drafts/v2-starter-draft/publish`, {
+			method: "POST",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({ versionIntent: "patch" }),
+		});
+		assert.equal(starterPublishResponse.status, 422);
+		const starterPublishPayload = await starterPublishResponse.json();
+		assert.equal(starterPublishPayload.validation.trigger, "before_publish");
+		assert.equal(starterPublishPayload.validation.blocksPublish, true);
+		assert.ok(starterPublishPayload.diagnostics.some((diagnostic) => diagnostic.code === "WorkflowValidationError.emptyGraph"));
+		assert.ok(starterPublishPayload.diagnostics.some((diagnostic) => diagnostic.code === "WorkflowValidationError.missingPort" && diagnostic.path === "$.input"));
+		assert.ok(starterPublishPayload.diagnostics.some((diagnostic) => diagnostic.code === "WorkflowValidationError.missingPort" && diagnostic.path === "$.output"));
+
 		const duplicateResponse = await fetch(`${baseURL}/api/chat/workflows/standard-project/duplicate`, {
 			method: "POST",
 			headers: {

@@ -126,8 +126,8 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Workflow Builder publish panel now derives a blocking publish gate from validation.blocksPublish/error diagnostics while preserving draft saves. Publish remains backend-enforced by before_publish validation; integration coverage verifies starter zero-node drafts and missing workflow input/output contracts are rejected."
     },
     {
       "id": "US-009",

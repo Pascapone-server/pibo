@@ -786,6 +786,9 @@ function WorkflowDraftEditorShell({ draft }: { draft: WorkflowDraftRecord }) {
 	const [publishState, setPublishState] = useState<"idle" | "validating" | "validated" | "publishing" | "published" | "error">("idle");
 	const [publishMessage, setPublishMessage] = useState<string | undefined>();
 	const publishActionBusy = publishState === "validating" || publishState === "publishing";
+	const publishErrorCount = currentDraft.validation?.errorCount ?? currentDraft.diagnostics.filter((diagnostic) => diagnostic.severity === "error").length;
+	const publishWarningCount = currentDraft.validation?.warningCount ?? currentDraft.diagnostics.filter((diagnostic) => diagnostic.severity === "warning").length;
+	const publishBlocked = currentDraft.validation?.blocksPublish === true || publishErrorCount > 0;
 
 	useEffect(() => {
 		setCurrentDraft(draft);
@@ -853,6 +856,16 @@ function WorkflowDraftEditorShell({ draft }: { draft: WorkflowDraftRecord }) {
 			</div>
 
 			<div className="rounded-sm border border-slate-800 bg-[#151f24]/70 p-4" aria-label="Workflow publish version panel">
+				<div id="workflow-publish-gate" className={`mb-3 rounded-sm border p-3 text-xs leading-5 ${publishBlocked ? "border-amber-700/70 bg-amber-950/30 text-amber-100" : "border-emerald-900/60 bg-emerald-950/20 text-emerald-200"}`} aria-label="Workflow publish gate" role="status">
+					<div className="font-semibold">{publishBlocked ? "Publish blocked by draft diagnostics" : "Publish gate ready"}</div>
+					<p className="mt-1">
+						{publishBlocked
+							? `Publish is disabled because ${publishErrorCount} error diagnostic${publishErrorCount === 1 ? "" : "s"} ${publishErrorCount === 1 ? "remains" : "remain"}. Draft save remains allowed while you fix errors; before-publish validation also requires workflow input/output ports and at least one node.`
+							: publishWarningCount > 0
+								? `Warnings do not block publishing. Before-publish validation still runs and will block if workflow input/output ports, graph nodes, or registered refs are invalid.`
+								: "No blocking diagnostics are present. Before-publish validation will run again before creating an immutable workflow version."}
+					</p>
+				</div>
 				<div className="flex flex-wrap items-end justify-between gap-3">
 					<div>
 						<div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Publish version intent</div>
@@ -888,7 +901,8 @@ function WorkflowDraftEditorShell({ draft }: { draft: WorkflowDraftRecord }) {
 							type="button"
 							className="inline-flex items-center justify-center gap-1 rounded-sm border border-emerald-600/70 px-3 py-1.5 text-xs font-semibold text-emerald-200 transition hover:border-emerald-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
 							onClick={() => void publishDraft()}
-							disabled={publishActionBusy}
+							disabled={publishActionBusy || publishBlocked}
+							aria-describedby="workflow-publish-gate"
 						>
 							{publishState === "publishing" ? <Loader2 size={13} className="animate-spin" /> : <CheckCheck size={13} />}
 							Publish draft
