@@ -134,3 +134,17 @@ Use this checklist after deploys or before release signoff to verify the workflo
    - Expected immutable version result: publish creates a published workflow version with a stable definition hash, the same `workflowId@version` cannot later be overwritten with different IR, and future edits use a new next-version draft instead of mutating the published version.
 7. Reopen the Workflow Library and version history for the workflow.
    - Expected library result: the new version appears as published, the source/status actions match UI-published behavior, and Project workflow pickers can select the published version while excluding drafts.
+
+### Historical archive/delete lifecycle smoke checklist
+
+Use this checklist after lifecycle changes or before release signoff to verify the archive/delete behavior required by `06-versioning-archive-delete-lifecycle.md`.
+
+1. Create and start a Project workflow session from a published UI-authored workflow, then confirm the run view records the selected workflow id/version, definition hash, configuration summary, and effective snapshot.
+2. Archive the workflow from the Workflow Library lifecycle controls.
+   - Expected archived selection behavior: the workflow is hidden from default Project workflow-version pickers and normal start/selection lists, remains visible only through explicit archived filters, version history, or historical run links, and existing Project run inspection still opens.
+3. Reopen the historical Project run created before archival.
+   - Expected archived run result: the run view keeps its snapshot-backed inspection sections and, when the live archived identity still exists, may link to the Workflows definition/version while clearly showing archived state.
+4. Delete or tombstone the same workflow identity using the authenticated delete flow.
+   - Expected live catalog result: the workflow is absent from default catalog, picker, duplicate, publish, archive, and Project-session selection surfaces.
+5. Reopen the same historical Project run after deletion.
+   - Expected snapshot-only result: the run view renders a clear `definition deleted` state, does not show a broken Workflows link, and continues to display the snapshot title, workflow id/version, effective definition hash, configuration summary, run status, node attempts, edge transfers, output, errors, and human action history from the stored Project snapshot.

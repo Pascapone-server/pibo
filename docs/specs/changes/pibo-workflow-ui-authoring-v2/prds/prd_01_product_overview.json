@@ -138,8 +138,8 @@
         "Typecheck passes"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added the historical archive/delete lifecycle smoke checklist with PRD 06 linkage, archived selection expectations, and snapshot-only deleted-definition run inspection expectations."
     }
   ]
 }
