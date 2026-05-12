@@ -1695,3 +1695,22 @@
   - The draft validate API rejects `before_publish` on the manual validate route; leave that trigger to publish and let manual validation use the route default/edit-trigger contract.
   - Release coverage can stay cheap by guarding the coverage matrix while relying on existing package and web-channel behavior tests for the long-running flows.
 ---
+## 2026-05-12 13:00 CEST - US-008
+- What was implemented
+  - Added a Workflow Builder authoring smoke checklist to the product overview PRD.
+  - Covered duplicate-to-draft, draft editing, validation diagnostics refresh/blocking behavior, publish, immutable published version hashes, and version history/picker expectations.
+  - Marked PRD 01 US-008 passing.
+- Files changed
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/01-product-overview.md`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_01_product_overview.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `python3 -m json.tool docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_01_product_overview.json` — passed.
+  - `git diff --check` — passed.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck'` — passed.
+  - Relevant tests: not run; documentation-only smoke checklist change.
+- Browser verification, if UI changed
+  - Not run; documentation-only change with no UI behavior changes.
+- **Learnings for future iterations:**
+  - Product-overview manual smoke checklists can capture cross-PRD expected outcomes while referencing the implemented V2 contracts instead of adding new product behavior.
+---

@@ -124,8 +124,8 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added a Workflow Builder authoring smoke checklist covering duplicate-to-draft, draft edits, validation diagnostics refresh/blocking behavior, publish, immutable version hashes, and version history/picker expectations."
     },
     {
       "id": "US-009",

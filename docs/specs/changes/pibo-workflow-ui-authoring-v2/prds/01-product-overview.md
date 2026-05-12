@@ -116,3 +116,21 @@ Use this checklist after deploys or before release signoff to verify the Project
 7. Inspect the Project workflow run view.
    - Expected inspection sections: status, current node, run history, node attempts, edge transfers, output, errors, validation diagnostics, nested workflow links, definition link or definition-deleted state, and pending human actions. Each section must show populated values or an explicit empty state.
 8. If the workflow reaches a human wait, resolve it from the Project run view and confirm the run resumes or records the selected terminal action.
+
+### Workflow Builder authoring smoke checklist
+
+Use this checklist after deploys or before release signoff to verify the workflow authoring path end to end.
+
+1. Open Chat Web as an authenticated user and navigate to Workflows.
+2. Pick an eligible code or UI-published workflow from the Workflow Library and choose Duplicate.
+   - Expected duplicate result: the original workflow remains read-only if it is code-owned, and the UI opens or creates a separate editable draft backed by the Workflow Registry/store.
+3. Open the draft in Workflow Builder and make a small visual edit, such as moving a node, editing workflow metadata, changing a registered capability selection, updating a prompt field, or editing raw JSON schema within the supported subset.
+   - Expected draft behavior: the draft can be saved even when warning or error diagnostics exist, and visual/raw panels continue to show the same Pibo Workflow IR as the source of truth.
+4. Run manual validation from the builder.
+   - Expected diagnostics behavior: validation diagnostics refresh for the current draft, group by workflow/node/edge/schema/state/registry ref where applicable, show actionable codes and locations, preserve non-validation diagnostics, and block Publish while any error-severity diagnostic remains.
+5. Fix blocking diagnostics by using picker-backed registered refs, compatible ports/adapters, valid JSON schema subset values, required workflow input/output contracts, and at least one node.
+   - Expected ready-to-publish behavior: the validation panel shows no error-severity diagnostics, warnings remain visible but do not block publish unless the publish route reports an error.
+6. Publish the draft with the intended semantic version bump.
+   - Expected immutable version result: publish creates a published workflow version with a stable definition hash, the same `workflowId@version` cannot later be overwritten with different IR, and future edits use a new next-version draft instead of mutating the published version.
+7. Reopen the Workflow Library and version history for the workflow.
+   - Expected library result: the new version appears as published, the source/status actions match UI-published behavior, and Project workflow pickers can select the published version while excluding drafts.
