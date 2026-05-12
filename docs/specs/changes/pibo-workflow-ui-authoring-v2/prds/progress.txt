@@ -2186,3 +2186,32 @@
   - Useful context
     - The starter draft route keeps the publish panel in a predictable blocked state while still exposing the version intent selector.
 ---
+## 2026-05-12 17:09 CEST - US-017
+- What was implemented
+  - Completed the implementation-completeness story for archive and delete lifecycle.
+  - Added focused lifecycle checklist coverage binding archive/delete UI actions and confirmation copy to the archive/delete API integration tests and Project run snapshot-only definition-deleted link UI.
+  - Marked PRD 09 US-017 passing with notes about whole-workflow archive, delete tombstones, catalog/picker filtering, and historical snapshot preservation.
+- Files changed
+  - `test/workflow-v2-lifecycle-checklist.test.mjs`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_09_implementation_completeness_contract.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck && node --test test/workflow-v2-lifecycle-checklist.test.mjs'` — passed, including typecheck and 5/5 lifecycle checklist tests.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run build && node --test --test-name-pattern "workflow archive API applies|workflow delete API tombstones" test/web-channel.test.mjs'` — passed, 2/2 targeted lifecycle integration tests.
+  - `python3 -m json.tool docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_09_implementation_completeness_contract.json` — passed.
+  - `git diff --check` — passed.
+- Browser verification, if UI changed
+  - Verified the container gateway at `http://127.0.0.1:4802/apps/chat` was reachable; no host gateways were touched.
+  - Used `browser-use --fresh-profile --session ralph-v2-us017` inside `pibo-dev-WorkflowsV2` with dev auth (`dev@pibo.local`).
+  - Opened `/apps/chat/workflows`, clicked `Archive workflow`, and verified the confirmation copy names whole-workflow identity scope, default catalog/Project picker hiding, archive-filter/history visibility, and historical Project snapshot rendering.
+  - Clicked `Delete workflow` without confirming deletion and verified tombstone copy, removal from catalog/picker/authoring/start surfaces, immutable historical snapshots, definition-deleted state, workflow-id confirmation placeholder, and disabled confirm button.
+  - Created a temporary UI-published workflow and configured Project workflow session through the dev-auth API, tombstoned that temporary workflow, opened `/apps/chat/projects/prj_5a970fee-44cc-48b8-910f-7b2cae003061/sessions/ps_d5c33ff1-6102-4bfb-b3b2-2650e6f93bf9`, and verified the Project workflow view shows `Definition deleted — snapshot-only definition-deleted state` with no live definition link.
+  - Saved screenshots inside the container: `/tmp/ralph-v2-us017-archive-delete-lifecycle.png` and `/tmp/ralph-v2-us017-definition-deleted-project-focused.png`.
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - Archive/delete aggregate stories can use a focused lifecycle checklist test as the bridge between Workflows UI confirmation affordances, lifecycle API filtering/tombstone behavior, and Project run-view deleted-definition links.
+  - Gotchas encountered
+    - The long-lived browser worker may lack the `pibo-agent` profile; use the profile picker or code-node handler fixtures when creating temporary browser-verification workflows.
+  - Useful context
+    - For browser checks, open archive/delete confirmation panels without submitting destructive actions; create and tombstone a temporary workflow only when a real snapshot-only Project deleted-definition state is needed.
+---

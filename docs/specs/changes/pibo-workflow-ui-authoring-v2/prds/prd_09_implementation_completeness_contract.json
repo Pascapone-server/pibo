@@ -265,8 +265,8 @@
         "Typecheck passes"
       ],
       "priority": 17,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added focused lifecycle checklist coverage binding archive/delete UI actions and confirmation copy, archive/delete API filtering and tombstone behavior, and Project run snapshot-only definition-deleted links to existing integration tests."
     },
     {
       "id": "US-018",

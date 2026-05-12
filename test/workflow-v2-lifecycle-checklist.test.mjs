@@ -90,6 +90,39 @@ test("Workflow V2 completeness covers publish and version lifecycle UI wiring", 
 	]);
 });
 
+test("Workflow V2 completeness covers archive/delete lifecycle UI and deleted-definition run links", async () => {
+	const apiSource = await readSource("src/apps/chat-ui/src/api.ts");
+	const workflowsAreaSource = await readSource("src/apps/chat-ui/src/WorkflowsArea.tsx");
+	const workflowViewSource = await readSource("src/apps/chat-ui/src/session-views/WorkflowXStateSessionView.tsx");
+	const webChannelTests = await readSource("test/web-channel.test.mjs");
+
+	assertAllMatch(apiSource, [
+		["archive client posts to the workflow identity archive route", /postWorkflowArchive[\s\S]*\/api\/chat\/workflows\/\$\{encodeURIComponent\(workflowId\)\}\/archive[\s\S]*method: "POST"/],
+		["delete client requires explicit workflow-id confirmation", /deleteWorkflow\(workflowId: string, input: \{ confirmWorkflowId: string \}\)[\s\S]*method: "DELETE"[\s\S]*body: JSON\.stringify\(input\)/],
+		["delete response exposes tombstone metadata for historical fallbacks", /WorkflowDeleteResponse[\s\S]*lastKnownTitle: string[\s\S]*lastKnownVersion\?: string[\s\S]*lastDefinitionHash\?: string/],
+	]);
+
+	assertAllMatch(workflowsAreaSource, [
+		["archive action is derived from catalog action metadata", /canArchive = published && hasWorkflowCatalogAction\(record, "archive"\)[\s\S]*Archive workflow/],
+		["delete action is derived from catalog action metadata", /canDelete = published && hasWorkflowCatalogAction\(record, "delete"\)[\s\S]*Delete workflow/],
+		["archive confirmation names whole-workflow scope and selection hiding", /Archiving applies to the whole workflow identity[\s\S]*hides this workflow from the default catalog and Project workflow selection lists/],
+		["delete confirmation names tombstoning and authoring/start removal", /Deleting tombstones the live workflow identity[\s\S]*removes this workflow from the default catalog, workflow pickers, duplicate\/edit\/publish\/archive actions, and new Project session creation/],
+		["delete confirmation names snapshot-only historical inspection", /Historical Project runs remain inspectable from immutable snapshots[\s\S]*definition-deleted state/],
+	]);
+
+	assertAllMatch(workflowViewSource, [
+		["run view explains snapshot-only history when definitions are deleted", /Snapshot-only history is shown when the live definition is deleted or unavailable/],
+		["run view renders definition-deleted state", /Definition deleted — snapshot-only definition-deleted state/],
+		["run view omits live links for snapshot-only deleted definitions", /model\.definitionLink\.status === "live" && definitionHref[\s\S]*Open live workflow definition[\s\S]*Historical run inspection uses the immutable Project session snapshot instead of a broken live definition link/],
+	]);
+
+	assertAllMatch(webChannelTests, [
+		["archive API proves identity-scope archive and selection hiding", /workflow archive API applies at workflow identity scope and hides archived workflows from selection[\s\S]*archivePayload\.archiveState\.workflowId, "ui-review-workflow"[\s\S]*defaultCatalogPayload\.workflows\.some\(\(workflow\) => workflow\.id === "ui-review-workflow"\), false/],
+		["delete API proves tombstone and live-catalog removal", /workflow delete API tombstones UI workflows while preserving Project snapshots[\s\S]*deletePayload\.deleted, true[\s\S]*defaultCatalogPayload\.workflows\.some\(\(workflow\) => workflow\.id === "ui-review-workflow"\), false/],
+		["delete API proves Project run snapshot fallback", /projectSession\.workflowDefinitionLink\.status, "snapshot_only_definition_deleted"[\s\S]*historicalRunPayload\.snapshot\.id, sessionPayload\.snapshot\.id[\s\S]*historicalRunPayload\.snapshot\.effectiveDefinition, sessionPayload\.snapshot\.effectiveDefinition/],
+	]);
+});
+
 test("Workflow V2 lifecycle tests cover archive filters, delete tombstones, and historical snapshots", async () => {
 	const catalogEntityTests = await readSource("packages/workflows/src/testing/workflow-catalog-entities.test.ts");
 	const webChannelTests = await readSource("test/web-channel.test.mjs");
