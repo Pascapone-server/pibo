@@ -297,8 +297,8 @@
         "Typecheck passes"
       ],
       "priority": 19,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Verified Project workflow human action controls: pending persisted wait tokens enrich Project workflow sessions, UI renders approve/reject/resume/cancel controls, resume payload validation blocks invalid payloads, and targeted integration tests cover token state validation and accepted/rejected actions."
     },
     {
       "id": "US-020",

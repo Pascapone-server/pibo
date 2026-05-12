@@ -1,5 +1,6 @@
 ## Codebase Patterns
 - Completeness-contract aggregate stories can be verified with focused source-level coverage tests that bind existing source/API/browser surfaces to the contract before marking the aggregate story passing.
+- For browser checks of Project human action controls, create/start a Project workflow session through the dev-auth API, seed persisted wait tokens in the container Project store, then open the Project session with `?view=workflow`.
 - Builder validation/publish completeness can pair source-level UI panel assertions with targeted `web-channel` validate, before-publish rejection, and version-allocation flows.
 - Workflow Builder coverage stories can pair a source-level UI/test matrix with targeted `web-channel` flows; compare layout-only changes by stripping `ui` metadata before checking runtime semantics.
 - Workflow Library buttons and labels should consume source/status-derived API `actions`/`editability` metadata rather than re-deriving code/UI mutation rules in React rows.
@@ -2236,4 +2237,32 @@
   - Saved screenshot: `/tmp/ralph-v2-us018-run-inspection.png` inside the container.
 - **Learnings for future iterations:**
   - Completeness-contract run inspection can be closed with the focused run-inspection source coverage plus the targeted web-channel tests for real session descendants and deleted-definition snapshot fallback, then a browser check against a started Project workflow session.
+---
+## 2026-05-12 17:35 CEST - US-019
+- What was implemented
+  - Completed the implementation-completeness story for human action controls by validating the existing Project Workflow/XState human action area against the V2 acceptance criteria.
+  - Confirmed pending actions are loaded from persisted workflow wait tokens, rendered in the run view, submitted through the Project workflow human-action route, and blocked by token-state/resume-payload validation before acceptance.
+  - Marked PRD 09 US-019 passing.
+- Files changed
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_09_implementation_completeness_contract.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck && npm run build && node --test test/workflow-v2-run-inspection-human-actions.test.mjs && node --test --test-name-pattern "chat web app lists and resolves Project workflow human wait tokens" test/web-channel.test.mjs'` — passed, including typecheck, build, 3/3 focused run-inspection/human-action tests, and 1/1 targeted web-channel human-action integration test.
+  - `python3 -m json.tool docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_09_implementation_completeness_contract.json` — passed.
+  - `git diff --check` — passed.
+- Browser verification, if UI changed
+  - Verified the container gateway at `http://127.0.0.1:4802/apps/chat` returned OK.
+  - Created dev-auth Project `US019 Human Actions Debug 1778599843`, configured workflow session `US019 Human Action Controls` for `standard-project@1.0.0`, and started run `wfr_4462705d-e0fc-4a81-bfd6-6a7acf22ed10` through the Chat Web API.
+  - Seeded persisted wait token `wwt_us019_controls` in the container Project store with registered Approve, Reject, Resume, and Cancel action refs plus a required resume payload schema.
+  - Used `browser-use --fresh-profile --session ralph-v2-us019` inside `pibo-dev-WorkflowsV2` with dev auth to open `/apps/chat/projects/prj_b482170c-0381-442b-825e-0cddf3c45619/sessions/ps_d0a1d26d-e864-4c77-8313-7dc173b3fc53?view=workflow`.
+  - Verified the Workflow/XState human action area shows the persisted pending wait token, Approve/Reject/Resume/Cancel controls, resume payload schema, and boundary copy; clicked Resume with the default `{}` payload and verified the inline diagnostic for the missing required `comment` field.
+  - Saved screenshot: `/tmp/ralph-v2-us019-human-actions.png` inside the container.
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - Persisted wait tokens can be seeded in the container Project store after API-created Project workflow runs to exercise real human-action UI controls in browser checks.
+  - Gotchas encountered
+    - The long-lived dev gateway did not have a `pibo-agent` profile registered; omitting `profile` used the gateway default `codex-compat-openai-web` profile and still created a valid `standard-project@1.0.0` workflow session.
+    - `browser-use wait` in this environment supports `selector` and `text`, not `time`; use shell `sleep` between a click and async diagnostic checks.
+  - Useful context
+    - Browser eval commands should avoid shell-interpreted JavaScript template literals in selectors; quote CSS selectors with normal strings when running through `bash`.
 ---
