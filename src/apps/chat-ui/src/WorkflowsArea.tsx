@@ -25,6 +25,7 @@ import {
 	getWorkflowDraft,
 	getWorkflowGuardPicker,
 	getWorkflowHandlerPicker,
+	getWorkflowHumanActionPicker,
 	getWorkflowProfilePicker,
 	getWorkflowVersionPicker,
 	getWorkflowVersionHistory,
@@ -84,6 +85,8 @@ type WorkflowGraphProjection = {
 type WorkflowVersionSelection = { workflowId: string; workflowVersion: string };
 type WorkflowPortKindSelection = "text" | "json";
 type OptionalWorkflowPortKindSelection = "none" | WorkflowPortKindSelection;
+type WorkflowHumanActionFormChoice = { id: string; kind?: string };
+type WorkflowHumanTimeoutKind = "none" | "milliseconds" | "seconds" | "minutes" | "iso8601";
 type WorkflowSettingsFormState = {
 	title: string;
 	description: string;
@@ -115,6 +118,9 @@ type WorkflowNodeInspectorFormState = {
 	workflowVersionKey: string;
 	humanPrompt: string;
 	humanSchemaText: string;
+	humanActionRefs: WorkflowHumanActionFormChoice[];
+	humanTimeoutKind: WorkflowHumanTimeoutKind;
+	humanTimeoutValue: string;
 };
 type WorkflowEdgeInspectorFormState = {
 	sourceNodeId: string;
@@ -828,6 +834,8 @@ function WorkflowGraphCanvas({ draft, onDraftChange }: { draft: WorkflowDraftRec
 	const [selectedWorkflowVersionKey, setSelectedWorkflowVersionKey] = useState("");
 	const [adapterOptions, setAdapterOptions] = useState<WorkflowRegisteredRefOption[]>([]);
 	const [selectedAdapterRef, setSelectedAdapterRef] = useState("");
+	const [humanActionOptions, setHumanActionOptions] = useState<WorkflowRegisteredRefOption[]>([]);
+	const [selectedHumanActionRef, setSelectedHumanActionRef] = useState("");
 
 	useEffect(() => {
 		let cancelled = false;
@@ -862,6 +870,20 @@ function WorkflowGraphCanvas({ draft, onDraftChange }: { draft: WorkflowDraftRec
 				if (cancelled) return;
 				setAdapterOptions(picker.options);
 				setSelectedAdapterRef((current) => current || (picker.options[0]?.id ?? ""));
+			})
+			.catch(() => undefined);
+		return () => {
+			cancelled = true;
+		};
+	}, []);
+
+	useEffect(() => {
+		let cancelled = false;
+		getWorkflowHumanActionPicker()
+			.then((picker) => {
+				if (cancelled) return;
+				setHumanActionOptions(picker.options);
+				setSelectedHumanActionRef((current) => current || (picker.options[0]?.id ?? ""));
 			})
 			.catch(() => undefined);
 		return () => {
@@ -939,6 +961,16 @@ function WorkflowGraphCanvas({ draft, onDraftChange }: { draft: WorkflowDraftRec
 		const definition = addWorkflowGraphAdapterNode(draft.definition, nodeId, position, selectedAdapterRef);
 		setSelectedElement({ type: "node", id: nodeId });
 		void saveDefinition(definition, `Added adapter node ${nodeId} for ${selectedAdapterRef}.`);
+	};
+
+	const addHumanNode = () => {
+		if (!selectedHumanActionRef) return;
+		const nodeId = nextWorkflowNodeId(draft.definition, "human");
+		const position = nextGraphNodePosition(nodes);
+		const actionOption = humanActionOptions.find((option) => option.id === selectedHumanActionRef);
+		const definition = addWorkflowGraphHumanNode(draft.definition, nodeId, position, createHumanActionChoice(selectedHumanActionRef, actionOption?.kind));
+		setSelectedElement({ type: "node", id: nodeId });
+		void saveDefinition(definition, `Added human node ${nodeId} with action ${selectedHumanActionRef}.`);
 	};
 
 	const connectSelectedNodes = (sourceId = sourceNodeId, targetId = targetNodeId) => {
@@ -1083,8 +1115,31 @@ function WorkflowGraphCanvas({ draft, onDraftChange }: { draft: WorkflowDraftRec
 							<Link2 size={13} />
 							Add Adapter node
 						</button>
+						<label className="grid gap-1 font-semibold text-slate-300">
+							<span>Human action ref</span>
+							<select
+								aria-label="Human node action ref"
+								className="rounded-sm border border-slate-700 bg-[#151f24] px-2 py-1.5 text-slate-100"
+								value={selectedHumanActionRef}
+								onChange={(event) => setSelectedHumanActionRef(event.target.value)}
+								disabled={isSaving || !humanActionOptions.length}
+							>
+								{humanActionOptions.length ? humanActionOptions.map((option) => (
+									<option key={option.id} value={option.id}>{humanActionOptionLabel(option)}</option>
+								)) : <option value="">No registered human actions</option>}
+							</select>
+						</label>
+						<button
+							type="button"
+							className="inline-flex items-center justify-center gap-2 rounded-sm border border-[#11a4d4]/50 px-3 py-2 text-xs font-semibold text-[#8bdcf4] transition hover:border-[#11a4d4] hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+							onClick={addHumanNode}
+							disabled={isSaving || !selectedHumanActionRef}
+						>
+							<MousePointer2 size={13} />
+							Add Human node
+						</button>
 						<div className="rounded-sm border border-slate-800 bg-[#151f24]/70 p-2 text-[11px] leading-5 text-slate-500">
-							Workflow nodes store only a workflow id/version reference. Adapter nodes store only registered deterministic adapter refs. V2 does not inline-expand nested workflow internals or create inline transform code.
+							Workflow nodes store only a workflow id/version reference. Adapter and human nodes store only registered deterministic adapter or human action refs. V2 does not inline-expand nested workflow internals or create inline transform code.
 						</div>
 						<div className="grid grid-cols-2 gap-2">
 							<label className="grid gap-1 font-semibold text-slate-300">
@@ -1280,9 +1335,11 @@ function WorkflowNodeInspector({ draft, nodeId, node, isSaving, onSaveDefinition
 	const [handlerPicker, setHandlerPicker] = useState<WorkflowHandlerPickerResponse | undefined>();
 	const [adapterPicker, setAdapterPicker] = useState<WorkflowRegisteredRefPickerResponse | undefined>();
 	const [workflowPicker, setWorkflowPicker] = useState<WorkflowVersionPickerResponse | undefined>();
+	const [humanActionPicker, setHumanActionPicker] = useState<WorkflowRegisteredRefPickerResponse | undefined>();
 	const nodeKind = workflowNodeKind(node);
 	const nodeDiagnostics = workflowDiagnosticsForNode(draft.diagnostics, nodeId);
 	const selectedAdapterOption = adapterPicker?.options.find((option) => option.id === (adapterPicker?.selectedRefId ?? form.adapterRef));
+	const selectedHumanActionIds = useMemo(() => new Set(form.humanActionRefs.map((action) => action.id)), [form.humanActionRefs]);
 
 	useEffect(() => {
 		setForm(createWorkflowNodeInspectorFormState(node));
@@ -1336,8 +1393,28 @@ function WorkflowNodeInspector({ draft, nodeId, node, isSaving, onSaveDefinition
 		};
 	}, [nodeKind, form.workflowVersionKey]);
 
+	useEffect(() => {
+		if (nodeKind !== "human") return;
+		let cancelled = false;
+		getWorkflowHumanActionPicker()
+			.then((picker) => {
+				if (!cancelled) setHumanActionPicker(picker);
+			})
+			.catch(() => undefined);
+		return () => {
+			cancelled = true;
+		};
+	}, [nodeKind]);
+
 	const update = <K extends keyof WorkflowNodeInspectorFormState>(key: K, value: WorkflowNodeInspectorFormState[K]) => {
 		setForm((current) => ({ ...current, [key]: value }));
+	};
+
+	const toggleHumanAction = (option: WorkflowRegisteredRefOption, checked: boolean) => {
+		setForm((current) => ({
+			...current,
+			humanActionRefs: toggleHumanActionChoice(current.humanActionRefs, option, checked),
+		}));
 	};
 
 	const saveNode = () => {
@@ -1431,7 +1508,63 @@ function WorkflowNodeInspector({ draft, nodeId, node, isSaving, onSaveDefinition
 							<span>Human prompt</span>
 							<textarea className="min-h-24 rounded-sm border border-slate-700 bg-[#151f24] px-2 py-1.5 text-slate-100" value={form.humanPrompt} onChange={(event) => update("humanPrompt", event.target.value)} />
 						</label>
-						<WorkflowSchemaTextEditor label="Human node action schema JSON" value={form.humanSchemaText} onChange={(value) => update("humanSchemaText", value)} />
+						<WorkflowSchemaTextEditor label="Human node resume payload schema JSON" value={form.humanSchemaText} onChange={(value) => update("humanSchemaText", value)} />
+						<div className="grid gap-2 rounded-sm border border-slate-800 bg-[#151f24]/70 p-3" aria-label="Human action choices">
+							<div>
+								<div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Registered action choices</div>
+								<p className="mt-1 text-[11px] leading-5 text-slate-500">
+									Actions are selected from the Workflow Registry. The label, action kind, and payload requirements come from picker metadata.
+								</p>
+							</div>
+							{humanActionPicker?.options.length ? humanActionPicker.options.map((option) => (
+								<label key={option.id} className="grid gap-1 rounded-sm border border-slate-800 bg-[#101d22] p-2 text-slate-300">
+									<span className="inline-flex items-center gap-2 font-semibold">
+										<input
+											type="checkbox"
+											className="h-3.5 w-3.5 accent-[#11a4d4]"
+											checked={selectedHumanActionIds.has(option.id)}
+											onChange={(event) => toggleHumanAction(option, event.target.checked)}
+										/>
+										<span>{option.displayName}</span>
+										<WorkflowPill label={`kind: ${option.kind ?? "registered"}`} />
+									</span>
+									<span className="text-[11px] font-normal leading-5 text-slate-500">{option.description ?? option.id}</span>
+									<span className="text-[11px] font-normal leading-5 text-slate-500">Payload requirements: {option.paramsSchema ? JSON.stringify(option.paramsSchema) : "none"}</span>
+								</label>
+							)) : (
+								<div className="rounded-sm border border-dashed border-slate-700 p-2 text-[11px] leading-5 text-slate-500">No registered human actions are available from the picker.</div>
+							)}
+							<WorkflowInspectorPickerDiagnostics diagnostics={humanActionPicker?.diagnostics ?? []} />
+							<div className="flex flex-wrap gap-2 text-[11px]" aria-label="Selected human action refs">
+								{form.humanActionRefs.length ? form.humanActionRefs.map((action) => (
+									<WorkflowPill key={`${action.id}:${action.kind ?? ""}`} label={`${action.id}${action.kind ? ` (${action.kind})` : ""}`} />
+								)) : <span className="text-slate-500">No human action refs selected.</span>}
+							</div>
+						</div>
+						<div className="grid gap-2 rounded-sm border border-slate-800 bg-[#151f24]/70 p-3 md:grid-cols-[1fr_1fr]" aria-label="Human node timeout">
+							<label className="grid gap-1 font-semibold text-slate-300">
+								<span>Timeout kind</span>
+								<select className="rounded-sm border border-slate-700 bg-[#101d22] px-2 py-1.5 text-slate-100" value={form.humanTimeoutKind} onChange={(event) => update("humanTimeoutKind", event.target.value as WorkflowHumanTimeoutKind)}>
+									<option value="none">No timeout</option>
+									<option value="milliseconds">Milliseconds</option>
+									<option value="seconds">Seconds</option>
+									<option value="minutes">Minutes</option>
+									<option value="iso8601">ISO-8601 duration</option>
+								</select>
+							</label>
+							<label className="grid gap-1 font-semibold text-slate-300">
+								<span>Timeout value</span>
+								<input
+									className="rounded-sm border border-slate-700 bg-[#101d22] px-2 py-1.5 text-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+									type={form.humanTimeoutKind === "iso8601" ? "text" : "number"}
+									min={form.humanTimeoutKind === "iso8601" ? undefined : 1}
+									placeholder={form.humanTimeoutKind === "iso8601" ? "PT1H" : "60"}
+									value={form.humanTimeoutValue}
+									onChange={(event) => update("humanTimeoutValue", event.target.value)}
+									disabled={form.humanTimeoutKind === "none"}
+								/>
+							</label>
+						</div>
 					</div>
 				) : null}
 				<WorkflowInspectorDiagnostics diagnostics={nodeDiagnostics} emptyLabel="No diagnostics for selected node." />
@@ -2687,6 +2820,33 @@ function createDefaultAdapterNodeDefinition(nodeId: string, adapterRef: string, 
 	};
 }
 
+function addWorkflowGraphHumanNode(definition: WorkflowDraftDefinition, nodeId: string, position: GraphPosition, action: WorkflowHumanActionFormChoice): WorkflowDraftDefinition {
+	const nodes = readWorkflowNodeDefinitions(definition);
+	const nextDefinition: WorkflowDraftDefinition = {
+		...definition,
+		nodes: {
+			...nodes,
+			[nodeId]: createDefaultHumanNodeDefinition(nodeId, action),
+		},
+		edges: isWorkflowJsonObject(definition.edges) ? definition.edges : {},
+	};
+	if (!workflowInitialNodeIds(nextDefinition).length) nextDefinition.initial = nodeId;
+	return writeWorkflowGraphPositions(nextDefinition, { ...readWorkflowPositions(definition), [nodeId]: position });
+}
+
+function createDefaultHumanNodeDefinition(nodeId: string, action: WorkflowHumanActionFormChoice): WorkflowJsonObject {
+	return {
+		kind: "human",
+		label: `Human ${nodeId}`,
+		prompt: "Review the workflow context and choose an available action.",
+		input: createWorkflowPort("text", "Context for human review.", undefined),
+		output: createWorkflowPort("json", "Human action result.", undefined, formatWorkflowSchemaText(DEFAULT_WORKFLOW_JSON_SCHEMA)),
+		schema: cloneWorkflowJsonObject(DEFAULT_WORKFLOW_JSON_SCHEMA),
+		actions: [createHumanActionObject(action)],
+		timeout: { kind: "minutes", value: 60 },
+	};
+}
+
 function addWorkflowGraphEdge(definition: WorkflowDraftDefinition, edgeId: string, sourceId: string, targetId: string): WorkflowDraftDefinition {
 	return {
 		...definition,
@@ -2817,6 +2977,9 @@ function createWorkflowNodeInspectorFormState(node: WorkflowJsonObject): Workflo
 		workflowVersionKey: workflowId && workflowVersion ? workflowVersionSelectionKey(workflowId, workflowVersion) : "",
 		humanPrompt: typeof node.prompt === "string" ? node.prompt : "",
 		humanSchemaText: node.schema === undefined ? "" : formatWorkflowSchemaText(node.schema),
+		humanActionRefs: readHumanActionChoices(node.actions),
+		humanTimeoutKind: readHumanTimeoutKind(node.timeout),
+		humanTimeoutValue: formatHumanTimeoutValue(node.timeout),
 	};
 }
 
@@ -2858,6 +3021,8 @@ function applyWorkflowNodeInspectorForm(definition: WorkflowDraftDefinition, nod
 		writeOptionalString(nextNode, "prompt", form.humanPrompt);
 		if (form.humanSchemaText.trim()) nextNode.schema = parseWorkflowSchemaText(form.humanSchemaText);
 		else delete nextNode.schema;
+		writeHumanActionChoices(nextNode, form.humanActionRefs);
+		writeHumanTimeout(nextNode, form.humanTimeoutKind, form.humanTimeoutValue);
 	}
 	return {
 		...definition,
@@ -3135,6 +3300,61 @@ function createRegisteredAdapterRef(adapterRef: string): WorkflowJsonObject {
 	return { kind: "adapter", language: "typescript", id: adapterRef };
 }
 
+function readHumanActionChoices(value: unknown): WorkflowHumanActionFormChoice[] {
+	if (!Array.isArray(value)) return [];
+	return value.flatMap((entry): WorkflowHumanActionFormChoice[] => {
+		if (!isWorkflowJsonObject(entry) || typeof entry.id !== "string" || !entry.id.trim()) return [];
+		return [createHumanActionChoice(entry.id, typeof entry.kind === "string" ? entry.kind : undefined)];
+	});
+}
+
+function createHumanActionChoice(id: string, kind?: string): WorkflowHumanActionFormChoice {
+	return kind ? { id, kind } : { id };
+}
+
+function createHumanActionObject(action: WorkflowHumanActionFormChoice): WorkflowJsonObject {
+	return action.kind ? { id: action.id, kind: action.kind } : { id: action.id };
+}
+
+function toggleHumanActionChoice(current: WorkflowHumanActionFormChoice[], option: WorkflowRegisteredRefOption, checked: boolean): WorkflowHumanActionFormChoice[] {
+	if (!checked) return current.filter((action) => action.id !== option.id);
+	if (current.some((action) => action.id === option.id)) return current;
+	return [...current, createHumanActionChoice(option.id, option.kind)];
+}
+
+function writeHumanActionChoices(target: WorkflowJsonObject, actions: WorkflowHumanActionFormChoice[]): void {
+	if (!actions.length) {
+		delete target.actions;
+		return;
+	}
+	target.actions = actions.map(createHumanActionObject);
+}
+
+function readHumanTimeoutKind(value: unknown): WorkflowHumanTimeoutKind {
+	if (!isWorkflowJsonObject(value) || typeof value.kind !== "string") return "none";
+	return ["milliseconds", "seconds", "minutes", "iso8601"].includes(value.kind) ? value.kind as WorkflowHumanTimeoutKind : "none";
+}
+
+function formatHumanTimeoutValue(value: unknown): string {
+	if (!isWorkflowJsonObject(value)) return "";
+	return typeof value.value === "number" || typeof value.value === "string" ? String(value.value) : "";
+}
+
+function writeHumanTimeout(target: WorkflowJsonObject, kind: WorkflowHumanTimeoutKind, value: string): void {
+	const trimmed = value.trim();
+	if (kind === "none" || !trimmed) {
+		delete target.timeout;
+		return;
+	}
+	if (kind === "iso8601") {
+		target.timeout = { kind, value: trimmed };
+		return;
+	}
+	const numericValue = Number(trimmed);
+	if (Number.isFinite(numericValue) && numericValue > 0) target.timeout = { kind, value: numericValue };
+	else delete target.timeout;
+}
+
 function formatWorkflowParamsText(value: unknown): string {
 	if (value === undefined) return "";
 	try {
@@ -3187,6 +3407,10 @@ function workflowDiagnosticsForEdge(diagnostics: WorkflowDraftDiagnostic[], edge
 
 function registeredRefOptionLabel(option: WorkflowRegisteredRefOption): string {
 	return `${option.displayName} (${option.id})`;
+}
+
+function humanActionOptionLabel(option: WorkflowRegisteredRefOption): string {
+	return `${option.displayName}${option.kind ? ` · ${option.kind}` : ""} (${option.id})`;
 }
 
 function readInitialProfileRef(): string {

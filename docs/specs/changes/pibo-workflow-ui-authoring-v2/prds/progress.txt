@@ -1310,3 +1310,37 @@
   - `test/web-channel.test.mjs` imports compiled `dist/` modules; rebuild before targeted test runs after changing Chat Web server code.
   - JSON object schemas used in V2 fixtures must include `required` and `additionalProperties: false` to satisfy the workflow structured-output subset.
 ---
+## 2026-05-12 07:11 CEST - US-006
+- What was implemented
+  - Added Workflow Builder graph controls to create Human nodes from registered human action picker metadata.
+  - Extended the Human node inspector with prompt editing, raw JSON resume payload schema editing, registered action choice checkboxes, selected action ref display, and timeout kind/value controls.
+  - Saved Human node action refs and timeout values back into the draft Pibo Workflow IR while preserving existing missing refs for diagnostics.
+- Files changed
+  - `src/apps/chat-ui/src/WorkflowsArea.tsx`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_05_composition_node_and_capability_pickers.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck'` — passed.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run chat-ui:build'` — passed.
+- Browser verification, if UI changed
+  - Restarted the container web gateway and verified `http://127.0.0.1:4802/apps/chat` returned OK.
+  - Used `browser-use --fresh-profile --session ralph-v2-human` inside `pibo-dev-WorkflowsV2` to open `/apps/chat/workflows/drafts/v2-starter-draft` as `dev@pibo.local`.
+  - Verified the graph controls expose `Human action ref` and `Add Human node`.
+  - Added a Human node, verified the inspector renders Human prompt, resume payload schema, registered action choices, action kind labels, payload requirements, and timeout controls.
+  - Selected the Reject action, changed timeout to 30 seconds, saved the node inspector, and confirmed the draft API stored approve/reject action refs plus `timeout: { kind: "seconds", value: 30 }`.
+  - Saved screenshot: `/tmp/ralph-v2-human-node-config.png` inside the container.
+- **Learnings for future iterations:**
+  - Human node inspector state should preserve unknown existing action refs so validation diagnostics remain visible until the user replaces them with registered picker choices.
+---
+## 2026-05-12 07:13 CEST - US-006 validation addendum
+- What was implemented
+  - No code changes in this addendum; recorded the full regression test result after the initial progress entry.
+- Files changed
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm test'` — passed, 334/334 tests.
+- Browser verification, if UI changed
+  - Browser verification remains as recorded in the US-006 entry above.
+- **Learnings for future iterations:**
+  - Full `npm test` now covers 334 Node tests after the current Workflow UI Authoring V2 additions.
+---
