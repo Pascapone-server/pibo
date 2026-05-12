@@ -732,3 +732,26 @@
   - Browser `innerText` reflects CSS uppercase transforms, so text assertions for uppercase-styled headings should normalize to lowercase.
   - Starting the worker gateway via a shell command that contains `runWebGatewayServer` can cause `pgrep`/`pkill` self-matches; avoid those patterns and keep the Node process alive after startup.
 ---
+## 2026-05-12 02:52 CEST - US-004
+- What was implemented
+  - Completed the product-overview duplicate-to-draft authoring path story by verifying the existing Workflow Library and Builder flow against the V2 acceptance criteria.
+  - Confirmed eligible code and UI published workflow rows expose `Duplicate to draft`, code workflow rows do not expose `Edit published`, and duplicating `standard-project@1.0.0` opens a UI draft owned by the Workflow Registry/store.
+  - Marked PRD 01 US-004 passing.
+- Files changed
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_01_product_overview.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck'` — passed.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run build && node --test --test-name-pattern "workflow builder draft loader" test/web-channel.test.mjs'` — passed, 1/1 targeted web-channel test.
+  - `python3 -m json.tool docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_01_product_overview.json` — passed.
+  - `git diff --check` — passed.
+- Browser verification, if UI changed
+  - Verified the container gateway was serving `http://127.0.0.1:4802/apps/chat`.
+  - Used `browser-use --fresh-profile` inside `pibo-dev-WorkflowsV2` with dev auth to open `/apps/chat/workflows`.
+  - Verified `Workflow Library`, `Workflow Builder`, `Standard Project`, `UI Review Workflow`, and `Duplicate to draft` are visible.
+  - Verified the `Standard Project` code workflow row has `Duplicate to draft` and does not expose `Edit published`, while the UI workflow row exposes both duplicate and edit-published actions.
+  - Clicked `Duplicate to draft` for `standard-project@1.0.0` and verified navigation to `/apps/chat/workflows/drafts/draft_standard-project_1-0-0_*` with `Standard Project Draft`, `WorkflowBuilderInfo.duplicatedDraft`, `Loaded UI draft`, and the raw XState read-only notice.
+  - Saved screenshot: `/tmp/ralph-v2-product-duplicate-to-draft.png` inside the container.
+- **Learnings for future iterations:**
+  - Product-overview stories can be completed by focused PRD implementations; still verify the user-facing end-to-end acceptance criteria before marking the overview story passing.
+---
