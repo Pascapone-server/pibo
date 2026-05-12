@@ -958,3 +958,26 @@
   - Start-blocked diagnostics need durable Project-scoped lifecycle events because configured sessions can be blocked before `workflowRunId` is assigned.
   - Browser routes for Project sessions use `/apps/chat/projects/:projectId/sessions/:piboSessionId?view=workflow`; query-only `projectId`/`piboSessionId` does not select the session route.
 ---
+## 2026-05-12 04:13 CEST - US-005
+- What was implemented
+  - Completed the product-overview Project run inspection story by validating the existing Projects Workflow/XState run view against the V2 acceptance criteria.
+  - Confirmed workflow-backed Project sessions route to the Workflow/XState projection plus run inspection, with explicit empty states for status/current-node context, run history, node attempts, edge transfers, output, errors, and pending human actions.
+  - Confirmed a non-workflow Project session keeps the Terminal view fallback and does not expose the Workflow view for that session kind.
+- Files changed
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_01_product_overview.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck'` — passed.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run build && node --test --test-name-pattern "configured Project workflow sessions|project bootstrap includes real workflow session descendants" test/web-channel.test.mjs'` — passed, 2/2 targeted web-channel tests.
+  - `python3 -m json.tool docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_01_product_overview.json` — passed.
+  - `git diff --check` — passed.
+- Browser verification, if UI changed
+  - Verified the container gateway was serving `http://127.0.0.1:4802/apps/chat`.
+  - Created dev-auth Project `Product Run Inspection` with workflow-backed session `Product Run Inspection Workflow` for `standard-project@1.0.0` and a legacy simple-chat session for Terminal fallback.
+  - Used `browser-use --fresh-profile` inside `pibo-dev-WorkflowsV2` to open the workflow session with `?view=workflow` and verified `Workflow / XState Projection`, `Workflow run inspection`, `Status`, `Current node`, `Run history`, `Node attempts`, `Edge transfers`, `Output`, `Error`, `Human action area`, `No pending human action`, and explicit no-run/no-output/no-error empty states.
+  - Opened the simple-chat Project session and verified the Terminal view shows `No visible trace rows yet.` plus `Workflow view unavailable for this Project session kind`.
+  - Saved screenshots inside the container: `/tmp/ralph-v2-product-run-inspection.png` and `/tmp/ralph-v2-product-terminal-fallback.png`.
+- **Learnings for future iterations:**
+  - Product-overview stories can often be completed by validating the already-landed focused PRD implementation; keep the overview PRD update limited to that story.
+  - For Project routing browser checks, create both a workflow-backed session and a non-workflow fallback session in the same Project so the positive Workflow view and safe Terminal fallback are verified together.
+---
