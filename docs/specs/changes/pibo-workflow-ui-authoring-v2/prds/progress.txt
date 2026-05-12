@@ -1600,3 +1600,25 @@
   - Native browser prompts are hard to verify through `browser-use`; use DOM-rendered confirmation panels for destructive workflow lifecycle safeguards.
   - Long-lived worker data may have archived/deleted static fixture workflows, so browser checks should create or target a currently published UI workflow when verifying lifecycle action affordances.
 ---
+## 2026-05-12 11:36 CEST - US-007 validation addendum
+- What was implemented
+  - Added source-level regression coverage for the Workflow Library lifecycle confirmation copy and delete-id gating.
+  - Re-ran focused quality checks and browser verification for the lifecycle confirmation and permission-safeguard story already implemented in `456cfa0`.
+- Files changed
+  - `test/workflow-v2-lifecycle-confirmation-ui.test.mjs`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck && npm run chat-ui:build && node --test test/workflow-v2-lifecycle-confirmation-ui.test.mjs && npm run build && node --test --test-name-pattern "workflow catalog lifecycle APIs create" test/web-channel.test.mjs'` — passed.
+  - `python3 -m json.tool docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_06_versioning_archive_delete_lifecycle.json` — passed.
+  - `git diff --check` — passed.
+- Browser verification, if UI changed
+  - Restarted the container web gateway from rebuilt `/workspace/dist` without touching host gateways and verified `http://127.0.0.1:4802/apps/chat` returned OK.
+  - Used `browser-use --fresh-profile --session ralph-v2-lifecycle` inside `pibo-dev-WorkflowsV2` with dev auth (`dev@pibo.local`).
+  - Opened `/apps/chat/workflows`, created a temporary UI-published workflow for verification, and verified its Workflow Library row exposes UI-only `Archive workflow` and `Delete workflow` actions.
+  - Verified the Archive confirmation copy through the `Archive workflow confirmation` region and cancelled without archiving the target verification workflow.
+  - Verified the Delete confirmation copy through the `Delete workflow confirmation` region and confirmed the destructive button stayed disabled until the workflow id was typed with `browser-use input`.
+  - Saved screenshot: `/tmp/ralph-v2-lifecycle-confirmation.png` inside the container.
+- **Learnings for future iterations:**
+  - Browser checks for React controlled inputs should use `browser-use input <index> <text>` when verifying disabled/enabled state; direct DOM value assignment may not update React state.
+  - `browser-use wait text` can miss confirmation panel text in scrolled two-column layouts; query the region by `aria-label` or inspect HTML/textContent when verifying lifecycle copy.
+---
