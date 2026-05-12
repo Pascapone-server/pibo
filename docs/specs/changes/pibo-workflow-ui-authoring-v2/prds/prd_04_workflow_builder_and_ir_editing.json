@@ -78,8 +78,8 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Raw Pibo Workflow IR editor is implemented in the builder. Valid raw JSON saves through the draft PATCH rawDefinitionText path; invalid text returns WorkflowBuilderWarning.invalidRawIrText, preserves the last valid draft definition, and keeps the invalid editor text visible for repair."
     },
     {
       "id": "US-006",
