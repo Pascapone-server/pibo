@@ -3088,6 +3088,18 @@ test("workflow security boundary validates registered refs and rejects inline ex
 		assert.ok(invalidParamsPatchPayload.diagnostics.some((diagnostic) => diagnostic.code === "WorkflowGraphError.invalidGuardParams" && diagnostic.path === "$.edges.collect-to-plan.guard.params.expected" && diagnostic.edgeId === "collect-to-plan"));
 		assert.ok(invalidParamsPatchPayload.diagnostics.some((diagnostic) => diagnostic.code === "WorkflowGraphError.invalidAdapterParams" && diagnostic.path === "$.edges.plan-to-review.adapter.transform.params.format" && diagnostic.edgeId === "plan-to-review"));
 
+		const incompatibleAdapterOutputDefinition = structuredClone(secureDefinition);
+		incompatibleAdapterOutputDefinition.edges["plan-to-review"].adapter.output = planPort;
+		const incompatibleAdapterOutputResponse = await fetch(`${baseURL}/api/chat/workflows/drafts/${encodeURIComponent(draftId)}`, {
+			method: "PATCH",
+			headers: jsonHeaders,
+			body: JSON.stringify({ definition: incompatibleAdapterOutputDefinition, editTrigger: "edge_edit" }),
+		});
+		assert.equal(incompatibleAdapterOutputResponse.status, 200);
+		const incompatibleAdapterOutputPayload = await incompatibleAdapterOutputResponse.json();
+		assert.equal(incompatibleAdapterOutputPayload.validation.ok, false);
+		assert.ok(incompatibleAdapterOutputPayload.diagnostics.some((diagnostic) => diagnostic.code === "WorkflowGraphError.incompatibleEdgeAdapterOutput" && diagnostic.path === "$.edges.plan-to-review.adapter.output" && diagnostic.edgeId === "plan-to-review"));
+
 		const invalidDefinition = structuredClone(secureDefinition);
 		invalidDefinition.nodes.collect.profile.id = "missing.profiles.inline";
 		invalidDefinition.nodes.plan.handler = "missing.handlers.inline";

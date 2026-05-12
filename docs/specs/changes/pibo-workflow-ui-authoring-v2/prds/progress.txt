@@ -2131,3 +2131,30 @@
 - **Learnings for future iterations:**
   - PRD 09 aggregate stories can often be completed by adding focused coverage that binds already-implemented UI controls to backend publish/start gates, then marking the aggregate story passing.
 ---
+## 2026-05-12 16:39 CEST - US-015
+- What was implemented
+  - Completed the implementation-completeness story for edge adapter, guard, and state editing.
+  - Added focused composition-boundary coverage for typed edge ports, registered guard/edge-adapter refs, paramsSchema-gated params editors, explicit edge adapter fix actions, and simple state mapping controls.
+  - Added web-channel validation coverage for edge adapter output incompatibility diagnostics.
+  - Marked PRD 09 US-015 passing.
+- Files changed
+  - `test/workflow-v2-composition-boundaries.test.mjs`
+  - `test/web-channel.test.mjs`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_09_implementation_completeness_contract.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `node --check test/workflow-v2-composition-boundaries.test.mjs && node --check test/web-channel.test.mjs && python3 -m json.tool docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_09_implementation_completeness_contract.json >/dev/null && git diff --check` — passed.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck && npm run build && node --test test/workflow-v2-composition-boundaries.test.mjs test/workflow-v2-state-mapping-ui.test.mjs test/web-channel.test.mjs'` — passed, 76/76 tests.
+- Browser verification, if UI changed
+  - Verified the container gateway at `http://127.0.0.1:4802/apps/chat` returned OK.
+  - Used `browser-use --fresh-profile --session ralph-v2-us015` inside `pibo-dev-WorkflowsV2` with dev auth (`dev@pibo.local`) to open `/apps/chat/workflows/drafts/draft_standard-project_1-0-0_d2823f93`.
+  - Selected workflow edges and verified typed source/target port fields, registered Guard ref and Edge adapter ref selects, paramsSchema-gated Guard params JSON and Edge adapter params JSON panels, simple state mapping dropdown controls, and the compatible edge adapter dialog with From/To schema previews plus `Use as edge adapter` and `Insert adapter node` actions.
+  - Saved screenshot: `/tmp/ralph-v2-us015-edge-guard-state.png` inside the container.
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - Edge/guard/state aggregate coverage can bind existing UI source assertions to web-channel validation diagnostics for adapter output compatibility and paramsSchema-gated refs.
+  - Gotchas encountered
+    - Browser `innerText` uppercases styled params editor labels; lower-case text checks or `browser-use state` are safer for verifying headings like `Guard params JSON`.
+  - Useful context
+    - The duplicated `standard-project@1.0.0` draft `draft_standard-project_1-0-0_d2823f93` contains typed edges with registered guard and edge-adapter refs, which makes it useful for browser checks of edge inspectors and adapter dialogs.
+---
