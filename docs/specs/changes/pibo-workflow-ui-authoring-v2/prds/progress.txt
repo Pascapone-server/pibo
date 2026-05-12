@@ -2364,3 +2364,23 @@
   - Useful context
     - For checklist-story browser verification, a started `standard-project@1.0.0` Project workflow session is enough to validate the Workflow/XState inspection shell and empty human-action state without seeding wait tokens.
 ---
+## 2026-05-12 20:58 CEST - US-024
+- What was implemented
+  - Added focused builder/security checklist tests that map visual graph editing, raw Pibo Workflow IR, raw JSON schema editing, prompt asset/direct prompt editing, composition, validation diagnostics, adapter/guard/state boundaries, missing registered refs, and explicit non-goals to the existing V2 source and integration coverage.
+  - Marked PRD 09 US-024 passing with notes describing the checklist coverage.
+- Files changed
+  - `test/workflow-v2-builder-security-checklist.test.mjs`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_09_implementation_completeness_contract.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `node --test test/workflow-v2-builder-security-checklist.test.mjs` — passed, 3/3 tests.
+  - `docker exec pibo-dev-WorkflowsV2Resume bash -lc 'cd /workspace && npm run typecheck && node --test test/workflow-v2-builder-security-checklist.test.mjs test/workflow-v2-builder-editing-raw-ir.test.mjs test/workflow-v2-composition-boundaries.test.mjs test/workflow-v2-security-boundary.test.mjs test/workflow-v2-deferrals.test.mjs test/workflow-v2-state-mapping-ui.test.mjs && npm run build && node --test --test-name-pattern "workflow builder draft loader opens starter and duplicated UI draft wrappers|workflow validation pipeline runs on draft load, edit, validate, and publish boundaries|workflow security boundary validates registered refs and rejects inline execution paths|workflow guard and adapter pickers list registered refs and report missing refs|workflow prompt asset revisions create managed assets and draft prompt refs" test/web-channel.test.mjs'` — passed, including typecheck, 15/15 focused source tests, build, and 5/5 targeted web-channel tests.
+  - `python3 -m json.tool docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_09_implementation_completeness_contract.json` — passed.
+- Browser verification, if UI changed
+  - Restarted the `pibo-dev-WorkflowsV2Resume` container web gateway and verified `http://127.0.0.1:4802/apps/chat` returned OK.
+  - Used `browser-use --fresh-profile --session ralph-v2-us024` inside `pibo-dev-WorkflowsV2Resume` with dev auth to open `/apps/chat/workflows/drafts/v2-starter-draft`.
+  - Verified the authenticated page shows `dev@pibo.local`, `Visual graph editor`, `Registered capability security boundary`, no-inline-executable copy, non-goal copy for raw XState/templates/slash commands/workflow tools, and no-Zod copy; browser eval also confirmed the raw IR panel, validation panel aria label, and `WorkflowValidationError.emptyGraph` diagnostics are present.
+  - Saved screenshot: `/tmp/ralph-v2-us024-builder-security-checklist.png` inside the container.
+- **Learnings for future iterations:**
+  - Builder/security checklist coverage can stay focused by binding existing builder, composition, state-mapping, deferral, security-boundary, and targeted web-channel tests instead of adding another long browser-only authoring flow.
+---

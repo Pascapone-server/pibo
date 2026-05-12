@@ -375,8 +375,8 @@
         "Typecheck passes"
       ],
       "priority": 24,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added focused builder/security checklist coverage that maps visual graph editing, raw IR, raw JSON schema, prompt editing, composition, adapter/guard/state boundaries, missing registered refs, and explicit non-goals to existing source, package, deferral, security, and web-channel tests."
     },
     {
       "id": "US-025",
