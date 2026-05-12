@@ -137,8 +137,8 @@
         "Typecheck passes"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Verified Project workflow start uses the immutable effective snapshot, persists exact snapshot identity/configuration/timestamp fields, and second starts return the existing run without creating another run."
     },
     {
       "id": "US-010",

@@ -1960,3 +1960,26 @@
   - Useful context
     - The starter draft route `/apps/chat/workflows/drafts/v2-starter-draft` exposes the builder controls and raw IR panel without requiring a new draft fixture.
 ---
+## 2026-05-12 15:06 CEST - US-009
+- What was implemented
+  - Completed the implementation-completeness contract story for Project session snapshot and start by strengthening the API regression test around exact snapshot fields.
+  - Verified configured Project workflow session snapshots persist identity, owner scope, workflow title/tags, hashes, input, prompt overrides, workflow-scoped model/thinking/fast-mode settings, prompt asset pins, and validation timestamps.
+  - Verified Start uses the saved effective snapshot and repeated Start calls return the existing run without creating another run, then marked PRD 09 US-009 passing.
+- Files changed
+  - `test/web-channel.test.mjs`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_09_implementation_completeness_contract.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck && npm run build && node --test --test-name-pattern "chat web app creates configured Project workflow sessions and starts one workflow run explicitly" test/web-channel.test.mjs && node --test test/project-service-workflow-link.test.mjs'` — passed.
+  - `python3 -m json.tool docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_09_implementation_completeness_contract.json` — passed.
+  - `git diff --check` — passed.
+- Browser verification, if UI changed
+  - Not run; this iteration tightened backend/API regression coverage and PRD state only, with no visible UI behavior changes.
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - Completeness-contract snapshot/start stories should assert both the API-created snapshot contract and the durable Project-service one-run enforcement tests.
+  - Gotchas encountered
+    - `web-channel` tests import `dist/`, so the targeted API test must run after `npm run build` even when only test assertions changed.
+  - Useful context
+    - The configured Project workflow session integration test already exercises second-start idempotency and effective-snapshot use; adding exact identity/timestamp assertions makes it suitable for PRD 09 US-009.
+---

@@ -3777,11 +3777,16 @@ test("chat web app creates configured Project workflow sessions and starts one w
 		assert.equal(createdPayload.validation.ok, true);
 		assert.match(createdPayload.snapshot.id, /^wfs_/);
 		assert.equal(createdPayload.snapshot.schemaVersion, 1);
+		assert.match(createdPayload.snapshot.createdAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+		assert.equal(createdPayload.snapshot.createdBy, "user-1");
+		assert.equal(createdPayload.snapshot.ownerScope, "user:user-1");
 		assert.equal(createdPayload.snapshot.projectId, projectPayload.project.id);
 		assert.equal(createdPayload.snapshot.piboSessionId, createdPayload.session.id);
 		assert.equal(createdPayload.snapshot.workflow.id, "standard-project");
 		assert.equal(createdPayload.snapshot.workflow.version, "1.0.0");
 		assert.equal(createdPayload.snapshot.workflow.source, "code");
+		assert.equal(createdPayload.snapshot.workflow.title, "Standard Project");
+		assert.deepEqual(createdPayload.snapshot.workflow.tags, ["project", "workflow"]);
 		assert.match(createdPayload.snapshot.workflow.baseDefinitionHash, /^sha256:[a-f0-9]{64}$/);
 		assert.match(createdPayload.snapshot.workflow.effectiveDefinitionHash, /^sha256:[a-f0-9]{64}$/);
 		assert.notEqual(createdPayload.snapshot.workflow.baseDefinitionHash, createdPayload.snapshot.workflow.effectiveDefinitionHash);
@@ -3797,10 +3802,12 @@ test("chat web app creates configured Project workflow sessions and starts one w
 		assert.deepEqual(createdPayload.snapshot.model, workflowConfiguration.model);
 		assert.equal(createdPayload.snapshot.thinkingLevel, "medium");
 		assert.equal(createdPayload.snapshot.fastMode, true);
+		assert.deepEqual(createdPayload.snapshot.promptAssetPins, []);
 		assert.equal(createdPayload.snapshot.baseDefinition.nodes.agent.promptTemplate, "Use the workflow input to produce a concise answer.\n\n{{input}}");
 		assert.equal(createdPayload.snapshot.effectiveDefinition.nodes.agent.promptTemplate, workflowConfiguration.promptOverrides.agent);
 		assert.equal(createdPayload.snapshot.validation.trigger, "before_project_session_creation");
 		assert.equal(createdPayload.snapshot.validation.ok, true);
+		assert.match(createdPayload.snapshot.validation.validatedAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
 		assert.equal(emitted.length, 0);
 
 		const immutablePatchResponse = await fetch(`${baseURL}/api/chat/project-sessions/${encodeURIComponent(createdPayload.session.id)}`, {
