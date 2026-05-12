@@ -29,6 +29,7 @@
 - Container web gateway restart commands should avoid `pgrep`/`pkill` patterns that match the wrapper shell; keep the Node process alive with a keepalive/nohup after `runWebGatewayServer` logs startup.
 - Invalid raw Workflow IR text should be a transient warning diagnostic on the draft while preserving the last parsed `definition`; clear the warning after the next valid parsed raw/visual edit.
 - Project workflow configuration snapshots should be immutable Project-service records keyed by Pibo Session id; apply prompt overrides only to the effective snapshot definition while preserving the base definition and hash.
+- Edge adapter UI should derive source output and target input ports from current Workflow IR; use-as-edge stores the target input as adapter output, while insert-node splits the edge through a visible deterministic adapter node.
 
 ## 2026-05-11 22:37 CEST - US-001
 - What was implemented
@@ -830,4 +831,29 @@
 - **Learnings for future iterations:**
   - React Flow node selection is more reliable through `browser-use click <element-index>` than dispatching a synthetic `MouseEvent` from page eval.
   - Edge guard/adapter inspectors need picker APIs just like profile, handler, and nested-workflow selectors to preserve the no-free-text registered-ref boundary.
+---
+## 2026-05-12 03:30 CEST - US-004
+- What was implemented
+  - Added registered adapter node authoring to the Workflow Builder landing panel, graph add-node controls, and selected-node inspector.
+  - Added a compatible edge adapter dialog for selected edges with incompatible-port diagnostics, including from/to port schema previews and registered adapter candidates.
+  - Added dialog actions to either apply a registered adapter as an explicit edge adapter or insert a visible deterministic adapter node between the edge endpoints.
+- Files changed
+  - `src/apps/chat-ui/src/WorkflowsArea.tsx`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_05_composition_node_and_capability_pickers.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck'` — passed.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run chat-ui:build && npm run build && node --test --test-name-pattern "workflow guard and adapter pickers|workflow validation pipeline|workflow security boundary" test/web-channel.test.mjs'` — passed, 3/3 targeted tests.
+  - `python3 -m json.tool docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_05_composition_node_and_capability_pickers.json` — passed.
+- Browser verification, if UI changed
+  - Restarted the container web gateway from the rebuilt `/workspace/dist` and verified `http://127.0.0.1:4802/apps/chat` returned OK.
+  - Created a dev-auth draft with a text-to-JSON incompatible edge and opened `/apps/chat/workflows/drafts/draft_standard-project_1-0-0_d2823f93` with `browser-use --fresh-profile` inside `pibo-dev-WorkflowsV2`.
+  - Verified the draft page shows `Add Adapter node`, registered adapter options, and `WorkflowGraphError.incompatibleEdgePorts`.
+  - Selected the incompatible edge, opened the compatible edge adapter dialog, and verified from/to schemas, compatible adapter candidates, `Use as edge adapter`, and `Insert adapter node` are visible.
+  - Clicked `Use as edge adapter` and verified the UI saved `fixture.adapters.draftToSummary` with `edgeAdapter` in the Pibo Workflow IR.
+  - Opened `/apps/chat/workflows?adapterRef=missing.adapters.inline` and verified the Adapter node editor lists only registered adapter refs while showing `WorkflowGraphError.unknownAdapterRef` for the missing ref.
+  - Saved screenshot: `/tmp/ralph-v2-adapter-dialog-open.png` inside the container.
+- **Learnings for future iterations:**
+  - Edge adapter fixes should reuse the selected edge's current source output and target input ports so the edge adapter output matches the target contract immediately after saving.
+  - Browser checks for uppercase-styled headings should lower-case `innerText` before matching strings such as `Adapter node editor` or `Compatible edge adapter dialog`.
 ---

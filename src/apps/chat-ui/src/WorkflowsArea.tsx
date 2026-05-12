@@ -129,6 +129,7 @@ type WorkflowNodeInspectorFormState = {
 	profileId: string;
 	promptTemplate: string;
 	handlerId: string;
+	adapterRef: string;
 	workflowVersionKey: string;
 	humanPrompt: string;
 };
@@ -141,6 +142,13 @@ type WorkflowEdgeInspectorFormState = {
 	guardHandler: string;
 	guardPriority: string;
 	adapterRef: string;
+};
+type WorkflowEdgePortDetails = {
+	sourceNodeId?: string;
+	targetNodeId?: string;
+	sourcePort?: WorkflowJsonObject;
+	targetPort?: WorkflowJsonObject;
+	directlyCompatible: boolean;
 };
 
 export function WorkflowsArea({ draftId, viewWorkflowId, viewWorkflowVersion }: { draftId?: string; viewWorkflowId?: string; viewWorkflowVersion?: string }) {
@@ -313,6 +321,7 @@ function WorkflowBuilderLanding() {
 			<WorkflowSecurityBoundaryPanel />
 			<WorkflowBuilderAgentNodeEditor />
 			<WorkflowBuilderCodeNodeEditor />
+			<WorkflowBuilderAdapterNodeEditor />
 			<WorkflowBuilderWorkflowNodeEditor />
 		</div>
 	);
@@ -515,6 +524,8 @@ function WorkflowGraphCanvas({ draft, onDraftChange }: { draft: WorkflowDraftRec
 	const [defaultAgentProfileId, setDefaultAgentProfileId] = useState("pibo-agent");
 	const [workflowVersionOptions, setWorkflowVersionOptions] = useState<WorkflowVersionPickerOption[]>([]);
 	const [selectedWorkflowVersionKey, setSelectedWorkflowVersionKey] = useState("");
+	const [adapterOptions, setAdapterOptions] = useState<WorkflowRegisteredRefOption[]>([]);
+	const [selectedAdapterRef, setSelectedAdapterRef] = useState("");
 
 	useEffect(() => {
 		let cancelled = false;
@@ -535,6 +546,20 @@ function WorkflowGraphCanvas({ draft, onDraftChange }: { draft: WorkflowDraftRec
 				if (cancelled) return;
 				setWorkflowVersionOptions(picker.options);
 				setSelectedWorkflowVersionKey((current) => current || (picker.options[0] ? workflowVersionOptionKey(picker.options[0]) : ""));
+			})
+			.catch(() => undefined);
+		return () => {
+			cancelled = true;
+		};
+	}, []);
+
+	useEffect(() => {
+		let cancelled = false;
+		getWorkflowAdapterPicker()
+			.then((picker) => {
+				if (cancelled) return;
+				setAdapterOptions(picker.options);
+				setSelectedAdapterRef((current) => current || (picker.options[0]?.id ?? ""));
 			})
 			.catch(() => undefined);
 		return () => {
@@ -603,6 +628,15 @@ function WorkflowGraphCanvas({ draft, onDraftChange }: { draft: WorkflowDraftRec
 		const definition = addWorkflowGraphWorkflowNode(draft.definition, nodeId, position, selectedNestedWorkflowOption);
 		setSelectedElement({ type: "node", id: nodeId });
 		void saveDefinition(definition, `Added nested workflow node ${nodeId} for ${selectedNestedWorkflowOption.id}@${selectedNestedWorkflowOption.version}.`);
+	};
+
+	const addAdapterNode = () => {
+		if (!selectedAdapterRef) return;
+		const nodeId = nextWorkflowNodeId(draft.definition, "adapter");
+		const position = nextGraphNodePosition(nodes);
+		const definition = addWorkflowGraphAdapterNode(draft.definition, nodeId, position, selectedAdapterRef);
+		setSelectedElement({ type: "node", id: nodeId });
+		void saveDefinition(definition, `Added adapter node ${nodeId} for ${selectedAdapterRef}.`);
 	};
 
 	const connectSelectedNodes = (sourceId = sourceNodeId, targetId = targetNodeId) => {
@@ -724,8 +758,31 @@ function WorkflowGraphCanvas({ draft, onDraftChange }: { draft: WorkflowDraftRec
 							<Layers size={13} />
 							Add Workflow node
 						</button>
+						<label className="grid gap-1 font-semibold text-slate-300">
+							<span>Adapter ref</span>
+							<select
+								aria-label="Adapter node ref"
+								className="rounded-sm border border-slate-700 bg-[#151f24] px-2 py-1.5 text-slate-100"
+								value={selectedAdapterRef}
+								onChange={(event) => setSelectedAdapterRef(event.target.value)}
+								disabled={isSaving || !adapterOptions.length}
+							>
+								{adapterOptions.length ? adapterOptions.map((option) => (
+									<option key={option.id} value={option.id}>{registeredRefOptionLabel(option)}</option>
+								)) : <option value="">No registered adapters</option>}
+							</select>
+						</label>
+						<button
+							type="button"
+							className="inline-flex items-center justify-center gap-2 rounded-sm border border-[#11a4d4]/50 px-3 py-2 text-xs font-semibold text-[#8bdcf4] transition hover:border-[#11a4d4] hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+							onClick={addAdapterNode}
+							disabled={isSaving || !selectedAdapterRef}
+						>
+							<Link2 size={13} />
+							Add Adapter node
+						</button>
 						<div className="rounded-sm border border-slate-800 bg-[#151f24]/70 p-2 text-[11px] leading-5 text-slate-500">
-							Workflow nodes store only a workflow id/version reference. V2 does not inline-expand nested workflow internals in the parent graph.
+							Workflow nodes store only a workflow id/version reference. Adapter nodes store only registered deterministic adapter refs. V2 does not inline-expand nested workflow internals or create inline transform code.
 						</div>
 						<div className="grid grid-cols-2 gap-2">
 							<label className="grid gap-1 font-semibold text-slate-300">
@@ -919,6 +976,7 @@ function WorkflowNodeInspector({ draft, nodeId, node, isSaving, onSaveDefinition
 	const [form, setForm] = useState<WorkflowNodeInspectorFormState>(() => createWorkflowNodeInspectorFormState(node));
 	const [profilePicker, setProfilePicker] = useState<WorkflowProfilePickerResponse | undefined>();
 	const [handlerPicker, setHandlerPicker] = useState<WorkflowHandlerPickerResponse | undefined>();
+	const [adapterPicker, setAdapterPicker] = useState<WorkflowRegisteredRefPickerResponse | undefined>();
 	const [workflowPicker, setWorkflowPicker] = useState<WorkflowVersionPickerResponse | undefined>();
 	const nodeKind = workflowNodeKind(node);
 	const nodeDiagnostics = workflowDiagnosticsForNode(draft.diagnostics, nodeId);
@@ -948,6 +1006,17 @@ function WorkflowNodeInspector({ draft, nodeId, node, isSaving, onSaveDefinition
 			cancelled = true;
 		};
 	}, [nodeKind, form.handlerId]);
+
+	useEffect(() => {
+		if (nodeKind !== "adapter") return;
+		let cancelled = false;
+		getWorkflowAdapterPicker(form.adapterRef || undefined).then((picker) => {
+			if (!cancelled) setAdapterPicker(picker);
+		}).catch(() => undefined);
+		return () => {
+			cancelled = true;
+		};
+	}, [nodeKind, form.adapterRef]);
 
 	useEffect(() => {
 		if (nodeKind !== "workflow") return;
@@ -1018,6 +1087,21 @@ function WorkflowNodeInspector({ draft, nodeId, node, isSaving, onSaveDefinition
 						<WorkflowInspectorPickerDiagnostics diagnostics={handlerPicker?.diagnostics ?? []} />
 					</div>
 				) : null}
+				{nodeKind === "adapter" ? (
+					<div className="grid gap-3 rounded-sm border border-slate-800 bg-[#101d22] p-3" aria-label="Adapter node fields">
+						<label className="grid gap-1 font-semibold text-slate-300">
+							<span>Registered adapter ref</span>
+							<select className="rounded-sm border border-slate-700 bg-[#151f24] px-2 py-1.5 text-slate-100" value={adapterPicker?.selectedRefId ?? form.adapterRef} onChange={(event) => update("adapterRef", event.target.value)}>
+								<option value="">Select a registered adapter ref</option>
+								{adapterPicker?.options.map((option) => <option key={option.id} value={option.id}>{registeredRefOptionLabel(option)}</option>)}
+							</select>
+						</label>
+						<WorkflowInspectorPickerDiagnostics diagnostics={adapterPicker?.diagnostics ?? []} />
+						<div className="rounded-sm border border-slate-800 bg-[#151f24]/70 p-2 text-[11px] leading-5 text-slate-500">
+							Adapter nodes store only a registered deterministic adapter ref. Inline transformation code and hidden LLM coercion are not exposed by the UI.
+						</div>
+					</div>
+				) : null}
 				{nodeKind === "workflow" ? (
 					<div className="grid gap-3 rounded-sm border border-slate-800 bg-[#101d22] p-3" aria-label="Workflow node fields">
 						<label className="grid gap-1 font-semibold text-slate-300">
@@ -1057,11 +1141,18 @@ function WorkflowEdgeInspector({ draft, edgeId, edge, nodeIds, isSaving, onSaveD
 	const [form, setForm] = useState<WorkflowEdgeInspectorFormState>(() => createWorkflowEdgeInspectorFormState(edge, nodeIds));
 	const [guardPicker, setGuardPicker] = useState<WorkflowRegisteredRefPickerResponse | undefined>();
 	const [adapterPicker, setAdapterPicker] = useState<WorkflowRegisteredRefPickerResponse | undefined>();
+	const [adapterDialogOpen, setAdapterDialogOpen] = useState(false);
 	const edgeDiagnostics = workflowDiagnosticsForEdge(draft.diagnostics, edgeId);
+	const edgePortDetails = createWorkflowEdgePortDetails(draft.definition, edge);
+	const hasIncompatibleEdgeDiagnostic = edgeDiagnostics.some((diagnostic) => diagnostic.code === "WorkflowGraphError.incompatibleEdgePorts");
 
 	useEffect(() => {
 		setForm(createWorkflowEdgeInspectorFormState(edge, nodeIds));
 	}, [edge, edgeId, nodeIds]);
+
+	useEffect(() => {
+		setAdapterDialogOpen(false);
+	}, [edgeId]);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -1150,6 +1241,26 @@ function WorkflowEdgeInspector({ draft, edgeId, edge, nodeIds, isSaving, onSaveD
 						</select>
 					</label>
 				</div>
+				<button
+					type="button"
+					className={`inline-flex items-center justify-center gap-2 rounded-sm border px-3 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${hasIncompatibleEdgeDiagnostic ? "border-amber-600/70 text-amber-100 hover:border-amber-400" : "border-slate-700 text-slate-300 hover:border-[#11a4d4]/60 hover:text-slate-100"}`}
+					onClick={() => setAdapterDialogOpen(true)}
+					disabled={isSaving || !edgePortDetails.sourcePort || !edgePortDetails.targetPort}
+				>
+					<Link2 size={13} />
+					{hasIncompatibleEdgeDiagnostic ? "Fix incompatible edge with adapter" : "Open compatible edge adapter dialog"}
+				</button>
+				{adapterDialogOpen ? (
+					<WorkflowEdgeAdapterDialog
+						draft={draft}
+						edgeId={edgeId}
+						edge={edge}
+						edgePortDetails={edgePortDetails}
+						isSaving={isSaving}
+						onClose={() => setAdapterDialogOpen(false)}
+						onSaveDefinition={onSaveDefinition}
+					/>
+				) : null}
 				<WorkflowInspectorPickerDiagnostics diagnostics={[...(guardPicker?.diagnostics ?? []), ...(adapterPicker?.diagnostics ?? [])]} />
 				<WorkflowInspectorDiagnostics diagnostics={edgeDiagnostics} emptyLabel="No diagnostics for selected edge." />
 				<button type="button" className="inline-flex items-center justify-center gap-2 rounded-sm border border-[#11a4d4]/50 px-3 py-2 text-xs font-semibold text-[#8bdcf4] transition hover:border-[#11a4d4] hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50" onClick={saveEdge} disabled={isSaving || !form.sourceNodeId || !form.targetNodeId}>
@@ -1158,6 +1269,129 @@ function WorkflowEdgeInspector({ draft, edgeId, edge, nodeIds, isSaving, onSaveD
 				</button>
 			</div>
 		</details>
+	);
+}
+
+function WorkflowEdgeAdapterDialog({ draft, edgeId, edge, edgePortDetails, isSaving, onClose, onSaveDefinition }: {
+	draft: WorkflowDraftRecord;
+	edgeId: string;
+	edge: WorkflowJsonObject;
+	edgePortDetails: WorkflowEdgePortDetails;
+	isSaving: boolean;
+	onClose: () => void;
+	onSaveDefinition: (definition: WorkflowDraftDefinition, successMessage: string, options?: { editTrigger?: WorkflowValidationTrigger }) => Promise<void>;
+}) {
+	const [picker, setPicker] = useState<WorkflowRegisteredRefPickerResponse | undefined>();
+	const [selectedAdapterRef, setSelectedAdapterRef] = useState(readEdgeAdapterRef(edge));
+	const [loadState, setLoadState] = useState<"loading" | "loaded" | "error">("loading");
+	const [errorMessage, setErrorMessage] = useState<string | undefined>();
+
+	useEffect(() => {
+		let cancelled = false;
+		setLoadState("loading");
+		setErrorMessage(undefined);
+		getWorkflowAdapterPicker(selectedAdapterRef || undefined)
+			.then((response) => {
+				if (cancelled) return;
+				setPicker(response);
+				setSelectedAdapterRef((current) => current || (response.options[0]?.id ?? ""));
+				setLoadState("loaded");
+			})
+			.catch((error: unknown) => {
+				if (cancelled) return;
+				setErrorMessage(error instanceof Error ? error.message : "Failed to load compatible adapters");
+				setLoadState("error");
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [selectedAdapterRef]);
+
+	const selectedOption = picker?.options.find((option) => option.id === selectedAdapterRef);
+	const canApply = Boolean(selectedOption && edgePortDetails.sourcePort && edgePortDetails.targetPort && loadState === "loaded" && !isSaving);
+
+	const useAsEdgeAdapter = async () => {
+		if (!selectedAdapterRef) return;
+		await onSaveDefinition(
+			applyWorkflowEdgeAdapterChoice(draft.definition, edgeId, selectedAdapterRef),
+			`Applied ${selectedAdapterRef} as edge adapter for ${edgeId}.`,
+			{ editTrigger: "edge_edit" },
+		);
+		onClose();
+	};
+
+	const insertAdapterNode = async () => {
+		if (!selectedAdapterRef) return;
+		const definition = insertWorkflowAdapterNodeForEdge(draft.definition, edgeId, selectedAdapterRef);
+		await onSaveDefinition(definition, `Inserted adapter node for ${edgeId} using ${selectedAdapterRef}.`, { editTrigger: "graph_edit" });
+		onClose();
+	};
+
+	return (
+		<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-labelledby="workflow-edge-adapter-dialog-title">
+			<div className="max-h-[88vh] w-full max-w-3xl overflow-auto rounded-sm border border-slate-700 bg-[#101d22] p-4 shadow-2xl shadow-black/40">
+				<div className="flex flex-wrap items-start justify-between gap-3">
+					<div>
+						<div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.16em] text-[#11a4d4]"><Link2 size={13} />Compatible edge adapter dialog</div>
+						<h4 id="workflow-edge-adapter-dialog-title" className="mt-1 text-sm font-bold text-slate-100">Choose a registered adapter for {edgeId}</h4>
+						<p className="mt-2 max-w-2xl text-xs leading-5 text-slate-500">
+							The dialog shows the source output and target input schemas from the Pibo Workflow IR. Use a registered adapter as an explicit edge adapter, or insert a visible adapter node between the endpoints.
+						</p>
+					</div>
+					<button type="button" className="rounded-sm border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:border-[#11a4d4]/60 hover:text-slate-100" onClick={onClose}>Close</button>
+				</div>
+
+				<div className="mt-4 grid gap-3 md:grid-cols-2">
+					<HandlerSchemaPreview label={`From schema${edgePortDetails.sourceNodeId ? ` (${edgePortDetails.sourceNodeId})` : ""}`} schema={edgePortDetails.sourcePort ?? null} />
+					<HandlerSchemaPreview label={`To schema${edgePortDetails.targetNodeId ? ` (${edgePortDetails.targetNodeId})` : ""}`} schema={edgePortDetails.targetPort ?? null} />
+				</div>
+
+				<div className={`mt-3 rounded-sm border p-3 text-xs leading-5 ${edgePortDetails.directlyCompatible ? "border-emerald-900/60 bg-emerald-950/20 text-emerald-200" : "border-amber-700/70 bg-amber-950/30 text-amber-100"}`}>
+					{edgePortDetails.directlyCompatible
+						? "These ports are directly compatible. An adapter is optional and remains explicit if selected."
+						: "These ports are not directly compatible. Select a registered adapter instead of hidden LLM coercion or inline transformation code."}
+				</div>
+
+				<div className="mt-4 grid gap-3 text-xs">
+					<label className="grid gap-1 font-semibold text-slate-300">
+						<span>Compatible registered adapter</span>
+						<select
+							aria-label="Compatible registered adapter"
+							className="rounded-sm border border-slate-700 bg-[#151f24] px-2 py-1.5 text-slate-100"
+							value={selectedAdapterRef}
+							onChange={(event) => setSelectedAdapterRef(event.target.value)}
+							disabled={loadState === "loading" || loadState === "error" || isSaving}
+						>
+							<option value="">Select a registered adapter ref</option>
+							{picker?.options.map((option) => <option key={option.id} value={option.id}>{registeredRefOptionLabel(option)}</option>)}
+						</select>
+					</label>
+
+					{loadState === "error" ? <div className="rounded-sm border border-red-900/70 bg-red-950/40 p-3 text-xs leading-5 text-red-200" role="alert">{errorMessage ?? "Failed to load compatible adapters."}</div> : null}
+					<WorkflowInspectorPickerDiagnostics diagnostics={picker?.diagnostics ?? []} />
+					{selectedOption ? <RegisteredRefOptionCard option={selectedOption} badge="selected adapter" /> : null}
+					<div className="grid gap-2" aria-label="Compatible adapter candidates">
+						<div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Compatible adapter candidates</div>
+						{picker?.options.map((option) => <RegisteredRefOptionCard key={option.id} option={option} badge="compatible adapter" />)}
+					</div>
+
+					<div className="grid gap-2 md:grid-cols-2">
+						<button type="button" className="inline-flex items-center justify-center gap-2 rounded-sm border border-[#11a4d4]/50 px-3 py-2 text-xs font-semibold text-[#8bdcf4] transition hover:border-[#11a4d4] hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50" onClick={() => void useAsEdgeAdapter()} disabled={!canApply}>
+							<Link2 size={13} />
+							Use as edge adapter
+						</button>
+						<button type="button" className="inline-flex items-center justify-center gap-2 rounded-sm border border-[#11a4d4]/50 px-3 py-2 text-xs font-semibold text-[#8bdcf4] transition hover:border-[#11a4d4] hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50" onClick={() => void insertAdapterNode()} disabled={!canApply}>
+							<Plus size={13} />
+							Insert adapter node
+						</button>
+					</div>
+
+					<div className="rounded-sm border border-slate-800 bg-[#151f24]/70 p-3 text-[11px] leading-5 text-slate-500">
+						Both actions persist Pibo Workflow IR only. Edge adapters store <code className="rounded bg-slate-900 px-1 text-slate-300">adapter.transform.id</code>; inserted adapter nodes store a visible deterministic adapter handler ref.
+					</div>
+				</div>
+			</div>
+		</div>
 	);
 }
 
@@ -1478,6 +1712,98 @@ function WorkflowBuilderCodeNodeEditor() {
 
 			<div className="rounded-sm border border-slate-800 bg-[#151f24]/70 p-3 text-[11px] leading-5 text-slate-500">
 				Missing handler refs return structured <code className="rounded bg-slate-900 px-1 text-slate-300">WorkflowGraphError.unknownHandlerRef</code> diagnostics and block publish/run paths once executable validation is invoked.
+			</div>
+		</div>
+	);
+}
+
+function WorkflowBuilderAdapterNodeEditor() {
+	const [selectedAdapterRef, setSelectedAdapterRef] = useState(readInitialAdapterRef);
+	const [picker, setPicker] = useState<WorkflowRegisteredRefPickerResponse | undefined>();
+	const [loadState, setLoadState] = useState<"loading" | "loaded" | "error">("loading");
+	const [errorMessage, setErrorMessage] = useState<string | undefined>();
+
+	useEffect(() => {
+		let cancelled = false;
+		setLoadState("loading");
+		setErrorMessage(undefined);
+		getWorkflowAdapterPicker(selectedAdapterRef || undefined)
+			.then((response) => {
+				if (cancelled) return;
+				setPicker(response);
+				setLoadState("loaded");
+			})
+			.catch((error: unknown) => {
+				if (cancelled) return;
+				setErrorMessage(error instanceof Error ? error.message : "Failed to load workflow adapter picker");
+				setLoadState("error");
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [selectedAdapterRef]);
+
+	const selectedOption = useMemo(
+		() => picker?.options.find((option) => option.id === picker.selectedRefId),
+		[picker],
+	);
+	const diagnostics = picker?.diagnostics ?? [];
+
+	return (
+		<div className="flex w-full flex-col gap-4 rounded-sm border border-slate-800 bg-[#101d22]/70 p-4">
+			<div className="flex items-start justify-between gap-3">
+				<div>
+					<div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.16em] text-[#11a4d4]">
+						<Link2 size={13} />
+						Adapter node editor
+					</div>
+					<p className="mt-2 text-xs leading-5 text-slate-500">
+						Select a registered deterministic adapter ref for visible adapter nodes. The UI stores only the registry ref and never opens inline transformation code.
+					</p>
+				</div>
+				<button
+					type="button"
+					className="inline-flex items-center gap-1 rounded-sm border border-slate-700 px-2 py-1 text-[11px] font-semibold text-slate-300 transition hover:border-[#11a4d4]/60 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+					onClick={() => void refreshAdapterPicker(selectedAdapterRef, setPicker, setLoadState, setErrorMessage)}
+					disabled={loadState === "loading"}
+				>
+					{loadState === "loading" ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+					Refresh
+				</button>
+			</div>
+
+			<label className="grid gap-2 text-xs font-semibold text-slate-300">
+				<span>Registered adapter</span>
+				<select
+					aria-label="Registered adapter"
+					className="rounded-sm border border-slate-700 bg-[#151f24] px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-[#11a4d4] disabled:opacity-60"
+					value={picker?.selectedRefId ?? ""}
+					onChange={(event) => setSelectedAdapterRef(event.target.value)}
+					disabled={loadState === "loading" || loadState === "error"}
+				>
+					<option value="">Select a registered adapter ref</option>
+					{picker?.options.map((option) => (
+						<option key={option.id} value={option.id}>{registeredRefOptionLabel(option)}</option>
+					))}
+				</select>
+			</label>
+
+			{loadState === "error" ? (
+				<div className="rounded-sm border border-red-900/70 bg-red-950/40 p-3 text-xs leading-5 text-red-200" role="alert">
+					{errorMessage ?? "Failed to load workflow adapter picker."}
+				</div>
+			) : null}
+
+			{selectedOption ? <RegisteredRefOptionCard option={selectedOption} badge="registered adapter" /> : null}
+			<WorkflowInspectorPickerDiagnostics diagnostics={diagnostics} />
+
+			<div className="grid gap-3" aria-label="Registered adapter picker options">
+				<div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Registered adapter refs</div>
+				{picker?.options.map((option) => <RegisteredRefOptionCard key={option.id} option={option} badge="registered adapter" />)}
+			</div>
+
+			<div className="rounded-sm border border-slate-800 bg-[#151f24]/70 p-3 text-[11px] leading-5 text-slate-500">
+				Adapter nodes are visible graph nodes for schema transformation. Incompatible edges can alternatively use the compatible edge adapter dialog to keep the adapter on the edge.
 			</div>
 		</div>
 	);
@@ -1945,6 +2271,31 @@ function createDefaultWorkflowNodeDefinition(nodeId: string, workflow: WorkflowV
 	};
 }
 
+function addWorkflowGraphAdapterNode(definition: WorkflowDraftDefinition, nodeId: string, position: GraphPosition, adapterRef: string): WorkflowDraftDefinition {
+	const nodes = readWorkflowNodeDefinitions(definition);
+	const nextDefinition: WorkflowDraftDefinition = {
+		...definition,
+		nodes: {
+			...nodes,
+			[nodeId]: createDefaultAdapterNodeDefinition(nodeId, adapterRef),
+		},
+		edges: isWorkflowJsonObject(definition.edges) ? definition.edges : {},
+	};
+	if (!workflowInitialNodeIds(nextDefinition).length) nextDefinition.initial = nodeId;
+	return writeWorkflowGraphPositions(nextDefinition, { ...readWorkflowPositions(definition), [nodeId]: position });
+}
+
+function createDefaultAdapterNodeDefinition(nodeId: string, adapterRef: string, input?: WorkflowJsonObject, output?: WorkflowJsonObject): WorkflowJsonObject {
+	return {
+		kind: "adapter",
+		label: `Adapter ${nodeId}`,
+		mode: "deterministic",
+		handler: createRegisteredAdapterRef(adapterRef),
+		input: cloneWorkflowJsonObject(input ?? createWorkflowPort("text", "", undefined)),
+		output: cloneWorkflowJsonObject(output ?? createWorkflowPort("text", "", undefined)),
+	};
+}
+
 function addWorkflowGraphEdge(definition: WorkflowDraftDefinition, edgeId: string, sourceId: string, targetId: string): WorkflowDraftDefinition {
 	return {
 		...definition,
@@ -2066,6 +2417,7 @@ function createWorkflowNodeInspectorFormState(node: WorkflowJsonObject): Workflo
 		profileId: readAgentProfileId(node.profile),
 		promptTemplate: typeof node.promptTemplate === "string" ? node.promptTemplate : "",
 		handlerId: typeof node.handler === "string" ? node.handler : "",
+		adapterRef: readAdapterRefId(node.handler),
 		workflowVersionKey: workflowId && workflowVersion ? workflowVersionSelectionKey(workflowId, workflowVersion) : "",
 		humanPrompt: typeof node.prompt === "string" ? node.prompt : "",
 	};
@@ -2089,6 +2441,10 @@ function applyWorkflowNodeInspectorForm(definition: WorkflowDraftDefinition, nod
 	if (nodeKind === "code") {
 		nextNode.language = "typescript";
 		if (form.handlerId.trim()) nextNode.handler = form.handlerId.trim();
+	}
+	if (nodeKind === "adapter") {
+		nextNode.mode = "deterministic";
+		if (form.adapterRef.trim()) nextNode.handler = createRegisteredAdapterRef(form.adapterRef.trim());
 	}
 	if (nodeKind === "workflow") {
 		const selection = parseWorkflowVersionKey(form.workflowVersionKey);
@@ -2168,6 +2524,130 @@ function applyWorkflowEdgeInspectorForm(definition: WorkflowDraftDefinition, edg
 	};
 }
 
+function createWorkflowEdgePortDetails(definition: WorkflowDraftDefinition, edge: WorkflowJsonObject): WorkflowEdgePortDetails {
+	const sourceNodeId = readEdgeEndpointNodeId(edge.from);
+	const targetNodeId = readEdgeEndpointNodeId(edge.to);
+	const sourcePort = readEdgeSourceOutputPort(definition, edge);
+	const targetPort = readEdgeTargetInputPort(definition, edge);
+	return {
+		...(sourceNodeId ? { sourceNodeId } : {}),
+		...(targetNodeId ? { targetNodeId } : {}),
+		...(sourcePort ? { sourcePort } : {}),
+		...(targetPort ? { targetPort } : {}),
+		directlyCompatible: Boolean(sourcePort && targetPort && areWorkflowPortsDirectlyCompatible(sourcePort, targetPort)),
+	};
+}
+
+function readEdgeAdapterRef(edge: WorkflowJsonObject): string {
+	const adapter = isWorkflowJsonObject(edge.adapter) ? edge.adapter : undefined;
+	const transform = adapter && isWorkflowJsonObject(adapter.transform) ? adapter.transform : undefined;
+	return readAdapterRefId(transform);
+}
+
+function applyWorkflowEdgeAdapterChoice(definition: WorkflowDraftDefinition, edgeId: string, adapterRef: string): WorkflowDraftDefinition {
+	const edges = readWorkflowEdgeDefinitions(definition);
+	const currentEdge = edges[edgeId];
+	if (!currentEdge) return definition;
+	const targetPort = readEdgeTargetInputPort(definition, currentEdge) ?? createWorkflowPort("text", "", undefined);
+	return {
+		...definition,
+		edges: {
+			...edges,
+			[edgeId]: {
+				...currentEdge,
+				id: edgeId,
+				adapter: {
+					kind: "edgeAdapter",
+					transform: createRegisteredAdapterRef(adapterRef),
+					output: cloneWorkflowJsonObject(targetPort),
+				},
+			},
+		},
+	};
+}
+
+function insertWorkflowAdapterNodeForEdge(definition: WorkflowDraftDefinition, edgeId: string, adapterRef: string): WorkflowDraftDefinition {
+	const edges = readWorkflowEdgeDefinitions(definition);
+	const currentEdge = edges[edgeId];
+	if (!currentEdge) return definition;
+	const sourceNodeId = readEdgeEndpointNodeId(currentEdge.from);
+	const targetNodeId = readEdgeEndpointNodeId(currentEdge.to);
+	if (!sourceNodeId || !targetNodeId) return definition;
+	const nodes = readWorkflowNodeDefinitions(definition);
+	const nodeId = nextWorkflowNodeId(definition, "adapter");
+	const sourcePort = readEdgeSourceOutputPort(definition, currentEdge) ?? createWorkflowPort("text", "", undefined);
+	const targetPort = readEdgeTargetInputPort(definition, currentEdge) ?? createWorkflowPort("text", "", undefined);
+	const positions = readWorkflowPositions(definition);
+	const position = midpointGraphPosition(positions[sourceNodeId], positions[targetNodeId]) ?? nextGraphNodePosition(createWorkflowGraphProjection(definition, []).nodes);
+	const remainingEdges = { ...edges };
+	delete remainingEdges[edgeId];
+	const firstEdgeId = uniqueWorkflowEdgeId(remainingEdges, `${edgeId}_to_${nodeId}`);
+	const secondEdgeId = uniqueWorkflowEdgeId({ ...remainingEdges, [firstEdgeId]: {} }, `${nodeId}_to_${targetNodeId}`);
+	const firstEdge: WorkflowJsonObject = {
+		id: firstEdgeId,
+		from: cloneWorkflowJsonObject(isWorkflowJsonObject(currentEdge.from) ? currentEdge.from : { nodeId: sourceNodeId }),
+		to: { nodeId },
+		kind: typeof currentEdge.kind === "string" ? currentEdge.kind : "data",
+	};
+	if (isWorkflowJsonObject(currentEdge.guard)) firstEdge.guard = cloneWorkflowJsonObject(currentEdge.guard);
+	const secondEdge: WorkflowJsonObject = {
+		id: secondEdgeId,
+		from: { nodeId },
+		to: cloneWorkflowJsonObject(isWorkflowJsonObject(currentEdge.to) ? currentEdge.to : { nodeId: targetNodeId }),
+		kind: typeof currentEdge.kind === "string" ? currentEdge.kind : "data",
+	};
+	const nextDefinition: WorkflowDraftDefinition = {
+		...definition,
+		nodes: {
+			...nodes,
+			[nodeId]: createDefaultAdapterNodeDefinition(nodeId, adapterRef, sourcePort, targetPort),
+		},
+		edges: {
+			...remainingEdges,
+			[firstEdgeId]: firstEdge,
+			[secondEdgeId]: secondEdge,
+		},
+	};
+	return writeWorkflowGraphPositions(nextDefinition, { ...positions, [nodeId]: position });
+}
+
+function readEdgeSourceOutputPort(definition: WorkflowDraftDefinition, edge: WorkflowJsonObject): WorkflowJsonObject | undefined {
+	const node = readEdgeEndpointNode(definition, edge.from);
+	return node && isWorkflowJsonObject(node.output) ? node.output : undefined;
+}
+
+function readEdgeTargetInputPort(definition: WorkflowDraftDefinition, edge: WorkflowJsonObject): WorkflowJsonObject | undefined {
+	const node = readEdgeEndpointNode(definition, edge.to);
+	return node && isWorkflowJsonObject(node.input) ? node.input : undefined;
+}
+
+function readEdgeEndpointNode(definition: WorkflowDraftDefinition, endpoint: unknown): WorkflowJsonObject | undefined {
+	const nodeId = readEdgeEndpointNodeId(endpoint);
+	return nodeId ? readWorkflowNodeDefinitions(definition)[nodeId] : undefined;
+}
+
+function areWorkflowPortsDirectlyCompatible(left: WorkflowJsonObject, right: WorkflowJsonObject): boolean {
+	if (left.kind === "text" && right.kind === "text") return true;
+	if (left.kind !== "json" || right.kind !== "json") return false;
+	return JSON.stringify(left.schema ?? null) === JSON.stringify(right.schema ?? null);
+}
+
+function midpointGraphPosition(left: GraphPosition | undefined, right: GraphPosition | undefined): GraphPosition | undefined {
+	return left && right ? { x: (left.x + right.x) / 2, y: (left.y + right.y) / 2 } : undefined;
+}
+
+function uniqueWorkflowEdgeId(edges: Record<string, WorkflowJsonObject>, base: string): string {
+	const sanitizedBase = base.replace(/[^a-zA-Z0-9_-]/g, "-");
+	if (!Object.hasOwn(edges, sanitizedBase)) return sanitizedBase;
+	let index = 2;
+	while (Object.hasOwn(edges, `${sanitizedBase}_${index}`)) index += 1;
+	return `${sanitizedBase}_${index}`;
+}
+
+function cloneWorkflowJsonObject(value: WorkflowJsonObject): WorkflowJsonObject {
+	return JSON.parse(JSON.stringify(value)) as WorkflowJsonObject;
+}
+
 function readWorkflowPortKind(value: unknown, fallback: WorkflowPortKindSelection): WorkflowPortKindSelection {
 	if (!isWorkflowJsonObject(value)) return fallback;
 	return value.kind === "json" ? "json" : "text";
@@ -2208,6 +2688,14 @@ function createNodePortRef(nodeId: string, portId: string): WorkflowJsonObject {
 
 function readAgentProfileId(value: unknown): string {
 	return isWorkflowJsonObject(value) && value.kind === "fixed" && typeof value.id === "string" ? value.id : "";
+}
+
+function readAdapterRefId(value: unknown): string {
+	return isWorkflowJsonObject(value) && value.kind === "adapter" && value.language === "typescript" && typeof value.id === "string" ? value.id : "";
+}
+
+function createRegisteredAdapterRef(adapterRef: string): WorkflowJsonObject {
+	return { kind: "adapter", language: "typescript", id: adapterRef };
 }
 
 function formatWorkflowStringList(value: unknown): string {
@@ -2252,6 +2740,11 @@ function readInitialHandlerRef(): string {
 	return new URL(window.location.href).searchParams.get("handlerRef") ?? "";
 }
 
+function readInitialAdapterRef(): string {
+	if (typeof window === "undefined") return "";
+	return new URL(window.location.href).searchParams.get("adapterRef") ?? "";
+}
+
 function readInitialWorkflowSelection(): WorkflowVersionSelection {
 	if (typeof window === "undefined") return { workflowId: "", workflowVersion: "" };
 	const searchParams = new URL(window.location.href).searchParams;
@@ -2293,6 +2786,23 @@ async function refreshHandlerPicker(
 		setLoadState("loaded");
 	} catch (error) {
 		setErrorMessage(error instanceof Error ? error.message : "Failed to load workflow handler picker");
+		setLoadState("error");
+	}
+}
+
+async function refreshAdapterPicker(
+	selectedRefId: string,
+	setPicker: (picker: WorkflowRegisteredRefPickerResponse | undefined) => void,
+	setLoadState: (state: "loading" | "loaded" | "error") => void,
+	setErrorMessage: (message: string | undefined) => void,
+): Promise<void> {
+	setLoadState("loading");
+	setErrorMessage(undefined);
+	try {
+		setPicker(await getWorkflowAdapterPicker(selectedRefId || undefined));
+		setLoadState("loaded");
+	} catch (error) {
+		setErrorMessage(error instanceof Error ? error.message : "Failed to load workflow adapter picker");
 		setLoadState("error");
 	}
 }
@@ -2391,6 +2901,21 @@ function HandlerOptionCard({ option }: { option: WorkflowHandlerPickerOption }) 
 				<HandlerSchemaPreview label="inputSchema" schema={option.inputSchema} />
 				<HandlerSchemaPreview label="outputSchema" schema={option.outputSchema} />
 			</div>
+		</div>
+	);
+}
+
+function RegisteredRefOptionCard({ option, badge }: { option: WorkflowRegisteredRefOption; badge: string }) {
+	return (
+		<div className="rounded-sm border border-slate-800 bg-[#151f24]/70 p-3 text-xs leading-5 text-slate-400">
+			<div className="flex flex-wrap items-start justify-between gap-2">
+				<div>
+					<div className="font-semibold text-slate-200">{option.displayName}</div>
+					<div className="mt-1 font-mono text-[11px] text-slate-300">{option.id}</div>
+				</div>
+				<WorkflowPill label={badge} />
+			</div>
+			{option.description ? <div className="mt-2 text-slate-500">{option.description}</div> : null}
 		</div>
 	);
 }
