@@ -153,8 +153,8 @@
         "Typecheck passes"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Verified builder graph canvas, workflow settings, node inspector, edge inspector, zero-node draft save behavior, and layout-as-UI-metadata coverage."
     },
     {
       "id": "US-011",

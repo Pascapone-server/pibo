@@ -37,6 +37,7 @@ test("Workflow V2 builder tests cover visual editing and publish flow", async ()
 	assertAllMatch(webChannelTests, [
 		["duplicate/open builder wrappers are integration-tested", /workflow builder draft loader opens starter and duplicated UI draft wrappers/],
 		["builder loader never exposes raw XState source", /starterPayload\.draft\.definition\.xstate, undefined[\s\S]*loadedDuplicatePayload\.draft\.definition\.xstate, undefined/],
+		["zero-node UI drafts can be saved", /zeroNodeSaveDefinition\.nodes = \{\}[\s\S]*zeroNodeSaveResponse\.status, 200[\s\S]*WorkflowValidationError\.emptyGraph/],
 		["graph editing adds a node", /graphEditedDefinition\.nodes\.agent_2 = \{/],
 		["graph editing connects an edge", /graphEditedDefinition\.edges\.edge_agent_to_agent_2 = \{/],
 		["graph editing saves manual layout positions", /graphEditedDefinition\.ui = \{[\s\S]*layout: "manual"[\s\S]*positions:[\s\S]*agent_2: \{ x: 420, y: 100 \}/],
@@ -51,6 +52,9 @@ test("Workflow V2 builder tests cover visual editing and publish flow", async ()
 		["graph canvas exposes the add-node control", /Add Agent node/],
 		["graph canvas exposes the connect-edge control", /Connect nodes/],
 		["graph canvas exposes the layout save control", /Save layout/],
+		["workflow settings inspector is visible", /Workflow settings inspector/],
+		["node inspector is visible", /Node inspector: \{nodeId\}/],
+		["edge inspector is visible", /Edge inspector: \{edgeId\}/],
 		["layout copy states runtime semantics are unchanged", /Saving layout writes only display metadata and does not change nodes, edges, ports, guards, adapters, runtime routing, or validation semantics/],
 		["publish panel exposes validation and publish actions", /Validate draft[\s\S]*Publish draft/],
 	]);

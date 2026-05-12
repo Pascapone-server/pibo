@@ -3362,6 +3362,26 @@ test("workflow builder draft loader opens starter and duplicated UI draft wrappe
 		assert.ok(starterPayload.draft.diagnostics.some((diagnostic) => diagnostic.code === "WorkflowValidationError.emptyGraph"));
 		assert.equal(starterPayload.draft.definition.xstate, undefined);
 
+		const zeroNodeSaveDefinition = structuredClone(starterPayload.draft.definition);
+		zeroNodeSaveDefinition.title = "Saved zero-node starter draft";
+		zeroNodeSaveDefinition.nodes = {};
+		zeroNodeSaveDefinition.edges = {};
+		const zeroNodeSaveResponse = await fetch(`${baseURL}/api/chat/workflows/drafts/v2-starter-draft`, {
+			method: "PATCH",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({ definition: zeroNodeSaveDefinition, editTrigger: "graph_edit" }),
+		});
+		assert.equal(zeroNodeSaveResponse.status, 200);
+		const zeroNodeSavePayload = await zeroNodeSaveResponse.json();
+		assert.equal(zeroNodeSavePayload.draft.definition.title, "Saved zero-node starter draft");
+		assert.deepEqual(zeroNodeSavePayload.draft.definition.nodes, {});
+		assert.equal(zeroNodeSavePayload.validation.ok, false);
+		assert.ok(zeroNodeSavePayload.diagnostics.some((diagnostic) => diagnostic.code === "WorkflowValidationError.emptyGraph"));
+
 		const starterPublishResponse = await fetch(`${baseURL}/api/chat/workflows/drafts/v2-starter-draft/publish`, {
 			method: "POST",
 			headers: {

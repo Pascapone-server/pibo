@@ -2005,3 +2005,28 @@
   - V2 UI workflow draft rows still carry `ownerScope`, but catalog permission decisions should not use it as an access gate.
   - Cross-user tests are useful for catching accidental private-catalog behavior when PRDs define workflows as global.
 ---
+## 2026-05-12 15:29 CEST - US-010
+- What was implemented
+  - Completed the implementation-completeness story for Workflow Builder graph and inspector panels.
+  - Added focused coverage proving zero-node UI drafts can be saved while remaining publish-blocked by validation diagnostics.
+  - Extended builder coverage assertions for the graph canvas, workflow settings inspector, node inspector, edge inspector, and layout-as-UI-metadata copy.
+  - Marked PRD 09 US-010 passing.
+- Files changed
+  - `test/web-channel.test.mjs`
+  - `test/workflow-v2-builder-editing-raw-ir.test.mjs`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_09_implementation_completeness_contract.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && node --test test/workflow-v2-builder-editing-raw-ir.test.mjs'` — passed.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && node --test test/web-channel.test.mjs'` — passed, 72/72 tests.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck'` — passed.
+- Browser verification, if UI changed
+  - Verified the container gateway was reachable at `http://127.0.0.1:4802/apps/chat`.
+  - Used dev auth as `dev@pibo.local`, duplicated `standard-project@1.0.0`, and opened `/apps/chat/workflows/drafts/draft_standard-project_1-0-0_d2823f93` with `browser-use --fresh-profile --session ralph-v2` inside `pibo-dev-WorkflowsV2`.
+  - Verified the authenticated builder renders the Workflows route, graph canvas surface, `Add Agent node`, `Save layout`, and `Workflow settings inspector` controls.
+  - Clicked a React Flow node and verified `Node inspector:` appears; clicked a React Flow edge and verified `Edge inspector:` appears.
+  - Saved screenshot: `/tmp/ralph-v2-us010-builder-graph-inspectors.png` inside the container.
+- **Learnings for future iterations:**
+  - Completeness-contract stories may need only focused acceptance-coverage additions when the underlying feature stories already implemented the UI; still run browser verification for UI-facing contracts.
+  - Zero-node draft saves should be tested at the draft PATCH boundary, while publish blocking remains covered by `before_publish` validation.
+---
