@@ -77,6 +77,132 @@ test("project workflow session records persist selection metadata before runs st
 	}
 });
 
+test("project workflow session selection and configuration stay immutable after creation", () => {
+	const tempRoot = mkdtempSync(join(tmpdir(), "pibo-project-workflow-immutable-"));
+	const service = new ChatProjectService(join(tempRoot, "web-projects.sqlite"));
+
+	try {
+		const project = service.createProject({
+			ownerScope: "user:workflow-immutable",
+			name: "Workflow Immutable Project",
+			projectFolder: join(tempRoot, "project"),
+			createFolder: true,
+		});
+		const configuration = {
+			inputValues: { topic: "Original topic" },
+			promptOverrides: { agent: "Original prompt" },
+			promptOverrideEligibleNodeIds: ["agent"],
+			overrideScopes: {
+				promptOverrides: "eligible_agent_node",
+				model: "workflow",
+				thinkingLevel: "workflow",
+				fastMode: "workflow",
+			},
+			model: { provider: "openai", id: "gpt-5.1" },
+			thinkingLevel: "low",
+			fastMode: false,
+		};
+		service.addProjectSession({
+			projectId: project.id,
+			piboSessionId: "ps_immutable_workflow",
+			kind: "main",
+			workflowId: "standard-project",
+			workflowVersion: "1.0.0",
+			title: "Configured immutable workflow",
+			state: "configured",
+			configuration,
+		});
+
+		assert.throws(() => service.addProjectSession({
+			projectId: project.id,
+			piboSessionId: "ps_immutable_workflow",
+			workflowId: "other-workflow",
+			workflowVersion: "1.0.0",
+		}), /workflow session selection is immutable/);
+		assert.throws(() => service.addProjectSession({
+			projectId: project.id,
+			piboSessionId: "ps_immutable_workflow",
+			workflowId: "standard-project",
+			workflowVersion: "2.0.0",
+		}), /workflow session selection is immutable/);
+		assert.throws(() => service.addProjectSession({
+			projectId: project.id,
+			piboSessionId: "ps_immutable_workflow",
+			workflowId: "standard-project",
+			workflowVersion: "1.0.0",
+			configuration: { ...configuration, inputValues: { topic: "Mutated topic" } },
+		}), /workflow session configuration is immutable/);
+
+		const renamed = service.addProjectSession({
+			projectId: project.id,
+			piboSessionId: "ps_immutable_workflow",
+			workflowId: "standard-project",
+			workflowVersion: "1.0.0",
+			title: "Renamed immutable workflow",
+		});
+		assert.equal(renamed.title, "Renamed immutable workflow");
+		assert.equal(renamed.workflowId, "standard-project");
+		assert.equal(renamed.workflowVersion, "1.0.0");
+		assert.deepEqual(renamed.configuration, configuration);
+
+		const snapshot = {
+			id: "wfs_immutable_start",
+			schemaVersion: 1,
+			createdAt: "2026-05-12T02:00:00.000Z",
+			createdBy: "user-1",
+			ownerScope: "user:workflow-immutable",
+			projectId: project.id,
+			piboSessionId: "ps_immutable_workflow",
+			workflow: {
+				id: "standard-project",
+				version: "1.0.0",
+				source: "code",
+				title: "Standard Project",
+				tags: ["project"],
+				baseDefinitionHash: "sha256:base",
+				effectiveDefinitionHash: "sha256:effective",
+			},
+			baseDefinition: { id: "standard-project", version: "1.0.0", nodes: {} },
+			effectiveDefinition: { id: "standard-project", version: "1.0.0", nodes: {} },
+			inputValues: configuration.inputValues,
+			promptOverrides: configuration.promptOverrides,
+			overridePolicy: {
+				promptEligibility: "metadata.sessionOverrides.prompt===true-and-direct-promptTemplate",
+				eligiblePromptNodeIds: ["agent"],
+				modelScope: "workflow",
+				thinkingLevelScope: "workflow",
+				fastModeScope: "workflow",
+			},
+			model: configuration.model,
+			thinkingLevel: configuration.thinkingLevel,
+			fastMode: configuration.fastMode,
+			promptAssetPins: [],
+			validation: { trigger: "before_project_session_creation", ok: true, validatedAt: "2026-05-12T02:00:00.000Z" },
+			deletedDefinitionFallback: {
+				workflowId: "standard-project",
+				workflowVersion: "1.0.0",
+				effectiveDefinitionHash: "sha256:effective",
+			},
+		};
+		service.saveWorkflowSessionSnapshot(snapshot);
+		assert.throws(() => service.startWorkflowSessionRun({
+			projectId: project.id,
+			piboSessionId: "ps_immutable_workflow",
+			runId: "wfr_wrong_version",
+			workflowId: "standard-project",
+			workflowVersion: "2.0.0",
+			snapshotId: snapshot.id,
+			effectiveDefinitionHash: snapshot.workflow.effectiveDefinitionHash,
+			current: { status: "running" },
+			inputValues: snapshot.inputValues,
+		}), /workflow session selection is immutable/);
+		assert.equal(service.listProjectWorkflowRuns({ piboSessionId: "ps_immutable_workflow" }).length, 0);
+	} finally {
+		service.close();
+		rmSync(tempRoot, { recursive: true, force: true });
+	}
+});
+
 test("project workflow session snapshots persist configuration and effective definitions", () => {
 	const tempRoot = mkdtempSync(join(tmpdir(), "pibo-project-workflow-snapshot-"));
 	const service = new ChatProjectService(join(tempRoot, "web-projects.sqlite"));

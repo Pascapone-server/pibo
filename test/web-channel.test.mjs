@@ -3135,6 +3135,50 @@ test("chat web app creates configured Project workflow sessions and starts one w
 		assert.equal(createdPayload.snapshot.validation.ok, true);
 		assert.equal(emitted.length, 0);
 
+		const immutablePatchResponse = await fetch(`${baseURL}/api/chat/project-sessions/${encodeURIComponent(createdPayload.session.id)}`, {
+			method: "PATCH",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({
+				workflowId: "other-workflow",
+				workflowVersion: "9.9.9",
+				inputValues: { topic: "mutated" },
+				promptOverrides: { agent: "mutated" },
+				model: { provider: "openai", id: "gpt-5.2" },
+				thinkingLevel: "high",
+				fastMode: false,
+			}),
+		});
+		assert.equal(immutablePatchResponse.status, 400);
+		const immutablePatchPayload = await immutablePatchResponse.json();
+		assert.match(immutablePatchPayload.error, /Project workflow selection and configuration are immutable/);
+
+		const titlePatchResponse = await fetch(`${baseURL}/api/chat/project-sessions/${encodeURIComponent(createdPayload.session.id)}`, {
+			method: "PATCH",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({ title: "Renamed Configured Standard Project" }),
+		});
+		assert.equal(titlePatchResponse.status, 200);
+		const titlePatchPayload = await titlePatchResponse.json();
+		assert.equal(titlePatchPayload.session.title, "Renamed Configured Standard Project");
+		assert.equal(titlePatchPayload.projectSession.workflowId, "standard-project");
+		assert.equal(titlePatchPayload.projectSession.workflowVersion, "1.0.0");
+		assert.deepEqual(titlePatchPayload.projectSession.configuration, createdPayload.configuration);
+
+		const inspectAfterOverrideResponse = await fetch(`${baseURL}/api/chat/workflows/standard-project?version=1.0.0`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(inspectAfterOverrideResponse.status, 200);
+		const inspectAfterOverridePayload = await inspectAfterOverrideResponse.json();
+		assert.equal(inspectAfterOverridePayload.selected.definition.nodes.agent.promptTemplate, "Use the workflow input to produce a concise answer.\n\n{{input}}");
+
 		const startValidationResponse = await fetch(`${baseURL}/api/chat/projects/${encodeURIComponent(projectPayload.project.id)}/workflow-sessions/${encodeURIComponent(createdPayload.session.id)}/start`, {
 			method: "POST",
 			headers: {

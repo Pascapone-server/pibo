@@ -2471,6 +2471,11 @@ const PROJECT_WORKFLOW_SESSION_CREATE_FIELDS = new Set([
 	"fastMode",
 ]);
 
+const PROJECT_SESSION_PATCH_FIELDS = new Set([
+	"title",
+	"archived",
+]);
+
 const PROJECT_WORKFLOW_SESSION_DISALLOWED_FIELDS = new Map<string, string>([
 	["agentProfileOverrides", "Agent profile overrides are not supported for V2 workflow sessions"],
 	["profileOverrides", "Agent profile overrides are not supported for V2 workflow sessions"],
@@ -2659,6 +2664,15 @@ function assertProjectWorkflowSessionCreateFields(body: ChatProjectSessionCreate
 		if (disallowedMessage) throw new PiboWebHttpError(disallowedMessage, 400);
 		if (!PROJECT_WORKFLOW_SESSION_CREATE_FIELDS.has(key)) {
 			throw new PiboWebHttpError(`Unsupported workflow session creation field: ${key}`, 400);
+		}
+	}
+}
+
+function assertProjectSessionPatchFields(body: ChatProjectSessionPatchBody): void {
+	if (!body || typeof body !== "object" || Array.isArray(body)) throw new PiboWebHttpError("Invalid JSON body", 400);
+	for (const key of Object.keys(body)) {
+		if (!PROJECT_SESSION_PATCH_FIELDS.has(key)) {
+			throw new PiboWebHttpError(`Unsupported project session update field: ${key}. Project workflow selection and configuration are immutable; create a new configured session to change workflow, input, prompt, model, thinking, or fast-mode values.`, 400);
 		}
 	}
 }
@@ -7540,6 +7554,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				const webSession = await requireSession(request, context);
 				const selectedSession = resolveRequestedSession(state, context, webSession, defaultProfile, projectSessionId);
 				const body = await readJsonBody<ChatProjectSessionPatchBody>(request);
+				assertProjectSessionPatchFields(body);
 				const updateSession = context.channelContext.updateSession;
 				if (!updateSession) throw new PiboWebHttpError("Session updates are not available", 501);
 				const title = normalizeSessionTitle(body.title);

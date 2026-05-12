@@ -248,13 +248,30 @@ export class ChatProjectService {
 	}
 
 	addProjectSession(input: { projectId: string; piboSessionId: string; kind?: PiboProjectSessionKind; workflowId?: PiboProjectWorkflowId; workflowVersion?: string; workflowRunId?: string; parentMainSessionId?: string; title?: string; state?: PiboProjectSessionState; configuration?: PiboProjectWorkflowSessionConfiguration }): PiboProjectSession {
+		const existing = this.getProjectSession(input.piboSessionId);
 		const now = new Date().toISOString();
-		const kind = input.kind ?? "main";
-		const state = normalizeProjectSessionState(input.state);
+		const kind = input.kind ?? existing?.kind ?? "main";
+		const workflowId = input.workflowId ?? existing?.workflowId ?? "simple-chat";
+		const workflowVersion = input.workflowVersion === undefined ? existing?.workflowVersion : normalizeOptionalString(input.workflowVersion);
+		const workflowRunId = input.workflowRunId ?? existing?.workflowRunId;
+		const parentMainSessionId = input.parentMainSessionId ?? existing?.parentMainSessionId;
+		const title = input.title === undefined ? existing?.title : input.title;
+		const state = input.state === undefined ? (existing?.state ?? "simple_chat") : normalizeProjectSessionState(input.state);
+		const configuration = input.configuration ?? existing?.configuration;
+		if (existing) {
+			assertProjectSessionImmutableFields(existing, {
+				projectId: input.projectId,
+				kind,
+				workflowId,
+				workflowVersion,
+				workflowRunId,
+				configuration,
+			});
+		}
 		this.db.prepare(`INSERT INTO project_sessions (project_id, pibo_session_id, kind, workflow_id, workflow_version, workflow_run_id, parent_main_session_id, title, state, configuration_json, archived, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
-			ON CONFLICT(pibo_session_id) DO UPDATE SET project_id = excluded.project_id, kind = excluded.kind, workflow_id = excluded.workflow_id, workflow_version = COALESCE(excluded.workflow_version, workflow_version), workflow_run_id = COALESCE(excluded.workflow_run_id, workflow_run_id), parent_main_session_id = excluded.parent_main_session_id, title = excluded.title, state = COALESCE(excluded.state, state), configuration_json = COALESCE(excluded.configuration_json, configuration_json), updated_at = excluded.updated_at`)
-			.run(input.projectId, input.piboSessionId, kind, input.workflowId ?? "simple-chat", normalizeOptionalString(input.workflowVersion) ?? null, input.workflowRunId ?? null, input.parentMainSessionId ?? null, input.title ?? null, state, serializeProjectSessionConfiguration(input.configuration), now, now);
+			ON CONFLICT(pibo_session_id) DO UPDATE SET project_id = excluded.project_id, kind = excluded.kind, workflow_id = excluded.workflow_id, workflow_version = excluded.workflow_version, workflow_run_id = excluded.workflow_run_id, parent_main_session_id = excluded.parent_main_session_id, title = excluded.title, state = excluded.state, configuration_json = excluded.configuration_json, updated_at = excluded.updated_at`)
+			.run(input.projectId, input.piboSessionId, kind, workflowId, workflowVersion ?? null, workflowRunId ?? null, parentMainSessionId ?? null, title ?? null, state, serializeProjectSessionConfiguration(configuration), now, now);
 		if (kind === "main") {
 			this.db.prepare("UPDATE projects SET current_main_session_id = ?, updated_at = ? WHERE id = ?").run(input.piboSessionId, now, input.projectId);
 		}
@@ -354,6 +371,15 @@ export class ChatProjectService {
 		try {
 			const existingSessionRow = this.db.prepare("SELECT * FROM project_sessions WHERE pibo_session_id = ?").get(input.piboSessionId) as ProjectSessionRow | undefined;
 			if (!existingSessionRow || existingSessionRow.project_id !== input.projectId) throw new Error("Project workflow session not found");
+			if (existingSessionRow.workflow_id !== input.workflowId || existingSessionRow.workflow_version !== input.workflowVersion) {
+				throw new Error("Project workflow session selection is immutable");
+			}
+			const snapshotRow = this.db.prepare("SELECT workflow_id, workflow_version, effective_definition_hash FROM project_workflow_session_snapshots WHERE id = ? AND pibo_session_id = ?")
+				.get(input.snapshotId, input.piboSessionId) as Pick<ProjectWorkflowSessionSnapshotRow, "workflow_id" | "workflow_version" | "effective_definition_hash"> | undefined;
+			if (!snapshotRow) throw new Error("Project workflow session snapshot not found");
+			if (snapshotRow.workflow_id !== input.workflowId || snapshotRow.workflow_version !== input.workflowVersion || snapshotRow.effective_definition_hash !== input.effectiveDefinitionHash) {
+				throw new Error("Project workflow session snapshot does not match selected workflow");
+			}
 
 			if (existingSessionRow.workflow_run_id) {
 				const existingRun = this.getProjectWorkflowRun(existingSessionRow.workflow_run_id)
@@ -775,6 +801,27 @@ function normalizeProjectSessionState(value: PiboProjectSessionState | undefined
 function normalizeWorkflowRunStatus(value: PiboProjectSessionState | null | undefined): PiboProjectWorkflowRunStatus | undefined {
 	if (value === "running" || value === "waiting" || value === "completed" || value === "failed" || value === "cancelled") return value;
 	return undefined;
+}
+
+function assertProjectSessionImmutableFields(existing: PiboProjectSession, next: {
+	projectId: string;
+	kind: PiboProjectSessionKind;
+	workflowId: PiboProjectWorkflowId;
+	workflowVersion?: string;
+	workflowRunId?: string;
+	configuration?: PiboProjectWorkflowSessionConfiguration;
+}): void {
+	if (existing.projectId !== next.projectId) throw new Error("Project session project is immutable");
+	if (existing.kind !== next.kind) throw new Error("Project session kind is immutable");
+	if (existing.workflowId !== next.workflowId || existing.workflowVersion !== next.workflowVersion) {
+		throw new Error("Project workflow session selection is immutable");
+	}
+	if (existing.workflowRunId && next.workflowRunId && existing.workflowRunId !== next.workflowRunId) {
+		throw new Error("Project workflow session run id is immutable");
+	}
+	if (serializeProjectSessionConfiguration(existing.configuration) !== serializeProjectSessionConfiguration(next.configuration)) {
+		throw new Error("Project workflow session configuration is immutable");
+	}
 }
 
 function serializeProjectSessionConfiguration(configuration: PiboProjectWorkflowSessionConfiguration | undefined): string | null {
