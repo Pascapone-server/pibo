@@ -2409,6 +2409,153 @@ test("workflow archive API applies at workflow identity scope and hides archived
 	}
 });
 
+test("workflow delete API tombstones UI workflows while preserving Project snapshots", async () => {
+	const { channel, baseURL, storageDir } = await startWebHostChannel({
+		auth: createFakeAuthService(),
+		profiles: [{ name: "pibo-agent", aliases: ["default"] }],
+	});
+
+	const jsonHeaders = {
+		"content-type": "application/json",
+		origin: baseURL,
+		"x-test-user": "user-1",
+	};
+
+	try {
+		const projectResponse = await fetch(`${baseURL}/api/chat/projects`, {
+			method: "POST",
+			headers: jsonHeaders,
+			body: JSON.stringify({
+				name: "Deleted Workflow History Project",
+				projectFolder: join(storageDir, "deleted-workflow-history-project"),
+				createFolder: true,
+			}),
+		});
+		assert.equal(projectResponse.status, 201);
+		const projectPayload = await projectResponse.json();
+
+		const sessionResponse = await fetch(`${baseURL}/api/chat/projects/${encodeURIComponent(projectPayload.project.id)}/workflow-sessions`, {
+			method: "POST",
+			headers: jsonHeaders,
+			body: JSON.stringify({
+				profile: "pibo-agent",
+				workflowId: "ui-review-workflow",
+				workflowVersion: "2.0.0",
+				title: "Review run before delete",
+			}),
+		});
+		assert.equal(sessionResponse.status, 201);
+		const sessionPayload = await sessionResponse.json();
+
+		const startResponse = await fetch(`${baseURL}/api/chat/projects/${encodeURIComponent(projectPayload.project.id)}/workflow-sessions/${encodeURIComponent(sessionPayload.session.id)}/start`, {
+			method: "POST",
+			headers: jsonHeaders,
+			body: JSON.stringify({}),
+		});
+		assert.equal(startResponse.status, 202);
+		const startPayload = await startResponse.json();
+		assert.equal(startPayload.run.snapshotId, sessionPayload.snapshot.id);
+
+		const unauthenticatedDelete = await fetch(`${baseURL}/api/chat/workflows/ui-review-workflow`, {
+			method: "DELETE",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+			},
+			body: JSON.stringify({ confirmWorkflowId: "ui-review-workflow" }),
+		});
+		assert.equal(unauthenticatedDelete.status, 401);
+
+		const badConfirmation = await fetch(`${baseURL}/api/chat/workflows/ui-review-workflow`, {
+			method: "DELETE",
+			headers: jsonHeaders,
+			body: JSON.stringify({ confirmWorkflowId: "wrong-workflow" }),
+		});
+		assert.equal(badConfirmation.status, 400);
+		assert.match((await badConfirmation.json()).error, /Type "ui-review-workflow"/);
+
+		const deleteResponse = await fetch(`${baseURL}/api/chat/workflows/ui-review-workflow`, {
+			method: "DELETE",
+			headers: jsonHeaders,
+			body: JSON.stringify({ confirmWorkflowId: "ui-review-workflow" }),
+		});
+		assert.equal(deleteResponse.status, 200);
+		const deletePayload = await deleteResponse.json();
+		assert.equal(deletePayload.workflowId, "ui-review-workflow");
+		assert.equal(deletePayload.deleted, true);
+		assert.equal(deletePayload.tombstone.workflowId, "ui-review-workflow");
+		assert.equal(deletePayload.tombstone.deletedBy, "user:user-1");
+		assert.equal(deletePayload.tombstone.lastKnownTitle, "UI Review Workflow");
+		assert.equal(deletePayload.tombstone.lastKnownVersion, "2.0.0");
+		assert.match(deletePayload.tombstone.lastDefinitionHash, /^sha256:[a-f0-9]{64}$/);
+
+		const defaultCatalogResponse = await fetch(`${baseURL}/api/chat/workflows`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(defaultCatalogResponse.status, 200);
+		const defaultCatalogPayload = await defaultCatalogResponse.json();
+		assert.equal(defaultCatalogPayload.workflows.some((workflow) => workflow.id === "ui-review-workflow"), false);
+
+		const archivedCatalogResponse = await fetch(`${baseURL}/api/chat/workflows?includeArchived=true`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(archivedCatalogResponse.status, 200);
+		const archivedCatalogPayload = await archivedCatalogResponse.json();
+		assert.equal(archivedCatalogPayload.workflows.some((workflow) => workflow.id === "ui-review-workflow"), false);
+
+		const pickerResponse = await fetch(`${baseURL}/api/chat/workflows/pickers/workflow-versions`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(pickerResponse.status, 200);
+		const pickerPayload = await pickerResponse.json();
+		assert.equal(pickerPayload.options.some((option) => option.id === "ui-review-workflow"), false);
+
+		const historyResponse = await fetch(`${baseURL}/api/chat/workflows/pickers/version-history`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(historyResponse.status, 200);
+		const historyPayload = await historyResponse.json();
+		assert.equal(historyPayload.options.some((option) => option.id === "ui-review-workflow"), false);
+
+		const inspectDeletedResponse = await fetch(`${baseURL}/api/chat/workflows/ui-review-workflow?version=2.0.0&includeArchived=true`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(inspectDeletedResponse.status, 404);
+
+		const duplicateDeletedResponse = await fetch(`${baseURL}/api/chat/workflows/ui-review-workflow/duplicate`, {
+			method: "POST",
+			headers: jsonHeaders,
+			body: JSON.stringify({ version: "2.0.0" }),
+		});
+		assert.equal(duplicateDeletedResponse.status, 404);
+
+		const bootstrapResponse = await fetch(`${baseURL}/api/chat/projects/bootstrap?projectId=${encodeURIComponent(projectPayload.project.id)}&piboSessionId=${encodeURIComponent(sessionPayload.session.id)}`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(bootstrapResponse.status, 200);
+		const bootstrapPayload = await bootstrapResponse.json();
+		const projectSession = bootstrapPayload.projectSessions[0];
+		assert.equal(projectSession.workflowRunId, startPayload.run.id);
+		assert.equal(projectSession.workflowDefinitionLink.status, "snapshot_only_definition_deleted");
+		assert.equal(projectSession.workflowDefinitionLink.workflowId, "ui-review-workflow");
+		assert.equal(projectSession.workflowDefinitionLink.workflowVersion, "2.0.0");
+		assert.equal(projectSession.workflowDefinitionLink.title, "UI Review Workflow");
+		assert.equal(projectSession.workflowDefinitionLink.definitionHash, sessionPayload.snapshot.workflow.effectiveDefinitionHash);
+		assert.equal(projectSession.workflowDefinitionLink.href, undefined);
+		assert.match(projectSession.workflowDefinitionLink.tombstoneLabel, /Definition deleted/);
+
+		const lifecycleResponse = await fetch(`${baseURL}/api/chat/workflows/lifecycle-events?type=workflow.delete.tombstoned&workflowId=ui-review-workflow`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(lifecycleResponse.status, 200);
+		const lifecyclePayload = await lifecycleResponse.json();
+		assert.equal(lifecyclePayload.events.length, 1);
+		assert.equal(lifecyclePayload.events[0].payload.lastKnownVersion, "2.0.0");
+	} finally {
+		await channel.stop?.();
+	}
+});
+
 test("workflow security boundary validates registered refs and rejects inline execution paths", async () => {
 	const { channel, baseURL } = await startWebHostChannel({
 		auth: createFakeAuthService(),

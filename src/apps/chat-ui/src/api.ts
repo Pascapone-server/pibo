@@ -609,6 +609,30 @@ export async function postWorkflowArchive(workflowId: string, input: { reason?: 
 	});
 }
 
+export type WorkflowDeleteResponse = {
+	workflowId: string;
+	deleted: true;
+	tombstone: {
+		workflowId: string;
+		source: "ui";
+		deleted: boolean;
+		deletedAt: string;
+		deletedBy: string;
+		lastKnownTitle: string;
+		lastKnownVersion?: string;
+		lastDefinitionHash?: string;
+		updatedAt: string;
+	};
+};
+
+export async function deleteWorkflow(workflowId: string, input: { confirmWorkflowId: string }): Promise<WorkflowDeleteResponse> {
+	return requestJson<WorkflowDeleteResponse>(`/api/chat/workflows/${encodeURIComponent(workflowId)}`, {
+		method: "DELETE",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify(input),
+	});
+}
+
 export type CronScheduleInput =
 	| { kind: "in"; value: string }
 	| { kind: "at"; at: string }

@@ -186,6 +186,7 @@ type ChatWebAppState = {
 	workflowDraftStore: ChatWorkflowDraftStore;
 	workflowPublishedVersionStore: ChatWorkflowPublishedVersionStore;
 	workflowArchiveStore: ChatWorkflowArchiveStore;
+	workflowTombstoneStore: ChatWorkflowTombstoneStore;
 	workflowLifecycleEventStore: ChatWorkflowLifecycleEventStore;
 };
 
@@ -566,6 +567,10 @@ type WorkflowArchiveBody = {
 	reason?: unknown;
 };
 
+type WorkflowDeleteBody = {
+	confirmWorkflowId?: unknown;
+};
+
 type WorkflowDraftPatchBody = {
 	definition?: unknown;
 	rawDefinitionText?: unknown;
@@ -643,6 +648,30 @@ type WorkflowArchiveStateStoreRow = {
 	archived_at: string | null;
 	archived_by: string | null;
 	archive_reason: string | null;
+	updated_at: string;
+};
+
+type WorkflowTombstoneRecord = {
+	workflowId: string;
+	source: "ui";
+	deleted: boolean;
+	deletedAt: string;
+	deletedBy: string;
+	lastKnownTitle: string;
+	lastKnownVersion?: string;
+	lastDefinitionHash?: string;
+	updatedAt: string;
+};
+
+type WorkflowTombstoneStoreRow = {
+	workflow_id: string;
+	source: "ui";
+	deleted: number;
+	deleted_at: string;
+	deleted_by: string;
+	last_known_title: string;
+	last_known_version: string | null;
+	last_definition_hash: string | null;
 	updated_at: string;
 };
 
@@ -1110,6 +1139,105 @@ function workflowArchiveStateFromStoreRow(row: WorkflowArchiveStateStoreRow): Wo
 		...(row.archived_at ? { archivedAt: row.archived_at } : {}),
 		...(row.archived_by ? { archivedBy: row.archived_by } : {}),
 		...(row.archive_reason ? { archiveReason: row.archive_reason } : {}),
+		updatedAt: row.updated_at,
+	};
+}
+
+class ChatWorkflowTombstoneStore {
+	constructor(private readonly dataStore: PiboDataStore) {
+		this.dataStore.db.exec(`
+			CREATE TABLE IF NOT EXISTS workflow_delete_tombstones (
+				workflow_id TEXT PRIMARY KEY,
+				source TEXT NOT NULL,
+				deleted INTEGER NOT NULL,
+				deleted_at TEXT NOT NULL,
+				deleted_by TEXT NOT NULL,
+				last_known_title TEXT NOT NULL,
+				last_known_version TEXT,
+				last_definition_hash TEXT,
+				updated_at TEXT NOT NULL
+			);
+
+			CREATE INDEX IF NOT EXISTS idx_workflow_delete_tombstones_deleted
+				ON workflow_delete_tombstones(deleted, updated_at);
+		`);
+	}
+
+	setWorkflowDeleted(input: {
+		workflowId: string;
+		deletedBy: string;
+		lastKnownTitle: string;
+		lastKnownVersion?: string;
+		lastDefinitionHash?: string;
+	}): WorkflowTombstoneRecord {
+		const existing = this.getWorkflowTombstone(input.workflowId);
+		const now = new Date().toISOString();
+		const record: WorkflowTombstoneRecord = {
+			workflowId: input.workflowId,
+			source: "ui",
+			deleted: true,
+			deletedAt: existing?.deletedAt ?? now,
+			deletedBy: input.deletedBy,
+			lastKnownTitle: input.lastKnownTitle,
+			...(input.lastKnownVersion ? { lastKnownVersion: input.lastKnownVersion } : {}),
+			...(input.lastDefinitionHash ? { lastDefinitionHash: input.lastDefinitionHash } : {}),
+			updatedAt: now,
+		};
+		this.saveWorkflowTombstone(record);
+		return record;
+	}
+
+	getWorkflowTombstone(workflowId: string): WorkflowTombstoneRecord | undefined {
+		const row = this.dataStore.db.prepare("SELECT * FROM workflow_delete_tombstones WHERE workflow_id = ? AND deleted = 1").get(workflowId) as WorkflowTombstoneStoreRow | undefined;
+		return row ? workflowTombstoneFromStoreRow(row) : undefined;
+	}
+
+	private saveWorkflowTombstone(record: WorkflowTombstoneRecord): void {
+		this.dataStore.db.prepare(`
+			INSERT INTO workflow_delete_tombstones (
+				workflow_id,
+				source,
+				deleted,
+				deleted_at,
+				deleted_by,
+				last_known_title,
+				last_known_version,
+				last_definition_hash,
+				updated_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(workflow_id) DO UPDATE SET
+				source = excluded.source,
+				deleted = excluded.deleted,
+				deleted_at = excluded.deleted_at,
+				deleted_by = excluded.deleted_by,
+				last_known_title = excluded.last_known_title,
+				last_known_version = excluded.last_known_version,
+				last_definition_hash = excluded.last_definition_hash,
+				updated_at = excluded.updated_at
+		`).run(
+			record.workflowId,
+			record.source,
+			record.deleted ? 1 : 0,
+			record.deletedAt,
+			record.deletedBy,
+			record.lastKnownTitle,
+			record.lastKnownVersion ?? null,
+			record.lastDefinitionHash ?? null,
+			record.updatedAt,
+		);
+	}
+}
+
+function workflowTombstoneFromStoreRow(row: WorkflowTombstoneStoreRow): WorkflowTombstoneRecord {
+	return {
+		workflowId: row.workflow_id,
+		source: row.source,
+		deleted: row.deleted === 1,
+		deletedAt: row.deleted_at,
+		deletedBy: row.deleted_by,
+		lastKnownTitle: row.last_known_title,
+		...(row.last_known_version ? { lastKnownVersion: row.last_known_version } : {}),
+		...(row.last_definition_hash ? { lastDefinitionHash: row.last_definition_hash } : {}),
 		updatedAt: row.updated_at,
 	};
 }
@@ -2459,6 +2587,12 @@ function normalizeWorkflowArchiveReason(value: unknown): string | undefined {
 	return trimmed ? trimmed.slice(0, 500) : undefined;
 }
 
+function requireWorkflowDeleteConfirmation(value: unknown, workflowId: string): void {
+	if (typeof value !== "string" || value.trim() !== workflowId) {
+		throw new PiboWebHttpError(`Type "${workflowId}" to delete this workflow.`, 400);
+	}
+}
+
 const PROJECT_WORKFLOW_SESSION_CREATE_FIELDS = new Set([
 	"profile",
 	"workflowId",
@@ -3389,7 +3523,9 @@ function buildWorkflowVersionPicker(state: ChatWebAppState, selectedWorkflowId?:
 }
 
 function buildWorkflowVersionHistory(state: ChatWebAppState, selectedWorkflowId?: string, selectedWorkflowVersion?: string): WorkflowVersionHistoryResponse {
-	const options = [...buildProjectWorkflowVersionCatalog(state)].sort(compareWorkflowCatalogVersionRecords);
+	const options = [...buildProjectWorkflowVersionCatalog(state)]
+		.filter((option) => option.status !== "deleted")
+		.sort(compareWorkflowCatalogVersionRecords);
 	const normalizedWorkflowId = selectedWorkflowId?.trim() || undefined;
 	const normalizedWorkflowVersion = selectedWorkflowVersion?.trim() || undefined;
 	const selected = normalizedWorkflowId
@@ -3492,6 +3628,7 @@ function buildProjectWorkflowVersionCatalog(state?: ChatWebAppState): WorkflowCa
 }
 
 function workflowCatalogRecordWithArchiveState(record: WorkflowCatalogVersionRecord, state?: ChatWebAppState): WorkflowCatalogVersionRecord {
+	if (record.source === "ui" && state?.workflowTombstoneStore.getWorkflowTombstone(record.id)) return { ...record, status: "deleted" };
 	const archiveState = state?.workflowArchiveStore.getWorkflowArchiveState(record.id);
 	if (record.source === "ui" && archiveState?.archived) return { ...record, status: "archived" };
 	return record;
@@ -3572,20 +3709,20 @@ function buildWorkflowCatalogList(
 	for (const record of STATIC_WORKFLOW_VERSION_CATALOG) {
 		if (record.status === "draft") continue;
 		const summary = workflowCatalogVersionSummaryFromCatalogRecord(record, buildContext);
-		if (summary.status === "archived" && !includeArchived) continue;
+		if (!isWorkflowCatalogSummaryVisible(summary, includeArchived)) continue;
 		addWorkflowCatalogVersion(workflows, summary);
 	}
 
 	for (const record of state.workflowPublishedVersionStore.listPublishedVersions()) {
 		const summary = workflowCatalogVersionSummaryFromPublishedVersion(record, buildContext);
-		if (summary.status === "archived" && !includeArchived) continue;
+		if (!isWorkflowCatalogSummaryVisible(summary, includeArchived)) continue;
 		addWorkflowCatalogVersion(workflows, summary);
 	}
 
 	for (const draft of state.workflowDraftStore.listDrafts()) {
 		if (draft.ownerScope !== webSession.ownerScope) continue;
 		const summary = workflowCatalogVersionSummaryFromDraft(draft, state);
-		if (summary.status === "archived" && !includeArchived) continue;
+		if (!isWorkflowCatalogSummaryVisible(summary, includeArchived)) continue;
 		addWorkflowCatalogVersion(workflows, summary);
 		const accumulator = workflows.get(draft.workflowId);
 		if (accumulator) accumulator.activeDraftId = draft.draftId;
@@ -3598,6 +3735,12 @@ function buildWorkflowCatalogList(
 			.map(workflowCatalogRecordFromAccumulator)
 			.sort(compareWorkflowCatalogRecords),
 	};
+}
+
+function isWorkflowCatalogSummaryVisible(summary: WorkflowCatalogVersionSummary, includeArchived: boolean): boolean {
+	if (summary.status === "deleted") return false;
+	if (summary.status === "archived" && !includeArchived) return false;
+	return true;
 }
 
 function addWorkflowCatalogVersion(workflows: Map<string, WorkflowCatalogAccumulator>, summary: WorkflowCatalogVersionSummary): void {
@@ -3837,7 +3980,7 @@ function workflowPublishedVersionInspection(
 	const persisted = state.workflowPublishedVersionStore.listPublishedVersions({ workflowId }).find((record) => record.version === version);
 	if (persisted) {
 		const catalogRecord = workflowCatalogRecordWithArchiveState(workflowCatalogRecordFromPublishedVersion(persisted), state);
-		if (catalogRecord.status === "archived" && !includeArchived) return undefined;
+		if (catalogRecord.status === "deleted" || (catalogRecord.status === "archived" && !includeArchived)) return undefined;
 		const diagnostics = validateWorkflowDefinitionForV2(persisted.definition, { state, context, webSession });
 		return {
 			version: { ...catalogRecord, definitionHash: persisted.definitionHash },
@@ -3849,7 +3992,7 @@ function workflowPublishedVersionInspection(
 
 	const staticRecord = STATIC_WORKFLOW_VERSION_CATALOG.find((record) => record.id === workflowId && record.version === version);
 	const catalogRecord = staticRecord ? workflowCatalogRecordWithArchiveState(staticRecord, state) : undefined;
-	if (!catalogRecord || catalogRecord.status === "draft" || (catalogRecord.status === "archived" && !includeArchived)) return undefined;
+	if (!catalogRecord || catalogRecord.status === "draft" || catalogRecord.status === "deleted" || (catalogRecord.status === "archived" && !includeArchived)) return undefined;
 	const definition = createPublishedWorkflowDefinition(catalogRecord, "pibo-agent");
 	const diagnostics = validateWorkflowDefinitionForV2(definition, { state, context, webSession });
 	return {
@@ -4048,6 +4191,45 @@ function archiveWorkflowIdentity(
 	const archivedWorkflow = buildWorkflowCatalogList(state, context, webSession, { includeArchived: true }).workflows.find((record) => record.id === workflowId);
 	if (!archivedWorkflow) throw new PiboWebHttpError("Archived workflow not found", 500);
 	return { workflow: archivedWorkflow, archiveState };
+}
+
+function deleteWorkflowIdentity(
+	state: ChatWebAppState,
+	context: PiboWebAppContext,
+	webSession: PiboWebSession,
+	workflowIdValue: unknown,
+	body: WorkflowDeleteBody,
+): { workflowId: string; deleted: true; tombstone: WorkflowTombstoneRecord } {
+	const workflowId = normalizeProjectWorkflowId(workflowIdValue);
+	const catalog = buildWorkflowCatalogList(state, context, webSession, { includeArchived: true });
+	const workflow = catalog.workflows.find((record) => record.id === workflowId);
+	if (!workflow) throw new PiboWebHttpError("Workflow not found", 404);
+	if (workflow.source !== "ui") {
+		throw new PiboWebHttpError("Code workflow projections are read-only; duplicate them to a UI draft before deleting", 409);
+	}
+	requireWorkflowDeleteConfirmation(body.confirmWorkflowId, workflow.id);
+	const displayVersion = selectWorkflowCatalogDisplayVersion(workflow.versions);
+	const tombstone = state.workflowTombstoneStore.setWorkflowDeleted({
+		workflowId,
+		deletedBy: principalIdFor(webSession),
+		lastKnownTitle: workflow.title,
+		...(displayVersion?.version ? { lastKnownVersion: displayVersion.version } : {}),
+		...(displayVersion?.definitionHash ? { lastDefinitionHash: displayVersion.definitionHash } : {}),
+	});
+	recordWorkflowLifecycleEvent(state, webSession, {
+		type: "workflow.delete.tombstoned",
+		workflowId,
+		workflowVersion: tombstone.lastKnownVersion,
+		status: "accepted",
+		diagnostics: [],
+		payload: {
+			deleted: true,
+			lastKnownTitle: tombstone.lastKnownTitle,
+			lastKnownVersion: tombstone.lastKnownVersion ?? null,
+			lastDefinitionHash: tombstone.lastDefinitionHash ?? null,
+		},
+	});
+	return { workflowId, deleted: true, tombstone };
 }
 
 function selectPublishedWorkflowVersion(state: ChatWebAppState, workflowId: string, version?: string): WorkflowPublishedVersionSelection | undefined {
@@ -4429,6 +4611,9 @@ function requireMutableWorkflowDraft(state: ChatWebAppState, webSession: PiboWeb
 		});
 	}
 	if (!record || record.ownerScope !== webSession.ownerScope) throw new PiboWebHttpError("Workflow draft not found", 404);
+	if (state.workflowTombstoneStore.getWorkflowTombstone(record.workflowId)) {
+		throw new PiboWebHttpError("Workflow has been deleted", 404);
+	}
 	return record;
 }
 
@@ -7407,6 +7592,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 		workflowDraftStore: new ChatWorkflowDraftStore(dataStore),
 		workflowPublishedVersionStore: new ChatWorkflowPublishedVersionStore(dataStore),
 		workflowArchiveStore: new ChatWorkflowArchiveStore(dataStore),
+		workflowTombstoneStore: new ChatWorkflowTombstoneStore(dataStore),
 		workflowLifecycleEventStore: new ChatWorkflowLifecycleEventStore(dataStore),
 	};
 
@@ -7944,6 +8130,13 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 					version: url.searchParams.get("version") ?? undefined,
 					draftId: url.searchParams.get("draftId") ?? undefined,
 				}));
+			}
+
+			if (workflowCatalogId && request.method === "DELETE") {
+				requireSameOriginJsonRequest(request);
+				const webSession = await requireSession(request, context);
+				const body = await readJsonBody<WorkflowDeleteBody>(request);
+				return responseJson(deleteWorkflowIdentity(state, context, webSession, workflowCatalogId, body));
 			}
 
 			const workflowDraftAction = workflowDraftActionResource(url.pathname);

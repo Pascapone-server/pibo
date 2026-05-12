@@ -21,6 +21,7 @@ import "@xyflow/react/dist/style.css";
 import type { LucideIcon } from "lucide-react";
 import { AlertTriangle, Archive, BookOpenText, Brain, CheckCheck, Code2, CopyPlus, ExternalLink, History, Layers, Link2, Loader2, MousePointer2, MoveRight, Plus, RefreshCw, Save, ShieldCheck, Trash2 } from "lucide-react";
 import {
+	deleteWorkflow,
 	getWorkflowAdapterPicker,
 	getWorkflowDraft,
 	getWorkflowGuardPicker,
@@ -208,8 +209,9 @@ function WorkflowLibraryPanel({ activeDraftId }: { activeDraftId?: string }) {
 	const [duplicatingKey, setDuplicatingKey] = useState<string | undefined>();
 	const [editingKey, setEditingKey] = useState<string | undefined>();
 	const [archivingWorkflowId, setArchivingWorkflowId] = useState<string | undefined>();
+	const [deletingWorkflowId, setDeletingWorkflowId] = useState<string | undefined>();
 	const [errorMessage, setErrorMessage] = useState<string | undefined>();
-	const busy = Boolean(duplicatingKey || editingKey || archivingWorkflowId);
+	const busy = Boolean(duplicatingKey || editingKey || archivingWorkflowId || deletingWorkflowId);
 
 	const loadVersionHistory = useCallback(async () => {
 		setHistoryLoadState("loading");
@@ -269,6 +271,21 @@ function WorkflowLibraryPanel({ activeDraftId }: { activeDraftId?: string }) {
 		}
 	};
 
+	const deleteWorkflowIdentity = async (workflowId: string) => {
+		const confirmWorkflowId = window.prompt(`Type the workflow id "${workflowId}" to delete this workflow. Historical Project run snapshots remain inspectable.`);
+		if (confirmWorkflowId === null) return;
+		setDeletingWorkflowId(workflowId);
+		setErrorMessage(undefined);
+		try {
+			await deleteWorkflow(workflowId, { confirmWorkflowId });
+			await loadVersionHistory();
+		} catch (error) {
+			setErrorMessage(error instanceof Error ? error.message : "Failed to delete workflow");
+		} finally {
+			setDeletingWorkflowId(undefined);
+		}
+	};
+
 	return (
 		<div className="flex w-full flex-col gap-4">
 			<div className="rounded-sm border border-slate-800 bg-[#101d22]/70 p-4">
@@ -298,7 +315,7 @@ function WorkflowLibraryPanel({ activeDraftId }: { activeDraftId?: string }) {
 							Version history
 						</div>
 						<p className="mt-1 text-[11px] leading-5 text-slate-500">
-							Published versions are listed in deterministic workflow/version order. Only published rows are selectable for Project sessions; archived or deleted rows stay visible as history.
+							Published versions are listed in deterministic workflow/version order. Only published rows are selectable for Project sessions; archived rows stay visible as history while deleted workflows render from Project snapshots.
 						</p>
 					</div>
 					<button
@@ -333,9 +350,11 @@ function WorkflowLibraryPanel({ activeDraftId }: { activeDraftId?: string }) {
 						duplicatingKey={duplicatingKey}
 						editingKey={editingKey}
 						archivingWorkflowId={archivingWorkflowId}
+						deletingWorkflowId={deletingWorkflowId}
 						onDuplicate={duplicateWorkflow}
 						onEditPublished={editPublishedWorkflow}
 						onArchive={archiveWorkflow}
+						onDelete={deleteWorkflowIdentity}
 					/>
 				)) : null}
 			</div>
@@ -355,18 +374,22 @@ function WorkflowVersionHistoryGroupCard({
 	duplicatingKey,
 	editingKey,
 	archivingWorkflowId,
+	deletingWorkflowId,
 	onDuplicate,
 	onEditPublished,
 	onArchive,
+	onDelete,
 }: {
 	group: WorkflowVersionHistoryGroup;
 	busy: boolean;
 	duplicatingKey?: string;
 	editingKey?: string;
 	archivingWorkflowId?: string;
+	deletingWorkflowId?: string;
 	onDuplicate: (workflowId: string, version: string) => Promise<void>;
 	onEditPublished: (workflowId: string, version: string) => Promise<void>;
 	onArchive: (workflowId: string) => Promise<void>;
+	onDelete: (workflowId: string) => Promise<void>;
 }) {
 	return (
 		<div className="rounded-sm border border-slate-800 bg-[#101d22]/70 p-4" aria-label={`Version history for ${group.workflowId}`}>
@@ -389,9 +412,11 @@ function WorkflowVersionHistoryGroupCard({
 						duplicatingKey={duplicatingKey}
 						editingKey={editingKey}
 						archivingWorkflowId={archivingWorkflowId}
+						deletingWorkflowId={deletingWorkflowId}
 						onDuplicate={onDuplicate}
 						onEditPublished={onEditPublished}
 						onArchive={onArchive}
+						onDelete={onDelete}
 					/>
 				))}
 			</div>
@@ -405,22 +430,27 @@ function WorkflowVersionHistoryRow({
 	duplicatingKey,
 	editingKey,
 	archivingWorkflowId,
+	deletingWorkflowId,
 	onDuplicate,
 	onEditPublished,
 	onArchive,
+	onDelete,
 }: {
 	record: WorkflowCatalogVersionRecord;
 	busy: boolean;
 	duplicatingKey?: string;
 	editingKey?: string;
 	archivingWorkflowId?: string;
+	deletingWorkflowId?: string;
 	onDuplicate: (workflowId: string, version: string) => Promise<void>;
 	onEditPublished: (workflowId: string, version: string) => Promise<void>;
 	onArchive: (workflowId: string) => Promise<void>;
+	onDelete: (workflowId: string) => Promise<void>;
 }) {
 	const key = workflowVersionSelectionKey(record.id, record.version);
 	const published = record.status === "published";
 	const archivable = published && record.source === "ui";
+	const deletable = published && record.source === "ui";
 	return (
 		<div className="rounded-sm border border-slate-800 bg-[#151f24]/70 p-3 text-xs leading-5 text-slate-400">
 			<div className="flex flex-wrap items-start justify-between gap-3">
@@ -473,6 +503,17 @@ function WorkflowVersionHistoryRow({
 								>
 									{archivingWorkflowId === record.id ? <Loader2 size={13} className="animate-spin" /> : <Archive size={13} />}
 									Archive workflow
+								</button>
+							) : null}
+							{deletable ? (
+								<button
+									type="button"
+									className="inline-flex items-center justify-center gap-1 rounded-sm border border-red-800/80 px-3 py-1.5 text-xs font-semibold text-red-100 transition hover:border-red-500 hover:text-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+									onClick={() => void onDelete(record.id)}
+									disabled={busy}
+								>
+									{deletingWorkflowId === record.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+									Delete workflow
 								</button>
 							) : null}
 						</>
