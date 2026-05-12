@@ -804,7 +804,7 @@ class ChatWorkflowDraftStore {
 				record.targetWorkflowVersion ?? null,
 				record.versionIntent,
 				JSON.stringify(record.definition),
-				JSON.stringify(record.diagnostics),
+				JSON.stringify(sanitizeWorkflowDiagnostics(record.diagnostics)),
 				record.validation ? JSON.stringify(record.validation) : null,
 				record.validationState,
 				record.revision,
@@ -827,7 +827,7 @@ function workflowDraftFromStoreRow(row: WorkflowDraftStoreRow): OwnedWorkflowDra
 		...(row.target_workflow_version ? { targetWorkflowVersion: row.target_workflow_version } : {}),
 		versionIntent: row.version_intent,
 		definition: JSON.parse(row.definition_json) as PiboJsonObject,
-		diagnostics: JSON.parse(row.diagnostics_json) as WorkflowDraftDiagnostic[],
+		diagnostics: sanitizeWorkflowDiagnostics(JSON.parse(row.diagnostics_json)),
 		...(row.validation_json ? { validation: JSON.parse(row.validation_json) as WorkflowValidationSummary } : {}),
 		validationState: row.validation_state,
 		revision: row.revision,
@@ -835,6 +835,64 @@ function workflowDraftFromStoreRow(row: WorkflowDraftStoreRow): OwnedWorkflowDra
 		updatedAt: row.updated_at,
 		ownerScope: row.owner_scope,
 	};
+}
+
+const WORKFLOW_DIAGNOSTIC_TEXT_MAX_LENGTH = 600;
+const WORKFLOW_DIAGNOSTIC_REF_MAX_LENGTH = 240;
+const WORKFLOW_DIAGNOSTIC_SENSITIVE_VALUE_PATTERN = /(["']?)(promptTemplate|promptOverrides|inputValues|input|output|state|payload|edgePayload|humanActionPayload|edge payload|human action payload)\1\s*[:=]\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\{[^{}]{0,500}\}|\[[^[\]]{0,500}\]|[^\s,;]{1,500})/gi;
+
+function sanitizeWorkflowDiagnostics(value: unknown): WorkflowDraftDiagnostic[] {
+	if (!Array.isArray(value)) return [];
+	return value.map(sanitizeWorkflowDiagnostic);
+}
+
+function sanitizeWorkflowDiagnostic(value: unknown): WorkflowDraftDiagnostic {
+	const record = isWorkflowDiagnosticRecord(value) ? value : {};
+	const diagnostic: WorkflowDraftDiagnostic = {
+		code: normalizeWorkflowDiagnosticString(record.code, WORKFLOW_DIAGNOSTIC_REF_MAX_LENGTH) ?? "WorkflowDiagnostic.redacted",
+		message: normalizeWorkflowDiagnosticText(record.message) ?? "Workflow diagnostic details were redacted.",
+		severity: normalizeWorkflowDiagnosticSeverity(record.severity),
+	};
+	const path = normalizeWorkflowDiagnosticString(record.path, WORKFLOW_DIAGNOSTIC_REF_MAX_LENGTH);
+	if (path) diagnostic.path = path;
+	const nodeId = normalizeWorkflowDiagnosticString(record.nodeId, WORKFLOW_DIAGNOSTIC_REF_MAX_LENGTH);
+	if (nodeId) diagnostic.nodeId = nodeId;
+	const edgeId = normalizeWorkflowDiagnosticString(record.edgeId, WORKFLOW_DIAGNOSTIC_REF_MAX_LENGTH);
+	if (edgeId) diagnostic.edgeId = edgeId;
+	const registryRef = normalizeWorkflowDiagnosticString(record.registryRef, WORKFLOW_DIAGNOSTIC_REF_MAX_LENGTH);
+	if (registryRef) diagnostic.registryRef = registryRef;
+	const hint = normalizeWorkflowDiagnosticText(record.hint);
+	if (hint) diagnostic.hint = hint;
+	return diagnostic;
+}
+
+function isWorkflowDiagnosticRecord(value: unknown): value is Record<string, unknown> {
+	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeWorkflowDiagnosticSeverity(value: unknown): WorkflowDraftDiagnostic["severity"] {
+	return value === "info" || value === "warning" || value === "error" ? value : "error";
+}
+
+function normalizeWorkflowDiagnosticText(value: unknown): string | undefined {
+	const text = normalizeWorkflowDiagnosticString(value, WORKFLOW_DIAGNOSTIC_TEXT_MAX_LENGTH);
+	if (!text) return undefined;
+	return truncateWorkflowDiagnosticText(redactWorkflowDiagnosticText(text));
+}
+
+function normalizeWorkflowDiagnosticString(value: unknown, maxLength: number): string | undefined {
+	if (typeof value !== "string") return undefined;
+	const trimmed = value.trim();
+	if (!trimmed) return undefined;
+	return trimmed.length > maxLength ? `${trimmed.slice(0, maxLength)}…` : trimmed;
+}
+
+function redactWorkflowDiagnosticText(text: string): string {
+	return text.replace(WORKFLOW_DIAGNOSTIC_SENSITIVE_VALUE_PATTERN, (_match, quote: string, label: string) => `${quote}${label}${quote}: [redacted]`);
+}
+
+function truncateWorkflowDiagnosticText(text: string): string {
+	return text.length > WORKFLOW_DIAGNOSTIC_TEXT_MAX_LENGTH ? `${text.slice(0, WORKFLOW_DIAGNOSTIC_TEXT_MAX_LENGTH)}…` : text;
 }
 
 class ChatWorkflowPublishedVersionStore {
@@ -1092,7 +1150,7 @@ class ChatWorkflowLifecycleEventStore {
 			...(input.workflowRunId ? { workflowRunId: input.workflowRunId } : {}),
 			...(input.status ? { status: input.status } : {}),
 			...(input.validation ? { validation: input.validation } : {}),
-			diagnostics: input.diagnostics ?? [],
+			diagnostics: sanitizeWorkflowDiagnostics(input.diagnostics ?? []),
 			...(input.payload ? { payload: input.payload } : {}),
 			createdAt: input.createdAt ?? new Date().toISOString(),
 		};
@@ -1194,7 +1252,7 @@ function workflowLifecycleEventFromStoreRow(row: WorkflowLifecycleEventStoreRow)
 		...(row.workflow_run_id ? { workflowRunId: row.workflow_run_id } : {}),
 		...(row.status ? { status: row.status } : {}),
 		...(row.validation_json ? { validation: JSON.parse(row.validation_json) as WorkflowValidationSummary } : {}),
-		diagnostics: JSON.parse(row.diagnostics_json) as WorkflowDraftDiagnostic[],
+		diagnostics: sanitizeWorkflowDiagnostics(JSON.parse(row.diagnostics_json)),
 		...(row.payload_json ? { payload: JSON.parse(row.payload_json) as PiboJsonObject } : {}),
 		createdAt: row.created_at,
 	};
@@ -2259,6 +2317,26 @@ function requireRoom(
 	return room;
 }
 
+function listOwnedProjects(state: ChatWebAppState, webSession: PiboWebSession, options: { includeArchived?: boolean } = {}): PiboProject[] {
+	return state.projectService.listProjects(options).filter((project) => project.ownerScope === webSession.ownerScope);
+}
+
+function requireOwnedProject(
+	state: ChatWebAppState,
+	webSession: PiboWebSession,
+	projectId: string,
+	options: { includeArchived?: boolean } = {},
+): PiboProject {
+	let project: PiboProject;
+	try {
+		project = state.projectService.requireProject(projectId, options);
+	} catch {
+		throw new PiboWebHttpError("Project not found", 404);
+	}
+	if (project.ownerScope !== webSession.ownerScope) throw new PiboWebHttpError("Project not found", 404);
+	return project;
+}
+
 function createPersonalChatSession(
 	context: PiboWebAppContext,
 	webSession: PiboWebSession,
@@ -2502,7 +2580,7 @@ function workflowValidationSnapshot(validation: WorkflowValidationResponse): Pib
 	return {
 		...validation.validation,
 		validatedAt: validation.validation.checkedAt,
-		diagnostics: validation.diagnostics as unknown as PiboJsonValue[],
+		diagnostics: sanitizeWorkflowDiagnostics(validation.diagnostics) as unknown as PiboJsonValue[],
 	};
 }
 
@@ -2522,7 +2600,7 @@ function validateProjectWorkflowSnapshotForStart(
 	snapshot: PiboProjectWorkflowSessionSnapshot,
 	input: { state: ChatWebAppState; context: PiboWebAppContext; webSession: PiboWebSession },
 ): WorkflowValidationResponse {
-	const diagnostics = validateWorkflowDefinitionForV2(snapshot.effectiveDefinition, input);
+	const diagnostics = sanitizeWorkflowDiagnostics(validateWorkflowDefinitionForV2(snapshot.effectiveDefinition, input));
 	return {
 		diagnostics,
 		validation: summarizeWorkflowDiagnostics(diagnostics, "before_workflow_start"),
@@ -3433,6 +3511,7 @@ function buildWorkflowCatalogList(
 	}
 
 	for (const draft of state.workflowDraftStore.listDrafts()) {
+		if (draft.ownerScope !== webSession.ownerScope) continue;
 		const summary = workflowCatalogVersionSummaryFromDraft(draft, state);
 		if (summary.status === "archived" && !includeArchived) continue;
 		addWorkflowCatalogVersion(workflows, summary);
@@ -3536,11 +3615,12 @@ function workflowCatalogVersionSummaryFromPublishedVersion(record: WorkflowPubli
 
 function workflowCatalogVersionSummaryFromDraft(draft: OwnedWorkflowDraftRecord, state: ChatWebAppState): WorkflowCatalogVersionSummary {
 	const record = workflowCatalogRecordWithArchiveState(workflowCatalogRecordFromDraft(draft), state);
+	const diagnostics = sanitizeWorkflowDiagnostics(draft.diagnostics);
 	return {
 		...record,
 		validationState: draft.validationState,
-		diagnostics: draft.diagnostics,
-		missingRefs: workflowMissingRefDiagnostics(draft.diagnostics),
+		diagnostics,
+		missingRefs: workflowMissingRefDiagnostics(diagnostics),
 		actions: workflowCatalogActionsFor(record),
 	};
 }
@@ -3604,7 +3684,7 @@ function workflowCatalogValidationStateFromVersions(versions: WorkflowCatalogVer
 }
 
 function workflowMissingRefDiagnostics(diagnostics: WorkflowDraftDiagnostic[]): WorkflowDraftDiagnostic[] {
-	return uniqueWorkflowDiagnostics(diagnostics.filter((diagnostic) => Boolean(diagnostic.registryRef)));
+	return uniqueWorkflowDiagnostics(sanitizeWorkflowDiagnostics(diagnostics).filter((diagnostic) => Boolean(diagnostic.registryRef)));
 }
 
 function uniqueWorkflowDiagnostics(diagnostics: WorkflowDraftDiagnostic[]): WorkflowDraftDiagnostic[] {
@@ -3635,9 +3715,10 @@ function buildWorkflowCatalogInspect(
 	let selectedDraft: OwnedWorkflowDraftRecord | undefined;
 	if (options.draftId) {
 		selectedDraft = state.workflowDraftStore.getDraft(options.draftId);
-		if (!selectedDraft || selectedDraft.workflowId !== workflowId) throw new PiboWebHttpError("Workflow draft not found", 404);
+		if (!selectedDraft || selectedDraft.workflowId !== workflowId || selectedDraft.ownerScope !== webSession.ownerScope) throw new PiboWebHttpError("Workflow draft not found", 404);
 	} else if (!options.version) {
-		selectedDraft = state.workflowDraftStore.findActiveDraftByWorkflowId(workflowId);
+		const activeDraft = state.workflowDraftStore.findActiveDraftByWorkflowId(workflowId);
+		selectedDraft = activeDraft?.ownerScope === webSession.ownerScope ? activeDraft : undefined;
 	}
 	if (selectedDraft) runWorkflowDraftValidation(state, context, webSession, selectedDraft, "draft_load");
 
@@ -3650,7 +3731,7 @@ function buildWorkflowCatalogInspect(
 			kind: "workflow-inspect",
 			workflow,
 			selected: { kind: "draft", draft: serializeWorkflowDraft(selectedDraft) },
-			diagnostics: selectedDraft.diagnostics,
+			diagnostics: sanitizeWorkflowDiagnostics(selectedDraft.diagnostics),
 		};
 	}
 
@@ -3715,7 +3796,10 @@ function workflowDraftBuilderPath(draftId: string): string {
 
 function serializeWorkflowDraft(record: OwnedWorkflowDraftRecord): WorkflowDraftRecord {
 	const { ownerScope: _ownerScope, ...draft } = record;
-	return draft;
+	return {
+		...draft,
+		diagnostics: sanitizeWorkflowDiagnostics(draft.diagnostics),
+	};
 }
 
 function requireWorkflowDraft(state: ChatWebAppState, webSession: PiboWebSession, draftId: string): WorkflowDraftRecord {
@@ -3747,7 +3831,7 @@ function duplicateWorkflowIntoDraft(
 
 	const copyWorkflowId = `ui-${published.id}-copy`;
 	const existingDraft = state.workflowDraftStore.findActiveDraftByWorkflowId(copyWorkflowId);
-	if (existingDraft) return serializeWorkflowDraft(existingDraft);
+	if (existingDraft && existingDraft.ownerScope === webSession.ownerScope) return serializeWorkflowDraft(existingDraft);
 
 	const now = new Date().toISOString();
 	const draftId = `draft_${published.id.replace(/[^a-zA-Z0-9_-]/g, "-")}_${published.version.replace(/[^a-zA-Z0-9_-]/g, "-")}_${randomUUID().slice(0, 8)}`;
@@ -3808,7 +3892,7 @@ function createNextVersionDraftFromPublishedWorkflow(
 	}
 
 	const existingDraft = state.workflowDraftStore.findActiveDraftByWorkflowId(published.id);
-	if (existingDraft) {
+	if (existingDraft && existingDraft.ownerScope === webSession.ownerScope) {
 		return { draft: serializeWorkflowDraft(existingDraft), reused: true };
 	}
 
@@ -4240,7 +4324,7 @@ function requireMutableWorkflowDraft(state: ChatWebAppState, webSession: PiboWeb
 			payload: { operation: "starter" },
 		});
 	}
-	if (!record) throw new PiboWebHttpError("Workflow draft not found", 404);
+	if (!record || record.ownerScope !== webSession.ownerScope) throw new PiboWebHttpError("Workflow draft not found", 404);
 	return record;
 }
 
@@ -4251,10 +4335,10 @@ function runWorkflowDraftValidation(
 	record: OwnedWorkflowDraftRecord,
 	trigger: WorkflowValidationTrigger,
 ): WorkflowValidationResponse {
-	const diagnostics = [
+	const diagnostics = sanitizeWorkflowDiagnostics([
 		...record.diagnostics.filter((diagnostic) => !isWorkflowValidationPipelineDiagnostic(diagnostic)),
 		...validateWorkflowDefinitionForV2(record.definition, { state, context, webSession }),
-	];
+	]);
 	const validation = summarizeWorkflowDiagnostics(diagnostics, trigger);
 	record.diagnostics = diagnostics;
 	record.validationState = validation.validationState;
@@ -4283,7 +4367,7 @@ function validatePublishedWorkflowBoundary(input: {
 	trigger: "before_project_session_creation" | "before_workflow_start";
 }): WorkflowValidationResponse {
 	const definition = createPublishedWorkflowDefinition(input.workflow, input.profileId);
-	const diagnostics = validateWorkflowDefinitionForV2(definition, input);
+	const diagnostics = sanitizeWorkflowDiagnostics(validateWorkflowDefinitionForV2(definition, input));
 	return {
 		diagnostics,
 		validation: summarizeWorkflowDiagnostics(diagnostics, input.trigger),
@@ -4362,7 +4446,7 @@ function validateWorkflowDefinitionForV2(
 		validateWorkflowEdgeLike(edgeId, edge, isJsonObject(nodes) ? nodes : {}, diagnostics);
 	}
 
-	return diagnostics;
+	return sanitizeWorkflowDiagnostics(diagnostics);
 }
 
 function validateWorkflowInitialLike(value: unknown, nodeIds: ReadonlySet<string>, diagnostics: WorkflowDraftDiagnostic[]): void {
@@ -5242,7 +5326,7 @@ function workflowValidationBlockedResponse(message: string, response: WorkflowVa
 	return responseJson({
 		error: message,
 		validation: response.validation,
-		diagnostics: response.diagnostics,
+		diagnostics: sanitizeWorkflowDiagnostics(response.diagnostics),
 		...extra,
 	}, { status: 422 });
 }
@@ -5684,7 +5768,7 @@ async function buildProjectsBootstrap(input: {
 	includeArchived?: boolean;
 }): Promise<ChatProjectsBootstrap> {
 	const personalProject = input.state.projectService.ensurePersonalProject({ ownerScope: input.webSession.ownerScope });
-	const selectedProject = input.projectId ? input.state.projectService.requireProject(input.projectId, { includeArchived: true }) : personalProject;
+	const selectedProject = input.projectId ? requireOwnedProject(input.state, input.webSession, input.projectId, { includeArchived: true }) : personalProject;
 	let storedProjectSessions = input.state.projectService.listProjectSessions(selectedProject.id, { includeArchived: input.includeArchived });
 	if (selectedProject.id === personalProject.id && storedProjectSessions.length === 0) {
 		const session = createProjectChatSession({
@@ -5719,7 +5803,7 @@ async function buildProjectsBootstrap(input: {
 		identity: input.webSession.authSession.identity,
 		personalProject,
 		project: selectedProject,
-		projects: input.state.projectService.listProjects({ includeArchived: input.includeArchived }),
+		projects: listOwnedProjects(input.state, input.webSession, { includeArchived: input.includeArchived }),
 		projectSessions,
 		workflowLifecycleEvents,
 		...(selectedSession ? { session: selectedSession, selectedPiboSessionId: selectedSession.id } : {}),
@@ -7119,8 +7203,8 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 			}
 
 			if (url.pathname === `${CHAT_WEB_API_PREFIX}/projects` && request.method === "GET") {
-				await requireSession(request, context);
-				return responseJson({ projects: state.projectService.listProjects({ includeArchived: parseBooleanSearchParam(url, "includeArchived") }) });
+				const webSession = await requireSession(request, context);
+				return responseJson({ projects: listOwnedProjects(state, webSession, { includeArchived: parseBooleanSearchParam(url, "includeArchived") }) });
 			}
 
 			if (url.pathname === `${CHAT_WEB_API_PREFIX}/projects` && request.method === "POST") {
@@ -7144,9 +7228,10 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 			const projectResource = projectResourcePath(url.pathname);
 			if (projectResource && projectResource.child === undefined && request.method === "PATCH") {
 				requireSameOriginJsonRequest(request);
-				await requireSession(request, context);
+				const webSession = await requireSession(request, context);
 				const body = await readJsonBody<ChatProjectPatchBody>(request);
 				try {
+					requireOwnedProject(state, webSession, projectResource.projectId, { includeArchived: true });
 					const project = state.projectService.updateProject(projectResource.projectId, {
 						...(body.name !== undefined ? { name: normalizeRoomName(body.name) } : {}),
 						...(body.description !== undefined ? { description: normalizeProjectDescription(body.description) ?? null } : {}),
@@ -7162,14 +7247,16 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 
 			if (projectResource && projectResource.child === undefined && request.method === "DELETE") {
 				requireSameOriginJsonRequest(request);
-				await requireSession(request, context);
+				const webSession = await requireSession(request, context);
 				const body = await readJsonBody<ChatProjectDeleteBody>(request);
 				try {
+					requireOwnedProject(state, webSession, projectResource.projectId, { includeArchived: true });
 					return responseJson(state.projectService.deleteProject(projectResource.projectId, {
 						confirmName: normalizeRoomDeleteConfirmation(body.confirmName),
 						deleteFiles: body.deleteFiles === true,
 					}));
 				} catch (error) {
+					if (error instanceof PiboWebHttpError) throw error;
 					throw new PiboWebHttpError(error instanceof Error ? error.message : String(error), 400);
 				}
 			}
@@ -7178,7 +7265,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				requireSameOriginJsonRequest(request);
 				const webSession = await requireSession(request, context);
 				const body = await readJsonBody<ChatProjectSessionCreateBody>(request);
-				const project = state.projectService.requireProject(projectResource.projectId);
+				const project = requireOwnedProject(state, webSession, projectResource.projectId);
 				const profile = resolveCreateSessionProfile(context, defaultProfile, body.profile);
 				const workflowSelection = resolveProjectWorkflowSelection(state, body.workflowId, body.workflowVersion, { requireExplicitWorkflowId: true, requireExplicitVersion: true });
 				const baseDefinition = createPublishedWorkflowDefinition(workflowSelection, profile);
@@ -7245,8 +7332,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				requireSameOriginJsonRequest(request);
 				const webSession = await requireSession(request, context);
 				const session = requireOwnedSession(context, webSession, workflowSessionStart.piboSessionId);
-				const project = state.projectService.requireProject(workflowSessionStart.projectId);
-				if (project.ownerScope !== webSession.ownerScope) throw new PiboWebHttpError("Project not found", 404);
+				const project = requireOwnedProject(state, webSession, workflowSessionStart.projectId);
 				const projectSession = state.projectService.getProjectSession(session.id);
 				if (!projectSession || projectSession.projectId !== project.id) throw new PiboWebHttpError("Project workflow session not found", 404);
 				const snapshot = state.projectService.getWorkflowSessionSnapshotForSession(session.id);
@@ -7351,7 +7437,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				requireSameOriginJsonRequest(request);
 				const webSession = await requireSession(request, context);
 				const body = await readJsonBody<ChatProjectSessionCreateBody>(request);
-				const project = state.projectService.requireProject(projectResource.projectId);
+				const project = requireOwnedProject(state, webSession, projectResource.projectId);
 				const profile = resolveCreateSessionProfile(context, defaultProfile, body.profile);
 				const workflowId = normalizeLegacyProjectWorkflowId(body.workflowId);
 				const session = createProjectChatSession({ state, context, webSession, project, profile, workflowId });

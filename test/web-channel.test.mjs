@@ -3140,6 +3140,118 @@ test("workflow lifecycle observability records draft, publish, Project start, an
 	}
 });
 
+test("workflow diagnostics are redacted and scoped to owning Project sessions", async () => {
+	const { channel, baseURL, dataStorePath, storageDir } = await startWebHostChannel({
+		auth: createFakeAuthService(),
+		profiles: [{ name: "pibo-agent", aliases: ["default"] }],
+	});
+
+	const jsonHeaders = {
+		"content-type": "application/json",
+		origin: baseURL,
+		"x-test-user": "user-1",
+	};
+
+	try {
+		const projectResponse = await fetch(`${baseURL}/api/chat/projects`, {
+			method: "POST",
+			headers: jsonHeaders,
+			body: JSON.stringify({
+				name: "Workflow Diagnostic Redaction Project",
+				projectFolder: join(storageDir, "workflow-diagnostic-redaction-project"),
+				createFolder: true,
+			}),
+		});
+		assert.equal(projectResponse.status, 201);
+		const projectPayload = await projectResponse.json();
+
+		const otherUserProjectsResponse = await fetch(`${baseURL}/api/chat/projects`, {
+			headers: { "x-test-user": "user-2" },
+		});
+		assert.equal(otherUserProjectsResponse.status, 200);
+		const otherUserProjectsPayload = await otherUserProjectsResponse.json();
+		assert.equal(otherUserProjectsPayload.projects.some((project) => project.id === projectPayload.project.id), false);
+
+		const otherUserBootstrapResponse = await fetch(`${baseURL}/api/chat/projects/bootstrap?projectId=${encodeURIComponent(projectPayload.project.id)}`, {
+			headers: { "x-test-user": "user-2" },
+		});
+		assert.equal(otherUserBootstrapResponse.status, 404);
+
+		const duplicateResponse = await fetch(`${baseURL}/api/chat/workflows/standard-project/duplicate`, {
+			method: "POST",
+			headers: jsonHeaders,
+			body: JSON.stringify({ version: "1.0.0" }),
+		});
+		assert.equal(duplicateResponse.status, 201);
+		const duplicatePayload = await duplicateResponse.json();
+		const draftId = duplicatePayload.draft.draftId;
+
+		const poisonedDiagnostic = {
+			code: "WorkflowBuilderWarning.poisonedDiagnostic",
+			message: "inputValues: {\"secret\":\"s3cr3t\"} output: \"top-secret-output\"",
+			severity: "warning",
+			path: "$.nodes.agent.promptTemplate",
+			nodeId: "agent",
+			edgeId: "agent-to-review",
+			registryRef: "missing-ref",
+			hint: "promptTemplate=\"secret prompt\" state: {\"token\":\"secret-state\"}",
+			inputValues: { secret: "s3cr3t" },
+			output: { secret: "top-secret-output" },
+			state: { token: "secret-state" },
+			payload: { secret: "secret-payload" },
+			humanActionPayload: { secret: "secret-human" },
+		};
+		const db = new DatabaseSync(dataStorePath);
+		try {
+			db.prepare("UPDATE workflow_ui_drafts SET diagnostics_json = ? WHERE draft_id = ?").run(JSON.stringify([poisonedDiagnostic]), draftId);
+		} finally {
+			db.close();
+		}
+
+		const draftResponse = await fetch(`${baseURL}/api/chat/workflows/drafts/${encodeURIComponent(draftId)}`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(draftResponse.status, 200);
+		const draftPayload = await draftResponse.json();
+		const redactedDiagnostic = draftPayload.draft.diagnostics.find((diagnostic) => diagnostic.code === poisonedDiagnostic.code);
+		assert.ok(redactedDiagnostic);
+		assert.equal(redactedDiagnostic.path, "$.nodes.agent.promptTemplate");
+		assert.equal(redactedDiagnostic.nodeId, "agent");
+		assert.equal(redactedDiagnostic.edgeId, "agent-to-review");
+		assert.equal(redactedDiagnostic.registryRef, "missing-ref");
+		assert.equal(Object.hasOwn(redactedDiagnostic, "inputValues"), false);
+		assert.equal(Object.hasOwn(redactedDiagnostic, "output"), false);
+		assert.equal(Object.hasOwn(redactedDiagnostic, "payload"), false);
+		assert.match(redactedDiagnostic.message, /inputValues: \[redacted\]/);
+		assert.match(redactedDiagnostic.message, /output: \[redacted\]/);
+		assert.match(redactedDiagnostic.hint, /promptTemplate: \[redacted\]/);
+		assert.match(redactedDiagnostic.hint, /state: \[redacted\]/);
+		assert.doesNotMatch(JSON.stringify(draftPayload.draft.diagnostics), /s3cr3t|top-secret-output|secret prompt|secret-state|secret-payload|secret-human/);
+
+		const otherUserDraftResponse = await fetch(`${baseURL}/api/chat/workflows/drafts/${encodeURIComponent(draftId)}`, {
+			headers: { "x-test-user": "user-2" },
+		});
+		assert.equal(otherUserDraftResponse.status, 404);
+
+		const lifecycleResponse = await fetch(`${baseURL}/api/chat/workflows/lifecycle-events?draftId=${encodeURIComponent(draftId)}&limit=20`, {
+			headers: { "x-test-user": "user-1" },
+		});
+		assert.equal(lifecycleResponse.status, 200);
+		const lifecyclePayload = await lifecycleResponse.json();
+		assert.ok(lifecyclePayload.events.some((event) => event.diagnostics.some((diagnostic) => diagnostic.code === poisonedDiagnostic.code)));
+		assert.doesNotMatch(JSON.stringify(lifecyclePayload.events), /s3cr3t|top-secret-output|secret prompt|secret-state|secret-payload|secret-human/);
+
+		const otherUserLifecycleResponse = await fetch(`${baseURL}/api/chat/workflows/lifecycle-events?draftId=${encodeURIComponent(draftId)}&limit=20`, {
+			headers: { "x-test-user": "user-2" },
+		});
+		assert.equal(otherUserLifecycleResponse.status, 200);
+		const otherUserLifecyclePayload = await otherUserLifecycleResponse.json();
+		assert.equal(otherUserLifecyclePayload.events.length, 0);
+	} finally {
+		await channel.stop?.();
+	}
+});
+
 test("chat web app rejects unsupported Project workflow session creation inputs", async () => {
 	const { channel, baseURL, emitted, storageDir } = await startWebHostChannel({
 		auth: createFakeAuthService(),

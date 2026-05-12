@@ -76,8 +76,8 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented normal-UI diagnostic sanitization/redaction and enforced owner-scoped Project, draft, and lifecycle diagnostic visibility."
     },
     {
       "id": "US-006",
