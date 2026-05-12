@@ -2339,3 +2339,28 @@
   - Catalog/lifecycle completeness checks can stay focused by asserting the existing package-level store tests plus targeted `web-channel` lifecycle flows instead of duplicating long HTTP scenarios.
   - Missing-reference coverage for workflow-version pickers uses `WorkflowCatalogError.unknownWorkflowVersion` and `registryRef` values like `missing-workflow@9.9.9`.
 ---
+## 2026-05-12 18:35 CEST - US-023
+- What was implemented
+  - Added a focused Project/run-view checklist test that maps Project configured-session creation, delayed start, snapshot persistence, immutability, one-run start, sidebar routing, run inspection, nested links, deleted-definition inspection, and human-action token cases to the existing service, source-level UI, package, and web-channel tests.
+  - Marked PRD 09 US-023 passing with notes describing the checklist coverage.
+- Files changed
+  - `test/workflow-v2-project-run-checklist.test.mjs`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_09_implementation_completeness_contract.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `node --test test/workflow-v2-project-run-checklist.test.mjs` — passed, 3/3 tests.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck && npm run build && node --test test/workflow-v2-project-run-checklist.test.mjs test/workflow-v2-run-inspection-human-actions.test.mjs test/project-service-workflow-link.test.mjs && node --test --test-name-pattern "chat web app creates configured Project workflow sessions and starts one workflow run explicitly|chat web app lists and resolves Project workflow human wait tokens|chat web app project bootstrap includes real workflow session descendants only|workflow delete API tombstones UI workflows while preserving Project snapshots" test/web-channel.test.mjs'` — passed, including typecheck, build, 11/11 focused tests, and 4/4 targeted web-channel tests.
+- Browser verification, if UI changed
+  - Verified the container gateway at `http://127.0.0.1:4802/apps/chat` returned OK and dev-auth session identity was `dev@pibo.local`.
+  - Created dev-auth Project `US023 Project Run Checklist 1778603408`, configured workflow session `US023 Project Run Checklist` for `standard-project@1.0.0`, and started run `wfr_faa28f67-b64b-4b23-81d9-0aca3b98bd1c` through the Chat Web API.
+  - Used `browser-use --fresh-profile --session ralph-v2-us023` inside `pibo-dev-WorkflowsV2` to open `/apps/chat/projects/prj_078838c7-2a5f-4cbe-b4ba-f08909c96997/sessions/ps_f1a8f016-b62a-4c5d-8f19-d0d5f85d0149?view=workflow`.
+  - Verified the authenticated Project Workflow/XState view exposes workflow run inspection, run history, node attempts, edge transfers, workflow navigation links, nested workflow child sessions, workflow definition link, `kernel/run records: truth`, `XState projection only`, and the no-pending-human-action empty state.
+  - Saved screenshot: `/tmp/ralph-v2-us023-project-run-checklist.png` inside the container.
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - Project/run-view checklist coverage can stay focused by asserting the existing Project service persistence tests, configured-session UI source tests, run-inspection source tests, runtime human-action tests, and targeted web-channel flows instead of duplicating full browser scenarios in Node tests.
+  - Gotchas encountered
+    - Browser text checks should be case-insensitive for headings because styled uppercase text may appear in `innerText` differently from source copy.
+  - Useful context
+    - For checklist-story browser verification, a started `standard-project@1.0.0` Project workflow session is enough to validate the Workflow/XState inspection shell and empty human-action state without seeding wait tokens.
+---

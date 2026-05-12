@@ -359,8 +359,8 @@
         "Typecheck passes"
       ],
       "priority": 23,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added focused Project/run-view checklist coverage that maps Project session creation, delayed start, snapshots, immutability, one-run start, sidebar routing, run inspection, nested links, deleted-definition inspection, and human action token cases to existing source, package, and web-channel tests."
     },
     {
       "id": "US-024",
