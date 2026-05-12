@@ -112,8 +112,8 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented Workflow Builder simple state mapping controls for node and edge state reads/writes, plus workflow global state field declarations that feed mapping dropdowns."
     },
     {
       "id": "US-008",

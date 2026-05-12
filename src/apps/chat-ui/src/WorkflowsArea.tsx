@@ -60,6 +60,10 @@ import { MarkdownEditor } from "./context/MarkdownEditor";
 
 const DEFAULT_AGENT_PROMPT_TEMPLATE = "Use the workflow input to produce a concise answer.\n\n{{input}}";
 const DEFAULT_WORKFLOW_JSON_SCHEMA: WorkflowJsonObject = { type: "object", properties: {}, required: [], additionalProperties: false };
+const WORKFLOW_STATE_SCOPES: WorkflowStateScope[] = ["global", "local", "edge"];
+const DEFAULT_LOCAL_STATE_PATHS = ["draft", "notes", "result"];
+const DEFAULT_EDGE_STATE_PATHS = ["payload", "previous", "resume"];
+const DEFAULT_WRITE_STATE_SCOPES: WorkflowStateScope[] = ["global", "local"];
 const STARTER_DRAFT_ID = "v2-starter-draft";
 const RAW_IR_PARSE_DIAGNOSTIC_CODE = "WorkflowBuilderWarning.invalidRawIrText";
 
@@ -92,6 +96,22 @@ type WorkflowGraphProjection = {
 type WorkflowVersionSelection = { workflowId: string; workflowVersion: string };
 type WorkflowPortKindSelection = "text" | "json";
 type OptionalWorkflowPortKindSelection = "none" | WorkflowPortKindSelection;
+type WorkflowStateScope = "global" | "local" | "edge";
+type WorkflowGlobalStateMergeKind = "none" | "replace" | "append" | "shallowMerge";
+type WorkflowGlobalStateFieldFormState = {
+	path: string;
+	description: string;
+	schemaText: string;
+	mergeKind: WorkflowGlobalStateMergeKind;
+};
+type WorkflowStateAccessFormState = {
+	reads: string[];
+	writes: string[];
+	readScope: WorkflowStateScope;
+	readPath: string;
+	writeScope: WorkflowStateScope;
+	writePath: string;
+};
 type WorkflowHumanActionFormChoice = { id: string; kind?: string };
 type WorkflowHumanTimeoutKind = "none" | "milliseconds" | "seconds" | "minutes" | "iso8601";
 type WorkflowSettingsFormState = {
@@ -103,6 +123,7 @@ type WorkflowSettingsFormState = {
 	outputKind: WorkflowPortKindSelection;
 	outputDescription: string;
 	outputSchemaText: string;
+	globalStateFields: WorkflowGlobalStateFieldFormState[];
 	metadataTags: string;
 	metadataUseWhen: string;
 	metadataNotFor: string;
@@ -117,6 +138,7 @@ type WorkflowNodeInspectorFormState = {
 	outputKind: OptionalWorkflowPortKindSelection;
 	outputDescription: string;
 	outputSchemaText: string;
+	stateAccess: WorkflowStateAccessFormState;
 	profileId: string;
 	promptTemplate: string;
 	handlerId: string;
@@ -140,6 +162,7 @@ type WorkflowEdgeInspectorFormState = {
 	guardParamsText: string;
 	adapterRef: string;
 	adapterParamsText: string;
+	stateAccess: WorkflowStateAccessFormState;
 };
 type WorkflowEdgePortDetails = {
 	sourceNodeId?: string;
@@ -1334,9 +1357,31 @@ function WorkflowSettingsInspector({ draft, isSaving, onSaveDefinition }: {
 		setForm((current) => ({ ...current, [key]: value }));
 	};
 
+	const updateGlobalStateField = <K extends keyof WorkflowGlobalStateFieldFormState>(index: number, key: K, value: WorkflowGlobalStateFieldFormState[K]) => {
+		setForm((current) => ({
+			...current,
+			globalStateFields: current.globalStateFields.map((field, fieldIndex) => fieldIndex === index ? { ...field, [key]: value } : field),
+		}));
+	};
+
+	const addGlobalStateField = () => {
+		setForm((current) => ({
+			...current,
+			globalStateFields: [...current.globalStateFields, createDefaultGlobalStateField(current.globalStateFields)],
+		}));
+	};
+
+	const removeGlobalStateField = (index: number) => {
+		setForm((current) => ({
+			...current,
+			globalStateFields: current.globalStateFields.filter((_, fieldIndex) => fieldIndex !== index),
+		}));
+	};
+
 	const saveSettings = () => {
 		const definition = applyWorkflowSettingsForm(draft.definition, form);
-		void onSaveDefinition(definition, "Saved workflow settings inspector edits to the draft IR.", { editTrigger: "schema_edit" });
+		const editTrigger: WorkflowValidationTrigger = workflowSettingsStateChanged(draft.definition, form) ? "state_edit" : "schema_edit";
+		void onSaveDefinition(definition, "Saved workflow settings inspector edits to the draft IR.", { editTrigger });
 	};
 
 	return (
@@ -1355,6 +1400,12 @@ function WorkflowSettingsInspector({ draft, isSaving, onSaveDefinition }: {
 					<WorkflowPortEditor label="Workflow input port" kind={form.inputKind} description={form.inputDescription} schemaText={form.inputSchemaText} onKindChange={(value) => update("inputKind", value)} onDescriptionChange={(value) => update("inputDescription", value)} onSchemaChange={(value) => update("inputSchemaText", value)} />
 					<WorkflowPortEditor label="Workflow output port" kind={form.outputKind} description={form.outputDescription} schemaText={form.outputSchemaText} onKindChange={(value) => update("outputKind", value)} onDescriptionChange={(value) => update("outputDescription", value)} onSchemaChange={(value) => update("outputSchemaText", value)} />
 				</div>
+				<WorkflowGlobalStateFieldsEditor
+					fields={form.globalStateFields}
+					onAddField={addGlobalStateField}
+					onRemoveField={removeGlobalStateField}
+					onUpdateField={updateGlobalStateField}
+				/>
 				<div className="grid gap-2 md:grid-cols-2">
 					<WorkflowListTextEditor label="metadata.tags" value={form.metadataTags} onChange={(value) => update("metadataTags", value)} />
 					<WorkflowListTextEditor label="metadata.useWhen" value={form.metadataUseWhen} onChange={(value) => update("metadataUseWhen", value)} />
@@ -1466,7 +1517,9 @@ function WorkflowNodeInspector({ draft, nodeId, node, isSaving, onSaveDefinition
 
 	const saveNode = () => {
 		const definition = applyWorkflowNodeInspectorForm(draft.definition, nodeId, form);
-		const editTrigger: WorkflowValidationTrigger = nodeKind === "agent" || nodeKind === "human" ? "prompt_edit" : "schema_edit";
+		const editTrigger: WorkflowValidationTrigger = workflowNodeStateAccessChanged(node, form)
+			? "state_edit"
+			: nodeKind === "agent" || nodeKind === "human" ? "prompt_edit" : "schema_edit";
 		void onSaveDefinition(definition, `Saved node inspector edits for ${nodeId}.`, { editTrigger });
 	};
 
@@ -1487,6 +1540,7 @@ function WorkflowNodeInspector({ draft, nodeId, node, isSaving, onSaveDefinition
 					<WorkflowOptionalPortEditor label="Node input port" kind={form.inputKind} description={form.inputDescription} schemaText={form.inputSchemaText} onKindChange={(value) => update("inputKind", value)} onDescriptionChange={(value) => update("inputDescription", value)} onSchemaChange={(value) => update("inputSchemaText", value)} />
 					<WorkflowOptionalPortEditor label="Node output port" kind={form.outputKind} description={form.outputDescription} schemaText={form.outputSchemaText} onKindChange={(value) => update("outputKind", value)} onDescriptionChange={(value) => update("outputDescription", value)} onSchemaChange={(value) => update("outputSchemaText", value)} />
 				</div>
+				<WorkflowStateAccessEditor label="Node" definition={draft.definition} value={form.stateAccess} onChange={(stateAccess) => update("stateAccess", stateAccess)} />
 				{nodeKind === "agent" ? (
 					<div className="grid gap-3 rounded-sm border border-slate-800 bg-[#101d22] p-3" aria-label="Agent node fields">
 						<label className="grid gap-1 font-semibold text-slate-300">
@@ -1765,6 +1819,100 @@ function WorkflowPromptAssetEditor({ draft, nodeId, node, isSaving, onSaveDefini
 	);
 }
 
+function WorkflowStateAccessEditor({ label, definition, value, onChange, allowEdgeWrites = false }: {
+	label: string;
+	definition: WorkflowDraftDefinition;
+	value: WorkflowStateAccessFormState;
+	onChange: (value: WorkflowStateAccessFormState) => void;
+	allowEdgeWrites?: boolean;
+}) {
+	const readPathOptions = workflowStatePathOptions(definition, value.readScope, [...value.reads, ...value.writes]);
+	const writeScopes = allowEdgeWrites ? WORKFLOW_STATE_SCOPES : DEFAULT_WRITE_STATE_SCOPES;
+	const writePathOptions = workflowStatePathOptions(definition, value.writeScope, [...value.reads, ...value.writes]);
+	const canAddRead = Boolean(value.readPath.trim());
+	const canAddWrite = Boolean(value.writePath.trim()) && (allowEdgeWrites || value.writeScope !== "edge");
+	const update = <K extends keyof WorkflowStateAccessFormState>(key: K, nextValue: WorkflowStateAccessFormState[K]) => onChange({ ...value, [key]: nextValue });
+	const addEntry = (direction: "reads" | "writes") => {
+		const scope = direction === "reads" ? value.readScope : value.writeScope;
+		const path = (direction === "reads" ? value.readPath : value.writePath).trim();
+		if (!path) return;
+		const entry = `${scope}.${path}`;
+		const entries = value[direction];
+		if (entries.includes(entry)) return;
+		onChange({ ...value, [direction]: [...entries, entry] });
+	};
+	const removeEntry = (direction: "reads" | "writes", entry: string) => onChange({
+		...value,
+		[direction]: value[direction].filter((candidate) => candidate !== entry),
+	});
+
+	return (
+		<div className="grid gap-3 rounded-sm border border-slate-800 bg-[#101d22]/70 p-3" aria-label={`${label} simple state mapping controls`}>
+			<div>
+				<div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">{label} simple state mappings</div>
+				<p className="mt-1 text-[11px] leading-5 text-slate-500">
+					Add simple scoped state reads and writes as Pibo Workflow IR <code className="rounded bg-slate-900 px-1 text-slate-300">state.reads</code> and <code className="rounded bg-slate-900 px-1 text-slate-300">state.writes</code> arrays. Complex state mapping DSLs remain raw Workflow IR only.
+				</p>
+			</div>
+			<div className="grid gap-2 md:grid-cols-[0.7fr_1fr_auto]">
+				<label className="grid gap-1 font-semibold text-slate-300">
+					<span>Read scope</span>
+					<select className="rounded-sm border border-slate-700 bg-[#151f24] px-2 py-1.5 text-slate-100" value={value.readScope} onChange={(event) => update("readScope", event.target.value as WorkflowStateScope)}>
+						{WORKFLOW_STATE_SCOPES.map((scope) => <option key={scope} value={scope}>{scope}</option>)}
+					</select>
+				</label>
+				<WorkflowStatePathSelect label="Read path" value={value.readPath} options={readPathOptions} onChange={(path) => update("readPath", path)} />
+				<button type="button" className="self-end rounded-sm border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-300 transition hover:border-[#11a4d4]/60 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50" onClick={() => addEntry("reads")} disabled={!canAddRead}>Add read</button>
+			</div>
+			<WorkflowStateEntryList label="Reads" entries={value.reads} onRemove={(entry) => removeEntry("reads", entry)} />
+			<div className="grid gap-2 md:grid-cols-[0.7fr_1fr_auto]">
+				<label className="grid gap-1 font-semibold text-slate-300">
+					<span>Write scope</span>
+					<select className="rounded-sm border border-slate-700 bg-[#151f24] px-2 py-1.5 text-slate-100" value={value.writeScope} onChange={(event) => update("writeScope", event.target.value as WorkflowStateScope)}>
+						{writeScopes.map((scope) => <option key={scope} value={scope}>{scope}</option>)}
+					</select>
+				</label>
+				<WorkflowStatePathSelect label="Write path" value={value.writePath} options={writePathOptions} onChange={(path) => update("writePath", path)} />
+				<button type="button" className="self-end rounded-sm border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-300 transition hover:border-[#11a4d4]/60 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50" onClick={() => addEntry("writes")} disabled={!canAddWrite}>Add write</button>
+			</div>
+			<WorkflowStateEntryList label="Writes" entries={value.writes} onRemove={(entry) => removeEntry("writes", entry)} />
+			{value.writeScope === "global" && !readWorkflowGlobalStatePaths(definition).length ? (
+				<div className="rounded-sm border border-amber-900/60 bg-amber-950/20 p-2 text-[11px] leading-5 text-amber-100">Declare global state fields in the workflow settings inspector before selecting global read/write paths.</div>
+			) : null}
+		</div>
+	);
+}
+
+function WorkflowStatePathSelect({ label, value, options, onChange }: { label: string; value: string; options: string[]; onChange: (value: string) => void }) {
+	const normalizedOptions = value && !options.includes(value) ? [value, ...options] : options;
+	return (
+		<label className="grid gap-1 font-semibold text-slate-300">
+			<span>{label}</span>
+			<select className="rounded-sm border border-slate-700 bg-[#151f24] px-2 py-1.5 text-slate-100" value={value} onChange={(event) => onChange(event.target.value)}>
+				<option value="">Select path</option>
+				{normalizedOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+			</select>
+		</label>
+	);
+}
+
+function WorkflowStateEntryList({ label, entries, onRemove }: { label: string; entries: string[]; onRemove: (entry: string) => void }) {
+	return (
+		<div className="grid gap-1">
+			<div className="text-[11px] font-semibold text-slate-400">{label}</div>
+			{entries.length ? (
+				<div className="flex flex-wrap gap-2">
+					{entries.map((entry) => (
+						<button key={entry} type="button" className="rounded-full border border-slate-700 px-2 py-1 text-[11px] text-slate-300 transition hover:border-red-500/60 hover:text-red-100" onClick={() => onRemove(entry)} title={`Remove ${entry}`}>
+							{entry} ×
+						</button>
+					))}
+				</div>
+			) : <div className="text-[11px] text-slate-500">No {label.toLowerCase()} declared.</div>}
+		</div>
+	);
+}
+
 function WorkflowEdgeInspector({ draft, edgeId, edge, nodeIds, isSaving, onSaveDefinition }: {
 	draft: WorkflowDraftRecord;
 	edgeId: string;
@@ -1817,7 +1965,8 @@ function WorkflowEdgeInspector({ draft, edgeId, edge, nodeIds, isSaving, onSaveD
 
 	const saveEdge = () => {
 		const definition = applyWorkflowEdgeInspectorForm(draft.definition, edgeId, form);
-		void onSaveDefinition(definition, `Saved edge inspector edits for ${edgeId}.`, { editTrigger: "edge_edit" });
+		const editTrigger: WorkflowValidationTrigger = workflowStateAccessChanged(edge.state, form.stateAccess) ? "state_edit" : "edge_edit";
+		void onSaveDefinition(definition, `Saved edge inspector edits for ${edgeId}.`, { editTrigger });
 	};
 
 	return (
@@ -1884,6 +2033,7 @@ function WorkflowEdgeInspector({ draft, edgeId, edge, nodeIds, isSaving, onSaveD
 				{selectedAdapterOption?.paramsSchema ? (
 					<WorkflowParamsEditor label="Edge adapter params JSON" schema={selectedAdapterOption.paramsSchema} value={form.adapterParamsText} onChange={(value) => update("adapterParamsText", value)} />
 				) : null}
+				<WorkflowStateAccessEditor label="Edge" definition={draft.definition} value={form.stateAccess} onChange={(stateAccess) => update("stateAccess", stateAccess)} allowEdgeWrites />
 				<button
 					type="button"
 					className={`inline-flex items-center justify-center gap-2 rounded-sm border px-3 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${hasIncompatibleEdgeDiagnostic ? "border-amber-600/70 text-amber-100 hover:border-amber-400" : "border-slate-700 text-slate-300 hover:border-[#11a4d4]/60 hover:text-slate-100"}`}
@@ -2089,6 +2239,53 @@ function WorkflowOptionalPortEditor({ label, kind, description, schemaText, onKi
 				<input className="rounded-sm border border-slate-700 bg-[#151f24] px-2 py-1.5 text-slate-100" value={description} onChange={(event) => onDescriptionChange(event.target.value)} disabled={kind === "none"} placeholder="Optional port description" />
 			</label>
 			{kind === "json" ? <WorkflowSchemaTextEditor label={`${label} raw JSON schema`} value={schemaText} onChange={onSchemaChange} /> : null}
+		</div>
+	);
+}
+
+function WorkflowGlobalStateFieldsEditor({ fields, onAddField, onRemoveField, onUpdateField }: {
+	fields: WorkflowGlobalStateFieldFormState[];
+	onAddField: () => void;
+	onRemoveField: (index: number) => void;
+	onUpdateField: <K extends keyof WorkflowGlobalStateFieldFormState>(index: number, key: K, value: WorkflowGlobalStateFieldFormState[K]) => void;
+}) {
+	return (
+		<div className="grid gap-3 rounded-sm border border-slate-800 bg-[#101d22] p-3" aria-label="Workflow global state fields">
+			<div>
+				<div className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">Workflow global state fields</div>
+				<p className="mt-1 text-[11px] leading-5 text-slate-500">
+					Declare simple global state paths for node and edge state mapping dropdowns. State schema changes run draft validation and may invalidate connected graph diagnostics without blocking draft save.
+				</p>
+			</div>
+			{fields.length ? fields.map((field, index) => (
+				<div key={`${index}:${field.path}`} className="grid gap-2 rounded-sm border border-slate-800 bg-[#151f24]/70 p-2 md:grid-cols-2">
+					<label className="grid gap-1 font-semibold text-slate-300">
+						<span>Global state path</span>
+						<input className="rounded-sm border border-slate-700 bg-[#101d22] px-2 py-1.5 text-slate-100" value={field.path} onChange={(event) => onUpdateField(index, "path", event.target.value)} placeholder="projectGoal" />
+					</label>
+					<label className="grid gap-1 font-semibold text-slate-300">
+						<span>Merge policy</span>
+						<select className="rounded-sm border border-slate-700 bg-[#101d22] px-2 py-1.5 text-slate-100" value={field.mergeKind} onChange={(event) => onUpdateField(index, "mergeKind", event.target.value as WorkflowGlobalStateMergeKind)}>
+							<option value="none">No merge policy</option>
+							<option value="replace">replace</option>
+							<option value="append">append</option>
+							<option value="shallowMerge">shallowMerge</option>
+						</select>
+					</label>
+					<label className="grid gap-1 font-semibold text-slate-300 md:col-span-2">
+						<span>Description</span>
+						<input className="rounded-sm border border-slate-700 bg-[#101d22] px-2 py-1.5 text-slate-100" value={field.description} onChange={(event) => onUpdateField(index, "description", event.target.value)} placeholder="Optional state description" />
+					</label>
+					<div className="md:col-span-2">
+						<WorkflowSchemaTextEditor label={`Global state ${field.path || index + 1} schema JSON`} value={field.schemaText} onChange={(value) => onUpdateField(index, "schemaText", value)} />
+					</div>
+					<button type="button" className="rounded-sm border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-300 transition hover:border-red-500/70 hover:text-red-100" onClick={() => onRemoveField(index)}>Remove state field</button>
+				</div>
+			)) : <div className="rounded-sm border border-dashed border-slate-700 p-2 text-[11px] leading-5 text-slate-500">No global state fields declared. Local and edge path dropdowns remain available for simple node-local state and edge payload access.</div>}
+			<button type="button" className="inline-flex items-center justify-center gap-2 rounded-sm border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-300 transition hover:border-[#11a4d4]/60 hover:text-slate-100" onClick={onAddField}>
+				<Plus size={13} />
+				Add global state field
+			</button>
 		</div>
 	);
 }
@@ -3120,6 +3317,7 @@ function createWorkflowSettingsFormState(definition: WorkflowDraftDefinition): W
 		outputKind: readWorkflowPortKind(definition.output, "text"),
 		outputDescription: readWorkflowPortDescription(definition.output),
 		outputSchemaText: formatWorkflowPortSchemaText(definition.output),
+		globalStateFields: createWorkflowGlobalStateFieldFormState(definition),
 		metadataTags: formatWorkflowStringList(metadata.tags),
 		metadataUseWhen: formatWorkflowStringList(metadata.useWhen),
 		metadataNotFor: formatWorkflowStringList(metadata.notFor),
@@ -3138,11 +3336,147 @@ function applyWorkflowSettingsForm(definition: WorkflowDraftDefinition, form: Wo
 		input: createWorkflowPort(form.inputKind, form.inputDescription, definition.input, form.inputSchemaText),
 		output: createWorkflowPort(form.outputKind, form.outputDescription, definition.output, form.outputSchemaText),
 	};
+	writeWorkflowGlobalStateFields(nextDefinition, form.globalStateFields);
 	writeOptionalString(nextDefinition, "title", form.title);
 	writeOptionalString(nextDefinition, "description", form.description);
 	if (Object.keys(metadata).length) nextDefinition.metadata = metadata;
 	else delete nextDefinition.metadata;
 	return nextDefinition;
+}
+
+function createDefaultGlobalStateField(existingFields: WorkflowGlobalStateFieldFormState[]): WorkflowGlobalStateFieldFormState {
+	const existingPaths = new Set(existingFields.map((field) => field.path.trim()).filter(Boolean));
+	let path = "projectGoal";
+	let index = 2;
+	while (existingPaths.has(path)) {
+		path = `projectGoal${index}`;
+		index += 1;
+	}
+	return {
+		path,
+		description: "",
+		schemaText: formatWorkflowSchemaText(DEFAULT_WORKFLOW_JSON_SCHEMA),
+		mergeKind: "none",
+	};
+}
+
+function createWorkflowGlobalStateFieldFormState(definition: WorkflowDraftDefinition): WorkflowGlobalStateFieldFormState[] {
+	const state = isWorkflowJsonObject(definition.state) ? definition.state : undefined;
+	const global = state && isWorkflowJsonObject(state.global) ? state.global : undefined;
+	if (!global) return [];
+	return Object.entries(global).flatMap(([path, value]): WorkflowGlobalStateFieldFormState[] => {
+		if (!isWorkflowJsonObject(value)) return [];
+		return [{
+			path,
+			description: typeof value.description === "string" ? value.description : "",
+			schemaText: formatWorkflowSchemaText(value.schema),
+			mergeKind: readWorkflowGlobalStateMergeKind(value.merge),
+		}];
+	});
+}
+
+function readWorkflowGlobalStateMergeKind(value: unknown): WorkflowGlobalStateMergeKind {
+	if (!isWorkflowJsonObject(value) || typeof value.kind !== "string") return "none";
+	return ["replace", "append", "shallowMerge"].includes(value.kind) ? value.kind as WorkflowGlobalStateMergeKind : "none";
+}
+
+function writeWorkflowGlobalStateFields(definition: WorkflowDraftDefinition, fields: WorkflowGlobalStateFieldFormState[]): void {
+	const nextState: WorkflowJsonObject = isWorkflowJsonObject(definition.state) ? { ...definition.state } : {};
+	const globalFields: Record<string, WorkflowJsonObject> = {};
+	for (const field of fields) {
+		const path = sanitizeWorkflowStatePathInput(field.path);
+		if (!path) continue;
+		const stateField: WorkflowJsonObject = { schema: parseWorkflowSchemaText(field.schemaText) };
+		writeOptionalString(stateField, "description", field.description);
+		const merge = createWorkflowGlobalStateMergePolicy(field.mergeKind);
+		if (merge) stateField.merge = merge;
+		globalFields[path] = stateField;
+	}
+	if (Object.keys(globalFields).length) nextState.global = globalFields;
+	else delete nextState.global;
+	if (Object.keys(nextState).length) definition.state = nextState;
+	else delete definition.state;
+}
+
+function createWorkflowGlobalStateMergePolicy(kind: WorkflowGlobalStateMergeKind): WorkflowJsonObject | undefined {
+	return kind === "none" ? undefined : { kind };
+}
+
+function workflowSettingsStateChanged(definition: WorkflowDraftDefinition, form: WorkflowSettingsFormState): boolean {
+	return JSON.stringify(createWorkflowGlobalStateFieldFormState(definition)) !== JSON.stringify(form.globalStateFields);
+}
+
+function workflowNodeStateAccessChanged(node: WorkflowJsonObject, form: WorkflowNodeInspectorFormState): boolean {
+	return workflowStateAccessChanged(node.state, form.stateAccess);
+}
+
+function workflowStateAccessChanged(value: unknown, form: WorkflowStateAccessFormState): boolean {
+	const current = createWorkflowStateAccessFormState(value);
+	return JSON.stringify({ reads: current.reads, writes: current.writes }) !== JSON.stringify({ reads: form.reads, writes: form.writes });
+}
+
+function createWorkflowStateAccessFormState(value: unknown): WorkflowStateAccessFormState {
+	const state = isWorkflowJsonObject(value) ? value : {};
+	const reads = readWorkflowStateAccessList(state.reads);
+	const writes = readWorkflowStateAccessList(state.writes);
+	const firstRead = parseWorkflowScopedStatePath(reads[0]);
+	const firstWrite = parseWorkflowScopedStatePath(writes[0]);
+	return {
+		reads,
+		writes,
+		readScope: firstRead?.scope ?? "global",
+		readPath: firstRead?.path ?? "",
+		writeScope: firstWrite?.scope === "edge" ? "global" : firstWrite?.scope ?? "global",
+		writePath: firstWrite?.scope === "edge" ? "" : firstWrite?.path ?? "",
+	};
+}
+
+function readWorkflowStateAccessList(value: unknown): string[] {
+	return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string" && Boolean(parseWorkflowScopedStatePath(entry))) : [];
+}
+
+function writeWorkflowStateAccess(target: WorkflowJsonObject, form: WorkflowStateAccessFormState): void {
+	const state: WorkflowJsonObject = isWorkflowJsonObject(target.state) ? { ...target.state } : {};
+	if (form.reads.length) state.reads = [...form.reads];
+	else delete state.reads;
+	if (form.writes.length) state.writes = [...form.writes];
+	else delete state.writes;
+	if (Object.keys(state).length) target.state = state;
+	else delete target.state;
+}
+
+function workflowStatePathOptions(definition: WorkflowDraftDefinition, scope: WorkflowStateScope, selectedEntries: string[]): string[] {
+	const selected = selectedEntries.flatMap((entry) => {
+		const parsed = parseWorkflowScopedStatePath(entry);
+		return parsed?.scope === scope ? [parsed.path] : [];
+	});
+	const base = scope === "global"
+		? readWorkflowGlobalStatePaths(definition)
+		: scope === "local"
+			? DEFAULT_LOCAL_STATE_PATHS
+			: DEFAULT_EDGE_STATE_PATHS;
+	return [...new Set([...base, ...selected])].sort();
+}
+
+function readWorkflowGlobalStatePaths(definition: WorkflowDraftDefinition): string[] {
+	const state = isWorkflowJsonObject(definition.state) ? definition.state : undefined;
+	const global = state && isWorkflowJsonObject(state.global) ? state.global : undefined;
+	return global ? Object.keys(global).sort() : [];
+}
+
+function sanitizeWorkflowStatePathInput(value: string): string {
+	return value.trim().replace(/\s+/g, "").replace(/^\.+/, "").replace(/\.+$/, "").replace(/\.{2,}/g, ".");
+}
+
+function parseWorkflowScopedStatePath(value: string | undefined): { scope: WorkflowStateScope; path: string } | undefined {
+	if (!value) return undefined;
+	const separatorIndex = value.indexOf(".");
+	if (separatorIndex <= 0 || separatorIndex === value.length - 1) return undefined;
+	const scope = value.slice(0, separatorIndex);
+	const path = value.slice(separatorIndex + 1);
+	if (!WORKFLOW_STATE_SCOPES.includes(scope as WorkflowStateScope)) return undefined;
+	if (path.split(".").some((segment) => !segment)) return undefined;
+	return { scope: scope as WorkflowStateScope, path };
 }
 
 function createWorkflowNodeInspectorFormState(node: WorkflowJsonObject): WorkflowNodeInspectorFormState {
@@ -3157,6 +3491,7 @@ function createWorkflowNodeInspectorFormState(node: WorkflowJsonObject): Workflo
 		outputKind: readOptionalWorkflowPortKind(node.output),
 		outputDescription: readWorkflowPortDescription(node.output),
 		outputSchemaText: formatWorkflowPortSchemaText(node.output),
+		stateAccess: createWorkflowStateAccessFormState(node.state),
 		profileId: readAgentProfileId(node.profile),
 		promptTemplate: typeof node.promptTemplate === "string" ? node.promptTemplate : "",
 		handlerId: typeof node.handler === "string" ? node.handler : "",
@@ -3181,6 +3516,7 @@ function applyWorkflowNodeInspectorForm(definition: WorkflowDraftDefinition, nod
 	writeOptionalString(nextNode, "description", form.description);
 	writeOptionalPort(nextNode, "input", form.inputKind, form.inputDescription, currentNode.input, form.inputSchemaText);
 	writeOptionalPort(nextNode, "output", form.outputKind, form.outputDescription, currentNode.output, form.outputSchemaText);
+	writeWorkflowStateAccess(nextNode, form.stateAccess);
 	if (nodeKind === "agent") {
 		nextNode.runtime = "pibo";
 		if (form.profileId.trim()) nextNode.profile = { kind: "fixed", id: form.profileId.trim() };
@@ -3294,6 +3630,7 @@ function createWorkflowEdgeInspectorFormState(edge: WorkflowJsonObject, nodeIds:
 		guardParamsText: formatWorkflowParamsText(guard?.params),
 		adapterRef: transform && typeof transform.id === "string" ? transform.id : "",
 		adapterParamsText: formatWorkflowParamsText(transform?.params),
+		stateAccess: createWorkflowStateAccessFormState(edge.state),
 	};
 }
 
@@ -3320,6 +3657,7 @@ function applyWorkflowEdgeInspectorForm(definition: WorkflowDraftDefinition, edg
 	} else {
 		delete nextEdge.guard;
 	}
+	writeWorkflowStateAccess(nextEdge, form.stateAccess);
 	const adapterRef = form.adapterRef.trim();
 	if (adapterRef) {
 		const previousAdapter = isWorkflowJsonObject(currentEdge.adapter) ? currentEdge.adapter : {};
