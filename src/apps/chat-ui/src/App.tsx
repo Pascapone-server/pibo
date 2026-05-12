@@ -1954,6 +1954,7 @@ function ProjectsArea({
 	const [workflowSessionTitle, setWorkflowSessionTitle] = useState("");
 	const [startingWorkflowSessionId, setStartingWorkflowSessionId] = useState<string | null>(null);
 	const [workflowStartMessages, setWorkflowStartMessages] = useState<Record<string, string>>({});
+	const [workflowCreateDiagnostics, setWorkflowCreateDiagnostics] = useState<WorkflowUiDiagnostic[]>([]);
 	const [autoRenameSessionId, setAutoRenameSessionId] = useState<string | null>(null);
 	const [composerText, setComposerText] = useState(() => routePiboSessionId ? readStoredComposerDraft(routePiboSessionId) : "");
 	const [composerFocusSignal, setComposerFocusSignal] = useState(0);
@@ -2074,10 +2075,16 @@ function ProjectsArea({
 		if (!selectedProject) return;
 		const selectedWorkflow = workflowVersionOptions.find((option) => workflowVersionOptionKey(option) === selectedWorkflowVersionKey);
 		if (!selectedWorkflow) {
+			setWorkflowCreateDiagnostics([{
+				code: "ProjectWorkflowSessionCreate.missingWorkflowVersion",
+				message: "Select a workflow version before creating the Project session.",
+				severity: "error",
+			}]);
 			onError("Select a workflow version before creating the Project session.");
 			return;
 		}
 		setCreatingWorkflowSession(true);
+		setWorkflowCreateDiagnostics([]);
 		try {
 			const title = workflowSessionTitle.trim();
 			const created = await postProjectWorkflowSession(selectedProject.id, {
@@ -2087,9 +2094,11 @@ function ProjectsArea({
 				...(title ? { title } : {}),
 			});
 			setWorkflowSessionTitle("");
+			setWorkflowCreateDiagnostics([]);
 			onNavigate(selectedProject.id, created.session.id, false, { closeMobileSidebar: false });
 			await load({ projectId: selectedProject.id, piboSessionId: created.session.id });
 		} catch (caught) {
+			setWorkflowCreateDiagnostics(workflowDiagnosticsFromError(caught));
 			onError(errorMessage(caught));
 		} finally {
 			setCreatingWorkflowSession(false);
@@ -2266,7 +2275,11 @@ function ProjectsArea({
 						loadState={workflowPickerState}
 						errorMessage={workflowPickerError}
 						creating={creatingWorkflowSession}
-						onSelectedOptionChange={setSelectedWorkflowVersionKey}
+						diagnostics={workflowCreateDiagnostics}
+						onSelectedOptionChange={(value) => {
+							setSelectedWorkflowVersionKey(value);
+							setWorkflowCreateDiagnostics([]);
+						}}
 						onTitleChange={setWorkflowSessionTitle}
 						onCreate={() => void createWorkflowProjectSession()}
 					/>
@@ -2318,6 +2331,7 @@ function ProjectWorkflowSessionCreatePanel({
 	loadState,
 	errorMessage,
 	creating,
+	diagnostics,
 	onSelectedOptionChange,
 	onTitleChange,
 	onCreate,
@@ -2329,6 +2343,7 @@ function ProjectWorkflowSessionCreatePanel({
 	loadState: "loading" | "loaded" | "error";
 	errorMessage: string | null;
 	creating: boolean;
+	diagnostics: WorkflowUiDiagnostic[];
 	onSelectedOptionChange: (value: string) => void;
 	onTitleChange: (value: string) => void;
 	onCreate: () => void;
@@ -2395,7 +2410,31 @@ function ProjectWorkflowSessionCreatePanel({
 			<ProjectWorkflowScopeBoundaryPanel />
 			{loadState === "loading" ? <div className="mt-3 text-xs text-slate-500">Loading workflow catalog…</div> : null}
 			{loadState === "error" ? <div className="mt-3 rounded-sm border border-red-900/70 bg-red-950/40 p-3 text-xs text-red-200" role="alert">{errorMessage ?? "Failed to load workflow catalog."}</div> : null}
+			{diagnostics.length ? <WorkflowDiagnosticsNotice label="Create-blocking diagnostics" diagnostics={diagnostics} /> : null}
 		</section>
+	);
+}
+
+function WorkflowDiagnosticsNotice({ label, diagnostics }: { label: string; diagnostics: WorkflowUiDiagnostic[] }) {
+	return (
+		<div className="mt-3 rounded-sm border border-red-500/40 bg-red-500/10 p-3 text-xs text-red-100" role="alert" aria-label={label}>
+			<div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.16em] text-red-200"><AlertTriangle size={12} />{label}</div>
+			<div className="mt-2 space-y-2">
+				{diagnostics.map((diagnostic, index) => (
+					<div key={`${diagnostic.code ?? "diagnostic"}:${diagnostic.path ?? diagnostic.registryRef ?? diagnostic.nodeId ?? diagnostic.edgeId ?? index}`} className="rounded-sm border border-red-500/25 bg-[#0b0f14]/60 p-2">
+						<div className="break-words text-red-100">{diagnostic.message ?? diagnostic.code ?? "Workflow validation blocked this action."}</div>
+						<div className="mt-1 flex flex-wrap gap-1 font-mono text-[10px] text-red-200/70">
+							{diagnostic.code ? <span>{diagnostic.code}</span> : null}
+							{diagnostic.path ? <span>{diagnostic.path}</span> : null}
+							{diagnostic.nodeId ? <span>node:{diagnostic.nodeId}</span> : null}
+							{diagnostic.edgeId ? <span>edge:{diagnostic.edgeId}</span> : null}
+							{diagnostic.registryRef ? <span>{diagnostic.registryRef}</span> : null}
+						</div>
+						{diagnostic.hint ? <div className="mt-1 text-[11px] text-red-100/75">{diagnostic.hint}</div> : null}
+					</div>
+				))}
+			</div>
+		</div>
 	);
 }
 
@@ -2494,6 +2533,7 @@ function ConfiguredWorkflowStartPanel({
 }
 
 type WorkflowLifecycleDiagnostic = WorkflowLifecycleEventRecord["diagnostics"][number];
+type WorkflowUiDiagnostic = Partial<WorkflowLifecycleDiagnostic> & { code?: string; message?: string };
 
 function workflowConfiguredSessionConfigurationSummary(projectSession: PiboProjectSession): { primary: string; secondary: string } {
 	const configuration = projectSession.configuration;
@@ -3828,13 +3868,13 @@ function errorMessage(caught: unknown): string {
 	return caught instanceof Error ? caught.message : String(caught);
 }
 
-function workflowDiagnosticsFromError(caught: unknown): Array<{ code?: string; message?: string }> {
+function workflowDiagnosticsFromError(caught: unknown): WorkflowUiDiagnostic[] {
 	if (!caught || typeof caught !== "object" || !("data" in caught)) return [];
 	const data = (caught as { data?: unknown }).data;
 	if (!data || typeof data !== "object" || !("diagnostics" in data)) return [];
 	const diagnostics = (data as { diagnostics?: unknown }).diagnostics;
 	if (!Array.isArray(diagnostics)) return [];
-	return diagnostics.filter((diagnostic): diagnostic is { code?: string; message?: string } => Boolean(diagnostic) && typeof diagnostic === "object");
+	return diagnostics.filter((diagnostic): diagnostic is WorkflowUiDiagnostic => Boolean(diagnostic) && typeof diagnostic === "object");
 }
 
 function SignedOut({ message }: { message: string }) {

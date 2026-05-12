@@ -1,4 +1,5 @@
 ## Codebase Patterns
+- Project workflow create/start diagnostics should render sanitized diagnostic metadata (`code`, `path`, `nodeId`, `edgeId`, `registryRef`, `hint`) near the blocking action, not only in a global error banner.
 - Dedicated workflow version-list/inspect APIs should derive visibility through `buildWorkflowCatalogList` before reading definitions so archive/delete filtering matches catalog and picker surfaces.
 - Configured/not-started Project workflow UI should derive pre-run validation and blocking diagnostics from `workflowLifecycleEvents`, because no workflow run record or trace attempt exists before Start succeeds.
 - Web-channel tests import `dist/`, so run `npm run build` before targeted `node --test test/web-channel.test.mjs` checks when server code changes.
@@ -1467,4 +1468,29 @@
   - Not run; documentation-only change with no UI behavior changes.
 - **Learnings for future iterations:**
   - Product-level smoke checklists should name both the configured/not-started pre-run state and the post-start run inspection sections so manual QA can verify delayed start and inspection contracts without reading implementation notes.
+---
+## 2026-05-12 08:13 CEST - US-007
+- What was implemented
+  - Added configured-session Project UI coverage for pre-run review state, explicit Start, empty run history, and create/start blocking diagnostics.
+  - Added a Create-blocking diagnostics panel that displays sanitized workflow diagnostic metadata next to the workflow Project session create action.
+  - Marked PRD 03 US-007 passing.
+- Files changed
+  - `src/apps/chat-ui/src/App.tsx`
+  - `test/workflow-v2-project-configured-ui.test.mjs`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_03_project_session_selection_and_snapshots.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck && npm run chat-ui:build && node --test test/workflow-v2-project-configured-ui.test.mjs'` — passed.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run build'` — passed before browser verification.
+  - `python3 -m json.tool docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_03_project_session_selection_and_snapshots.json` — passed.
+  - `git diff --check` — passed.
+- Browser verification, if UI changed
+  - Restarted the container web gateway from rebuilt `/workspace/dist` and verified `http://127.0.0.1:4802/apps/chat` returned OK.
+  - Used `browser-use --fresh-profile --session ralph-v2-configured-ui` inside `pibo-dev-WorkflowsV2` with dev auth (`dev@pibo.local`).
+  - Opened `/apps/chat/projects` and verified a configured workflow Project session shows selected workflow id/version, configuration summary, validation state, explicit `Start workflow`, and `No current run attempts` before a run exists.
+  - Opened the blocked configured session at `/apps/chat/projects/prj_51bd2b3a-fd9e-440a-b644-2510ba45298d/sessions/ps_61b94953-5e03-4691-9feb-f78a11912afc` and verified `Start-blocking diagnostics` shows `WorkflowGraphError.archivedAgentProfileRef`, schema path, registry reference, and hint near the Start action.
+  - Saved screenshot: `/tmp/ralph-v2-configured-session-ui.png` inside the container.
+- **Learnings for future iterations:**
+  - Configured Project workflow UI state spans both the top Start panel and the Workflow/XState projection view; verify both because the Start panel owns the blocking action while the projection view owns run inspection details.
+  - Browser verification can reuse the seeded blocked configured session from earlier observability work to validate diagnostic rendering without creating new archived-profile fixtures.
 ---
