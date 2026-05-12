@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Activity, AlertTriangle, CheckCircle2, Circle, Clock3, GitBranch, Layers3, ListChecks, Route, XCircle } from "lucide-react";
+import { Activity, AlertTriangle, CheckCircle2, Circle, Clock3, Database, GitBranch, History, Layers3, ListChecks, Route, XCircle } from "lucide-react";
 import { JsonRenderer } from "../tracing/JsonRenderer";
 import type { PiboProjectSession, PiboSessionSignalSnapshot, PiboSessionTraceView, PiboTraceNode, PiboWebSessionStatus } from "../types";
 import type { ChatSessionViewProps } from "./types";
@@ -31,6 +31,41 @@ type WorkflowValidationError = {
 	message: string;
 	code?: string;
 	path?: string;
+	source?: string;
+};
+
+type WorkflowRunHistoryEntry = {
+	id: string;
+	status: string;
+	currentNodeId?: string;
+	updatedAt: string;
+	source: string;
+};
+
+type WorkflowNodeAttemptSummary = {
+	id: string;
+	nodeId: string;
+	label: string;
+	kind: string;
+	status: string;
+	attempt: number;
+	source: string;
+	startedAt?: string;
+	completedAt?: string;
+};
+
+type WorkflowEdgeTransferSummary = {
+	id: string;
+	edgeId: string;
+	status: string;
+	source: string;
+	createdAt?: string;
+};
+
+type WorkflowRuntimeErrorSummary = {
+	id: string;
+	message: string;
+	code?: string;
 	source?: string;
 };
 
@@ -68,6 +103,7 @@ export function WorkflowXStateSessionView({
 				<WorkflowSummaryCard model={workflowModel} />
 				<WorkflowProjectionBoundaryNotice />
 				<WorkflowExecutionShell model={workflowModel} />
+				<WorkflowRunInspectionPanel model={workflowModel} />
 				<WorkflowGraph nodes={workflowModel.nodes} edges={workflowModel.edges} />
 				<div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
 					<WorkflowRuntimeSnapshot model={workflowModel} />
@@ -107,6 +143,10 @@ type WorkflowProjectSessionUiModel = {
 	edges: WorkflowVisualEdge[];
 	configuration: WorkflowConfigurationSummary;
 	pendingHumanActions: WorkflowPendingHumanAction[];
+	runHistory: WorkflowRunHistoryEntry[];
+	nodeAttempts: WorkflowNodeAttemptSummary[];
+	edgeTransfers: WorkflowEdgeTransferSummary[];
+	runtimeErrors: WorkflowRuntimeErrorSummary[];
 	finalOutput?: WorkflowFinalOutput;
 	validationErrors: WorkflowValidationError[];
 	snapshot: Record<string, unknown>;
@@ -183,7 +223,7 @@ function WorkflowExecutionShell({ model }: { model: WorkflowProjectSessionUiMode
 					<WorkflowShellFact label="status" value={model.state} />
 					<WorkflowShellFact label="current node" value={activeNode?.label ?? "none"} />
 					<WorkflowShellFact label="output" value={model.finalOutput ? "available" : "empty"} />
-					<WorkflowShellFact label="error" value={model.validationErrors.length ? `${model.validationErrors.length} validation diagnostics` : "none"} />
+					<WorkflowShellFact label="error" value={model.runtimeErrors.length ? `${model.runtimeErrors.length} runtime errors` : model.validationErrors.length ? `${model.validationErrors.length} validation diagnostics` : "none"} />
 					<p className="leading-5 text-slate-500">
 						This workflow run view container is the stable Project home for status, current node, output, and error sections.
 					</p>
@@ -212,6 +252,157 @@ function WorkflowExecutionShell({ model }: { model: WorkflowProjectSessionUiMode
 			</WorkflowShellCard>
 		</div>
 	);
+}
+
+function WorkflowRunInspectionPanel({ model }: { model: WorkflowProjectSessionUiModel }) {
+	const activeNode = currentWorkflowNode(model);
+	const displayedErrors = [
+		...model.runtimeErrors.map((error) => ({ ...error, source: error.source ?? "runtime" })),
+		...model.validationErrors.map((error) => ({ ...error, source: error.source ?? "validation" })),
+	].slice(0, 8);
+	return (
+		<section className="rounded-sm border border-slate-800 bg-[#111820] p-4 text-sm" aria-label="Workflow run inspection panel">
+			<div className="flex flex-wrap items-start justify-between gap-3">
+				<div className="min-w-0">
+					<div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500">
+						<Database size={14} />
+						Workflow run inspection
+					</div>
+					<p className="mt-2 max-w-3xl text-xs leading-5 text-slate-500">
+						Status, current node, history, attempts, transfers, output, and errors are rendered from Project session and workflow run facts when a run is linked. The XState graph remains a visualization projection only.
+					</p>
+				</div>
+				<div className="flex shrink-0 flex-wrap gap-2 text-[10px] uppercase tracking-wide">
+					<span className="rounded border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-emerald-200">kernel/run records: truth</span>
+					<span className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-amber-100">XState projection only</span>
+				</div>
+			</div>
+			<div className="mt-4 grid gap-3 lg:grid-cols-3">
+				<WorkflowInspectionSection title="Status" badge={model.state} icon={<Activity size={14} />}>
+					<WorkflowInspectionFact label="run id" value={model.workflowRunId ? shortWorkflowValue(model.workflowRunId) : "not started"} />
+					<WorkflowInspectionFact label="status" value={model.state} />
+					<WorkflowInspectionFact label="record source" value={model.workflowRunId ? "Project workflow run id" : "no run record yet"} />
+				</WorkflowInspectionSection>
+				<WorkflowInspectionSection title="Current node" badge={activeNode?.status ?? "none"} icon={<Route size={14} />}>
+					<WorkflowInspectionFact label="node" value={activeNode?.label ?? "none"} />
+					<WorkflowInspectionFact label="node id" value={activeNode?.id ?? "none"} />
+					<WorkflowInspectionFact label="source" value="project/session run cursor" />
+				</WorkflowInspectionSection>
+				<WorkflowInspectionSection title="Run history" badge={`${model.runHistory.length}`} icon={<History size={14} />}>
+					{model.runHistory.length ? (
+						<div className="space-y-2">
+							{model.runHistory.map((run) => (
+								<div key={run.id} className="rounded-sm border border-slate-800 bg-[#0b0f14] p-2">
+									<div className="flex items-start justify-between gap-3">
+										<div className="min-w-0 truncate font-mono text-xs text-slate-200">{shortWorkflowValue(run.id)}</div>
+										<span className={`rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${workflowFactStatusClass(run.status)}`}>{run.status}</span>
+									</div>
+									<div className="mt-1 text-[11px] text-slate-500">{run.currentNodeId ? `current ${run.currentNodeId}` : "no current node"} · {run.source}</div>
+									<div className="mt-1 font-mono text-[10px] text-slate-600">updated {run.updatedAt}</div>
+								</div>
+							))}
+						</div>
+					) : (
+						<WorkflowEmptyState>No workflow run history for this selected Project session yet.</WorkflowEmptyState>
+					)}
+				</WorkflowInspectionSection>
+			</div>
+			<div className="mt-3 grid gap-3 lg:grid-cols-2">
+				<WorkflowInspectionSection title="Node attempts" badge={`${model.nodeAttempts.length}`} icon={<ListChecks size={14} />}>
+					{model.nodeAttempts.length ? (
+						<div className="space-y-2">
+							{model.nodeAttempts.map((attempt) => (
+								<div key={attempt.id} className="rounded-sm border border-slate-800 bg-[#0b0f14] p-2">
+									<div className="flex items-start justify-between gap-3">
+										<div className="min-w-0">
+											<div className="truncate text-xs font-semibold text-slate-200">{attempt.label}</div>
+											<div className="mt-1 font-mono text-[10px] text-slate-500">{attempt.nodeId} · attempt {attempt.attempt}</div>
+										</div>
+										<span className={`rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${workflowFactStatusClass(attempt.status)}`}>{attempt.status}</span>
+									</div>
+									<div className="mt-1 text-[11px] text-slate-500">{attempt.kind} · {attempt.source}</div>
+								</div>
+							))}
+						</div>
+					) : (
+						<WorkflowEmptyState>No node attempts recorded for this workflow run yet.</WorkflowEmptyState>
+					)}
+				</WorkflowInspectionSection>
+				<WorkflowInspectionSection title="Edge transfers" badge={`${model.edgeTransfers.length}`} icon={<GitBranch size={14} />}>
+					{model.edgeTransfers.length ? (
+						<div className="space-y-2">
+							{model.edgeTransfers.map((transfer) => (
+								<div key={transfer.id} className="rounded-sm border border-slate-800 bg-[#0b0f14] p-2">
+									<div className="flex items-start justify-between gap-3">
+										<div className="min-w-0 truncate font-mono text-xs text-slate-200">{transfer.edgeId}</div>
+										<span className={`rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${workflowFactStatusClass(transfer.status)}`}>{transfer.status}</span>
+									</div>
+									<div className="mt-1 text-[11px] text-slate-500">{transfer.source}{transfer.createdAt ? ` · ${transfer.createdAt}` : ""}</div>
+								</div>
+							))}
+						</div>
+					) : (
+						<WorkflowEmptyState>No edge transfers recorded for this workflow run yet.</WorkflowEmptyState>
+					)}
+				</WorkflowInspectionSection>
+				<WorkflowInspectionSection title="Output" badge={model.finalOutput ? "available" : "empty"} icon={<CheckCircle2 size={14} />}>
+					{model.finalOutput ? (
+						<div className="rounded-sm border border-slate-800 bg-[#0b0f14] p-2">
+							<div className="mb-2 font-mono text-[10px] text-slate-500">{model.finalOutput.source}</div>
+							<JsonRenderer value={model.finalOutput.value} defaultExpandLevel={1} maxHeight="12rem" showControls={false} />
+						</div>
+					) : (
+						<WorkflowEmptyState>No workflow output has been recorded for this run yet.</WorkflowEmptyState>
+					)}
+				</WorkflowInspectionSection>
+				<WorkflowInspectionSection title="Error" badge={displayedErrors.length ? `${displayedErrors.length}` : "none"} icon={<AlertTriangle size={14} />}>
+					{displayedErrors.length ? (
+						<div className="space-y-2">
+							{displayedErrors.map((error) => (
+								<div key={error.id} className="rounded-sm border border-red-500/35 bg-red-500/10 p-2 text-xs text-red-100">
+									<div className="break-words">{error.message}</div>
+									<div className="mt-1 flex flex-wrap gap-1 font-mono text-[10px] text-red-200/70">
+										{error.code ? <span>{error.code}</span> : null}
+										{error.source ? <span>{error.source}</span> : null}
+									</div>
+								</div>
+							))}
+						</div>
+					) : (
+						<WorkflowEmptyState>No workflow run errors are recorded.</WorkflowEmptyState>
+					)}
+				</WorkflowInspectionSection>
+			</div>
+		</section>
+	);
+}
+
+function WorkflowInspectionSection({ title, badge, icon, children }: { title: string; badge: string; icon: ReactNode; children: ReactNode }) {
+	return (
+		<section className="min-w-0 rounded-sm border border-slate-800 bg-[#0f171e] p-3" aria-label={title}>
+			<div className="mb-3 flex items-center justify-between gap-3">
+				<div className="flex min-w-0 items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500">
+					<span className="text-[#11a4d4]">{icon}</span>
+					{title}
+				</div>
+				<span className="shrink-0 rounded border border-slate-700 bg-[#0b0f14] px-1.5 py-0.5 font-mono text-[10px] text-slate-400">{badge}</span>
+			</div>
+			{children}
+		</section>
+	);
+}
+
+function WorkflowInspectionFact({ label, value }: { label: string; value: string }) {
+	return (
+		<div className="flex items-start justify-between gap-3 border-b border-slate-800/70 py-2 first:pt-0 last:border-b-0 last:pb-0">
+			<span className="text-[10px] uppercase tracking-wide text-slate-500">{label}</span>
+			<span className="min-w-0 max-w-[14rem] truncate text-right font-mono text-xs text-slate-300" title={value}>{value}</span>
+		</div>
+	);
+}
+
+function WorkflowEmptyState({ children }: { children: ReactNode }) {
+	return <div className="rounded-sm border border-dashed border-slate-800 bg-[#0b0f14] p-3 text-xs leading-5 text-slate-500">{children}</div>;
 }
 
 function WorkflowShellCard({ title, icon, children }: { title: string; icon: ReactNode; children: ReactNode }) {
@@ -424,10 +615,15 @@ function createProjectSessionWorkflowModel(
 	selectedSessionSignal: PiboSessionSignalSnapshot | undefined,
 ): WorkflowProjectSessionUiModel | null {
 	if (!isWorkflowBackedProjectSession(projectSession)) return null;
+	const state = workflowStateLabel(projectSession, selectedSessionStatus);
 	const status = workflowNodeStatus(projectSession, selectedSessionStatus);
 	const activeStateId = stateIdForStatus(status);
 	const finalOutput = collectWorkflowFinalOutput(traceView, status);
 	const validationErrors = collectWorkflowValidationErrors(traceView);
+	const runHistory = collectWorkflowRunHistory(projectSession, state, activeStateId);
+	const nodeAttempts = collectWorkflowNodeAttempts(traceView, projectSession.workflowRunId);
+	const edgeTransfers = collectWorkflowEdgeTransfers(traceView, projectSession.workflowRunId);
+	const runtimeErrors = collectWorkflowRuntimeErrors(traceView, selectedSessionSignal);
 	const nodes: WorkflowVisualNode[] = [
 		{
 			id: "workflow.entry",
@@ -456,7 +652,7 @@ function createProjectSessionWorkflowModel(
 		...(projectSession.workflowVersion ? { workflowVersion: projectSession.workflowVersion } : {}),
 		...(projectSession.workflowRunId ? { workflowRunId: projectSession.workflowRunId } : {}),
 		piboSessionId: projectSession.piboSessionId,
-		state: workflowStateLabel(projectSession, selectedSessionStatus),
+		state,
 		status,
 		traceTitle: traceView?.title,
 		traceVersion: traceView?.version,
@@ -468,6 +664,10 @@ function createProjectSessionWorkflowModel(
 		],
 		configuration: summarizeWorkflowConfiguration(projectSession),
 		pendingHumanActions: collectPendingHumanActions(projectSession, selectedSessionSignal),
+		runHistory,
+		nodeAttempts,
+		edgeTransfers,
+		runtimeErrors,
 		...(finalOutput ? { finalOutput } : {}),
 		validationErrors,
 		snapshot: {
@@ -487,11 +687,19 @@ function createProjectSessionWorkflowModel(
 			current: {
 				snapshotKind: "ui",
 				...(projectSession.workflowRunId ? { runId: projectSession.workflowRunId } : {}),
-				status: workflowStateLabel(projectSession, selectedSessionStatus),
+				status: state,
 				stateIds: [activeStateId],
 				nodeId: activeStateId === "node.session" ? "session" : undefined,
 			},
 			nodeStatuses: nodes.map((node) => ({ id: node.id, kind: node.kind, status: node.status })),
+			runInspection: {
+				durableTruth: "kernel_run_records",
+				xstateProjectionOnly: true,
+				runHistoryCount: runHistory.length,
+				nodeAttemptCount: nodeAttempts.length,
+				edgeTransferCount: edgeTransfers.length,
+				runtimeErrorCount: runtimeErrors.length,
+			},
 			result: {
 				hasFinalOutput: Boolean(finalOutput),
 				validationErrorCount: validationErrors.length,
@@ -529,6 +737,118 @@ function collectPendingHumanActions(
 		label: "Awaiting human action",
 		source: selectedSessionSignal ? "session signal" : "project session state",
 	}];
+}
+
+function collectWorkflowRunHistory(projectSession: PiboProjectSession, state: string, currentNodeId: string): WorkflowRunHistoryEntry[] {
+	if (!projectSession.workflowRunId) return [];
+	return [{
+		id: projectSession.workflowRunId,
+		status: state,
+		currentNodeId,
+		updatedAt: projectSession.updatedAt,
+		source: "project session run record",
+	}];
+}
+
+function collectWorkflowNodeAttempts(traceView: PiboSessionTraceView | null, workflowRunId: string | undefined): WorkflowNodeAttemptSummary[] {
+	if (!workflowRunId || !traceView) return [];
+	return flattenTraceNodes(traceView.nodes)
+		.filter(isTraceNodeAttemptFact)
+		.slice(0, 8)
+		.map((node, index) => ({
+			id: node.id,
+			nodeId: node.stableKey ?? node.entryId ?? node.type,
+			label: node.title || node.type,
+			kind: node.type,
+			status: traceStatusToAttemptStatus(node.status),
+			attempt: index + 1,
+			source: "session trace fact",
+			...(node.startedAt ? { startedAt: node.startedAt } : {}),
+			...(node.completedAt ? { completedAt: node.completedAt } : {}),
+		}));
+}
+
+function isTraceNodeAttemptFact(node: PiboTraceNode): boolean {
+	return node.type === "agent.turn"
+		|| node.type === "tool.call"
+		|| node.type === "execution.command"
+		|| node.type === "agent.delegation"
+		|| node.type === "agent.async"
+		|| node.type === "yielded.run"
+		|| node.type === "error";
+}
+
+function traceStatusToAttemptStatus(status: PiboTraceNode["status"]): string {
+	if (status === "done") return "completed";
+	if (status === "error") return "failed";
+	return "running";
+}
+
+function collectWorkflowEdgeTransfers(traceView: PiboSessionTraceView | null, workflowRunId: string | undefined): WorkflowEdgeTransferSummary[] {
+	if (!workflowRunId || !traceView) return [];
+	const transfers: WorkflowEdgeTransferSummary[] = [];
+	for (const event of traceView.rawEvents) {
+		if (!isRecord(event.payload)) continue;
+		const payloadType = stringValue(event.payload.type);
+		const payloadRunId = stringValue(event.payload.runId);
+		if (payloadType !== "edge.transferred" || (payloadRunId && payloadRunId !== workflowRunId)) continue;
+		const edgeId = stringValue(event.payload.edgeId);
+		if (!edgeId) continue;
+		transfers.push({
+			id: stringValue(event.payload.edgeTransferId) ?? event.id,
+			edgeId,
+			status: "transferred",
+			source: event.type,
+			createdAt: event.createdAt,
+		});
+	}
+	return transfers.slice(0, 8);
+}
+
+function collectWorkflowRuntimeErrors(
+	traceView: PiboSessionTraceView | null,
+	selectedSessionSignal: PiboSessionSignalSnapshot | undefined,
+): WorkflowRuntimeErrorSummary[] {
+	const errors: WorkflowRuntimeErrorSummary[] = [];
+	for (const signalError of selectedSessionSignal?.errors ?? []) {
+		errors.push({
+			id: `signal:${errors.length}`,
+			message: signalError.message,
+			...(signalError.code ? { code: signalError.code } : {}),
+			source: signalError.source ?? "session signal",
+		});
+	}
+	if (traceView) {
+		for (const node of flattenTraceNodes(traceView.nodes)) {
+			const message = node.error ?? (node.status === "error" ? validationMessageFromValue(node.output) ?? validationMessageFromValue(node.summary) : undefined);
+			if (!message) continue;
+			errors.push({ id: `node:${node.id}`, message, source: node.type });
+		}
+		for (const event of traceView.rawEvents) {
+			if (!isRecord(event.payload)) continue;
+			const payloadError = event.payload.error;
+			const message = isRecord(payloadError) ? stringValue(payloadError.message) : stringValue(payloadError);
+			const code = isRecord(payloadError) ? stringValue(payloadError.code) : undefined;
+			if (!message) continue;
+			errors.push({
+				id: `event:${event.id}`,
+				message,
+				...(code ? { code } : {}),
+				source: event.type,
+			});
+		}
+	}
+	return dedupeRuntimeErrors(errors).slice(0, 8);
+}
+
+function dedupeRuntimeErrors(errors: WorkflowRuntimeErrorSummary[]): WorkflowRuntimeErrorSummary[] {
+	const seen = new Set<string>();
+	return errors.filter((error) => {
+		const key = `${error.code ?? ""}:${error.message}:${error.source ?? ""}`;
+		if (seen.has(key)) return false;
+		seen.add(key);
+		return true;
+	});
 }
 
 function collectWorkflowFinalOutput(traceView: PiboSessionTraceView | null, status: WorkflowNodeStatus): WorkflowFinalOutput | undefined {
@@ -738,6 +1058,15 @@ function statusTextClass(status: WorkflowNodeStatus): string {
 	if (status === "failed" || status === "cancelled") return "border-red-500/40 bg-red-500/10 text-red-300";
 	if (status === "waiting") return "border-amber-500/40 bg-amber-500/10 text-amber-300";
 	if (status === "active") return "border-[#11a4d4]/40 bg-[#11a4d4]/10 text-[#11a4d4]";
+	return "border-slate-700 bg-slate-900/50 text-slate-400";
+}
+
+function workflowFactStatusClass(status: string): string {
+	const normalized = status.toLowerCase();
+	if (normalized.includes("complete") || normalized.includes("done") || normalized.includes("transferred")) return "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
+	if (normalized.includes("fail") || normalized.includes("error") || normalized.includes("cancel")) return "border-red-500/40 bg-red-500/10 text-red-300";
+	if (normalized.includes("wait") || normalized.includes("blocked")) return "border-amber-500/40 bg-amber-500/10 text-amber-300";
+	if (normalized.includes("run") || normalized.includes("active") || normalized.includes("workflow")) return "border-[#11a4d4]/40 bg-[#11a4d4]/10 text-[#11a4d4]";
 	return "border-slate-700 bg-slate-900/50 text-slate-400";
 }
 

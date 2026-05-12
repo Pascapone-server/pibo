@@ -63,8 +63,8 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented Projects Workflow/XState run inspection panel with status, current node, run history, node attempts, edge transfers, output, error, and explicit empty states."
     },
     {
       "id": "US-005",

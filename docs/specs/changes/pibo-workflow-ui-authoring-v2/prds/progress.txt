@@ -1,4 +1,5 @@
 ## Codebase Patterns
+- Project Workflow/XState run inspection panels should render status, current node, run history, node attempts, edge transfers, output, and error sections with explicit empty states for configured/not-started sessions while labeling XState as projection-only.
 - Workflow Builder inspectors should patch the same draft Pibo Workflow IR through existing draft PATCH validation triggers; capability refs in inspectors should come from picker APIs instead of free-text fields.
 - Nested workflow node UI should reuse the workflow-version picker API, store only `workflowId`/`workflowVersion` refs in parent graph IR, and navigate to a separate workflow viewer instead of inline-expanding child graphs.
 - Workflow catalog persistence uses explicit `SqliteWorkflowRunStore` entities for UI identities, drafts, published versions, archive states, and delete tombstones; tombstones must not remove definition snapshots needed by historical run inspection.
@@ -883,4 +884,27 @@
 - **Learnings for future iterations:**
   - Version history and workflow selection should stay separate: history can include draft/archived/deleted states for visibility, while Project creation should consume only published picker options.
   - Browser workers may preserve previously published UI workflow versions in the container store, so version-history UI checks should assert stable labels/statuses rather than a fixed version count.
+---
+## 2026-05-12 03:46 CEST - US-004
+- What was implemented
+  - Added a Project Workflow/XState run inspection panel with status, current node, run history, node attempts, edge transfers, output, and error sections.
+  - Added explicit empty states for configured/not-started sessions without a linked run, node attempts, edge transfers, output, or errors.
+  - Kept the XState graph labeled as visualization-only while the inspection panel labels Project session/workflow run facts as the truth source.
+- Files changed
+  - `src/apps/chat-ui/src/session-views/WorkflowXStateSessionView.tsx`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_07_project_run_inspection_sidebar_and_human_actions.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck'` — passed.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run chat-ui:build'` — passed.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && node --test --test-name-pattern "configured Project workflow sessions" test/web-channel.test.mjs'` — passed, 1/1 targeted test.
+- Browser verification, if UI changed
+  - Restarted the container gateway from rebuilt `/workspace/dist` and verified `http://127.0.0.1:4802/apps/chat` returned OK.
+  - Created dev-auth Project `Run Inspection V2 1778550361` and workflow-backed session `Run Inspection Panel Check` for `standard-project@1.0.0` through the Chat Web API.
+  - Used `browser-use --fresh-profile` inside `pibo-dev-WorkflowsV2` to open the session with `?view=workflow`.
+  - Verified the authenticated Workflow/XState Project view shows `Workflow run inspection`, `Status`, `Current node`, `Run history`, `Node attempts`, `Edge transfers`, `Output`, `Error`, explicit no-history/no-attempt/no-transfer empty states, and `XState projection only`.
+  - Saved screenshot: `/tmp/ralph-v2-run-inspection-panel.png` inside the container.
+- **Learnings for future iterations:**
+  - Configured workflow sessions have no run id until the start story creates a durable run, so run inspection UI needs explicit empty states rather than hiding sections.
+  - Keep run inspection copy clear that Project session/workflow run facts are authoritative and XState is only a projection.
 ---
