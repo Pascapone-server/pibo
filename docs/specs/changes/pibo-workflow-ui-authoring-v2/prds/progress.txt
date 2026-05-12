@@ -1,4 +1,5 @@
 ## Codebase Patterns
+- Configured/not-started Project workflow UI should derive pre-run validation and blocking diagnostics from `workflowLifecycleEvents`, because no workflow run record or trace attempt exists before Start succeeds.
 - Web-channel tests import `dist/`, so run `npm run build` before targeted `node --test test/web-channel.test.mjs` checks when server code changes.
 - Raw JSON schema editors should write schema JSON back into Pibo Workflow IR and rely on the draft validation pipeline to surface `WorkflowInterfaceError.*` subset diagnostics rather than adding Zod, AJV, or form-builder layers.
 - V2 workflow picker API options should carry a uniform `displayName`, optional description, and nullable `paramsSchema` even when the picker has richer metadata such as profile aliases, schemas, or workflow versions.
@@ -1373,4 +1374,29 @@
 - **Learnings for future iterations:**
   - Apply delete/tombstone status before archive projection so tombstoned workflows cannot leak through archived/history views.
   - Browser verification data in the long-lived worker may contain archived or previously published UI workflow copies, so target a visible published UI row rather than assuming static fixture state.
+---
+## 2026-05-12 07:41 CEST - US-006
+- What was implemented
+  - Enhanced configured/not-started Project workflow sessions with a configuration summary, validation-state summary, explicit no-current-run-attempts copy, and Start action context.
+  - Displayed persisted start-blocking lifecycle diagnostics directly in the Project configured-session panel.
+  - Updated the Workflow/XState run inspection view so configured sessions report no current node/run attempts before Start creates a run.
+- Files changed
+  - `src/apps/chat-ui/src/App.tsx`
+  - `src/apps/chat-ui/src/session-views/WorkflowXStateSessionView.tsx`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_07_project_run_inspection_sidebar_and_human_actions.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck'` — passed.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run chat-ui:build'` — passed.
+  - `python3 -m json.tool docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_07_project_run_inspection_sidebar_and_human_actions.json` — passed.
+  - `git diff --check` — passed.
+- Browser verification, if UI changed
+  - Restarted the container web gateway without touching host gateways and verified `http://127.0.0.1:4802/apps/chat` returned OK.
+  - Used `browser-use --fresh-profile --session ralph-v2-pre-run` inside `pibo-dev-WorkflowsV2` with dev auth (`dev@pibo.local`).
+  - Opened `/apps/chat/projects` and verified a configured workflow Project session shows `Configuration summary`, `Validation state`, `Start workflow`, and `No current run attempts` before any workflow run exists.
+  - Opened the blocked configured session at `/apps/chat/projects/prj_51bd2b3a-fd9e-440a-b644-2510ba45298d/sessions/ps_61b94953-5e03-4691-9feb-f78a11912afc` and verified `Start-blocking diagnostics` displays `WorkflowGraphError.archivedAgentProfileRef` in the Project context.
+  - Saved screenshot: `/tmp/ralph-v2-configured-pre-run-state.png` inside the container.
+- **Learnings for future iterations:**
+  - Pre-run Project workflow views cannot rely on trace/run attempts; render configuration and validation from the Project session row plus lifecycle events until Start creates the first workflow run.
+  - `browser-use wait text` may return false before the accessibility tree refreshes, so use `state` and a lower-cased `document.body.innerText` check when verifying transformed uppercase labels.
 ---

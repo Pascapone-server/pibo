@@ -2177,6 +2177,7 @@ function ProjectsArea({
 	const workflowStartPanel = selectedProject && selectedProjectSession && isConfiguredWorkflowSessionPending(selectedProjectSession) ? (
 		<ConfiguredWorkflowStartPanel
 			projectSession={selectedProjectSession}
+			lifecycleEvents={data?.workflowLifecycleEvents ?? []}
 			starting={startingWorkflowSessionId === selectedProjectSession.piboSessionId}
 			message={workflowStartMessages[selectedProjectSession.piboSessionId] ?? null}
 			onStart={() => void startWorkflowProjectSession(selectedProjectSession)}
@@ -2411,15 +2412,22 @@ function ProjectWorkflowScopeBoundaryPanel() {
 
 function ConfiguredWorkflowStartPanel({
 	projectSession,
+	lifecycleEvents,
 	starting,
 	message,
 	onStart,
 }: {
 	projectSession: PiboProjectSession;
+	lifecycleEvents: readonly WorkflowLifecycleEventRecord[];
 	starting: boolean;
 	message: string | null;
 	onStart: () => void;
 }) {
+	const configurationSummary = workflowConfiguredSessionConfigurationSummary(projectSession);
+	const validationEvent = latestWorkflowSessionValidationEvent(projectSession.piboSessionId, lifecycleEvents);
+	const validation = workflowConfiguredSessionValidationSummary(validationEvent);
+	const blockingDiagnostics = latestWorkflowStartBlockingDiagnostics(projectSession.piboSessionId, lifecycleEvents);
+	const messageClass = workflowStartPanelMessageClass(message);
 	return (
 		<section className="rounded-sm border border-[#11a4d4]/35 bg-[#111820] p-4 shadow-lg shadow-black/10" aria-labelledby="project-workflow-start-title">
 			<div className="flex flex-wrap items-start justify-between gap-4">
@@ -2440,26 +2448,122 @@ function ConfiguredWorkflowStartPanel({
 					Start workflow
 				</button>
 			</div>
-			<div className="mt-4 grid gap-2 text-xs md:grid-cols-3">
+			<div className="mt-4 grid gap-2 text-xs md:grid-cols-2 xl:grid-cols-4">
 				<div className="rounded-sm border border-slate-800 bg-[#101d22]/70 p-3">
 					<div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Workflow</div>
 					<div className="mt-1 truncate font-mono text-slate-300" title={projectSession.workflowId}>{projectSession.workflowId}</div>
 					{projectSession.workflowVersion ? <div className="mt-1 text-slate-500">version {projectSession.workflowVersion}</div> : null}
 				</div>
 				<div className="rounded-sm border border-slate-800 bg-[#101d22]/70 p-3">
-					<div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Session state</div>
-					<div className="mt-1 text-slate-300">configured/not-started</div>
-					<div className="mt-1 text-slate-500">Validation runs again when Start is accepted.</div>
+					<div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Configuration summary</div>
+					<div className="mt-1 text-slate-300">{configurationSummary.primary}</div>
+					<div className="mt-1 text-slate-500">{configurationSummary.secondary}</div>
+				</div>
+				<div className="rounded-sm border border-slate-800 bg-[#101d22]/70 p-3">
+					<div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Validation state</div>
+					<div className={validation.className}>{validation.label}</div>
+					<div className="mt-1 text-slate-500">{validation.description}</div>
 				</div>
 				<div className="rounded-sm border border-slate-800 bg-[#101d22]/70 p-3">
 					<div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Run history</div>
-					<div className="mt-1 text-slate-300">No workflow run record yet</div>
-					<div className="mt-1 text-slate-500">Creation and Start remain separate actions.</div>
+					<div className="mt-1 text-slate-300">No current run attempts</div>
+					<div className="mt-1 text-slate-500">No workflow run record exists until Start succeeds.</div>
 				</div>
 			</div>
-			{message ? <div className="mt-3 rounded-sm border border-emerald-500/40 bg-emerald-500/10 p-3 text-xs text-emerald-200" role="status">{message}</div> : null}
+			{blockingDiagnostics.length ? (
+				<div className="mt-3 rounded-sm border border-red-500/40 bg-red-500/10 p-3 text-xs text-red-100" role="alert" aria-label="Start-blocking diagnostics">
+					<div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.16em] text-red-200"><AlertTriangle size={12} />Start-blocking diagnostics</div>
+					<div className="mt-2 space-y-2">
+						{blockingDiagnostics.map((diagnostic, index) => (
+							<div key={`${diagnostic.code}:${diagnostic.path ?? diagnostic.registryRef ?? index}`} className="rounded-sm border border-red-500/25 bg-[#0b0f14]/60 p-2">
+								<div className="break-words text-red-100">{diagnostic.message}</div>
+								<div className="mt-1 flex flex-wrap gap-1 font-mono text-[10px] text-red-200/70">
+									<span>{diagnostic.code}</span>
+									{diagnostic.path ? <span>{diagnostic.path}</span> : null}
+									{diagnostic.registryRef ? <span>{diagnostic.registryRef}</span> : null}
+								</div>
+								{diagnostic.hint ? <div className="mt-1 text-[11px] text-red-100/75">{diagnostic.hint}</div> : null}
+							</div>
+						))}
+					</div>
+				</div>
+			) : null}
+			{message ? <div className={`mt-3 rounded-sm border p-3 text-xs ${messageClass}`} role="status">{message}</div> : null}
 		</section>
 	);
+}
+
+type WorkflowLifecycleDiagnostic = WorkflowLifecycleEventRecord["diagnostics"][number];
+
+function workflowConfiguredSessionConfigurationSummary(projectSession: PiboProjectSession): { primary: string; secondary: string } {
+	const configuration = projectSession.configuration;
+	const inputCount = Object.keys(configuration?.inputValues ?? {}).length;
+	const promptOverrideCount = Object.keys(configuration?.promptOverrides ?? {}).length;
+	const modelLabel = configuration?.model ? `${configuration.model.provider}/${configuration.model.id}` : "default model";
+	const thinkingLabel = configuration?.thinkingLevel ? `${configuration.thinkingLevel} thinking` : "default thinking";
+	const fastModeLabel = configuration?.fastMode === true ? "fast mode on" : configuration?.fastMode === false ? "fast mode off" : "default speed";
+	return {
+		primary: `${inputCount} input ${inputCount === 1 ? "value" : "values"} · ${promptOverrideCount} prompt ${promptOverrideCount === 1 ? "override" : "overrides"}`,
+		secondary: `${modelLabel} · ${thinkingLabel} · ${fastModeLabel}`,
+	};
+}
+
+function latestWorkflowSessionValidationEvent(piboSessionId: string, events: readonly WorkflowLifecycleEventRecord[]): WorkflowLifecycleEventRecord | undefined {
+	return latestWorkflowLifecycleEvent(events.filter((event) => event.piboSessionId === piboSessionId && Boolean(event.validation)));
+}
+
+function latestWorkflowStartBlockingDiagnostics(piboSessionId: string, events: readonly WorkflowLifecycleEventRecord[]): WorkflowLifecycleDiagnostic[] {
+	const blockedEvent = latestWorkflowLifecycleEvent(events.filter((event) => event.piboSessionId === piboSessionId && event.type === "project.workflow_start.blocked"));
+	return (blockedEvent?.diagnostics ?? []).filter((diagnostic) => diagnostic.severity === "error");
+}
+
+function latestWorkflowLifecycleEvent(events: readonly WorkflowLifecycleEventRecord[]): WorkflowLifecycleEventRecord | undefined {
+	return events.reduce<WorkflowLifecycleEventRecord | undefined>((latest, event) => {
+		if (!latest) return event;
+		return event.createdAt > latest.createdAt ? event : latest;
+	}, undefined);
+}
+
+function workflowConfiguredSessionValidationSummary(event: WorkflowLifecycleEventRecord | undefined): { label: string; description: string; className: string } {
+	if (!event?.validation) {
+		return {
+			label: "not checked yet",
+			description: "Validation runs before Start creates a workflow run.",
+			className: "mt-1 text-slate-300",
+		};
+	}
+	const validation = event.validation;
+	const counts = `${validation.errorCount} errors · ${validation.warningCount} warnings`;
+	if (validation.blocksRun || validation.validationState === "error") {
+		return {
+			label: `blocked · ${counts}`,
+			description: `Last checked ${shortWorkflowTimestamp(validation.checkedAt)} at ${validation.trigger}.`,
+			className: "mt-1 text-red-200",
+		};
+	}
+	if (validation.validationState === "warning") {
+		return {
+			label: `warnings · ${counts}`,
+			description: `Last checked ${shortWorkflowTimestamp(validation.checkedAt)} at ${validation.trigger}.`,
+			className: "mt-1 text-amber-200",
+		};
+	}
+	return {
+		label: `valid · ${counts}`,
+		description: `Last checked ${shortWorkflowTimestamp(validation.checkedAt)} at ${validation.trigger}.`,
+		className: "mt-1 text-emerald-200",
+	};
+}
+
+function workflowStartPanelMessageClass(message: string | null): string {
+	if (message?.toLowerCase().includes("blocked")) return "border-red-500/40 bg-red-500/10 text-red-200";
+	return "border-emerald-500/40 bg-emerald-500/10 text-emerald-200";
+}
+
+function shortWorkflowTimestamp(value: string): string {
+	const parsed = new Date(value);
+	if (Number.isNaN(parsed.getTime())) return value;
+	return parsed.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
 }
 
 function workflowVersionOptionKey(option: WorkflowVersionPickerOption): string {

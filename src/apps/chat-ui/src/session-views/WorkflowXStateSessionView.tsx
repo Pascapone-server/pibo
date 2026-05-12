@@ -215,7 +215,7 @@ function WorkflowProjectionBoundaryNotice() {
 }
 
 function WorkflowExecutionShell({ model }: { model: WorkflowProjectSessionUiModel }) {
-	const activeNode = currentWorkflowNode(model);
+	const activeNode = model.workflowRunId ? currentWorkflowNode(model) : undefined;
 	const selectedWorkflow = `${model.workflowId}${model.workflowVersion ? `@${model.workflowVersion}` : ""}`;
 	return (
 		<div className="grid gap-4 lg:grid-cols-3" aria-label="Projects workflow execution shell">
@@ -268,7 +268,7 @@ function WorkflowExecutionShell({ model }: { model: WorkflowProjectSessionUiMode
 }
 
 function WorkflowRunInspectionPanel({ model }: { model: WorkflowProjectSessionUiModel }) {
-	const activeNode = currentWorkflowNode(model);
+	const activeNode = model.workflowRunId ? currentWorkflowNode(model) : undefined;
 	const displayedErrors = [
 		...model.runtimeErrors.map((error) => ({ ...error, source: error.source ?? "runtime" })),
 		...model.validationErrors.map((error) => ({ ...error, source: error.source ?? "validation" })),
@@ -316,7 +316,7 @@ function WorkflowRunInspectionPanel({ model }: { model: WorkflowProjectSessionUi
 							))}
 						</div>
 					) : (
-						<WorkflowEmptyState>No workflow run history for this selected Project session yet.</WorkflowEmptyState>
+						<WorkflowEmptyState>{model.workflowRunId ? "No workflow run history for this selected Project session yet." : "No current run attempts; this configured Project session has not been started."}</WorkflowEmptyState>
 					)}
 				</WorkflowInspectionSection>
 			</div>
@@ -338,7 +338,7 @@ function WorkflowRunInspectionPanel({ model }: { model: WorkflowProjectSessionUi
 							))}
 						</div>
 					) : (
-						<WorkflowEmptyState>No node attempts recorded for this workflow run yet.</WorkflowEmptyState>
+						<WorkflowEmptyState>{model.workflowRunId ? "No node attempts recorded for this workflow run yet." : "No current node attempts; Start has not created a workflow run."}</WorkflowEmptyState>
 					)}
 				</WorkflowInspectionSection>
 				<WorkflowInspectionSection title="Edge transfers" badge={`${model.edgeTransfers.length}`} icon={<GitBranch size={14} />}>
@@ -1179,6 +1179,7 @@ function workflowNodeStatus(projectSession: PiboProjectSession, selectedSessionS
 	if (state.includes("fail") || state.includes("error")) return "failed";
 	if (state.includes("cancel")) return "cancelled";
 	if (state.includes("wait") || state.includes("blocked")) return "waiting";
+	if (!projectSession.workflowRunId && state.includes("configured")) return "idle";
 	return selectedSessionStatus === "running" ? "active" : "active";
 }
 

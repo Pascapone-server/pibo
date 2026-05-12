@@ -95,8 +95,8 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Configured/not-started Project sessions now show configuration and validation summaries, explicit Start, no-current-run-attempts states, and start-blocking diagnostics in the Project context."
     },
     {
       "id": "US-007",
