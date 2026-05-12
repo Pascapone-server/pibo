@@ -51,6 +51,7 @@ import {
 } from "./api";
 
 const DEFAULT_AGENT_PROMPT_TEMPLATE = "Use the workflow input to produce a concise answer.\n\n{{input}}";
+const DEFAULT_WORKFLOW_JSON_SCHEMA: WorkflowJsonObject = { type: "object", properties: {}, required: [], additionalProperties: false };
 const STARTER_DRAFT_ID = "v2-starter-draft";
 const RAW_IR_PARSE_DIAGNOSTIC_CODE = "WorkflowBuilderWarning.invalidRawIrText";
 
@@ -88,8 +89,10 @@ type WorkflowSettingsFormState = {
 	description: string;
 	inputKind: WorkflowPortKindSelection;
 	inputDescription: string;
+	inputSchemaText: string;
 	outputKind: WorkflowPortKindSelection;
 	outputDescription: string;
+	outputSchemaText: string;
 	metadataTags: string;
 	metadataUseWhen: string;
 	metadataNotFor: string;
@@ -100,8 +103,10 @@ type WorkflowNodeInspectorFormState = {
 	description: string;
 	inputKind: OptionalWorkflowPortKindSelection;
 	inputDescription: string;
+	inputSchemaText: string;
 	outputKind: OptionalWorkflowPortKindSelection;
 	outputDescription: string;
+	outputSchemaText: string;
 	profileId: string;
 	promptTemplate: string;
 	handlerId: string;
@@ -109,6 +114,7 @@ type WorkflowNodeInspectorFormState = {
 	adapterParamsText: string;
 	workflowVersionKey: string;
 	humanPrompt: string;
+	humanSchemaText: string;
 };
 type WorkflowEdgeInspectorFormState = {
 	sourceNodeId: string;
@@ -1228,7 +1234,7 @@ function WorkflowSettingsInspector({ draft, isSaving, onSaveDefinition }: {
 
 	const saveSettings = () => {
 		const definition = applyWorkflowSettingsForm(draft.definition, form);
-		void onSaveDefinition(definition, "Saved workflow settings inspector edits to the draft IR.", { editTrigger: "graph_edit" });
+		void onSaveDefinition(definition, "Saved workflow settings inspector edits to the draft IR.", { editTrigger: "schema_edit" });
 	};
 
 	return (
@@ -1244,8 +1250,8 @@ function WorkflowSettingsInspector({ draft, isSaving, onSaveDefinition }: {
 					<textarea className="min-h-20 rounded-sm border border-slate-700 bg-[#101d22] px-2 py-1.5 text-slate-100" value={form.description} onChange={(event) => update("description", event.target.value)} />
 				</label>
 				<div className="grid gap-2 md:grid-cols-2">
-					<WorkflowPortEditor label="Workflow input port" kind={form.inputKind} description={form.inputDescription} onKindChange={(value) => update("inputKind", value)} onDescriptionChange={(value) => update("inputDescription", value)} />
-					<WorkflowPortEditor label="Workflow output port" kind={form.outputKind} description={form.outputDescription} onKindChange={(value) => update("outputKind", value)} onDescriptionChange={(value) => update("outputDescription", value)} />
+					<WorkflowPortEditor label="Workflow input port" kind={form.inputKind} description={form.inputDescription} schemaText={form.inputSchemaText} onKindChange={(value) => update("inputKind", value)} onDescriptionChange={(value) => update("inputDescription", value)} onSchemaChange={(value) => update("inputSchemaText", value)} />
+					<WorkflowPortEditor label="Workflow output port" kind={form.outputKind} description={form.outputDescription} schemaText={form.outputSchemaText} onKindChange={(value) => update("outputKind", value)} onDescriptionChange={(value) => update("outputDescription", value)} onSchemaChange={(value) => update("outputSchemaText", value)} />
 				</div>
 				<div className="grid gap-2 md:grid-cols-2">
 					<WorkflowListTextEditor label="metadata.tags" value={form.metadataTags} onChange={(value) => update("metadataTags", value)} />
@@ -1336,7 +1342,7 @@ function WorkflowNodeInspector({ draft, nodeId, node, isSaving, onSaveDefinition
 
 	const saveNode = () => {
 		const definition = applyWorkflowNodeInspectorForm(draft.definition, nodeId, form);
-		void onSaveDefinition(definition, `Saved node inspector edits for ${nodeId}.`, { editTrigger: "node_edit" });
+		void onSaveDefinition(definition, `Saved node inspector edits for ${nodeId}.`, { editTrigger: "schema_edit" });
 	};
 
 	return (
@@ -1353,8 +1359,8 @@ function WorkflowNodeInspector({ draft, nodeId, node, isSaving, onSaveDefinition
 					<textarea className="min-h-16 rounded-sm border border-slate-700 bg-[#101d22] px-2 py-1.5 text-slate-100" value={form.description} onChange={(event) => update("description", event.target.value)} />
 				</label>
 				<div className="grid gap-2 md:grid-cols-2">
-					<WorkflowOptionalPortEditor label="Node input port" kind={form.inputKind} description={form.inputDescription} onKindChange={(value) => update("inputKind", value)} onDescriptionChange={(value) => update("inputDescription", value)} />
-					<WorkflowOptionalPortEditor label="Node output port" kind={form.outputKind} description={form.outputDescription} onKindChange={(value) => update("outputKind", value)} onDescriptionChange={(value) => update("outputDescription", value)} />
+					<WorkflowOptionalPortEditor label="Node input port" kind={form.inputKind} description={form.inputDescription} schemaText={form.inputSchemaText} onKindChange={(value) => update("inputKind", value)} onDescriptionChange={(value) => update("inputDescription", value)} onSchemaChange={(value) => update("inputSchemaText", value)} />
+					<WorkflowOptionalPortEditor label="Node output port" kind={form.outputKind} description={form.outputDescription} schemaText={form.outputSchemaText} onKindChange={(value) => update("outputKind", value)} onDescriptionChange={(value) => update("outputDescription", value)} onSchemaChange={(value) => update("outputSchemaText", value)} />
 				</div>
 				{nodeKind === "agent" ? (
 					<div className="grid gap-3 rounded-sm border border-slate-800 bg-[#101d22] p-3" aria-label="Agent node fields">
@@ -1420,10 +1426,13 @@ function WorkflowNodeInspector({ draft, nodeId, node, isSaving, onSaveDefinition
 					</div>
 				) : null}
 				{nodeKind === "human" ? (
-					<label className="grid gap-1 font-semibold text-slate-300">
-						<span>Human prompt</span>
-						<textarea className="min-h-24 rounded-sm border border-slate-700 bg-[#101d22] px-2 py-1.5 text-slate-100" value={form.humanPrompt} onChange={(event) => update("humanPrompt", event.target.value)} />
-					</label>
+					<div className="grid gap-3 rounded-sm border border-slate-800 bg-[#101d22] p-3" aria-label="Human node fields">
+						<label className="grid gap-1 font-semibold text-slate-300">
+							<span>Human prompt</span>
+							<textarea className="min-h-24 rounded-sm border border-slate-700 bg-[#151f24] px-2 py-1.5 text-slate-100" value={form.humanPrompt} onChange={(event) => update("humanPrompt", event.target.value)} />
+						</label>
+						<WorkflowSchemaTextEditor label="Human node action schema JSON" value={form.humanSchemaText} onChange={(value) => update("humanSchemaText", value)} />
+					</div>
 				) : null}
 				<WorkflowInspectorDiagnostics diagnostics={nodeDiagnostics} emptyLabel="No diagnostics for selected node." />
 				<button type="button" className="inline-flex items-center justify-center gap-2 rounded-sm border border-[#11a4d4]/50 px-3 py-2 text-xs font-semibold text-[#8bdcf4] transition hover:border-[#11a4d4] hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50" onClick={saveNode} disabled={isSaving}>
@@ -1708,12 +1717,14 @@ function WorkflowEdgeAdapterDialog({ draft, edgeId, edge, edgePortDetails, isSav
 	);
 }
 
-function WorkflowPortEditor({ label, kind, description, onKindChange, onDescriptionChange }: {
+function WorkflowPortEditor({ label, kind, description, schemaText, onKindChange, onDescriptionChange, onSchemaChange }: {
 	label: string;
 	kind: WorkflowPortKindSelection;
 	description: string;
+	schemaText: string;
 	onKindChange: (kind: WorkflowPortKindSelection) => void;
 	onDescriptionChange: (description: string) => void;
+	onSchemaChange: (schemaText: string) => void;
 }) {
 	return (
 		<div className="grid gap-2 rounded-sm border border-slate-800 bg-[#101d22] p-2">
@@ -1728,16 +1739,19 @@ function WorkflowPortEditor({ label, kind, description, onKindChange, onDescript
 				<span>Description</span>
 				<input className="rounded-sm border border-slate-700 bg-[#151f24] px-2 py-1.5 text-slate-100" value={description} onChange={(event) => onDescriptionChange(event.target.value)} placeholder="Optional port description" />
 			</label>
+			{kind === "json" ? <WorkflowSchemaTextEditor label={`${label} raw JSON schema`} value={schemaText} onChange={onSchemaChange} /> : null}
 		</div>
 	);
 }
 
-function WorkflowOptionalPortEditor({ label, kind, description, onKindChange, onDescriptionChange }: {
+function WorkflowOptionalPortEditor({ label, kind, description, schemaText, onKindChange, onDescriptionChange, onSchemaChange }: {
 	label: string;
 	kind: OptionalWorkflowPortKindSelection;
 	description: string;
+	schemaText: string;
 	onKindChange: (kind: OptionalWorkflowPortKindSelection) => void;
 	onDescriptionChange: (description: string) => void;
+	onSchemaChange: (schemaText: string) => void;
 }) {
 	return (
 		<div className="grid gap-2 rounded-sm border border-slate-800 bg-[#101d22] p-2">
@@ -1753,7 +1767,25 @@ function WorkflowOptionalPortEditor({ label, kind, description, onKindChange, on
 				<span>Description</span>
 				<input className="rounded-sm border border-slate-700 bg-[#151f24] px-2 py-1.5 text-slate-100" value={description} onChange={(event) => onDescriptionChange(event.target.value)} disabled={kind === "none"} placeholder="Optional port description" />
 			</label>
+			{kind === "json" ? <WorkflowSchemaTextEditor label={`${label} raw JSON schema`} value={schemaText} onChange={onSchemaChange} /> : null}
 		</div>
+	);
+}
+
+function WorkflowSchemaTextEditor({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+	return (
+		<label className="grid gap-1 font-semibold text-slate-300">
+			<span>{label}</span>
+			<textarea
+				className="min-h-36 rounded-sm border border-slate-700 bg-[#151f24] px-2 py-1.5 font-mono text-[11px] leading-5 text-slate-100"
+				value={value}
+				onChange={(event) => onChange(event.target.value)}
+				placeholder={JSON.stringify(DEFAULT_WORKFLOW_JSON_SCHEMA, null, 2)}
+				spellCheck={false}
+				aria-label={label}
+			/>
+			<span className="text-[11px] font-normal leading-5 text-slate-500">Raw JSON Schema subset only. Unsupported keywords return workflow diagnostics; no Zod, AJV, or form-builder schema layer is introduced.</span>
+		</label>
 	);
 }
 
@@ -2736,8 +2768,10 @@ function createWorkflowSettingsFormState(definition: WorkflowDraftDefinition): W
 		description: typeof definition.description === "string" ? definition.description : "",
 		inputKind: readWorkflowPortKind(definition.input, "text"),
 		inputDescription: readWorkflowPortDescription(definition.input),
+		inputSchemaText: formatWorkflowPortSchemaText(definition.input),
 		outputKind: readWorkflowPortKind(definition.output, "text"),
 		outputDescription: readWorkflowPortDescription(definition.output),
+		outputSchemaText: formatWorkflowPortSchemaText(definition.output),
 		metadataTags: formatWorkflowStringList(metadata.tags),
 		metadataUseWhen: formatWorkflowStringList(metadata.useWhen),
 		metadataNotFor: formatWorkflowStringList(metadata.notFor),
@@ -2753,8 +2787,8 @@ function applyWorkflowSettingsForm(definition: WorkflowDraftDefinition, form: Wo
 	writeWorkflowStringList(metadata, "examples", form.metadataExamples);
 	const nextDefinition: WorkflowDraftDefinition = {
 		...definition,
-		input: createWorkflowPort(form.inputKind, form.inputDescription, definition.input),
-		output: createWorkflowPort(form.outputKind, form.outputDescription, definition.output),
+		input: createWorkflowPort(form.inputKind, form.inputDescription, definition.input, form.inputSchemaText),
+		output: createWorkflowPort(form.outputKind, form.outputDescription, definition.output, form.outputSchemaText),
 	};
 	writeOptionalString(nextDefinition, "title", form.title);
 	writeOptionalString(nextDefinition, "description", form.description);
@@ -2771,8 +2805,10 @@ function createWorkflowNodeInspectorFormState(node: WorkflowJsonObject): Workflo
 		description: typeof node.description === "string" ? node.description : "",
 		inputKind: readOptionalWorkflowPortKind(node.input),
 		inputDescription: readWorkflowPortDescription(node.input),
+		inputSchemaText: formatWorkflowPortSchemaText(node.input),
 		outputKind: readOptionalWorkflowPortKind(node.output),
 		outputDescription: readWorkflowPortDescription(node.output),
+		outputSchemaText: formatWorkflowPortSchemaText(node.output),
 		profileId: readAgentProfileId(node.profile),
 		promptTemplate: typeof node.promptTemplate === "string" ? node.promptTemplate : "",
 		handlerId: typeof node.handler === "string" ? node.handler : "",
@@ -2780,6 +2816,7 @@ function createWorkflowNodeInspectorFormState(node: WorkflowJsonObject): Workflo
 		adapterParamsText: formatWorkflowParamsText(readAdapterRefParams(node.handler)),
 		workflowVersionKey: workflowId && workflowVersion ? workflowVersionSelectionKey(workflowId, workflowVersion) : "",
 		humanPrompt: typeof node.prompt === "string" ? node.prompt : "",
+		humanSchemaText: node.schema === undefined ? "" : formatWorkflowSchemaText(node.schema),
 	};
 }
 
@@ -2791,8 +2828,8 @@ function applyWorkflowNodeInspectorForm(definition: WorkflowDraftDefinition, nod
 	const nextNode: WorkflowJsonObject = { ...currentNode };
 	writeOptionalString(nextNode, "label", form.label);
 	writeOptionalString(nextNode, "description", form.description);
-	writeOptionalPort(nextNode, "input", form.inputKind, form.inputDescription, currentNode.input);
-	writeOptionalPort(nextNode, "output", form.outputKind, form.outputDescription, currentNode.output);
+	writeOptionalPort(nextNode, "input", form.inputKind, form.inputDescription, currentNode.input, form.inputSchemaText);
+	writeOptionalPort(nextNode, "output", form.outputKind, form.outputDescription, currentNode.output, form.outputSchemaText);
 	if (nodeKind === "agent") {
 		nextNode.runtime = "pibo";
 		if (form.profileId.trim()) nextNode.profile = { kind: "fixed", id: form.profileId.trim() };
@@ -2817,7 +2854,11 @@ function applyWorkflowNodeInspectorForm(definition: WorkflowDraftDefinition, nod
 			nextNode.workflowVersion = selection.workflowVersion;
 		}
 	}
-	if (nodeKind === "human") writeOptionalString(nextNode, "prompt", form.humanPrompt);
+	if (nodeKind === "human") {
+		writeOptionalString(nextNode, "prompt", form.humanPrompt);
+		if (form.humanSchemaText.trim()) nextNode.schema = parseWorkflowSchemaText(form.humanSchemaText);
+		else delete nextNode.schema;
+	}
 	return {
 		...definition,
 		nodes: {
@@ -3032,22 +3073,44 @@ function readWorkflowPortDescription(value: unknown): string {
 	return isWorkflowJsonObject(value) && typeof value.description === "string" ? value.description : "";
 }
 
-function createWorkflowPort(kind: WorkflowPortKindSelection, description: string, previous: unknown): WorkflowJsonObject {
+function formatWorkflowPortSchemaText(value: unknown): string {
+	const schema = isWorkflowJsonObject(value) && value.schema !== undefined ? value.schema : DEFAULT_WORKFLOW_JSON_SCHEMA;
+	return formatWorkflowSchemaText(schema);
+}
+
+function formatWorkflowSchemaText(value: unknown): string {
+	try {
+		return JSON.stringify(value ?? DEFAULT_WORKFLOW_JSON_SCHEMA, null, 2) ?? JSON.stringify(DEFAULT_WORKFLOW_JSON_SCHEMA, null, 2);
+	} catch {
+		return JSON.stringify(DEFAULT_WORKFLOW_JSON_SCHEMA, null, 2);
+	}
+}
+
+function parseWorkflowSchemaText(value: string): unknown {
+	const trimmed = value.trim();
+	if (!trimmed) return cloneWorkflowJsonObject(DEFAULT_WORKFLOW_JSON_SCHEMA);
+	try {
+		return JSON.parse(trimmed) as unknown;
+	} catch {
+		return value;
+	}
+}
+
+function createWorkflowPort(kind: WorkflowPortKindSelection, description: string, previous: unknown, schemaText?: string): WorkflowJsonObject {
 	const port: WorkflowJsonObject = { kind };
 	writeOptionalString(port, "description", description);
 	if (kind === "json") {
-		const previousSchema = isWorkflowJsonObject(previous) && isWorkflowJsonObject(previous.schema) ? previous.schema : undefined;
-		port.schema = previousSchema ?? { type: "object" };
+		port.schema = parseWorkflowSchemaText(schemaText ?? formatWorkflowPortSchemaText(previous));
 	}
 	return port;
 }
 
-function writeOptionalPort(target: WorkflowJsonObject, key: "input" | "output", kind: OptionalWorkflowPortKindSelection, description: string, previous: unknown): void {
+function writeOptionalPort(target: WorkflowJsonObject, key: "input" | "output", kind: OptionalWorkflowPortKindSelection, description: string, previous: unknown, schemaText: string): void {
 	if (kind === "none") {
 		delete target[key];
 		return;
 	}
-	target[key] = createWorkflowPort(kind, description, previous);
+	target[key] = createWorkflowPort(kind, description, previous, schemaText);
 }
 
 function createNodePortRef(nodeId: string, portId: string): WorkflowJsonObject {

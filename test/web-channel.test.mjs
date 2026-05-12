@@ -2439,6 +2439,8 @@ test("workflow security boundary validates registered refs and rejects inline ex
 				properties: {
 					steps: { type: "array", items: { type: "string" } },
 				},
+				required: ["steps"],
+				additionalProperties: false,
 			},
 		};
 		const secureDefinition = {
@@ -2799,6 +2801,33 @@ test("workflow validation pipeline runs on draft load, edit, validate, and publi
 		assert.equal(rawRepairPayload.draft.definition.title, "Raw IR safe sync");
 		assert.equal(rawRepairPayload.draft.revision, rawPatchPayload.draft.revision + 1);
 		assert.equal(rawRepairPayload.diagnostics.some((diagnostic) => diagnostic.code === "WorkflowBuilderWarning.invalidRawIrText"), false);
+
+		const unsupportedSchemaDefinition = structuredClone(rawRepairPayload.draft.definition);
+		unsupportedSchemaDefinition.input = {
+			kind: "json",
+			schema: {
+				type: "object",
+				properties: {
+					topic: { type: "string", pattern: "^[a-z]+$" },
+				},
+				required: ["topic"],
+				additionalProperties: false,
+			},
+		};
+		const schemaPatchResponse = await fetch(`${baseURL}/api/chat/workflows/drafts/${encodeURIComponent(draftId)}`, {
+			method: "PATCH",
+			headers: {
+				"content-type": "application/json",
+				origin: baseURL,
+				"x-test-user": "user-1",
+			},
+			body: JSON.stringify({ definition: unsupportedSchemaDefinition, editTrigger: "schema_edit" }),
+		});
+		assert.equal(schemaPatchResponse.status, 200);
+		const schemaPatchPayload = await schemaPatchResponse.json();
+		assert.equal(schemaPatchPayload.validation.trigger, "schema_edit");
+		assert.equal(schemaPatchPayload.validation.ok, false);
+		assert.ok(schemaPatchPayload.diagnostics.some((diagnostic) => diagnostic.code === "WorkflowInterfaceError.unsupportedSchemaKeyword" && diagnostic.path === "$.input.schema.properties.topic.pattern"));
 
 		const invalidDefinition = structuredClone(rawRepairPayload.draft.definition);
 		invalidDefinition.nodes.agent.profile.id = "missing-workflow-profile";

@@ -94,8 +94,8 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Raw JSON schema editors are implemented for workflow and node JSON contracts, save raw JSON through the draft IR, and surface WorkflowInterfaceError diagnostics from the existing JSON Schema subset validation path without adding Zod, AJV, or form-builder schema authoring."
     },
     {
       "id": "US-007",

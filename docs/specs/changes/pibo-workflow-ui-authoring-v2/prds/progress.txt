@@ -1,4 +1,6 @@
 ## Codebase Patterns
+- Web-channel tests import `dist/`, so run `npm run build` before targeted `node --test test/web-channel.test.mjs` checks when server code changes.
+- Raw JSON schema editors should write schema JSON back into Pibo Workflow IR and rely on the draft validation pipeline to surface `WorkflowInterfaceError.*` subset diagnostics rather than adding Zod, AJV, or form-builder layers.
 - V2 workflow picker API options should carry a uniform `displayName`, optional description, and nullable `paramsSchema` even when the picker has richer metadata such as profile aliases, schemas, or workflow versions.
 - V2 explicit non-goal browser checks should verify visible scope-boundary copy and scan interactive action labels, because explanatory panels intentionally mention deferred features without exposing them as actions.
 - Project Workflow/XState navigation should derive nested workflow links from real `PiboWebSessionNode` child sessions and definition link/deleted state from Project session `workflowDefinitionLink` metadata.
@@ -1282,4 +1284,29 @@
 - **Learnings for future iterations:**
   - Keep Project workflow session update APIs narrow: title/archive can be patched, while workflow selection and session-scoped execution configuration require a new configured session.
   - Start-time service checks should compare the Project session row, saved snapshot row, and run input before creating the one allowed run.
+---
+## 2026-05-12 06:55 CEST - US-006
+- What was implemented
+  - Added raw JSON schema editors to Workflow Builder workflow input/output ports and node input/output ports, plus human node action schemas.
+  - Saved schema textarea values back into Pibo Workflow IR through the existing draft PATCH flow with the `schema_edit` trigger.
+  - Extended V2 draft validation to walk the existing JSON Schema subset contract and emit `WorkflowInterfaceError.*` diagnostics for unsupported keywords, unsupported composition forms, missing required fields, invalid refs, and object/array subset violations.
+  - Added web-channel coverage for unsupported schema diagnostics and updated the strict JSON schema fixture used by security-boundary tests.
+- Files changed
+  - `src/apps/chat-ui/src/WorkflowsArea.tsx`
+  - `src/apps/chat/web-app.ts`
+  - `test/web-channel.test.mjs`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_04_workflow_builder_and_ir_editing.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck'` — passed.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run build'` — passed.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && node --test test/web-channel.test.mjs'` — passed, 67/67 tests.
+- Browser verification, if UI changed
+  - Restarted the container web gateway from built `dist/` and verified `http://127.0.0.1:4802/apps/chat` returned OK.
+  - Used `browser-use --fresh-profile --session ralph-v2` inside `pibo-dev-WorkflowsV2` with dev auth (`dev@pibo.local`).
+  - Opened `/apps/chat/workflows/drafts/v2-starter-draft`, verified raw JSON schema editors render for workflow input/output JSON ports, edited the input schema to include unsupported `pattern`, saved workflow settings, and verified `WorkflowInterfaceError.unsupportedSchemaKeyword` plus `$.input.schema.properties.topic.pattern` appear in the builder diagnostics.
+  - Saved screenshot: `/tmp/ralph-v2-raw-schema-editors.png` inside the container.
+- **Learnings for future iterations:**
+  - `test/web-channel.test.mjs` imports compiled `dist/` modules; rebuild before targeted test runs after changing Chat Web server code.
+  - JSON object schemas used in V2 fixtures must include `required` and `additionalProperties: false` to satisfy the workflow structured-output subset.
 ---
