@@ -4009,6 +4009,7 @@ test("chat web app lists and resolves Project workflow human wait tokens", async
 				actions: [{ id: "fixture.humanActions.approve", kind: "approve" }],
 				expiresAt: "2000-01-01T00:00:00.000Z",
 			});
+			insertWaitToken({ id: "wwt_missing_action_ref", actions: [{ id: "missing.humanActions.inline", kind: "approve" }] });
 			db.prepare("UPDATE project_workflow_runs SET status = 'waiting' WHERE id = ?").run(runId);
 			db.prepare("UPDATE project_sessions SET state = 'waiting' WHERE pibo_session_id = ?").run(createdPayload.session.id);
 		} finally {
@@ -4021,13 +4022,17 @@ test("chat web app lists and resolves Project workflow human wait tokens", async
 		assert.equal(bootstrapResponse.status, 200);
 		const bootstrapPayload = await bootstrapResponse.json();
 		const bootProjectSession = bootstrapPayload.projectSessions.find((session) => session.piboSessionId === createdPayload.session.id);
-		assert.equal(bootProjectSession.pendingHumanActions.length, 5);
+		assert.equal(bootProjectSession.pendingHumanActions.length, 6);
 		const resumeWait = bootProjectSession.pendingHumanActions.find((action) => action.waitTokenId === "wwt_resume");
 		assert.equal(resumeWait.prompt, "Review prompt for wwt_resume");
 		assert.equal(resumeWait.availableActions[0].id, "fixture.humanActions.resume");
 		assert.equal(resumeWait.availableActions[0].displayName, "Resume");
 		assert.equal(resumeWait.payloadRequirements.required, true);
 		assert.equal(resumeWait.payloadRequirements.schema.required[0], "comment");
+		const missingActionWait = bootProjectSession.pendingHumanActions.find((action) => action.waitTokenId === "wwt_missing_action_ref");
+		assert.equal(missingActionWait.availableActions[0].registered, false);
+		assert.equal(missingActionWait.diagnostics[0].code, "WorkflowGraphError.unknownHumanActionRef");
+		assert.equal(missingActionWait.diagnostics[0].registryRef, "missing.humanActions.inline");
 
 		const missingTokenResponse = await postHumanAction(createdPayload.session.id, { waitTokenId: "wwt_missing", actionId: "fixture.humanActions.approve" });
 		assert.equal(missingTokenResponse.status, 404);
@@ -4048,6 +4053,12 @@ test("chat web app lists and resolves Project workflow human wait tokens", async
 		assert.equal(invalidResumeResponse.status, 422);
 		const invalidResumePayload = await invalidResumeResponse.json();
 		assert.equal(invalidResumePayload.diagnostics[0].code, "WorkflowRuntimeError.invalidHumanActionPayload");
+
+		const missingActionRefResponse = await postHumanAction(createdPayload.session.id, { waitTokenId: "wwt_missing_action_ref", actionId: "missing.humanActions.inline" });
+		assert.equal(missingActionRefResponse.status, 422);
+		const missingActionRefPayload = await missingActionRefResponse.json();
+		assert.equal(missingActionRefPayload.diagnostics[0].code, "WorkflowGraphError.unknownHumanActionRef");
+		assert.equal(missingActionRefPayload.diagnostics[0].registryRef, "missing.humanActions.inline");
 
 		const approveResponse = await postHumanAction(createdPayload.session.id, { waitTokenId: "wwt_approve", actionId: "fixture.humanActions.approve" });
 		assert.equal(approveResponse.status, 202);

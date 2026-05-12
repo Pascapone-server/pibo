@@ -127,8 +127,8 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added focused V2 run inspection/human action coverage tests, extended integration coverage for missing registered human action refs, and browser-verified the Project Workflow/XState run view with pending human actions and diagnostics."
     }
   ]
 }

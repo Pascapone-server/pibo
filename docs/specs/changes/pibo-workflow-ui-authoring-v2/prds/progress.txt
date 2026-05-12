@@ -1,4 +1,5 @@
 ## Codebase Patterns
+- Run inspection checklist tests can combine a source-level UI coverage matrix with targeted `workflow-session-kind` and `web-channel` flows; seed missing registered human action refs to cover disabled controls and diagnostics.
 - Workflow Builder publish panels should disable the Publish action from `validation.blocksPublish`/error diagnostics while leaving draft save and manual Validate available; the backend `before_publish` route remains the authoritative gate.
 - Catalog missingRefs should filter to explicit missing/unavailable reference diagnostic codes; diagnostics that carry `registryRef` for params or kind mismatch context should stay in full diagnostics only.
 - Workflow Builder manual Validate controls should call the draft validate route without `before_publish`; the publish route owns the `before_publish` trigger, while manual validation uses the route fallback/edit triggers.
@@ -1816,4 +1817,28 @@
   - Not run; this story added lifecycle test coverage only and did not change visible UI behavior.
 - **Learnings for future iterations:**
   - Lifecycle checklist coverage can stay focused by tying package-level entity/hash tests to targeted web-channel lifecycle flows instead of adding another duplicate end-to-end lifecycle scenario.
+---
+## 2026-05-12 14:12 CEST - US-008
+- What was implemented
+  - Added a focused Workflow V2 run inspection and human action coverage suite for Project sidebar kinds, Workflow/Terminal routing, run inspection sections, nested/definition links, and human action outcomes.
+  - Extended the Project workflow human wait-token integration test to cover missing registered human action refs in bootstrap diagnostics and submission rejection.
+  - Marked PRD 07 US-008 passing.
+- Files changed
+  - `test/workflow-v2-run-inspection-human-actions.test.mjs`
+  - `test/web-channel.test.mjs`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_07_project_run_inspection_sidebar_and_human_actions.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck && node --test test/workflow-v2-run-inspection-human-actions.test.mjs && npm run build && node --test test/workflow-session-kind.test.mjs && node --test --test-name-pattern "chat web app lists and resolves Project workflow human wait tokens|chat web app project bootstrap includes real workflow session descendants only|workflow delete API tombstones" test/web-channel.test.mjs'` — passed.
+  - `python3 -m json.tool docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_07_project_run_inspection_sidebar_and_human_actions.json` — passed.
+  - `git diff --check` — passed.
+- Browser verification, if UI changed
+  - Verified the container gateway at `http://127.0.0.1:4802/apps/chat` was reachable; no host gateways were touched.
+  - Used `browser-use --fresh-profile --session ralph-v2-run` inside `pibo-dev-WorkflowsV2` with dev auth (`dev@pibo.local`).
+  - Created and started a temporary workflow-backed Project session, seeded pending resume and missing-registered-action wait tokens, and opened the Project Workflow/XState route.
+  - Verified the Project sidebar showed the `main workflow` marker, the Workflow/XState view showed `Human action area`, `Workflow run inspection`, `XState projection only`, `WorkflowGraphError.unknownHumanActionRef`, and after clicking `Resume` with `{}` showed `WorkflowRuntimeError.invalidHumanActionPayload`.
+  - Saved screenshot inside the container: `/tmp/ralph-v2-run-inspection-human-actions.png`.
+- **Learnings for future iterations:**
+  - Run inspection checklist stories can stay small by asserting the existing UI/source and integration-test coverage matrix, then re-running the focused web-channel flows that own the runtime behavior.
+  - Browser verification for human actions can seed wait-token rows directly in the worker's `web-projects.sqlite` after creating and starting a real Project workflow session through the dev-auth API.
 ---
