@@ -1,4 +1,5 @@
 ## Codebase Patterns
+- Rollout-gate docs should pair each phase with required automated test families and reference canonical product smoke checklists instead of duplicating behavior contracts.
 - Run inspection checklist tests can combine a source-level UI coverage matrix with targeted `workflow-session-kind` and `web-channel` flows; seed missing registered human action refs to cover disabled controls and diagnostics.
 - Workflow Builder publish panels should disable the Publish action from `validation.blocksPublish`/error diagnostics while leaving draft save and manual Validate available; the backend `before_publish` route remains the authoritative gate.
 - Catalog missingRefs should filter to explicit missing/unavailable reference diagnostic codes; diagnostics that carry `registryRef` for params or kind mismatch context should stay in full diagnostics only.
@@ -1841,4 +1842,24 @@
 - **Learnings for future iterations:**
   - Run inspection checklist stories can stay small by asserting the existing UI/source and integration-test coverage matrix, then re-running the focused web-channel flows that own the runtime behavior.
   - Browser verification for human actions can seed wait-token rows directly in the worker's `web-projects.sqlite` after creating and starting a real Project workflow session through the dev-auth API.
+---
+## 2026-05-12 14:20 CEST - US-008
+- What was implemented
+  - Documented the V2 rollout gate matrix for MVP, v1.1, v1.2, and final release readiness.
+  - Added the canonical manual validation flows for Project select-configure-save-start-inspect and Builder duplicate-edit-validate-publish.
+  - Added a reusable Codebase Patterns note for future rollout-gate documentation.
+  - Marked PRD 08 US-008 passing.
+- Files changed
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/08-validation-security-testing-rollout.md`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_08_validation_security_testing_rollout.json`
+  - `docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/progress.txt`
+- Quality checks run
+  - `python3 -m json.tool docs/specs/changes/pibo-workflow-ui-authoring-v2/prds/prd_08_validation_security_testing_rollout.json` — passed.
+  - `git diff --check` — passed.
+  - `docker exec pibo-dev-WorkflowsV2 bash -lc 'cd /workspace && npm run typecheck'` — passed.
+  - Relevant tests: not run; documentation-only rollout-gate change.
+- Browser verification, if UI changed
+  - Not run; documentation-only change with no UI behavior changes.
+- **Learnings for future iterations:**
+  - Rollout-gate documentation should tie each phase to specific automated test families plus the canonical manual flows, while keeping detailed step expectations in the product smoke checklists.
 ---

@@ -122,8 +122,8 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Documented the V2 rollout gate matrix and canonical manual validation flows for Project execution and Builder authoring."
     }
   ]
 }
