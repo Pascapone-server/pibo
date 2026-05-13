@@ -92,7 +92,7 @@ test("default plugin registry builds profiles from registered resources", () => 
 		},
 		{
 			name: "fast_mode",
-			description: "Toggle between Fast mode and Normal mode for models with thinking support.",
+			description: "Toggle OpenAI priority service tier for fast-capable reasoning models.",
 			slashCommands: ["fast"],
 		},
 		{

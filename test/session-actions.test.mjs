@@ -47,6 +47,10 @@ function enableThinkingSupport(runtime) {
 	runtime.session.state.model = { provider: "test", id: "reasoning-test-model", reasoning: true };
 }
 
+function enableFastModeSupport(runtime) {
+	runtime.session.state.model = { api: "openai-codex-responses", provider: "openai-codex", id: "gpt-5.4", reasoning: true };
+}
+
 async function createSessionHarness() {
 	const cwd = await mkdtemp(join(tmpdir(), "pibo-session-actions-"));
 	const profile = new InitialSessionContextBuilder("session-actions-test").createSession();
@@ -93,7 +97,7 @@ test("thinking action without level reports current level without cycling", asyn
 test("fast action toggles independently of thinking level", async () => {
 	const harness = await createSessionHarness();
 	try {
-		enableThinkingSupport(harness.routed.runtime);
+		enableFastModeSupport(harness.routed.runtime);
 		harness.routed.runtime.session.setThinkingLevel("medium");
 
 		const fast = await harness.routed.executeAction({
@@ -125,6 +129,62 @@ test("fast action toggles independently of thinking level", async () => {
 		assert.equal(normal.result.mode, "normal");
 		assert.equal(harness.routed.runtime.session.thinkingLevel, "high");
 		assert.equal(harness.routed.getStatus().fastMode, false);
+	} finally {
+		await harness.dispose();
+	}
+});
+
+test("fast action is unsupported for reasoning models without fast service tier support", async () => {
+	const harness = await createSessionHarness();
+	try {
+		enableThinkingSupport(harness.routed.runtime);
+		harness.routed.runtime.session.setThinkingLevel("medium");
+
+		const fast = await harness.routed.executeAction({
+			type: "execution",
+			piboSessionId: "route:test",
+			action: "fast_mode",
+		});
+
+		assert.equal(fast.type, "execution_result");
+		assert.equal(fast.result.mode, "normal");
+		assert.equal(fast.result.supported, false);
+		assert.equal(fast.result.changed, false);
+		assert.equal(harness.routed.getStatus().fastMode, false);
+	} finally {
+		await harness.dispose();
+	}
+});
+
+test("fast mode applies OpenAI priority service tier to provider payloads", async () => {
+	const harness = await createSessionHarness();
+	try {
+		enableFastModeSupport(harness.routed.runtime);
+		harness.routed.runtime.session.setThinkingLevel("medium");
+
+		const before = await harness.routed.runtime.session.agent.onPayload({ model: "gpt-5.4" }, harness.routed.runtime.session.model);
+		assert.equal(before.service_tier, undefined);
+
+		await harness.routed.executeAction({
+			type: "execution",
+			piboSessionId: "route:test",
+			action: "fast_mode",
+		});
+
+		const fast = await harness.routed.runtime.session.agent.onPayload({ model: "gpt-5.4" }, harness.routed.runtime.session.model);
+		assert.equal(fast.service_tier, "priority");
+
+		harness.routed.runtime.session.state.model = {
+			api: "anthropic-messages",
+			provider: "anthropic",
+			id: "claude-opus-test",
+			reasoning: true,
+		};
+		const unsupported = await harness.routed.runtime.session.agent.onPayload(
+			{ model: "claude-opus-test" },
+			harness.routed.runtime.session.model,
+		);
+		assert.equal(unsupported.service_tier, undefined);
 	} finally {
 		await harness.dispose();
 	}
