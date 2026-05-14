@@ -5346,10 +5346,9 @@ function Composer({
 		setUploadStatus({ message: `Uploading ${selectedFiles.length} file${selectedFiles.length === 1 ? "" : "s"}...`, error: false });
 		try {
 			const result = await uploadChatFiles(selectedFiles);
-			const names = result.files.map((file) => file.name).join(", ");
 			const paths = result.files.map((file) => file.path);
 			setUploadStatus({
-				message: `Uploaded ${result.files.length} file${result.files.length === 1 ? "" : "s"} to ${result.uploadDir}: ${names}`,
+				message: `Uploaded ${result.files.length} file${result.files.length === 1 ? "" : "s"} successfully`,
 				copyText: paths.join("\n"),
 				error: false,
 			});
@@ -5399,19 +5398,19 @@ function Composer({
 				}}
 			/>
 			{uploadStatus ? (
-				<div className={`mb-2 flex items-start gap-2 rounded-sm border px-3 py-2 text-xs ${uploadStatus.error ? "border-red-900 bg-red-950/40 text-red-200" : "border-slate-700 bg-[#0e1116] text-slate-300"}`}>
-					<button
-						type="button"
-						disabled={!uploadStatus.copyText}
-						onClick={() => {
-							if (!uploadStatus.copyText) return;
-							void copyTextToClipboard(uploadStatus.copyText);
-						}}
-						title={uploadStatus.copyText ? "Copy uploaded file path" : undefined}
-						className={`min-w-0 flex-1 text-left ${uploadStatus.copyText ? "cursor-pointer hover:text-[#11a4d4]" : "cursor-default"}`}
-					>
-						{uploadStatus.message}
-					</button>
+				<div className={`mb-2 flex items-center gap-2 rounded-sm border px-3 py-2 text-xs ${uploadStatus.error ? "border-red-900 bg-red-950/40 text-red-200" : "border-slate-700 bg-[#0e1116] text-slate-300"}`}>
+					<span className="min-w-0 flex-1 truncate">{uploadStatus.message}</span>
+					{uploadStatus.copyText ? (
+						<button
+							type="button"
+							onClick={() => void copyTextToClipboard(uploadStatus.copyText!)}
+							title="Copy uploaded file path"
+							aria-label="Copy uploaded file path"
+							className="shrink-0 rounded-sm p-0.5 text-slate-400 hover:bg-slate-800 hover:text-[#11a4d4]"
+						>
+							<Copy size={13} />
+						</button>
+					) : null}
 					<button
 						type="button"
 						onClick={() => setUploadStatus(null)}
