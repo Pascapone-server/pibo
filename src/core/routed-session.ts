@@ -28,6 +28,26 @@ import type { ModelProfile } from "./profiles.js";
 
 type PiSessionTreeNode = ReturnType<SessionManager["getTree"]>[number];
 
+type ProviderRequestModel = {
+	api?: unknown;
+	provider?: unknown;
+};
+
+type ProviderRequestPayload = Record<string, unknown>;
+
+const FAST_SERVICE_TIER = "priority";
+
+function modelSupportsFastServiceTier(model: ProviderRequestModel | undefined): boolean {
+	if (!model) return false;
+	if (model.api === "openai-codex-responses") return true;
+	return model.api === "openai-responses" && (model.provider === "openai" || model.provider === "openai-codex");
+}
+
+function withFastServiceTier(payload: unknown): unknown {
+	if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+	return { ...(payload as ProviderRequestPayload), service_tier: FAST_SERVICE_TIER };
+}
+
 type PiboSessionOperationListener = (
 	result: PiboSessionOperationResult,
 	event: PiboExecutionEvent,
@@ -312,6 +332,7 @@ export class RoutedSession {
 	private processing = false;
 	private disposed = false;
 	private fastMode = false;
+	private readonly fastModePatchedAgents = new WeakSet<object>();
 	private activeMessage?: PiboMessageEvent;
 	private activeAssistantIndex?: number;
 	private nextAssistantIndex = 0;
@@ -331,13 +352,30 @@ export class RoutedSession {
 		private readonly onKillChildren?: (piboSessionId: string, options?: { includeRuns?: boolean }) => Promise<{ killed: string[]; cancelledRuns: string[] }>,
 		private readonly onStateChange?: (state: { processing: boolean; queuedMessages: number; disposed: boolean }) => void,
 	) {
-		this.fastMode = initialFastMode && this.runtime.session.supportsThinking();
+		this.fastMode = initialFastMode && this.fastModeSupported();
 		this.bindRuntimeSession();
+		this.patchFastModeProviderRequest();
 		this.patchAgentContinue();
 		this.runtime.setRebindSession(async () => {
 			this.bindRuntimeSession();
+			this.patchFastModeProviderRequest();
 			this.patchAgentContinue();
 		});
+	}
+
+	private patchFastModeProviderRequest(): void {
+		const agent = this.runtime.session.agent;
+		if (!agent || typeof agent !== "object") return;
+		if (this.fastModePatchedAgents.has(agent)) return;
+		this.fastModePatchedAgents.add(agent);
+
+		const originalOnPayload = agent.onPayload?.bind(agent);
+		agent.onPayload = async (payload, model) => {
+			const nextPayload = originalOnPayload ? await originalOnPayload(payload, model) : payload;
+			if (this.getFastModeResult().mode !== "fast") return nextPayload;
+			if (!modelSupportsFastServiceTier(model)) return nextPayload;
+			return withFastServiceTier(nextPayload);
+		};
 	}
 
 	private patchAgentContinue(): void {
@@ -626,7 +664,7 @@ export class RoutedSession {
 	setFastMode(enabled: boolean): { mode: "fast" | "normal"; supported: boolean; changed: boolean } {
 		this.assertActive();
 		const before = this.getFastModeResult().mode;
-		if (this.runtime.session.supportsThinking()) this.fastMode = enabled;
+		if (this.fastModeSupported()) this.fastMode = enabled;
 		const current = this.getFastModeResult();
 		return { ...current, changed: before !== current.mode };
 	}
@@ -844,8 +882,12 @@ export class RoutedSession {
 	}
 
 	private getFastModeResult(): { mode: "fast" | "normal"; supported: boolean } {
-		const supported = this.runtime.session.supportsThinking();
+		const supported = this.fastModeSupported();
 		return { mode: supported && this.fastMode ? "fast" : "normal", supported };
+	}
+
+	private fastModeSupported(): boolean {
+		return this.runtime.session.supportsThinking() && modelSupportsFastServiceTier(this.runtime.session.model);
 	}
 
 	private clearQueue(): number {

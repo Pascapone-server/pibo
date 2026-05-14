@@ -230,7 +230,7 @@ export const piboCorePlugin = definePiboPlugin({
 		});
 		api.registerGatewayAction({
 			name: "fast_mode",
-			description: "Toggle between Fast mode and Normal mode for models with thinking support.",
+			description: "Toggle OpenAI priority service tier for fast-capable reasoning models.",
 			slashCommands: ["fast"],
 			execute(context) {
 				const current = context.getFastMode();
