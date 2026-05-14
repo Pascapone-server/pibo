@@ -3313,9 +3313,8 @@ async function saveUploadedChatFiles(request: Request): Promise<{ uploadDir: str
 	const saved = [];
 	for (const file of files) {
 		const name = sanitizeUploadFilename(file.name);
-		const targetPath = nextAvailableUploadPath(name);
 		const bytes = Buffer.from(await file.arrayBuffer());
-		writeFileSync(targetPath, bytes, { flag: "wx" });
+		const targetPath = writeUploadedChatFile(name, bytes);
 		saved.push({ name, path: targetPath, bytes: bytes.byteLength });
 	}
 	return { uploadDir: CHAT_UPLOAD_DIR, files: saved };
@@ -3336,15 +3335,29 @@ function sanitizeUploadFilename(name: string): string {
 	return `upload-${Date.now()}`;
 }
 
-function nextAvailableUploadPath(filename: string): string {
-	const extension = extname(filename);
-	const stem = filename.slice(0, filename.length - extension.length) || "upload";
+function writeUploadedChatFile(filename: string, bytes: Buffer): string {
 	for (let index = 0; index < 10_000; index += 1) {
-		const candidate = index === 0 ? filename : `${stem}-${index}${extension}`;
-		const targetPath = resolve(CHAT_UPLOAD_DIR, candidate);
-		if (!existsSync(targetPath)) return targetPath;
+		const targetPath = uploadPathForIndex(filename, index);
+		try {
+			writeFileSync(targetPath, bytes, { flag: "wx" });
+			return targetPath;
+		} catch (error) {
+			if (isNodeError(error) && error.code === "EEXIST") continue;
+			throw error;
+		}
 	}
 	throw new PiboWebHttpError("Could not allocate upload filename", 500);
+}
+
+function uploadPathForIndex(filename: string, index: number): string {
+	if (index === 0) return resolve(CHAT_UPLOAD_DIR, filename);
+	const extension = extname(filename);
+	const stem = filename.slice(0, filename.length - extension.length) || "upload";
+	return resolve(CHAT_UPLOAD_DIR, `${stem}-${index}${extension}`);
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+	return typeof error === "object" && error !== null && "code" in error;
 }
 
 function contentTypeForDownload(path: string): string {

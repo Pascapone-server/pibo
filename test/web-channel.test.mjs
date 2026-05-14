@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { createChatWebApp } from "../dist/apps/chat/web-app.js";
@@ -216,11 +216,14 @@ test("chat web app uploads multipart files to the Pibo uploads directory", async
 	const { channel, baseURL } = await startWebHostChannel({
 		auth: createFakeAuthService(),
 	});
-	let uploadedPath;
+	const uploadedPaths = [];
+	const filename = `upload-test-${Date.now()}.txt`;
+	const suffixedFilename = filename.replace(/\.txt$/, "-1.txt");
 
 	try {
 		const form = new FormData();
-		form.append("files", new File(["hello upload"], "upload-test.txt", { type: "text/plain" }));
+		form.append("files", new File(["hello upload"], filename, { type: "text/plain" }));
+		form.append("files", new File(["hello upload again"], filename, { type: "text/plain" }));
 
 		const response = await fetch(`${baseURL}/api/chat/upload`, {
 			method: "POST",
@@ -233,12 +236,17 @@ test("chat web app uploads multipart files to the Pibo uploads directory", async
 		assert.equal(response.status, 201);
 		const payload = await response.json();
 		assert.equal(payload.uploadDir, join(homedir(), ".pibo", "uploads"));
-		assert.equal(payload.files.length, 1);
-		uploadedPath = payload.files[0].path;
-		assert.equal(dirname(uploadedPath), payload.uploadDir);
-		assert.equal(readFileSync(uploadedPath, "utf8"), "hello upload");
+		assert.equal(payload.files.length, 2);
+		for (const file of payload.files) {
+			uploadedPaths.push(file.path);
+			assert.equal(dirname(file.path), payload.uploadDir);
+		}
+		assert.equal(basename(uploadedPaths[0]), filename);
+		assert.equal(basename(uploadedPaths[1]), suffixedFilename);
+		assert.equal(readFileSync(uploadedPaths[0], "utf8"), "hello upload");
+		assert.equal(readFileSync(uploadedPaths[1], "utf8"), "hello upload again");
 	} finally {
-		if (uploadedPath) rmSync(uploadedPath, { force: true });
+		for (const uploadedPath of uploadedPaths) rmSync(uploadedPath, { force: true });
 		await channel.stop?.();
 	}
 });
