@@ -13,12 +13,15 @@ The Organizer should make a distributed Pibo setup feel like one product without
 1. Single-instance Pibo stays first-class. The Organizer must not be required for normal Pibo usage.
 2. A Pibo instance is persistent by default. Its `PIBO_HOME`, sessions, skills, agents, prompts, workspaces, secrets, and accumulated state are valuable and must survive restarts.
 3. The Web Chat UI remains the single-instance UI. The Organizer may proxy or embed it, but should not reimplement session rendering or agent execution across instances.
-4. Runtime execution happens inside the selected Pibo instance, on the node where that instance runs. Tools operate on that node's filesystem and resources.
-5. V1 uses Docker as the instance runtime substrate and a Pibo-specific Node Agent as the control surface.
-6. V1 does not require Kubernetes, Docker Swarm, Nomad, or any managed cloud service.
-7. HTTP polling is sufficient for V1 node communication. WebSockets can be added later for live logs or larger installations.
-8. Manual node setup is acceptable in V1. Automated bare-metal provisioning can come later.
-9. The Organizer host may also run worker instances by default, but must support a `control-only` mode later.
+4. Managed V1 instances use three resource planes: Web, Runtime, and Tool Runner. The single-process `pibo gateway:web` path remains available for simple standalone use.
+5. Web responsiveness is a V1 requirement, not a later optimization. UI APIs, event-log reads, session queries, SSE/event streaming, and auth must remain responsive while builds, typechecks, tests, and other CPU-heavy tools run.
+6. Runtime orchestration must be protected from heavy tool execution. Model turns, session routing, subagent orchestration, run-control updates, and event projection should not share unconstrained CPU/memory/IO with `npm build`, `npm test`, or `npm run typecheck`.
+7. Tool execution happens inside the selected Pibo instance's Tool Runner plane, on the node where that instance runs. Tools operate on that node's filesystem and shared workspace resources, but with explicit CPU, memory, IO, timeout, and concurrency limits.
+8. V1 uses Docker as the instance runtime substrate and a Pibo-specific Node Agent as the control surface.
+9. V1 does not require Kubernetes, Docker Swarm, Nomad, or any managed cloud service.
+10. HTTP polling is sufficient for V1 node communication. WebSockets can be added later for live logs or larger installations.
+11. Manual node setup is acceptable in V1. Automated bare-metal provisioning can come later.
+12. The Organizer host may also run worker instances by default, but must support a `control-only` mode later.
 
 ## High-level architecture
 
@@ -28,11 +31,14 @@ Browser
     -> Organizer inventory, scheduler, proxy, and control API
     -> Node Agent on each server over HTTPS/polling
       -> Docker Engine on that server
-        -> Pibo Instance containers
-          -> pibo gateway:web
-          -> Web Chat UI
-          -> Pibo runtime and tools
-          -> persistent PIBO_HOME and workspace volumes
+        -> Pibo Managed Instance
+          -> Web plane container/process
+            -> Web Chat UI, auth, HTTP APIs, event-log reads, SSE/proxy endpoints
+          -> Runtime plane container/process
+            -> session router, model turns, subagents, run-control, event projection
+          -> Tool Runner plane container/process(es)
+            -> bash, build, typecheck, tests, heavy CLIs
+          -> persistent PIBO_HOME and workspace volumes shared by the planes
 ```
 
 The important separation is:
@@ -40,7 +46,10 @@ The important separation is:
 ```text
 Organizer = fleet control plane
 Node Agent = per-server executor and reporter
-Pibo Instance = persistent agent runtime and Web Chat UI
+Pibo Instance = persistent agent product boundary
+Web plane = responsive UI/API/event surface
+Runtime plane = agent orchestration and normalized event production
+Tool Runner plane = constrained execution of filesystem and CPU-heavy tools
 ```
 
 ## Components
@@ -101,18 +110,74 @@ The exact CLI can change, but the product flow should remain:
 
 ### Pibo Instance
 
-A Pibo instance is a persistent isolated runtime, usually a Docker container running `pibo gateway:web`.
+A Pibo instance is a persistent isolated product boundary. In standalone mode it may still run as one `pibo gateway:web` process. In Organizer-managed V1 it should be modeled as a three-plane instance: Web, Runtime, and Tool Runner.
 
 Each instance owns:
 
 - one `PIBO_HOME` volume
 - one or more workspace mounts/volumes
-- one Web Chat UI
-- one gateway/web runtime
+- one Web Chat UI surface
+- one Runtime plane for session routing, model turns, subagents, event projection, and run-control
+- one or more Tool Runner planes for bash, builds, typechecks, tests, and heavy external CLIs
 - its own sessions, rooms, agents, user skills, context files, prompts, config, auth state, and logs
-- resource reservations and optional Docker limits
+- resource reservations and Docker limits per plane
 
 A Pibo instance is not a short-lived job in V1. It is closer to a persistent workspace or project runtime.
+
+### Managed instance resource planes
+
+Organizer-managed V1 instances must separate responsiveness-critical work from heavy execution.
+
+#### Web plane
+
+Responsibilities:
+
+- Serve the Web Chat UI and static assets.
+- Handle Web Chat HTTP APIs, auth routes, room/session list reads, event-log reads, and SSE endpoints.
+- Maintain local UI-facing read models and event logs when applicable.
+- Proxy or subscribe to Runtime events without executing heavy tools.
+- Stay responsive even while the Tool Runner is building, testing, or typechecking.
+
+Resource posture:
+
+- Small but protected CPU and memory reservation.
+- High scheduling priority relative to Tool Runner work.
+- No direct heavy shell execution.
+- Should be restartable without destroying Runtime or Tool Runner state.
+
+#### Runtime plane
+
+Responsibilities:
+
+- Own the `PiboSessionRouter` and routed sessions.
+- Run model turns and agent orchestration.
+- Coordinate subagents and `pibo_run_*` lifecycle state.
+- Produce normalized `PiboOutputEvent` streams for the Web plane.
+- Dispatch tool calls to Tool Runner instead of executing heavyweight commands inline.
+
+Resource posture:
+
+- Protected from Tool Runner CPU, memory, and IO saturation.
+- Must keep event production and session control responsive.
+- Should continue accepting abort/kill/status actions even when heavy tools are running.
+
+#### Tool Runner plane
+
+Responsibilities:
+
+- Execute bash commands and filesystem-heavy tools.
+- Run `npm run build`, `npm run typecheck`, tests, package installs, browser automation, and similar workload.
+- Stream stdout/stderr and lifecycle updates back to the Runtime plane.
+- Enforce per-command timeout, concurrency, CPU, memory, and IO limits.
+
+Resource posture:
+
+- Lowest priority in the instance.
+- Hard Docker/cgroup limits where possible.
+- Optional multiple workers per instance later.
+- Safe failure boundary: a Tool Runner OOM or crash should not take down Web or Runtime.
+
+The central reason for this split is perceived responsiveness. If Web is fast but Runtime event streaming, session queries, or message processing are delayed by `npm build`, the product still feels slow. Therefore V1 managed instances must protect both Web and Runtime from heavy tool execution.
 
 ### Organizer Host
 
@@ -207,19 +272,29 @@ type PiboOrganizerInstance = {
   status: "creating" | "running" | "stopped" | "restarting" | "upgrading" | "failed" | "deleted";
   image: string;
   version: string;
-  containerName: string;
+  mode: "standalone" | "managed-three-plane";
+  containers: {
+    web?: string;
+    runtime?: string;
+    toolRunner?: string[];
+  };
   piboHomeVolume: string;
   workspaceVolume?: string;
   workspacePath: string;
   internalWebUrl?: string;
+  internalRuntimeUrl?: string;
   proxiedWebPath: string;
   resources: {
-    cpuCores: number;
-    memoryMb: number;
-    diskGb: number;
+    total: { cpuCores: number; memoryMb: number; diskGb: number };
+    web: { cpuCores: number; memoryMb: number };
+    runtime: { cpuCores: number; memoryMb: number };
+    toolRunner: { cpuCores: number; memoryMb: number; maxConcurrency: number };
   };
   health: {
     healthy: boolean;
+    web?: "healthy" | "unhealthy" | "unknown";
+    runtime?: "healthy" | "unhealthy" | "unknown";
+    toolRunner?: "healthy" | "unhealthy" | "unknown";
     message?: string;
     checkedAt?: string;
   };
@@ -227,6 +302,7 @@ type PiboOrganizerInstance = {
     lastSeenAt?: string;
     unreadCount?: number;
     activeSessions?: number;
+    activeToolRuns?: number;
     recentErrors?: number;
   };
   labels: string[];
@@ -324,10 +400,16 @@ The Node Agent authenticates with a node secret after enrollment. Tokens and sec
   "instances": [
     {
       "id": "inst_...",
-      "containerName": "pibo-inst-project-a",
       "status": "running",
       "image": "pibo:1.0.6",
-      "ports": { "web": 4788, "gateway": 4789 }
+      "containers": {
+        "web": "pibo-inst-project-a-web",
+        "runtime": "pibo-inst-project-a-runtime",
+        "toolRunner": ["pibo-inst-project-a-tool-0"]
+      },
+      "ports": { "web": 4788 },
+      "health": { "web": "healthy", "runtime": "healthy", "toolRunner": "healthy" },
+      "activeToolRuns": 1
     }
   ]
 }
@@ -339,35 +421,102 @@ The Organizer queues commands for a node. The node claims one or more commands, 
 
 Command execution should be idempotent where practical:
 
-- Creating an already-existing container with the same instance ID should return existing state if compatible.
+- Creating an already-existing instance group with the same instance ID should return existing state if compatible.
 - Starting an already-running instance should succeed.
 - Stopping an already-stopped instance should succeed.
+- Recreating a missing plane should preserve shared volumes and instance identity.
 - Failed commands must preserve enough error detail for operator diagnosis without leaking secrets.
 
 ## Docker instance layout
 
-A V1 instance container should have predictable labels and volumes.
+A standalone Pibo install may still run one process/container. An Organizer-managed V1 instance should be represented as an instance group with predictable labels, shared volumes, an internal network, and separate containers or processes for Web, Runtime, and Tool Runner.
 
-Example container:
+Preferred V1 layout:
+
+```text
+pibo-inst-<instanceId>-net
+pibo-home-<instanceId>
+pibo-workspace-<instanceId>
+pibo-inst-<instanceId>-web
+pibo-inst-<instanceId>-runtime
+pibo-inst-<instanceId>-tool-0
+```
+
+Example Web plane container:
 
 ```bash
 docker run -d \
-  --name pibo-inst-<instanceId> \
+  --name pibo-inst-<instanceId>-web \
   --restart unless-stopped \
-  --cpus <cpuCores> \
-  --memory <memoryMb>m \
-  --label pibo.role=instance \
+  --network pibo-inst-<instanceId>-net \
+  --cpus <webCpu> \
+  --memory <webMemoryMb>m \
+  --label pibo.role=instance-web \
   --label pibo.instance.id=<instanceId> \
-  --label pibo.instance.name=<name> \
   --label pibo.node.id=<nodeId> \
   -e HOME=/home/pibo \
   -e PIBO_HOME=/home/pibo/.pibo \
+  -e PIBO_RUNTIME_URL=http://pibo-inst-<instanceId>-runtime:4789 \
+  -v pibo-home-<instanceId>:/home/pibo/.pibo \
+  pibo:<version> \
+  web-chat
+```
+
+Example Runtime plane container:
+
+```bash
+docker run -d \
+  --name pibo-inst-<instanceId>-runtime \
+  --restart unless-stopped \
+  --network pibo-inst-<instanceId>-net \
+  --cpus <runtimeCpu> \
+  --memory <runtimeMemoryMb>m \
+  --label pibo.role=instance-runtime \
+  --label pibo.instance.id=<instanceId> \
+  --label pibo.node.id=<nodeId> \
+  -e HOME=/home/pibo \
+  -e PIBO_HOME=/home/pibo/.pibo \
+  -e PIBO_TOOL_RUNNER_URL=http://pibo-inst-<instanceId>-tool-0:4795 \
   -v pibo-home-<instanceId>:/home/pibo/.pibo \
   -v pibo-workspace-<instanceId>:/workspace \
   -w /workspace \
   pibo:<version> \
-  gateway:web
+  runtime
 ```
+
+Example Tool Runner plane container:
+
+```bash
+docker run -d \
+  --name pibo-inst-<instanceId>-tool-0 \
+  --restart unless-stopped \
+  --network pibo-inst-<instanceId>-net \
+  --cpus <toolCpu> \
+  --memory <toolMemoryMb>m \
+  --label pibo.role=instance-tool-runner \
+  --label pibo.instance.id=<instanceId> \
+  --label pibo.node.id=<nodeId> \
+  -e HOME=/home/pibo \
+  -e PIBO_HOME=/home/pibo/.pibo \
+  -e PIBO_TOOL_NICE=10 \
+  -e PIBO_TOOL_IONICE=idle \
+  -v pibo-home-<instanceId>:/home/pibo/.pibo \
+  -v pibo-workspace-<instanceId>:/workspace \
+  -w /workspace \
+  pibo:<version> \
+  tool-runner
+```
+
+The command names `web-chat`, `runtime`, and `tool-runner` are design placeholders. Implementation may choose different CLI names, but the resource-plane separation is part of V1 managed mode.
+
+Required behavior:
+
+- Web and Runtime must not execute heavy bash/build/typecheck work inline.
+- Runtime dispatches tool executions to Tool Runner through an internal protocol.
+- Tool Runner streams stdout/stderr, status, exit code, and resource-limit failures back to Runtime.
+- Runtime projects Tool Runner updates into normal Pibo events so Web Chat can render them through the existing event model.
+- Tool Runner failures must not crash Web or Runtime.
+- Web must remain responsive during Tool Runner saturation.
 
 Open questions for implementation:
 
@@ -375,6 +524,8 @@ Open questions for implementation:
 - how host workspaces are mounted when a user wants to use an existing host path
 - whether the Web Chat auth DB lives inside `PIBO_HOME` or a separate volume
 - how instance secrets are injected and rotated
+- the first internal Tool Runner protocol: HTTP, NDJSON over TCP, or child-process-compatible RPC
+- whether the Runtime and Tool Runner share one image with different entrypoints or separate images
 
 V1 should prefer Docker named volumes for managed instances. Existing host paths can be supported as an advanced option.
 
@@ -400,6 +551,15 @@ freeDisk = capacity.diskGb - reserved.diskGb
 ```
 
 The scheduler should use reservations for placement. Live usage is useful for warnings and score adjustments, but reservations prevent overcommit surprises.
+
+For managed three-plane instances, reservations are the sum of Web, Runtime, and Tool Runner reservations:
+
+```text
+instanceReservedCpu = web.cpu + runtime.cpu + toolRunner.cpu
+instanceReservedMemory = web.memory + runtime.memory + toolRunner.memory
+```
+
+Web and Runtime reservations should be protected. Tool Runner reservations may be larger but lower priority. The scheduler should avoid placing an instance if its Tool Runner could starve the node's remaining Web/Runtime planes.
 
 Simple scoring:
 
@@ -433,40 +593,56 @@ V1 should allow manual node override. The scheduler should explain placement dec
 3. Scheduler selects a node or accepts manual node choice.
 4. Organizer creates instance row with `status=creating`.
 5. Organizer queues `create_instance` command for the node.
-6. Node Agent creates Docker volumes and container.
-7. Node Agent starts container and checks `/health`.
-8. Node Agent posts result.
-9. Organizer marks instance `running` and exposes the proxied Web Chat URL.
+6. Node Agent creates Docker volumes, an internal network, and the Web/Runtime/Tool Runner containers.
+7. Node Agent starts the planes in dependency order: Tool Runner, Runtime, then Web.
+8. Node Agent checks per-plane health endpoints and verifies Runtime can reach Tool Runner.
+9. Node Agent posts result.
+10. Organizer marks instance `running` and exposes the proxied Web Chat URL.
 
 ### Stop
 
-Stop container but retain all volumes and instance metadata.
+Stop all instance planes but retain volumes and instance metadata.
 
 ### Start
 
-Start existing container. If missing but volumes exist, Node Agent may recreate from instance spec.
+Start existing instance planes. If one or more containers are missing but volumes exist, Node Agent may recreate them from the instance spec.
 
 ### Restart
 
-Stop/start container. Preserve volumes.
+Stop/start Web, Runtime, and Tool Runner planes. Preserve volumes.
 
 ### Upgrade
 
 1. Pull/build target image.
-2. Stop instance.
-3. Recreate container with same volumes and updated image.
-4. Start instance.
-5. Health check.
+2. Stop the instance planes.
+3. Recreate Web, Runtime, and Tool Runner containers with the same volumes and updated image.
+4. Start the planes in dependency order.
+5. Run per-plane health checks and verify Runtime-to-Tool-Runner connectivity.
 6. Rollback path should be planned, but V1 can initially require manual rollback.
 
 ### Delete
 
 Deletion should be two-phase:
 
-1. Archive/disable instance.
+1. Archive/disable instance and stop all planes.
 2. Permanent delete only after explicit confirmation.
 
 Permanent deletion must define whether volumes are retained, snapshotted, or removed. V1 should default to preserving volumes unless the operator explicitly chooses destructive deletion.
+
+## Tool execution policy V1
+
+Managed V1 instances should treat tool execution as a separate service boundary. Runtime decides what to execute and how results map into the Pibo event model; Tool Runner performs the filesystem and process work.
+
+Default V1 policy:
+
+- All `bash` executions run through Tool Runner.
+- External CLI tools that spawn processes or touch the workspace run through Tool Runner.
+- Pure in-memory Runtime actions may stay inside Runtime.
+- File reads/writes can be evaluated case by case, but anything that can become large or slow should be routed through Tool Runner or bounded explicitly.
+- Tool Runner applies command timeout, max output policy, max concurrency, CPU and memory limits, and low CPU/IO priority.
+- Runtime must retain control actions such as abort, kill, status, and run acknowledgement even when Tool Runner is saturated.
+
+This policy avoids trying to perfectly classify heavy versus light shell commands. A command such as `git status` is cheap, but the same `bash` surface can run `npm test`. Routing all process execution through Tool Runner makes responsiveness predictable and keeps Web/Runtime protected.
 
 ## Reverse proxy and fluid UI
 
@@ -736,31 +912,40 @@ The UI should show the scheduler's selected node and reason.
 - Implement command polling.
 - Report Docker availability and capacity.
 
-### Phase 3: Docker instance lifecycle
+### Phase 3: Managed three-plane instance lifecycle
 
-- Implement create/start/stop/restart/remove instance commands.
-- Add Docker labels and volume conventions.
-- Add basic health checks.
-- Add resource reservations in Organizer.
+- Implement create/start/stop/restart/remove instance commands for Web, Runtime, and Tool Runner containers.
+- Add Docker labels, shared volumes, internal networks, and per-plane naming conventions.
+- Add basic health checks for Web, Runtime, and Tool Runner.
+- Add per-plane resource reservations in Organizer.
+- Ensure lifecycle operations preserve `PIBO_HOME` and workspace volumes.
 
-### Phase 4: Scheduler V1
+### Phase 4: Runtime-to-Tool-Runner execution protocol
+
+- Add an internal protocol for Runtime to dispatch tool executions to Tool Runner.
+- Stream stdout/stderr/status/resource-limit updates back into Runtime.
+- Project Tool Runner updates into existing Pibo output events.
+- Ensure abort/kill/status actions remain responsive while tools run.
+- Enforce Tool Runner timeout, concurrency, CPU, memory, and IO limits.
+
+### Phase 5: Scheduler V1
 
 - Implement hard filters and simple scoring.
 - Support manual node override.
 - Explain scheduler decisions in API/UI.
 
-### Phase 5: Proxy/open instance UX
+### Phase 6: Proxy/open instance UX
 
 - Add Organizer reverse proxy route for instance Web Chat.
 - Make Web Chat proxy/base-path compatible as needed.
 - Add `Open` action from instance list/detail.
 
-### Phase 6: Summary signals
+### Phase 7: Summary signals
 
 - Add instance health/summary bridge.
 - Show unread/activity/error badges in Organizer.
 
-### Phase 7: Hardening
+### Phase 8: Hardening
 
 - Node revocation.
 - Command retries and idempotency.
@@ -781,6 +966,8 @@ The UI should show the scheduler's selected node and reason.
 - Full backup/restore automation.
 - Linear automation beyond design hooks.
 - Multi-tenant billing/quotas.
+- Perfect sandboxing of arbitrary tools. V1 isolates and constrains Tool Runner execution, but does not claim a hostile-code security boundary.
+- Removing standalone `pibo gateway:web`. Simple single-instance mode remains supported.
 
 ## Open questions
 
@@ -791,6 +978,10 @@ The UI should show the scheduler's selected node and reason.
 5. What image/versioning strategy should V1 use: locally built `pibo:latest`, npm-installed image, or registry-published image?
 6. Should the Organizer store node command history indefinitely or prune old successful commands?
 7. What is the minimum safe backup story before permanent instance deletion is allowed?
+8. What is the first Runtime-to-Tool-Runner protocol: HTTP, NDJSON over TCP, or another local RPC?
+9. Which commands are Tool Runner-only in V1: all bash/tool executions or only commands classified as heavy?
+10. How many Tool Runner containers should an instance start by default, and should max concurrency be configurable per instance?
+11. Should Web and Runtime be separate containers from day one, or separate processes in one container with independent cgroups as an interim implementation? The V1 product requirement is three resource planes; the implementation can choose the least risky path that preserves isolation.
 
 ## Current recommended V1 scope
 
@@ -800,11 +991,14 @@ Build a pragmatic Docker-based Organizer system:
 Organizer App + SQLite inventory
 Node Agent with manual enrollment
 HTTP polling command protocol
-Docker-local instance lifecycle
+Docker-local managed instance lifecycle
+Three resource planes per managed instance: Web, Runtime, Tool Runner
 Persistent volumes per instance
+Per-plane resource reservations and limits
+Runtime-to-Tool-Runner execution protocol
 Simple reservation-based scheduler
 Reverse-proxied Web Chat entrypoints
-Basic node and instance health
+Basic node and per-plane instance health
 ```
 
-This keeps Pibo usable as a single instance while creating a clear growth path for multiple servers and many persistent Pibo runtimes.
+This keeps Pibo usable as a single standalone instance while creating a clear growth path for multiple servers and many persistent Pibo runtimes. The managed-mode V1 requirement is stronger than simple containerization: Web and Runtime responsiveness must be protected from heavy Tool Runner work so the UI, streaming, event processing, and session control remain fast during builds and typechecks.
