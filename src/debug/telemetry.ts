@@ -1,3 +1,6 @@
+import { DatabaseSync } from "node:sqlite";
+import type { ProviderAwareTelemetryStaleWorkItem } from "../core/telemetry-staleness.js";
+import { TelemetryStaleDetector } from "../core/telemetry-staleness.js";
 import type {
 	StoredTelemetryPhase,
 	StoredTelemetryProviderEvent,
@@ -6,6 +9,9 @@ import type {
 	TelemetryPreviewUnavailableResult,
 	TelemetryProviderEventsPage,
 	StoredTelemetryTurn,
+	TelemetryPruneResult,
+	TelemetryRetentionClass,
+	TelemetryRetentionStats,
 	TelemetrySessionDetail,
 	TelemetrySessionSummary,
 	TelemetryStore,
@@ -32,8 +38,24 @@ export type DebugTelemetryProviderOptions = {
 	fields?: string[];
 };
 
+export type DebugTelemetryStaleOptions = {
+	limit?: string;
+	thresholdMs?: string;
+};
+
+export type DebugTelemetryStatsOptions = {
+	retention?: string;
+};
+
+export type DebugTelemetryPruneOptions = {
+	retention?: string;
+	before?: string;
+	apply?: boolean;
+};
+
 const DEFAULT_TELEMETRY_CLI_LIMIT = 20;
 const MAX_TELEMETRY_CLI_LIMIT = 200;
+const TELEMETRY_RETENTION_CLASSES: TelemetryRetentionClass[] = ["live", "diagnostic", "provider_event", "payload_preview", "incident"];
 
 export type DebugTelemetryUnavailable = {
 	available: false;
@@ -114,6 +136,43 @@ export type DebugTelemetryProviderPayloadResult = {
 	providerRequestId: string;
 	payloadRef: string;
 	preview: TelemetryPreviewUnavailableResult;
+	nextCommands: string[];
+} | DebugTelemetryUnavailable;
+
+export type DebugTelemetryToolResult = {
+	available: true;
+	command: "tool";
+	toolCallId: string;
+	tool: StoredTelemetryToolCall;
+	noExecutionStart: boolean;
+	nextCommands: string[];
+} | DebugTelemetryUnavailable;
+
+export type DebugTelemetryStaleResult = {
+	available: true;
+	command: "stale";
+	limit: number;
+	thresholdOverrideMs?: number;
+	rowCount: number;
+	rows: ProviderAwareTelemetryStaleWorkItem[];
+	nextCommands: string[];
+} | DebugTelemetryUnavailable;
+
+export type DebugTelemetryStatsResult = {
+	available: true;
+	command: "stats";
+	retentionClass?: TelemetryRetentionClass;
+	stats: TelemetryRetentionStats;
+	nextCommands: string[];
+} | DebugTelemetryUnavailable;
+
+export type DebugTelemetryPruneResult = {
+	available: true;
+	command: "prune";
+	retentionClass: TelemetryRetentionClass;
+	before: string;
+	dryRun: boolean;
+	result: TelemetryPruneResult;
 	nextCommands: string[];
 } | DebugTelemetryUnavailable;
 
@@ -242,6 +301,79 @@ export function inspectTelemetryProviderPayload(store: ResolvedPiboDebugStore, p
 			nextCommands: providerNextCommands(request),
 		};
 	});
+}
+
+export function inspectTelemetryTool(store: ResolvedPiboDebugStore, toolCallId: string): DebugTelemetryToolResult {
+	return withTelemetryStore(store, (telemetry) => {
+		const tool = telemetry.getToolCall(toolCallId);
+		if (!tool) return notFound(`No telemetry found for tool call ${toolCallId}.`);
+		return {
+			available: true,
+			command: "tool",
+			toolCallId,
+			tool,
+			noExecutionStart: !tool.executionStartedAt,
+			nextCommands: toolNextCommands(tool),
+		};
+	});
+}
+
+export function inspectTelemetryStale(store: ResolvedPiboDebugStore, options: DebugTelemetryStaleOptions = {}): DebugTelemetryStaleResult {
+	const limit = parseTelemetryLimit(options.limit);
+	const thresholdOverrideMs = parseTelemetryThresholdMs(options.thresholdMs);
+	return withTelemetryStore(store, (telemetry) => {
+		const detector = new TelemetryStaleDetector(telemetry);
+		const rows = detector.listStaleWork({ limit, thresholdMs: thresholdOverrideMs });
+		return {
+			available: true,
+			command: "stale",
+			limit,
+			thresholdOverrideMs,
+			rowCount: rows.length,
+			rows,
+			nextCommands: ["pibo debug telemetry sessions --active", "pibo debug telemetry session <pibo-session-id>"],
+		};
+	});
+}
+
+export function inspectTelemetryStats(store: ResolvedPiboDebugStore, options: DebugTelemetryStatsOptions = {}): DebugTelemetryStatsResult {
+	const retentionClass = options.retention ? parseTelemetryRetentionClass(options.retention) : undefined;
+	return withTelemetryStore(store, (telemetry) => {
+		const stats = telemetry.getStats();
+		const filteredStats = retentionClass
+			? {
+				rows: stats.rows.filter((row) => row.retentionClass === retentionClass),
+				totalRows: stats.rows.filter((row) => row.retentionClass === retentionClass).reduce((sum, row) => sum + row.rowCount, 0),
+				totalBytes: stats.rows.filter((row) => row.retentionClass === retentionClass).reduce((sum, row) => sum + row.byteCount, 0),
+			}
+			: stats;
+		return {
+			available: true,
+			command: "stats",
+			retentionClass,
+			stats: filteredStats,
+			nextCommands: ["pibo debug telemetry prune --retention diagnostic --before <iso-date>", "pibo debug telemetry sessions --active"],
+		};
+	});
+}
+
+export function inspectTelemetryPrune(store: ResolvedPiboDebugStore, options: DebugTelemetryPruneOptions = {}): DebugTelemetryPruneResult {
+	if (!options.retention) throw new Error("pibo debug telemetry prune requires --retention <class>");
+	if (!options.before) throw new Error("pibo debug telemetry prune requires --before <iso-date>");
+	const retentionClass = parseTelemetryRetentionClass(options.retention);
+	const before = parseTelemetryBefore(options.before);
+	return withTelemetryStore(store, (telemetry) => {
+		const result = telemetry.prune({ retentionClass, before, apply: options.apply === true });
+		return {
+			available: true,
+			command: "prune",
+			retentionClass,
+			before,
+			dryRun: options.apply !== true,
+			result,
+			nextCommands: ["pibo debug telemetry stats", "pibo debug telemetry sessions --active"],
+		};
+	}, { readOnly: false });
 }
 
 export function formatTelemetrySessions(result: DebugTelemetrySessionsResult): string {
@@ -384,7 +516,77 @@ export function formatTelemetryProviderPayload(result: DebugTelemetryProviderPay
 	].join("\n");
 }
 
-function withTelemetryStore<T>(store: ResolvedPiboDebugStore, action: (telemetry: TelemetryStore) => T): T | DebugTelemetryUnavailable {
+export function formatTelemetryTool(result: DebugTelemetryToolResult): string {
+	if (!result.available) return formatUnavailable(result);
+	const tool = result.tool;
+	return [
+		`pibo debug telemetry tool ${result.toolCallId}`,
+		`session\t${tool.piboSessionId}`,
+		`turn\t${tool.turnId}`,
+		`providerRequestId\t${tool.providerRequestId ?? "-"}`,
+		`toolName\t${tool.toolName}`,
+		`status\t${tool.status}`,
+		`argsBytes\t${tool.argsBytes}`,
+		`parseStatus\t${tool.parseStatus}`,
+		`safeArgKeys\t${tool.safeArgKeys.length > 0 ? tool.safeArgKeys.join(",") : "-"}`,
+		`argsStartedAt\t${tool.argsStartedAt ?? "-"}`,
+		`firstDeltaAt\t${tool.firstDeltaAt ?? "-"}`,
+		`lastDeltaAt\t${tool.lastDeltaAt ?? "-"}`,
+		`argsCompletedAt\t${tool.argsCompletedAt ?? "-"}`,
+		`executionStartedAt\t${tool.executionStartedAt ?? "-"}`,
+		`executionEndedAt\t${tool.executionEndedAt ?? "-"}`,
+		`durationMs\t${tool.durationMs ?? "-"}`,
+		`noExecutionStart\t${result.noExecutionStart}`,
+		`runId\t${tool.runId ?? "-"}`,
+		`errorCategory\t${tool.errorCategory ?? "-"}`,
+		`errorMessage\t${tool.errorMessage ?? "-"}`,
+		`eventId\t${tool.eventId ?? "-"}`,
+		`eventStreamId\t${tool.eventStreamId ?? "-"}`,
+		`payloadRef\t${tool.payloadRef ?? "-"}`,
+		"Next:",
+		...result.nextCommands.map((command) => `  ${command}`),
+	].join("\n");
+}
+
+export function formatTelemetryStale(result: DebugTelemetryStaleResult): string {
+	if (!result.available) return formatUnavailable(result);
+	return [
+		"pibo debug telemetry stale",
+		`limit\t${result.limit}`,
+		`thresholdOverrideMs\t${result.thresholdOverrideMs ?? "-"}`,
+		formatRows(result.rows.map(compactStaleRow)),
+		"Next:",
+		...result.nextCommands.map((command) => `  ${command}`),
+	].join("\n");
+}
+
+export function formatTelemetryStats(result: DebugTelemetryStatsResult): string {
+	if (!result.available) return formatUnavailable(result);
+	return [
+		"pibo debug telemetry stats",
+		`retentionClass\t${result.retentionClass ?? "all"}`,
+		`totalRows\t${result.stats.totalRows}`,
+		`totalBytes\t${result.stats.totalBytes}`,
+		formatRows(result.stats.rows),
+		"Next:",
+		...result.nextCommands.map((command) => `  ${command}`),
+	].join("\n");
+}
+
+export function formatTelemetryPrune(result: DebugTelemetryPruneResult): string {
+	if (!result.available) return formatUnavailable(result);
+	return [
+		"pibo debug telemetry prune",
+		`retentionClass\t${result.retentionClass}`,
+		`before\t${result.before}`,
+		`dryRun\t${result.dryRun}`,
+		formatRows([result.result]),
+		"Next:",
+		...result.nextCommands.map((command) => `  ${command}`),
+	].join("\n");
+}
+
+function withTelemetryStore<T>(store: ResolvedPiboDebugStore, action: (telemetry: TelemetryStore) => T, options: { readOnly?: boolean } = {}): T | DebugTelemetryUnavailable {
 	if (!store.exists) {
 		return {
 			available: false,
@@ -393,7 +595,7 @@ function withTelemetryStore<T>(store: ResolvedPiboDebugStore, action: (telemetry
 			nextCommands: ["pibo debug db stores"],
 		};
 	}
-	const db = openReadOnlyDebugDatabase(store);
+	const db = options.readOnly === false ? openWritableDebugDatabase(store) : openReadOnlyDebugDatabase(store);
 	try {
 		const tables = db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name LIKE 'telemetry_%'").all() as Array<{ name: string }>;
 		if (tables.length === 0) {
@@ -410,11 +612,35 @@ function withTelemetryStore<T>(store: ResolvedPiboDebugStore, action: (telemetry
 	}
 }
 
+function openWritableDebugDatabase(store: ResolvedPiboDebugStore): DatabaseSync {
+	if (!store.exists) throw new Error(`Debug store "${store.name}" not found at ${store.path}`);
+	const db = new DatabaseSync(store.path);
+	db.exec("PRAGMA busy_timeout = 5000");
+	return db;
+}
+
 function parseTelemetryLimit(value: string | undefined): number {
 	if (value === undefined) return DEFAULT_TELEMETRY_CLI_LIMIT;
 	const parsed = Number(value);
 	if (!Number.isInteger(parsed) || parsed < 1) throw new Error("Limit must be a positive integer");
 	return Math.min(parsed, MAX_TELEMETRY_CLI_LIMIT);
+}
+
+function parseTelemetryThresholdMs(value: string | undefined): number | undefined {
+	if (value === undefined) return undefined;
+	const parsed = Number(value);
+	if (!Number.isInteger(parsed) || parsed < 1) throw new Error("--threshold-ms must be a positive integer");
+	return parsed;
+}
+
+function parseTelemetryRetentionClass(value: string): TelemetryRetentionClass {
+	if (TELEMETRY_RETENTION_CLASSES.includes(value as TelemetryRetentionClass)) return value as TelemetryRetentionClass;
+	throw new Error(`Unknown telemetry retention class "${value}". Use one of: ${TELEMETRY_RETENTION_CLASSES.join(", ")}`);
+}
+
+function parseTelemetryBefore(value: string): string {
+	if (!Number.isFinite(Date.parse(value))) throw new Error("--before must be a valid ISO date/time");
+	return value;
 }
 
 function notFound(message: string, piboSessionId?: string, turnId?: string): DebugTelemetryUnavailable {
@@ -503,6 +729,24 @@ function compactProviderEventRow(event: StoredTelemetryProviderEvent & { selecte
 	};
 }
 
+function compactStaleRow(item: ProviderAwareTelemetryStaleWorkItem): Record<string, unknown> {
+	return {
+		piboSessionId: item.piboSessionId,
+		turnId: item.turnId,
+		activePhase: item.activePhase ?? item.phase,
+		staleForMs: item.staleForMs,
+		lastProgressAt: item.lastProgressAt,
+		queueDepth: item.queueDepth,
+		appliedThresholdMs: item.appliedThresholdMs,
+		thresholdSource: item.thresholdSource,
+		thresholdKey: item.thresholdKey,
+		provider: item.provider,
+		model: item.model,
+		profile: item.profile,
+		next: item.nextCommands[0],
+	};
+}
+
 function compactToolRow(tool: StoredTelemetryToolCall): Record<string, unknown> {
 	return {
 		toolCallId: tool.toolCallId,
@@ -575,5 +819,14 @@ function providerNextCommands(provider: StoredTelemetryProviderRequest, nextAfte
 		`pibo debug telemetry provider ${provider.providerRequestId} events --limit 20`,
 		typeof nextAfterSequence === "number" ? `pibo debug telemetry provider ${provider.providerRequestId} events --after ${nextAfterSequence} --limit 20` : undefined,
 		`pibo debug telemetry session ${provider.piboSessionId}`,
+	].filter((command): command is string => typeof command === "string");
+}
+
+function toolNextCommands(tool: StoredTelemetryToolCall): string[] {
+	return [
+		`pibo debug telemetry turn ${tool.turnId}`,
+		tool.providerRequestId ? `pibo debug telemetry provider ${tool.providerRequestId}` : undefined,
+		tool.providerRequestId ? `pibo debug telemetry provider ${tool.providerRequestId} events --limit 20` : undefined,
+		`pibo debug telemetry session ${tool.piboSessionId}`,
 	].filter((command): command is string => typeof command === "string");
 }

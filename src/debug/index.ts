@@ -22,6 +22,7 @@ type ParsedOptions = {
 	store?: string;
 	active: boolean;
 	stale: boolean;
+	thresholdMs?: string;
 };
 
 export async function runDebugCli(argv = process.argv): Promise<void> {
@@ -180,14 +181,22 @@ async function runDebugTelemetry(args: string[]): Promise<void> {
 		formatTelemetryProvider,
 		formatTelemetryProviderEvents,
 		formatTelemetryProviderPayload,
+		formatTelemetryPrune,
 		formatTelemetrySession,
 		formatTelemetrySessions,
+		formatTelemetryStale,
+		formatTelemetryStats,
+		formatTelemetryTool,
 		formatTelemetryTurn,
 		inspectTelemetryProvider,
 		inspectTelemetryProviderEvents,
 		inspectTelemetryProviderPayload,
+		inspectTelemetryPrune,
 		inspectTelemetrySession,
 		inspectTelemetrySessions,
+		inspectTelemetryStale,
+		inspectTelemetryStats,
+		inspectTelemetryTool,
 		inspectTelemetryTurn,
 	} = await import("./telemetry.js");
 	const store = resolveDebugStore("pibo-data");
@@ -235,6 +244,32 @@ async function runDebugTelemetry(args: string[]): Promise<void> {
 		const result = inspectTelemetryProvider(store, providerRequestId);
 		if (options.json) console.log(formatJson(result));
 		else console.log(formatTelemetryProvider(result));
+		return;
+	}
+	if (command === "tool") {
+		const toolCallId = options.positionals[0];
+		if (!toolCallId) throw new Error("pibo debug telemetry tool requires <tool-call-id>");
+		const result = inspectTelemetryTool(store, toolCallId);
+		if (options.json) console.log(formatJson(result));
+		else console.log(formatTelemetryTool(result));
+		return;
+	}
+	if (command === "stale") {
+		const result = inspectTelemetryStale(store, { limit: options.limit, thresholdMs: options.thresholdMs });
+		if (options.json) console.log(formatJson(result));
+		else console.log(formatTelemetryStale(result));
+		return;
+	}
+	if (command === "stats") {
+		const result = inspectTelemetryStats(store, { retention: options.retention });
+		if (options.json) console.log(formatJson(result));
+		else console.log(formatTelemetryStats(result));
+		return;
+	}
+	if (command === "prune") {
+		const result = inspectTelemetryPrune(store, { retention: options.retention, before: options.before, apply: options.apply });
+		if (options.json) console.log(formatJson(result));
+		else console.log(formatTelemetryPrune(result));
 		return;
 	}
 	throw new Error(`Unknown pibo debug telemetry command "${command}". Run pibo debug telemetry --help.`);
@@ -556,6 +591,13 @@ function parseOptions(args: string[]): ParsedOptions {
 			parsed.stale = true;
 			continue;
 		}
+		if (arg === "--threshold-ms") {
+			const value = args[index + 1];
+			if (!value) throw new Error("--threshold-ms requires a value");
+			parsed.thresholdMs = value;
+			index += 1;
+			continue;
+		}
 		if (arg === "--store") {
 			const value = args[index + 1];
 			if (!value) throw new Error("--store requires a value");
@@ -696,9 +738,9 @@ Usage:
   pibo debug telemetry provider <provider-request-id> events [--after seq] [--fields a,b] [--limit n] [--json]
   pibo debug telemetry provider <provider-request-id> payload <preview-or-event-summary-id> [--json]
   pibo debug telemetry tool <tool-call-id> [--json]
-  pibo debug telemetry stale [--limit n] [--json]
-  pibo debug telemetry stats [--json]
-  pibo debug telemetry prune --retention class --before iso-date [--apply] [--json]
+  pibo debug telemetry stale [--threshold-ms n] [--limit n] [--json]
+  pibo debug telemetry stats [--retention class] [--json]
+  pibo debug telemetry prune --retention class --before iso-date [--dry-run|--apply] [--json]
 
 Commands:
   sessions  List recent, active, or stale telemetry sessions

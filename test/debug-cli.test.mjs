@@ -152,6 +152,67 @@ test("pibo debug telemetry inspects provider summaries, event pages, and disable
 	}
 });
 
+test("pibo debug telemetry inspects tool calls, stale work, stats, and dry-run-first prune", async () => {
+	const cwd = await makeDebugFixture();
+	try {
+		const tool = await execFileAsync("node", [cliPath, "debug", "telemetry", "tool", "tool_debug_stuck"], { cwd });
+		assert.match(tool.stdout, /pibo debug telemetry tool tool_debug_stuck/);
+		assert.match(tool.stdout, /toolName\tbash/);
+		assert.match(tool.stdout, /status\targs_partial/);
+		assert.match(tool.stdout, /argsBytes\t18/);
+		assert.match(tool.stdout, /parseStatus\tpartial/);
+		assert.match(tool.stdout, /noExecutionStart\ttrue/);
+		assert.match(tool.stdout, /pibo debug telemetry provider pr_debug_stuck/);
+		assert.doesNotMatch(tool.stdout, /sleep 10/);
+		assert.doesNotMatch(tool.stdout, /partial command body/);
+
+		const toolJson = await execFileAsync("node", [cliPath, "debug", "telemetry", "tool", "tool_debug_stuck", "--json"], { cwd });
+		const toolParsed = JSON.parse(toolJson.stdout);
+		assert.equal(toolParsed.available, true);
+		assert.equal(toolParsed.tool.toolCallId, "tool_debug_stuck");
+		assert.equal(toolParsed.noExecutionStart, true);
+		assert.deepEqual(Object.keys(toolParsed.tool).includes("args"), false);
+
+		const stale = await execFileAsync("node", [cliPath, "debug", "telemetry", "stale", "--limit", "5"], { cwd });
+		assert.match(stale.stdout, /pibo debug telemetry stale/);
+		assert.match(stale.stdout, /ps_running\tturn_debug_stuck/);
+		assert.match(stale.stdout, /tool_args/);
+		assert.match(stale.stdout, /300000\tdefault/);
+		assert.doesNotMatch(stale.stdout, /large provider body/);
+
+		const staleOverride = await execFileAsync("node", [cliPath, "debug", "telemetry", "stale", "--threshold-ms", "1000", "--json"], { cwd });
+		const staleOverrideParsed = JSON.parse(staleOverride.stdout);
+		assert.equal(staleOverrideParsed.available, true);
+		assert.equal(staleOverrideParsed.thresholdOverrideMs, 1000);
+		assert.equal(staleOverrideParsed.rows.some((row) => row.thresholdSource === "override" && row.appliedThresholdMs === 1000), true);
+
+		const stats = await execFileAsync("node", [cliPath, "debug", "telemetry", "stats", "--retention", "provider_event", "--json"], { cwd });
+		const statsParsed = JSON.parse(stats.stdout);
+		assert.equal(statsParsed.available, true);
+		assert.equal(statsParsed.retentionClass, "provider_event");
+		assert.equal(statsParsed.stats.totalRows, 2);
+		assert.equal(statsParsed.stats.totalBytes, 200);
+
+		const dryRun = await execFileAsync("node", [cliPath, "debug", "telemetry", "prune", "--retention", "provider_event", "--before", "2026-05-01T10:04:04.000Z", "--json"], { cwd });
+		const dryRunParsed = JSON.parse(dryRun.stdout);
+		assert.equal(dryRunParsed.available, true);
+		assert.equal(dryRunParsed.dryRun, true);
+		assert.equal(dryRunParsed.result.applied, false);
+		assert.equal(dryRunParsed.result.rowsMatched, 1);
+		assert.equal(dryRunParsed.result.rowsDeleted, 0);
+
+		const apply = await execFileAsync("node", [cliPath, "debug", "telemetry", "prune", "--retention", "provider_event", "--before", "2026-05-01T10:04:04.000Z", "--apply", "--json"], { cwd });
+		const applyParsed = JSON.parse(apply.stdout);
+		assert.equal(applyParsed.result.applied, true);
+		assert.equal(applyParsed.result.rowsDeleted, 1);
+
+		const statsAfter = await execFileAsync("node", [cliPath, "debug", "telemetry", "stats", "--retention", "provider_event", "--json"], { cwd });
+		assert.equal(JSON.parse(statsAfter.stdout).stats.totalRows, 1);
+	} finally {
+		await rm(cwd, { recursive: true, force: true });
+	}
+});
+
 test("pibo debug db discovers schema and runs limited read-only SQL", async () => {
 	const cwd = await makeDebugFixture();
 	try {
