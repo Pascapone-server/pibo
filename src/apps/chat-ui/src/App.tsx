@@ -1,4 +1,4 @@
-import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
+import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEvent, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { flushSync } from "react-dom";
@@ -5178,6 +5178,7 @@ function Composer({
 	const composerRootRef = useRef<HTMLDivElement>(null);
 	const inputRef = useRef<HTMLTextAreaElement>(null);
 	const fileInputRef = useRef<HTMLInputElement>(null);
+	const clipboardUploadButtonRef = useRef<HTMLButtonElement>(null);
 	const activeCommandRef = useRef<HTMLButtonElement>(null);
 	const activeSkillRef = useRef<HTMLButtonElement>(null);
 	const historyNavRef = useRef<{ entries: string[]; index: number; draft: string } | null>(null);
@@ -5187,6 +5188,7 @@ function Composer({
 	const [dismissedSuggestionKeys, setDismissedSuggestionKeys] = useState<string[]>([]);
 	const [uploading, setUploading] = useState(false);
 	const [uploadStatus, setUploadStatus] = useState<{ message: string; copyText?: string; error: boolean } | null>(null);
+	const [pendingClipboardImage, setPendingClipboardImage] = useState<ClipboardImageUpload | null>(null);
 
 	const skillTrigger = useMemo(() => {
 		for (let i = cursorPos - 1; i >= 0; i--) {
@@ -5264,6 +5266,15 @@ function Composer({
 	useEffect(() => {
 		historyNavRef.current = null;
 	}, [sessionId]);
+
+	useEffect(() => {
+		if (!pendingClipboardImage) return;
+		const frame = requestAnimationFrame(() => clipboardUploadButtonRef.current?.focus());
+		return () => {
+			cancelAnimationFrame(frame);
+			URL.revokeObjectURL(pendingClipboardImage.previewUrl);
+		};
+	}, [pendingClipboardImage]);
 
 	useEffect(() => {
 		if (focusSignal <= 0) return;
@@ -5352,6 +5363,35 @@ function Composer({
 		fileInputRef.current?.click();
 	};
 
+	const closeClipboardImageDialog = () => {
+		setPendingClipboardImage(null);
+	};
+
+	const handleClipboardImagePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+		if (disabled || uploading) return;
+		const imageFiles = clipboardImageFiles(event.clipboardData);
+		if (!imageFiles.length) return;
+
+		event.preventDefault();
+		dismissVisibleSuggestions();
+		setUploadStatus(null);
+		const file = imageFiles[0];
+		setPendingClipboardImage((current) => {
+			if (current) URL.revokeObjectURL(current.previewUrl);
+			return {
+				file,
+				previewUrl: URL.createObjectURL(file),
+			};
+		});
+	};
+
+	const confirmClipboardImageUpload = async () => {
+		if (!pendingClipboardImage || uploading) return;
+		const file = pendingClipboardImage.file;
+		setPendingClipboardImage(null);
+		await handleFileSelection([file]);
+	};
+
 	const handleFileSelection = async (selectedFiles: readonly File[]) => {
 		if (!selectedFiles.length) return;
 		setUploading(true);
@@ -5434,6 +5474,40 @@ function Composer({
 					</button>
 				</div>
 			) : null}
+			{pendingClipboardImage ? (
+				<div
+					className="fixed inset-0 z-50 grid place-items-center bg-black/60 px-4"
+					role="dialog"
+					aria-modal="true"
+					aria-label="Upload pasted image"
+					onKeyDown={(event) => {
+						if (event.key === "Escape") closeClipboardImageDialog();
+					}}
+				>
+					<div className="w-full max-w-md rounded-sm border border-slate-700 bg-[#151f24] shadow-2xl">
+						<div className="flex items-start justify-between gap-3 border-b border-slate-800 px-4 py-3">
+							<div>
+								<div className="text-sm font-semibold text-slate-100">Pasted image detected</div>
+								<div className="mt-1 text-xs text-slate-400">Upload this clipboard image to ~/.pibo/uploads?</div>
+							</div>
+							<button type="button" onClick={closeClipboardImageDialog} className="rounded-sm p-1 text-slate-500 hover:bg-slate-800 hover:text-slate-200" aria-label="Cancel pasted image upload">
+								<X size={14} />
+							</button>
+						</div>
+						<div className="space-y-3 px-4 py-4">
+							<img src={pendingClipboardImage.previewUrl} alt="Pasted clipboard image preview" className="max-h-64 w-full rounded-sm border border-slate-800 bg-[#0e1116] object-contain" />
+							<div className="flex items-center justify-between gap-3 text-xs text-slate-400">
+								<span className="min-w-0 truncate font-mono">{pendingClipboardImage.file.name}</span>
+								<span className="shrink-0 font-mono">{formatBytes(pendingClipboardImage.file.size)}</span>
+							</div>
+						</div>
+						<div className="flex justify-end gap-2 border-t border-slate-800 px-4 py-3">
+							<button type="button" onClick={closeClipboardImageDialog} className="h-8 rounded-sm border border-slate-700 px-3 text-xs text-slate-300 hover:border-slate-500 hover:text-slate-100">Cancel</button>
+							<button ref={clipboardUploadButtonRef} type="button" onClick={() => void confirmClipboardImageUpload()} disabled={uploading} className="h-8 rounded-sm bg-[#11a4d4] px-3 text-xs font-medium text-white disabled:opacity-50">Upload image</button>
+						</div>
+					</div>
+				</div>
+			) : null}
 			{filteredSkills.length ? (
 				<div className="absolute left-3 bottom-full mb-2 w-[min(520px,calc(100%-24px))] max-h-72 overflow-auto bg-[#0e1116] border border-emerald-500 rounded-sm shadow-xl">
 					{filteredSkills.map((skill, index) => (
@@ -5513,6 +5587,7 @@ function Composer({
 							void submit();
 						}
 					}}
+					onPaste={handleClipboardImagePaste}
 					placeholder={disabled ? "Select a session to message" : "Send Message (/ for commands or $ for skills)"}
 					className="h-10 min-h-10 resize-none overflow-hidden bg-[#0e1116] border border-slate-700 rounded-sm px-3 py-2 text-sm leading-5 outline-none focus:border-[#11a4d4] disabled:opacity-50 [scrollbar-gutter:stable]"
 				/>
@@ -5531,12 +5606,74 @@ function Composer({
 	);
 }
 
+type ClipboardImageUpload = {
+	file: File;
+	previewUrl: string;
+};
+
 function composerSkillSuggestionKey(startPos: number, token: string): string {
 	return `skill:${startPos}:${token}`;
 }
 
 function composerCommandSuggestionKey(commandToken: string): string {
 	return `command:${commandToken}`;
+}
+
+function clipboardImageFiles(data: DataTransfer): File[] {
+	const itemFiles = Array.from(data.items)
+		.filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+		.map((item) => item.getAsFile())
+		.filter((file): file is File => Boolean(file));
+	const files = itemFiles.length ? itemFiles : Array.from(data.files).filter((file) => file.type.startsWith("image/"));
+	return files.map(normalizeClipboardImageFile);
+}
+
+function normalizeClipboardImageFile(file: File): File {
+	if (file.name && file.name !== "image.png") return file;
+	return new File([file], screenshotUploadFilename(file.type), {
+		type: file.type || "image/png",
+		lastModified: Date.now(),
+	});
+}
+
+function screenshotUploadFilename(type: string): string {
+	const extension = imageExtension(type);
+	const now = new Date();
+	const stamp = [
+		now.getFullYear(),
+		padDatePart(now.getMonth() + 1),
+		padDatePart(now.getDate()),
+		"-",
+		padDatePart(now.getHours()),
+		padDatePart(now.getMinutes()),
+		padDatePart(now.getSeconds()),
+	].join("");
+	return `screenshot-${stamp}${extension}`;
+}
+
+function imageExtension(type: string): string {
+	switch (type) {
+		case "image/jpeg":
+			return ".jpg";
+		case "image/gif":
+			return ".gif";
+		case "image/webp":
+			return ".webp";
+		case "image/svg+xml":
+			return ".svg";
+		default:
+			return ".png";
+	}
+}
+
+function padDatePart(value: number): string {
+	return String(value).padStart(2, "0");
+}
+
+function formatBytes(bytes: number): string {
+	if (bytes < 1024) return `${bytes} B`;
+	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+	return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
 }
 
 function resizeComposerInput(input: HTMLTextAreaElement | null) {
