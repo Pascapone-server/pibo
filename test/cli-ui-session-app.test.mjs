@@ -1,19 +1,24 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { PassThrough } from "node:stream";
 import { promisify } from "node:util";
 import React from "react";
 import test from "node:test";
 import { renderToString } from "ink";
-import { createDefaultFakeCliSessionSource } from "../dist/cli-session/index.js";
+import { CliSourceError, createDefaultFakeCliSessionSource, FakeCliSessionSource } from "../dist/cli-session/index.js";
 import { buildCompactTerminalRows } from "../dist/session-ui/index.js";
 import {
 	cliSessionsHelpText,
 	cliSessionSlashHelpText,
+	createCliSessionCleanup,
+	formatCliSessionError,
 	formatCliSessionStatus,
 	handleCliSessionSubmittedInput,
 	InkSessionAppView,
 	parseCliSessionInput,
 	reduceInkSessionInputState,
+	runCliSessionsUi,
+	terminalLineLimitFromColumns,
 } from "../dist/apps/cli-ui/index.js";
 
 const execFileAsync = promisify(execFile);
@@ -92,6 +97,13 @@ function stateHarness(initialState) {
 	};
 }
 
+function streamWithTty(isTTY, columns = 80) {
+	const stream = new PassThrough();
+	stream.isTTY = isTTY;
+	stream.columns = columns;
+	return stream;
+}
+
 async function openFakeSessionInto(source, harness, sessionId, message) {
 	const opened = await source.openSession(sessionId);
 	harness.setState((current) => ({
@@ -152,6 +164,26 @@ test("Slash parser distinguishes messages, commands, and empty input", () => {
 	assert.match(cliSessionSlashHelpText(), /Web-only in V1/);
 });
 
+test("exit cleanup closes open session subscriptions and source idempotently", async () => {
+	const source = createDefaultFakeCliSessionSource();
+	const opened = await source.openSession("ps_fake_existing");
+	const unsubscribe = opened.subscribe(() => {});
+	assert.equal(source.listenerCount("ps_fake_existing"), 1);
+
+	let closeSessionCalls = 0;
+	const cleanup = createCliSessionCleanup(() => {
+		closeSessionCalls += 1;
+		unsubscribe();
+		void opened.close();
+	}, () => source.close());
+
+	cleanup();
+	cleanup();
+	assert.equal(closeSessionCalls, 1);
+	assert.equal(source.listenerCount("ps_fake_existing"), 0);
+	assert.throws(() => source.setStatus({ message: "after-close" }), /source is closed/);
+});
+
 test("Slash commands handle help status clear pickers unknown exit and normal sends", async () => {
 	const source = createDefaultFakeCliSessionSource();
 	source.setStatus({ message: "TOKEN=secret-value" });
@@ -200,6 +232,62 @@ test("Slash commands handle help status clear pickers unknown exit and normal se
 	assert.equal(exited, true);
 });
 
+test("empty picker states and recovery errors are actionable and redacted", async () => {
+	const source = new FakeCliSessionSource({ sessions: [], agents: [], status: { rooms: "unsupported", message: "TOKEN=secret-value" } });
+	const harness = stateHarness({ ...baseState(), session: undefined, rows: [] });
+	const openSession = (sessionId, message) => openFakeSessionInto(source, harness, sessionId, message);
+	const submit = (input) => handleCliSessionSubmittedInput(input, source, harness.state, harness.setState, openSession, () => {});
+
+	await submit("/session");
+	assert.equal(harness.state.mode, "session-picker");
+	assert.equal(harness.state.picker.items.length, 0);
+	assert.match(harness.state.picker.emptyMessage, /Use \/new/);
+	assert.match(harness.state.picker.emptyMessage, /cannot list rooms/);
+
+	await submit("/agent");
+	assert.equal(harness.state.mode, "agent-picker");
+	assert.equal(harness.state.picker.items.length, 0);
+	assert.match(harness.state.picker.emptyMessage, /No existing agents\/profiles/);
+
+	const formatted = formatCliSessionError(new CliSourceError("session_not_found", "missing TOKEN=secret-value"));
+	assert.match(formatted, /TOKEN=\[redacted\]/);
+	assert.doesNotMatch(formatted, /secret-value/);
+	assert.match(formatted, /Recovery: use \/session/);
+});
+
+test("default app viewport bounds large sessions and narrow terminal lines", () => {
+	const rows = Array.from({ length: 30 }, (_, index) => ({
+		id: `row-${index}`,
+		kind: "message.user",
+		status: "done",
+		lines: [{ prefix: "prompt", tokens: [{ text: `message ${index} ${"x".repeat(80)}` }] }],
+		sourceNodeIds: [`node-${index}`],
+	}));
+	const output = renderToString(React.createElement(InkSessionAppView, {
+		state: { ...baseState(), rows, input: "x".repeat(120) },
+		maxLineChars: 32,
+	}));
+
+	assert.match(output, /… 10 earlier rows omitted/);
+	assert.doesNotMatch(output, /message 0/);
+	assert.match(output, /message 29/);
+	assert.match(output, /truncated/);
+	assert.equal(terminalLineLimitFromColumns(36), 32);
+	assert.equal(terminalLineLimitFromColumns(10), 20);
+});
+
+test("runCliSessionsUi rejects non-interactive stdin or stdout before rendering", async () => {
+	const previousExitCode = process.exitCode;
+	const stderr = streamWithTty(false);
+	let stderrText = "";
+	stderr.on("data", (chunk) => { stderrText += chunk.toString(); });
+	process.exitCode = undefined;
+	await runCliSessionsUi({ stdin: streamWithTty(false), stdout: streamWithTty(true), stderr, source: createDefaultFakeCliSessionSource() });
+	assert.equal(process.exitCode, 1);
+	assert.match(stderrText, /interactive stdin and stdout TTYs/);
+	process.exitCode = previousExitCode;
+});
+
 test("pibo tui:sessions command help and root discovery describe the new UI without hiding existing TUI commands", async () => {
 	const help = cliSessionsHelpText();
 	assert.match(help, /reduced Web Chat-derived session UI/);
@@ -222,7 +310,7 @@ test("pibo tui:sessions startup has a non-TTY smoke-test seam", async () => {
 		() => execFileAsync("node", [cliPath, "tui:sessions", "--demo"]),
 		(error) => {
 			assert.equal(error.code, 1);
-			assert.match(error.stderr, /requires an interactive TTY/);
+			assert.match(error.stderr, /requires interactive stdin and stdout TTYs/);
 			return true;
 		},
 	);
