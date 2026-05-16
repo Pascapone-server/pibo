@@ -53,3 +53,4 @@ Implement:
 ## Progress log
 
 - 2026-05-16: Created dedicated worktree and Docker dev worker for Ink CLI Session UI Ralph loop.
+- 2026-05-16: Started container gateway/web with `npm run build && /app/scripts/docker-entrypoint.sh gateway:web`; health check passed at `http://127.0.0.1:4812/apps/chat`.
