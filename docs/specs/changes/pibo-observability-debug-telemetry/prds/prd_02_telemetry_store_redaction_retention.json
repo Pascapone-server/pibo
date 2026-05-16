@@ -16,8 +16,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "Depends on PRD 01 decision matrix."
+      "passes": true,
+      "notes": "Completed in storage foundation batch on 2026-05-16: added shared TypeScript telemetry types, correlation fields, status enums, retention classes including incident, preview-unavailable result type, and best-effort service wrapper. Validated with Docker npm run typecheck and npm test."
     },
     {
       "id": "US-002",
@@ -34,8 +34,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": "Must not create pibo-telemetry.sqlite."
+      "passes": true,
+      "notes": "Completed in storage foundation batch on 2026-05-16: added additive pibo.sqlite telemetry tables and indexes for turns, phases, provider requests, provider event summaries, tool calls, retention classes, and session/event/payload/provider/tool lookup paths. Migration idempotency covered by tests. Validated with Docker npm run typecheck and npm test."
     },
     {
       "id": "US-003",
@@ -50,8 +50,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": "Runtime capture in PRD 03 consumes these write APIs."
+      "passes": true,
+      "notes": "Completed in storage foundation batch on 2026-05-16: implemented typed upsert/write APIs for turns, phases, provider requests, provider event summaries/counters, tool calls, preview-disabled reads, and a best-effort wrapper that swallows unavailable-store/write failures. Store contract tests cover insert/update/terminal status/missing optional correlation ids. Validated with Docker npm run typecheck and npm test."
     },
     {
       "id": "US-004",

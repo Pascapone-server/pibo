@@ -42,3 +42,15 @@ Implement all PRDs under:
 - 2026-05-16: Validation passed for PRD 01 docs batch with `docker exec pibo-dev-ralph-observability-telemetry bash -lc 'cd /workspace && npm run typecheck'`.
 - 2026-05-16: Re-ran `npm run typecheck` in the Docker worker after final documentation cleanup; validation still passed.
 - 2026-05-16: Committed PRD 01 documentation batch with message `Document telemetry V1 guardrails PRD01`.
+
+- 2026-05-16: Started new Ralph run. Reviewed recent commits/status (HEAD 0475c87, clean), glossary, progress file, all change specs/PRD markdown, and all PRD JSONs. Selected PRD 02 storage foundation batch (US-001 through US-003 initially, extending only if cohesive): shared types, additive telemetry schema, and best-effort typed write APIs; defer CLI/read/stale/runtime capture to later dependent batches.
+
+- 2026-05-16: Inspected data store seams (`src/data/schema.ts`, `src/data/pibo-store.ts`, existing event/payload/session stores, and data-v2 tests). Implementation plan: add `src/data/telemetry.ts`, wire it into `PiboDataStore`, add additive telemetry tables/indexes to `applyPiboDataSchema`, and add store contract tests before validating in the Docker worker.
+
+- 2026-05-16: Implemented PRD 02 storage foundation draft: telemetry record types, additive pibo.sqlite tables/indexes, PiboDataStore telemetry seam, typed upsert/write methods, best-effort wrapper, provider event counters, tool-call progress rows, and preview-disabled read contract. Added `test/telemetry-store.test.mjs` for schema idempotency and write contracts. Beginning Docker validation.
+
+- 2026-05-16: Full Docker validation passed for PRD 02 storage foundation: `docker exec pibo-dev-ralph-observability-telemetry bash -lc "cd /workspace && npm test"` completed with 402 passing tests. Marked PRD 02 US-001 through US-003 as passing in JSON and checked tasks 2.1/2.2. Remaining PRD 02 work: bounded read APIs, centralized volume-control helper, complete preview optional contract, stats/prune.
+
+- 2026-05-16: Reloaded the Docker dev gateway inside `pibo-dev-ralph-observability-telemetry` after code changes and verified health with `curl -fsS http://127.0.0.1:4802/apps/chat >/dev/null` after the build/gateway came up.
+
+- 2026-05-16: Committed PRD 02 storage foundation batch with message `Implement telemetry store foundation PRD02 US-001-US-003`.

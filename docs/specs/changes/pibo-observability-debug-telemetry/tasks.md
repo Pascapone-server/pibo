@@ -10,8 +10,8 @@
 
 ## 2. Data Model, Links, and Storage Volume
 
-- [ ] 2.1 Add `pibo.sqlite` telemetry schema migration for turns, phases, provider requests, provider events/aggregates, tool calls, retention classes, preview-unavailable contract, and indexes for session/event/payload joins.
-- [ ] 2.2 Add typed telemetry store/service with bounded insert/update methods.
+- [x] 2.1 Add `pibo.sqlite` telemetry schema migration for turns, phases, provider requests, provider events/aggregates, tool calls, retention classes, preview-unavailable contract, and indexes for session/event/payload joins.
+- [x] 2.2 Add typed telemetry store/service with bounded insert/update methods.
 - [ ] 2.3 Add bounded-preview/truncation helper for optional preview paths and header/payload-like display values.
 - [ ] 2.4 Add retention class and stats support.
 - [ ] 2.5 Add tests for idempotent migration, missing store behavior, session/event/payload joins, bounded storage, truncation, and prune dry-run.
