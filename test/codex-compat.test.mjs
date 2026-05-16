@@ -47,9 +47,9 @@ test("default registry exposes the provider-backed codex-compatible profile", ()
 			["worker", "codex-compat-openai-web"],
 		],
 	);
-	assert.deepEqual(profile.contextFiles.map((contextFile) => contextFile.key), ["Codex Base Prompt"]);
-	assert.deepEqual(profile.contextFiles.map((contextFile) => basename(contextFile.path)), ["codex-base-prompt.md"]);
-	assert.equal(existsSync(profile.contextFiles[0].path), true);
+	assert.deepEqual(profile.contextFiles.map((contextFile) => contextFile.key), ["Codex Base Prompt", "Pibo Debug Tooling"]);
+	assert.deepEqual(profile.contextFiles.map((contextFile) => basename(contextFile.path)), ["codex-base-prompt.md", "pibo-debug-tooling.md"]);
+	assert.equal(profile.contextFiles.every((contextFile) => existsSync(contextFile.path)), true);
 });
 
 test("default registry exposes web_search as a core native tool", () => {
@@ -110,6 +110,7 @@ test("codex-compatible profile inspection shows active generated tools and provi
 	}
 	const contextFileNames = inspection.contextFiles.map((contextFile) => basename(contextFile.path));
 	assert.equal(contextFileNames.includes("codex-base-prompt.md"), true);
+	assert.equal(contextFileNames.includes("pibo-debug-tooling.md"), true);
 	assert.equal(profile.contextFiles.some((contextFile) => /^(?:AGENTS|RULES|GLOSSARY)\.md$/.test(basename(contextFile.path))), false);
 	assert.equal(inspection.subagents.every((subagent) => subagent.active), true);
 });
