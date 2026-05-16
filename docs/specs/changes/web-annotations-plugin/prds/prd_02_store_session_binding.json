@@ -31,8 +31,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed by WebAnnotationStore binding table and operations in src/web-annotations/store.ts. Bindings are keyed by owner scope, Pibo Session ID, optional Room ID, binding id, URL/target id, state, timestamps, metadata, and support create/list/get/patch/remove. Removal marks bindings removed and leaves annotations intact. Focused store tests and Docker worker typecheck passed."
     },
     {
       "id": "US-003",
@@ -47,8 +47,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed by durable web_annotations table and create/list/get operations. Records persist owner scope, Pibo Session ID, optional Room ID, binding id, status, created time, URL/title, target metadata/source hints, viewport, screenshot references, and metadata JSON. Lists default newest-first with bounded limits and status filtering. Focused store tests and Docker worker typecheck passed."
     },
     {
       "id": "US-004",
@@ -63,8 +63,8 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed by patchAnnotation plus acknowledge/resolve/dismiss helpers and bounded addThreadMessage. Runtime validation rejects invalid statuses, malformed resolvedBy/summary/metadata, empty thread content, and excessive thread messages; updates updatedAt and resolvedAt/resolvedBy where applicable. Focused store tests and Docker worker typecheck passed."
     },
     {
       "id": "US-005",
@@ -79,8 +79,8 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed by store tests seeding multiple owner scopes and sessions, verifying list/get/update isolation, and confirming binding removal leaves authorized historical annotations readable. Focused store tests and Docker worker typecheck passed."
     }
   ]
 }
