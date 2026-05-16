@@ -3,6 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { PiboProviderTelemetryRecorder } from "../dist/core/provider-telemetry.js";
 import { PiboRuntimeTelemetryRecorder, turnIdForEvent } from "../dist/core/runtime-telemetry.js";
 import { PiboDataStore } from "../dist/data/pibo-store.js";
 
@@ -37,6 +38,14 @@ function status(queuedMessages = 0) {
 
 function phaseByName(timeline, name) {
 	return timeline.phases.find((phase) => phase.name === name);
+}
+
+function providerRecorder(store) {
+	return new PiboProviderTelemetryRecorder({
+		store: store.telemetry,
+		session,
+		model: { provider: "openai", id: "gpt-test", api: "openai-responses" },
+	});
 }
 
 test("runtime telemetry records queued, started, and completed turn lifecycle", () => {
@@ -184,6 +193,131 @@ test("runtime telemetry marks open normalized phases errored when the turn error
 		assert.equal(phaseByName(timeline, "provider_stream").status, "error");
 		assert.equal(phaseByName(timeline, "assistant_text").status, "error");
 		assert.equal(phaseByName(timeline, "error").status, "error");
+	} finally {
+		store.close();
+	}
+});
+
+test("provider telemetry records completed request lifecycle from provider hooks and normalized events", () => {
+	const store = createStore();
+	try {
+		const runtime = new PiboRuntimeTelemetryRecorder(store.telemetry);
+		const provider = providerRecorder(store);
+		const eventId = "evt_provider_complete";
+		runtime.recordOutput({ type: "message_queued", piboSessionId: session.id, eventId, queuedMessages: 1, text: "hello", source: "user" }, { session, status: status(1) });
+		runtime.recordOutput({ type: "message_started", piboSessionId: session.id, eventId, text: "hello", source: "user" }, { session, status: status(0) });
+		provider.recordRequestStart({ model: "gpt-test", service_tier: "priority", input: "not persisted" }, { at: "2026-05-16T00:00:01.000Z" });
+		provider.recordResponse({ status: 200, headers: { authorization: "Bearer not-persisted" }, at: "2026-05-16T00:00:02.000Z" });
+		runtime.recordOutput({ type: "assistant_delta", piboSessionId: session.id, eventId, assistantIndex: 0, contentIndex: 0, text: "partial answer" }, { session, status: status(0) });
+		runtime.recordOutput({ type: "message_finished", piboSessionId: session.id, eventId, source: "user" }, { session, status: status(0) });
+
+		const timeline = store.telemetry.getTurnTimeline(turnIdForEvent(eventId));
+		assert.ok(timeline);
+		assert.equal(timeline.providerRequests.length, 1);
+		const request = timeline.providerRequests[0];
+		assert.equal(request.provider, "openai");
+		assert.equal(request.api, "openai-responses");
+		assert.equal(request.model, "gpt-test");
+		assert.equal(request.serviceTier, "priority");
+		assert.equal(request.status, "completed");
+		assert.equal(request.httpStatus, 200);
+		assert.equal(request.firstByteAt, "2026-05-16T00:00:02.000Z");
+		assert.ok(request.lastNormalizedEventAt);
+		assert.equal(request.normalizedEventCount, 1);
+		assert.equal(request.rawEventCount, 0);
+		assert.equal(request.captureMode, "metadata_only");
+		assert.equal(phaseByName(timeline, "provider_request").status, "ok");
+		assert.equal(phaseByName(timeline, "provider_stream").status, "ok");
+		assert.equal(phaseByName(timeline, "provider_stream").providerRequestId, request.providerRequestId);
+	} finally {
+		store.close();
+	}
+});
+
+test("provider telemetry marks active provider requests aborted with no raw payload capture", () => {
+	const store = createStore();
+	try {
+		const runtime = new PiboRuntimeTelemetryRecorder(store.telemetry);
+		const provider = providerRecorder(store);
+		const eventId = "evt_provider_abort";
+		runtime.recordOutput({ type: "message_queued", piboSessionId: session.id, eventId, queuedMessages: 1, text: "abort", source: "user" }, { session, status: status(1) });
+		runtime.recordOutput({ type: "message_started", piboSessionId: session.id, eventId, text: "abort", source: "user" }, { session, status: status(0) });
+		provider.recordRequestStart({ model: "gpt-test" }, { at: "2026-05-16T00:01:01.000Z" });
+		provider.recordResponse({ status: 200, headers: {}, at: "2026-05-16T00:01:02.000Z" });
+		runtime.recordOutput({ type: "execution_result", piboSessionId: session.id, action: "abort", result: { aborted: true } }, { session, status: status(0) });
+
+		const timeline = store.telemetry.getTurnTimeline(turnIdForEvent(eventId));
+		assert.ok(timeline);
+		assert.equal(timeline.providerRequests[0].status, "aborted");
+		assert.equal(timeline.providerRequests[0].completedAt !== undefined, true);
+		assert.equal(phaseByName(timeline, "provider_stream").status, "aborted");
+	} finally {
+		store.close();
+	}
+});
+
+test("provider telemetry marks active provider requests errored safely", () => {
+	const store = createStore();
+	try {
+		const runtime = new PiboRuntimeTelemetryRecorder(store.telemetry);
+		const provider = providerRecorder(store);
+		const eventId = "evt_provider_error";
+		runtime.recordOutput({ type: "message_queued", piboSessionId: session.id, eventId, queuedMessages: 1, text: "error", source: "user" }, { session, status: status(1) });
+		runtime.recordOutput({ type: "message_started", piboSessionId: session.id, eventId, text: "error", source: "user" }, { session, status: status(0) });
+		provider.recordRequestStart({ model: "gpt-test" }, { at: "2026-05-16T00:02:01.000Z" });
+		runtime.recordOutput({ type: "session_error", piboSessionId: session.id, eventId, error: "Provider failed with compact safe message" }, { session, status: status(0) });
+
+		const timeline = store.telemetry.getTurnTimeline(turnIdForEvent(eventId));
+		assert.ok(timeline);
+		assert.equal(timeline.providerRequests[0].status, "error");
+		assert.equal(timeline.providerRequests[0].errorCategory, "runtime_error");
+		assert.equal(timeline.providerRequests[0].errorMessage, "Provider failed with compact safe message");
+		assert.equal(phaseByName(timeline, "provider_request").status, "error");
+	} finally {
+		store.close();
+	}
+});
+
+test("provider telemetry keeps no-first-byte requests open", () => {
+	const store = createStore();
+	try {
+		const runtime = new PiboRuntimeTelemetryRecorder(store.telemetry);
+		const provider = providerRecorder(store);
+		const eventId = "evt_provider_no_first_byte";
+		runtime.recordOutput({ type: "message_queued", piboSessionId: session.id, eventId, queuedMessages: 1, text: "wait", source: "user" }, { session, status: status(1) });
+		runtime.recordOutput({ type: "message_started", piboSessionId: session.id, eventId, text: "wait", source: "user" }, { session, status: status(0) });
+		provider.recordRequestStart({ model: "gpt-test" }, { at: "2026-05-16T00:03:01.000Z" });
+
+		const timeline = store.telemetry.getTurnTimeline(turnIdForEvent(eventId));
+		assert.ok(timeline);
+		assert.equal(timeline.providerRequests[0].status, "started");
+		assert.equal(timeline.providerRequests[0].firstByteAt, undefined);
+		assert.equal(timeline.providerRequests[0].completedAt, undefined);
+		assert.equal(phaseByName(timeline, "provider_request").status, "open");
+	} finally {
+		store.close();
+	}
+});
+
+test("provider telemetry keeps partial streamed requests open", () => {
+	const store = createStore();
+	try {
+		const runtime = new PiboRuntimeTelemetryRecorder(store.telemetry);
+		const provider = providerRecorder(store);
+		const eventId = "evt_provider_partial";
+		runtime.recordOutput({ type: "message_queued", piboSessionId: session.id, eventId, queuedMessages: 1, text: "partial", source: "user" }, { session, status: status(1) });
+		runtime.recordOutput({ type: "message_started", piboSessionId: session.id, eventId, text: "partial", source: "user" }, { session, status: status(0) });
+		provider.recordRequestStart({ model: "gpt-test" }, { at: "2026-05-16T00:04:01.000Z" });
+		provider.recordResponse({ status: 200, headers: {}, at: "2026-05-16T00:04:02.000Z" });
+		runtime.recordOutput({ type: "assistant_delta", piboSessionId: session.id, eventId, assistantIndex: 0, contentIndex: 0, text: "partial" }, { session, status: status(0) });
+
+		const timeline = store.telemetry.getTurnTimeline(turnIdForEvent(eventId));
+		assert.ok(timeline);
+		assert.equal(timeline.providerRequests[0].status, "streaming");
+		assert.equal(timeline.providerRequests[0].completedAt, undefined);
+		assert.equal(timeline.providerRequests[0].normalizedEventCount, 1);
+		assert.equal(phaseByName(timeline, "provider_request").status, "ok");
+		assert.equal(phaseByName(timeline, "provider_stream").status, "open");
 	} finally {
 		store.close();
 	}

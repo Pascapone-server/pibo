@@ -20,7 +20,7 @@
 
 - [x] 3.1 Capture queue and turn lifecycle in session router / routed session.
 - [x] 3.2 Capture phase transitions from normalized events.
-- [ ] 3.3 Capture provider request lifecycle around stream calls.
+- [x] 3.3 Capture provider request lifecycle around stream calls.
 - [ ] 3.4 Capture bounded provider event metadata/summaries in OpenAI/Codex Responses stream parser without duplicating raw provider bodies.
 - [ ] 3.5 Capture parse error and unknown-event counters.
 - [ ] 3.6 Capture tool-call argument progress metadata, including deltas as counters and timestamps.

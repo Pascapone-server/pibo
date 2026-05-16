@@ -73,8 +73,19 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": "Use Pibo-owned provider wrappers/seams where feasible; do not edit node_modules."
+      "passes": true,
+      "notes": "Completed in provider lifecycle telemetry batch on 2026-05-16. Raw provider event metadata/counters beyond normalized progress remain in PRD 03 US-004.",
+      "status": "complete",
+      "pass": true,
+      "validation": [
+        "docker exec pibo-dev-ralph-observability-telemetry bash -lc 'cd /workspace && npm run typecheck'",
+        "docker exec pibo-dev-ralph-observability-telemetry bash -lc 'cd /workspace && npm test' (417 passing tests)"
+      ],
+      "implementationNotes": [
+        "Added src/core/provider-telemetry.ts with a best-effort provider telemetry recorder and Pi extension factory using before_provider_request and after_provider_response hooks.",
+        "Wired PiboSessionRouter to install the provider telemetry extension for routed runtimes when a telemetry store is available.",
+        "Runtime telemetry now links normalized stream progress and terminal ok/error/aborted outcomes back to active provider request rows and provider phases without storing raw provider payloads or full headers."
+      ]
     },
     {
       "id": "US-004",

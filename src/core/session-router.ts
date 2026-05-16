@@ -38,6 +38,7 @@ import { isPiboThinkingLevel, type PiboThinkingLevel } from "./thinking.js";
 import { RuntimeSessionRegistry } from "../tools/runtime/registry.js";
 import { withWorkflowSessionKind } from "../sessions/workflow-session-kind.js";
 import { PiboRuntimeTelemetryRecorder } from "./runtime-telemetry.js";
+import { createPiboProviderTelemetryExtension } from "./provider-telemetry.js";
 import type { TelemetryStore } from "../data/telemetry.js";
 
 export type {
@@ -194,13 +195,14 @@ export class PiboSessionRouter {
 	private readonly pluginRegistry: PiboPluginRegistry;
 	private readonly sessionStore: PiboSessionStore;
 	private readonly reliabilityStore?: PiboReliabilityStore;
+	private readonly telemetryStore?: TelemetryStore;
 	private readonly telemetryRecorder?: PiboRuntimeTelemetryRecorder;
 
 	constructor(private readonly options: PiboSessionRouterOptions = {}) {
 		this.pluginRegistry = options.pluginRegistry ?? createDefaultPiboPluginRegistry();
 		this.sessionStore = options.sessionStore ?? new InMemoryPiboSessionStore();
-		const telemetryStore = options.telemetryStore ?? telemetryStoreFromSessionStore(this.sessionStore);
-		this.telemetryRecorder = telemetryStore ? new PiboRuntimeTelemetryRecorder(telemetryStore) : undefined;
+		this.telemetryStore = options.telemetryStore ?? telemetryStoreFromSessionStore(this.sessionStore);
+		this.telemetryRecorder = this.telemetryStore ? new PiboRuntimeTelemetryRecorder(this.telemetryStore) : undefined;
 		const defaultProfileName = this.pluginRegistry.getProfileNames().includes("codex-compat-openai-web")
 			? "codex-compat-openai-web"
 			: this.pluginRegistry.getProfileNames()[0];
@@ -415,11 +417,18 @@ export class PiboSessionRouter {
 		const activeModel = this.ensureSessionActiveModel(piboSession, profile, parentPiSessionId, modelDefaults);
 		const initialThinkingLevel = resolvePiboSessionInitialThinkingLevel(piboSession);
 		const userSettings = loadPiboUserSettings(piboSession.ownerScope ?? "user:unknown");
+		const telemetryExtension = this.telemetryStore
+			? createPiboProviderTelemetryExtension({ store: this.telemetryStore, session: piboSession, model: activeModel })
+			: undefined;
 		const runtime = await createPiboRuntime({
 			cwd: piboSession.workspace ?? this.options.cwd,
 			persistSession: this.options.persistSession,
 			thinkingLevel: initialThinkingLevel ?? this.options.thinkingLevel,
 			profile: profileForSession(profile, piboSession.piSessionId, parentPiSessionId),
+			extensionFactories: [
+				...(telemetryExtension ? [telemetryExtension] : []),
+				...(this.options.extensionFactories ?? []),
+			],
 			subagentRunner: this.createSubagentRunner(piboSession.id),
 			runToolController: this.createRunToolController(piboSession.id),
 			runtimeToolController: this.runtimeRegistry.createController(piboSession.id),

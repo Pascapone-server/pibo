@@ -2,12 +2,15 @@ import type { PiboOutputEvent, PiboEventSource, PiboJsonObject, PiboSessionStatu
 import type { PiboSession } from "../sessions/store.js";
 import {
 	BestEffortTelemetryService,
+	type StoredTelemetryProviderRequest,
 	type TelemetryPhaseName,
 	type TelemetryPhaseStatus,
+	type TelemetryProviderRequestStatus,
 	type TelemetryStore,
 	type TelemetryTurnSource,
 	type TelemetryTurnStatus,
 } from "../data/telemetry.js";
+import { isTerminalProviderStatus } from "./provider-telemetry.js";
 
 type RuntimeTelemetryContext = {
 	session?: PiboSession;
@@ -196,9 +199,11 @@ export class PiboRuntimeTelemetryRecorder {
 		const turn = this.turnContextForEvent(event.piboSessionId, event.eventId, undefined, context) ?? this.activeTurnContext(event.piboSessionId, context);
 		if (!turn) return;
 		const now = new Date().toISOString();
+		const providerRequest = this.activeProviderRequestForTurn(turn.turnId);
 		this.closeOpenPhasesByName(turn.turnId, "message_started", "ok", now);
-		this.startOrProgressPhase(turn, "provider_stream", now, "normalized provider stream progress");
-		this.startOrProgressPhase(turn, phaseName, now, summary, { updateTurn: true });
+		this.progressProviderRequest(providerRequest, now);
+		this.startOrProgressPhase(turn, "provider_stream", now, "normalized provider stream progress", { providerRequestId: providerRequest?.providerRequestId });
+		this.startOrProgressPhase(turn, phaseName, now, summary, { updateTurn: true, providerRequestId: providerRequest?.providerRequestId });
 	}
 
 	private recordToolArgsPhase(
@@ -211,8 +216,11 @@ export class PiboRuntimeTelemetryRecorder {
 		this.closeOpenPhasesByName(turn.turnId, "message_started", "ok", now);
 		this.closeOpenPhasesByName(turn.turnId, "assistant_text", "ok", now);
 		this.closeOpenPhasesByName(turn.turnId, "reasoning", "ok", now);
-		this.startOrProgressPhase(turn, "provider_stream", now, "normalized provider stream progress");
+		const providerRequest = this.activeProviderRequestForTurn(turn.turnId);
+		this.progressProviderRequest(providerRequest, now);
+		this.startOrProgressPhase(turn, "provider_stream", now, "normalized provider stream progress", { providerRequestId: providerRequest?.providerRequestId });
 		const phase = this.startOrProgressPhase(turn, "tool_args", now, event.argsComplete ? "tool arguments complete" : "tool arguments in progress", {
+			providerRequestId: providerRequest?.providerRequestId,
 			toolCallId: event.toolCallId,
 			updateTurn: true,
 		});
@@ -271,6 +279,7 @@ export class PiboRuntimeTelemetryRecorder {
 		if (!turn) return;
 		const now = new Date().toISOString();
 		this.finishOpenPhases(turn.turnId, terminalPhaseStatus(status), now);
+		this.finishActiveProviderRequests(turn.turnId, providerStatusForTurnStatus(status), now, summary);
 		this.telemetry.upsertPhase({
 			phaseId: phaseId(turn.turnId, phaseName),
 			turnId: turn.turnId,
@@ -305,7 +314,7 @@ export class PiboRuntimeTelemetryRecorder {
 		phaseName: TelemetryPhaseName,
 		now: string,
 		summary: string,
-		options: { toolCallId?: string; updateTurn?: boolean } = {},
+		options: { providerRequestId?: string; toolCallId?: string; updateTurn?: boolean } = {},
 	) {
 		const existing = this.openPhaseByName(turn.turnId, phaseName);
 		const phase = this.telemetry.upsertPhase({
@@ -318,6 +327,7 @@ export class PiboRuntimeTelemetryRecorder {
 			status: "open",
 			startedAt: existing?.startedAt ?? now,
 			lastProgressAt: now,
+			providerRequestId: options.providerRequestId,
 			toolCallId: options.toolCallId,
 			eventId: turn.eventId,
 			summary,
@@ -372,6 +382,73 @@ export class PiboRuntimeTelemetryRecorder {
 		}
 	}
 
+	private activeProviderRequestForTurn(turnId: string): StoredTelemetryProviderRequest | undefined {
+		const timeline = this.store?.getTurnTimeline(turnId, { limit: 100 });
+		return [...(timeline?.providerRequests ?? [])].reverse().find((request) => !isTerminalProviderStatus(request.status));
+	}
+
+	private progressProviderRequest(request: StoredTelemetryProviderRequest | undefined, now: string): void {
+		if (!request) return;
+		this.upsertProviderRequestFromExisting(request, {
+			status: "streaming",
+			lastNormalizedEventAt: now,
+			normalizedEventCount: request.normalizedEventCount + 1,
+		});
+	}
+
+	private finishActiveProviderRequests(turnId: string, status: TelemetryProviderRequestStatus, now: string, summary: string): void {
+		const timeline = this.store?.getTurnTimeline(turnId, { limit: 100 });
+		for (const request of timeline?.providerRequests ?? []) {
+			if (isTerminalProviderStatus(request.status)) continue;
+			this.upsertProviderRequestFromExisting(request, {
+				status,
+				completedAt: now,
+				errorCategory: status === "error" ? "runtime_error" : undefined,
+				errorMessage: status === "error" ? safeSummary(summary) : undefined,
+			});
+		}
+	}
+
+	private upsertProviderRequestFromExisting(
+		request: StoredTelemetryProviderRequest,
+		input: Partial<Pick<StoredTelemetryProviderRequest, "status" | "lastNormalizedEventAt" | "normalizedEventCount" | "completedAt" | "errorCategory" | "errorMessage">>,
+	): void {
+		this.telemetry.upsertProviderRequest({
+			providerRequestId: request.providerRequestId,
+			piboSessionId: request.piboSessionId,
+			rootSessionId: request.rootSessionId,
+			roomId: request.roomId,
+			turnId: request.turnId,
+			phaseId: request.phaseId,
+			provider: request.provider,
+			api: request.api,
+			model: request.model,
+			transport: request.transport,
+			serviceTier: request.serviceTier,
+			status: input.status ?? request.status,
+			responseHeadersAt: request.responseHeadersAt,
+			firstByteAt: request.firstByteAt,
+			lastRawEventAt: request.lastRawEventAt,
+			lastNormalizedEventAt: input.lastNormalizedEventAt ?? request.lastNormalizedEventAt,
+			completedAt: input.completedAt ?? request.completedAt,
+			httpStatus: request.httpStatus,
+			upstreamResponseId: request.upstreamResponseId,
+			rawEventCount: request.rawEventCount,
+			normalizedEventCount: input.normalizedEventCount ?? request.normalizedEventCount,
+			parseErrorCount: request.parseErrorCount,
+			unknownEventCount: request.unknownEventCount,
+			bytesReceived: request.bytesReceived,
+			eventTypeCounts: request.eventTypeCounts,
+			eventStreamId: request.eventStreamId,
+			eventId: request.eventId,
+			payloadRef: request.payloadRef,
+			errorCategory: input.errorCategory ?? request.errorCategory,
+			errorMessage: input.errorMessage ?? request.errorMessage,
+			captureMode: request.captureMode,
+			retentionClass: request.retentionClass,
+		});
+	}
+
 	private turnContextForEvent(
 		piboSessionId: string,
 		eventId: string | undefined,
@@ -424,6 +501,13 @@ function telemetrySource(source: PiboEventSource | undefined): TelemetryTurnSour
 
 function terminalPhaseStatus(status: TelemetryTurnStatus): TelemetryPhaseStatus {
 	if (status === "ok") return "ok";
+	if (status === "aborted") return "aborted";
+	if (status === "timeout") return "timeout";
+	return "error";
+}
+
+function providerStatusForTurnStatus(status: TelemetryTurnStatus): TelemetryProviderRequestStatus {
+	if (status === "ok") return "completed";
 	if (status === "aborted") return "aborted";
 	if (status === "timeout") return "timeout";
 	return "error";
