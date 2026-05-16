@@ -1,0 +1,53 @@
+# Web Annotations Plugin Implementation Progress
+
+## Ralph job setup
+
+- Created: 2026-05-16
+- Owner scope: `user:Z0xS45cCzyDBL7bAxQLyD1YNfC1mWnnB`
+- Target room: `room_0a4f82d4-71b0-4b4b-a28c-63b2049f2c46`
+- Profile: `pibo-agent`
+- Template: `prd-batch-stories`
+- Worktree: `/root/code/pibo/.worktrees/dev/.worktrees/web-annotations-plugin`
+- Branch: `web-annotations-plugin`
+- Docker dev worker: `pibo-dev-web-annotations-plugin`
+- Docker web port: `4822`
+- Docker gateway port: `4820`
+- Docker CDP port: `4821`
+- PRD story count: `37`
+- Ralph max iterations: `111`
+
+## Scope
+
+Implement the Web Annotations Plugin PRD batch:
+
+- `docs/specs/changes/web-annotations-plugin/prds/prd_*.json`
+- `docs/specs/changes/web-annotations-plugin/prds/*.md`
+
+Source context:
+
+- `docs/reports/web-annotation-feedback-tools-agentation-open-design.md`
+- `docs/specs/changes/web-annotations-plugin/proposal.md`
+- `docs/specs/changes/web-annotations-plugin/spec.md`
+- `docs/specs/changes/web-annotations-plugin/design.md`
+- `docs/specs/changes/web-annotations-plugin/tasks.md`
+
+## Operating notes
+
+- Keep implementation work in the dedicated host worktree above.
+- Use the Docker worker for runtime, tests, builds, gateway restarts, and browser checks.
+- Do not create or release Docker workers unless explicitly asked.
+- Do not restart or modify host services.
+- Run container commands as `docker exec pibo-dev-web-annotations-plugin bash -lc 'cd /workspace && <command>'`.
+- Git operations and commits must be done on the host worktree path.
+- Batch user stories sensibly. Complete up to 3 related stories per run unless blocked or a story needs a full run by itself.
+- Commit after each completed story or coherent story group.
+- Before starting new work, review recent commits in this worktree/branch.
+- Browser verification is mandatory for UI and overlay/CDP stories.
+
+## Codebase Patterns
+
+<!-- Ralph should append reusable implementation patterns here. -->
+
+## Progress log
+
+- 2026-05-16: Created dedicated Docker dev worker/worktree, copied Web Annotations PRDs, and prepared Ralph setup metadata.
