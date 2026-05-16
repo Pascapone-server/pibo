@@ -16,8 +16,9 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "No Chat Web telemetry drill-down UI in V1."
+      "passes": true,
+      "notes": "Completed in signals/staleness batch on 2026-05-16: signal snapshots now expose compact metadata-only activeTelemetry hints with active turn id, active phase, last progress time, stale age, stale flag, queue depth, and threshold. Tests cover active non-stale, active stale, telemetry-unavailable/idle, and absence of prompt/tool argument payloads. Validated with Docker npm run typecheck and npm test (429 passing tests).",
+      "status": "complete"
     },
     {
       "id": "US-002",
@@ -32,8 +33,9 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": "Run before PRD 04 stale command."
+      "passes": true,
+      "notes": "Completed in signals/staleness batch on 2026-05-16: added sanitized telemetryStaleThresholds user/provider settings shape with default, provider, and profile thresholds plus resolver output for applied threshold and source. Tests cover default, provider override, profile override, explicit override, invalid config fallback, and missing config fallback. Validated with Docker npm run typecheck and npm test (429 passing tests).",
+      "status": "complete"
     },
     {
       "id": "US-003",
@@ -48,8 +50,9 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": "Depends on PRD 02 read APIs and US-002 settings."
+      "passes": true,
+      "notes": "Completed in signals/staleness batch on 2026-05-16: added read-only TelemetryStaleDetector over existing telemetry read APIs with provider/profile-aware thresholds, threshold source/key output, next commands, active phase, stale age, queue depth, provider/model/profile fields, missing-progress fallback, and completed-turn filtering. Detector performs no abort/clear/dispose/prune mutations. Validated with Docker npm run typecheck and npm test (429 passing tests).",
+      "status": "complete"
     },
     {
       "id": "US-004",

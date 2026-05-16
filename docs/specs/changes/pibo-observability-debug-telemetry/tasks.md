@@ -29,11 +29,11 @@
 
 ## 4. Signals and Staleness Hints
 
-- [ ] 4.1 Add active phase and last progress summary to runtime status or signal projection.
-- [ ] 4.2 Add provider/profile-aware stale threshold settings, including a minimal Provider Settings option.
-- [ ] 4.3 Add stale work detector that reads telemetry without aborting work.
+- [x] 4.1 Add active phase and last progress summary to runtime status or signal projection.
+- [x] 4.2 Add provider/profile-aware stale threshold settings, including a minimal Provider Settings option.
+- [x] 4.3 Add stale work detector that reads telemetry without aborting work.
 - [ ] 4.4 Expose stale hints through gateway status when available.
-- [ ] 4.5 Add tests for active stale session, non-stale active session, and provider-specific threshold behavior.
+- [x] 4.5 Add tests for active stale session, non-stale active session, and provider-specific threshold behavior.
 
 ## 5. Debug CLI
 
