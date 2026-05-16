@@ -52,31 +52,31 @@
 
 ## Phase 5: SSH/recovery hardening
 
-- [ ] T5.1 Add TTY detection and non-TTY fallback/error behavior.
-- [ ] T5.2 Handle no sessions, no rooms, no profiles, and source unavailable states.
-- [ ] T5.3 Ensure `Ctrl+C`, `/exit`, and `/quit` close subscriptions and restore terminal state.
-- [ ] T5.4 Add large-session row-window limits.
-- [ ] T5.5 Add narrow-terminal wrapping/truncation checks.
-- [ ] T5.6 Document recovery usage and Web-only feature boundaries.
+- [x] T5.1 Add TTY detection and non-TTY fallback/error behavior.
+- [x] T5.2 Handle no sessions, no rooms, no profiles, and source unavailable states.
+- [x] T5.3 Ensure `Ctrl+C`, `/exit`, and `/quit` close subscriptions and restore terminal state.
+- [x] T5.4 Add large-session row-window limits.
+- [x] T5.5 Add narrow-terminal wrapping/truncation checks.
+- [x] T5.6 Document recovery usage and Web-only feature boundaries.
 
 ## Phase 6: Validation
 
-- [ ] T6.1 Run `npm run typecheck`.
-- [ ] T6.2 Run relevant tests.
-- [ ] T6.3 Run manual TTY smoke test.
-- [ ] T6.4 Verify Web Chat UI build/typecheck still passes.
-- [ ] T6.5 Verify unsupported Web-only features are not exposed in CLI V1.
-- [ ] T6.6 Update PRD/task status after implementation.
+- [x] T6.1 Run `npm run typecheck`.
+- [x] T6.2 Run relevant tests.
+- [x] T6.3 Run manual TTY smoke test.
+- [x] T6.4 Verify Web Chat UI build/typecheck still passes.
+- [x] T6.5 Verify unsupported Web-only features are not exposed in CLI V1.
+- [x] T6.6 Update PRD/task status after implementation.
 
 ## Acceptance Checklist
 
-- [ ] New CLI command starts an Ink app in a TTY.
+- [x] New CLI command starts an Ink app in a TTY.
 - [x] CLI can create/select sessions.
 - [x] CLI can send a normal message.
 - [x] CLI shows live compact transcript output.
 - [x] CLI can choose existing agent/profile.
 - [x] `/help`, `/new`, `/session`, `/agent`, `/status`, `/clear`, `/exit`, and `/quit` work.
-- [ ] Projects, Workflows, Cron, Ralph, Agent Designer, and full Settings are absent from V1 CLI.
-- [ ] Shared row model is reused by Web and CLI.
-- [ ] Web Chat UI remains unchanged.
-- [ ] Typecheck passes.
+- [x] Projects, Workflows, Cron, Ralph, Agent Designer, and full Settings are absent from V1 CLI.
+- [x] Shared row model is reused by Web and CLI.
+- [x] Web Chat UI remains unchanged.
+- [x] Typecheck passes.

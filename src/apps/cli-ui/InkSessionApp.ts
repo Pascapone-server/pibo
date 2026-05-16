@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
+import { isCliSourceError } from "../../cli-session/index.js";
 import { buildCompactTerminalRows, type CompactTerminalRow } from "../../session-ui/index.js";
 import type {
 	CliAgentSummary,
@@ -70,6 +71,10 @@ export function InkSessionApp({ source, initialSessionId, maxRows, maxLineChars,
 		openedRef.current = undefined;
 	}, []);
 
+	const cleanup = useMemo(() => createCliSessionCleanup(closeOpenSession, () => {
+		void source.close();
+	}), [closeOpenSession, source]);
+
 	const openSession = useCallback(async (sessionId: string, message?: string) => {
 		closeOpenSession();
 		const opened = await source.openSession(sessionId);
@@ -98,9 +103,10 @@ export function InkSessionApp({ source, initialSessionId, maxRows, maxLineChars,
 	}, [closeOpenSession, source]);
 
 	const requestExit = useCallback(() => {
+		cleanup();
 		onExit?.();
 		app.exit();
-	}, [app, onExit]);
+	}, [app, cleanup, onExit]);
 
 	const submitCommandOrMessage = useCallback(async (rawInput: string) => {
 		await handleCliSessionSubmittedInput(rawInput, source, stateRef.current, setState, openSession, requestExit);
@@ -132,7 +138,7 @@ export function InkSessionApp({ source, initialSessionId, maxRows, maxLineChars,
 				error: undefined,
 			}));
 		} catch (error) {
-			setState((current) => ({ ...current, mode: "transcript", picker: undefined, error: boundedLine(errorMessage(error)), message: undefined }));
+			setState((current) => ({ ...current, mode: "transcript", picker: undefined, error: boundedLine(formatCliSessionError(error)), message: undefined }));
 		}
 	}, [openSession, source]);
 
@@ -144,26 +150,26 @@ export function InkSessionApp({ source, initialSessionId, maxRows, maxLineChars,
 				const sessionId = initialSessionId ?? sessions[0]?.id;
 				if (!sessionId) {
 					const status = await source.getStatus();
+					const rooms = await safeListRooms(source);
 					setState((current) => ({
 						...current,
 						loading: false,
 						status,
-						message: "No sessions found. Use /new to create a local CLI session.",
+						message: emptySessionRecoveryMessage(status, rooms),
 					}));
 					return;
 				}
 				await openSession(sessionId);
 			} catch (error) {
-				setState((current) => ({ ...current, loading: false, error: errorMessage(error) }));
+				setState((current) => ({ ...current, loading: false, error: formatCliSessionError(error) }));
 			}
 		})();
 
 		return () => {
 			closedRef.current = true;
-			closeOpenSession();
-			void source.close();
+			cleanup();
 		};
-	}, [closeOpenSession, initialSessionId, openSession, source]);
+	}, [cleanup, initialSessionId, openSession, source]);
 
 	useInput((input, key) => {
 		if (closedRef.current) return;
@@ -212,33 +218,40 @@ export type InkSessionAppViewProps = {
 };
 
 export function InkSessionAppView({ state, maxRows = 20, maxLineChars }: InkSessionAppViewProps): React.ReactElement {
-	const statusText = useMemo(() => formatStatusLine(state), [state]);
+	const lineLimit = normalizeTerminalLineLimit(maxLineChars);
+	const statusText = useMemo(() => boundedLine(formatStatusLine(state), lineLimit), [lineLimit, state]);
 	return React.createElement(
 		Box,
 		{ flexDirection: "column" },
 		React.createElement(Text, { color: state.status?.connected === false ? "red" : "cyan" }, statusText),
-		React.createElement(Text, { color: "gray" }, "Commands: /help /new /session /agent /status /clear /exit /quit"),
+		React.createElement(Text, { color: "gray" }, boundedLine("Commands: /help /new /session /agent /status /clear /exit /quit", lineLimit)),
 		state.loading ? React.createElement(Text, { color: "yellow" }, "Loading CLI session…") : null,
-		state.error ? React.createElement(Text, { color: "red" }, boundedLine(`Error: ${state.error}`)) : null,
-		state.message ? React.createElement(Text, { color: "gray" }, boundedLine(state.message, 500)) : null,
-		state.picker ? React.createElement(InkSessionPickerView, { picker: state.picker }) : null,
-		React.createElement(InkTerminalView, { rows: state.rows, maxRows, maxLineChars }),
-		React.createElement(Text, { color: state.mode === "transcript" ? "green" : "yellow" }, `› ${state.input}`),
+		state.error ? React.createElement(Text, { color: "red" }, boundedLine(`Error: ${state.error}`, lineLimit)) : null,
+		state.message ? React.createElement(Text, { color: "gray" }, boundedLine(state.message, lineLimit)) : null,
+		state.picker ? React.createElement(InkSessionPickerView, { picker: state.picker, maxLineChars: lineLimit }) : null,
+		React.createElement(InkTerminalView, { rows: state.rows, maxRows, maxLineChars: lineLimit }),
+		React.createElement(Text, { color: state.mode === "transcript" ? "green" : "yellow" }, boundedLine(`› ${state.input}`, lineLimit)),
 	);
 }
 
-export function InkSessionPickerView({ picker }: { picker: InkSessionPickerState }): React.ReactElement {
+export function normalizeTerminalLineLimit(maxLineChars: number | undefined): number {
+	if (maxLineChars === undefined || !Number.isFinite(maxLineChars)) return 220;
+	return Math.max(20, Math.floor(maxLineChars));
+}
+
+export function InkSessionPickerView({ picker, maxLineChars }: { picker: InkSessionPickerState; maxLineChars?: number }): React.ReactElement {
+	const lineLimit = normalizeTerminalLineLimit(maxLineChars);
 	if (picker.items.length === 0) {
 		return React.createElement(Box, { flexDirection: "column" },
-			React.createElement(Text, { color: "yellow" }, picker.title),
-			React.createElement(Text, { color: "gray" }, picker.emptyMessage),
+			React.createElement(Text, { color: "yellow" }, boundedLine(picker.title, lineLimit)),
+			React.createElement(Text, { color: "gray" }, boundedLine(picker.emptyMessage, lineLimit)),
 		);
 	}
 	return React.createElement(
 		Box,
 		{ flexDirection: "column" },
-		React.createElement(Text, { color: "yellow" }, `${picker.title} (↑/↓ select, Enter open, Esc cancel)`),
-		...picker.items.map((item, index) => React.createElement(Text, { key: item.id, color: index === picker.selectedIndex ? "green" : "white" }, `${index === picker.selectedIndex ? "❯" : " "} ${item.label}${item.description ? ` — ${item.description}` : ""}`)),
+		React.createElement(Text, { color: "yellow" }, boundedLine(`${picker.title} (↑/↓ select, Enter open, Esc cancel)`, lineLimit)),
+		...picker.items.map((item, index) => React.createElement(Text, { key: item.id, color: index === picker.selectedIndex ? "green" : "white" }, boundedLine(`${index === picker.selectedIndex ? "❯" : " "} ${item.label}${item.description ? ` — ${item.description}` : ""}`, lineLimit))),
 	);
 }
 
@@ -321,21 +334,21 @@ export async function handleCliSessionSubmittedInput(
 	if (parsed.type === "message") {
 		const sessionId = state.session?.id;
 		if (!sessionId) {
-			setState((current) => ({ ...current, error: "No session is open. Use /new or /session first." }));
+			setState((current) => ({ ...current, error: "No session is open. Use /new to create one or /session to select an existing session." }));
 			return;
 		}
 		try {
 			await source.sendMessage(sessionId, parsed.text);
 			setState((current) => ({ ...current, message: "Message sent.", error: undefined }));
 		} catch (error) {
-			setState((current) => ({ ...current, error: boundedLine(errorMessage(error)), message: undefined }));
+			setState((current) => ({ ...current, error: boundedLine(formatCliSessionError(error)), message: undefined }));
 		}
 		return;
 	}
 	try {
 		await handleSlashCommand(parsed.command, source, state, setState, openSession, requestExit);
 	} catch (error) {
-		setState((current) => ({ ...current, error: boundedLine(errorMessage(error)), message: undefined, mode: "transcript", picker: undefined }));
+		setState((current) => ({ ...current, error: boundedLine(formatCliSessionError(error)), message: undefined, mode: "transcript", picker: undefined }));
 	}
 }
 
@@ -371,17 +384,21 @@ async function handleSlashCommand(
 	}
 	if (command.name === "session") {
 		const sessions = await source.listSessions();
+		const status = await source.getStatus({ sessionId: state.session?.id });
+		const rooms = await safeListRooms(source);
+		const emptyMessage = emptySessionRecoveryMessage(status, rooms);
 		setState((current) => ({
 			...current,
+			status,
 			mode: "session-picker",
 			picker: {
 				kind: "session",
 				title: "Select session",
 				items: sessions.map(sessionPickerItem),
 				selectedIndex: 0,
-				emptyMessage: "No sessions found. Use /new to create a local CLI session.",
+				emptyMessage,
 			},
-			message: sessions.length === 0 ? "No sessions found. Use /new to create one." : "Select a session with arrow keys.",
+			message: sessions.length === 0 ? emptyMessage : "Select a session with arrow keys.",
 			error: undefined,
 		}));
 		return;
@@ -433,6 +450,49 @@ function formatStatusLine(state: InkSessionAppState): string {
 
 function boundedLine(value: string, max = 220): string {
 	return value.length <= max ? value : `${value.slice(0, Math.max(0, max - 12))}… truncated`;
+}
+
+export function createCliSessionCleanup(closeOpenSession: () => void, closeSource: () => void): () => void {
+	let cleanedUp = false;
+	return () => {
+		if (cleanedUp) return;
+		cleanedUp = true;
+		try {
+			closeOpenSession();
+		} finally {
+			try {
+				closeSource();
+			} catch {
+				// Exit cleanup must be best-effort so terminal shutdown can finish.
+			}
+		}
+	};
+}
+
+async function safeListRooms(source: CliSessionSource): Promise<readonly unknown[]> {
+	try {
+		return await source.listRooms();
+	} catch {
+		return [];
+	}
+}
+
+function emptySessionRecoveryMessage(status: CliRuntimeStatus, rooms: readonly unknown[]): string {
+	if (status.rooms === "unsupported") return "No sessions found and this source cannot list rooms. Use /new to create a local CLI session.";
+	if (rooms.length === 0) return "No sessions or rooms found. Use /new to create a local CLI session.";
+	return "No sessions found. Use /new to create a local CLI session.";
+}
+
+export function formatCliSessionError(error: unknown): string {
+	const message = redactCliSessionStatusText(errorMessage(error));
+	if (isCliSourceError(error)) {
+		if (error.code === "source_closed") return `${message}. Recovery: restart pibo tui:sessions.`;
+		if (error.code === "session_not_found") return `${message}. Recovery: use /session to select another session or /new to create one.`;
+		if (error.code === "agent_not_found") return `${message}. Recovery: use /agent to pick an available existing profile.`;
+		if (error.code === "empty_message") return `${message}. Type a message or use /help.`;
+		return `${message}. Recovery: check local Pibo state, then use /status, /session, or /new.`;
+	}
+	return `${message}. Recovery: use /status for source state or restart the CLI if the problem persists.`;
 }
 
 function redactCliSessionStatusText(text: string): string {
