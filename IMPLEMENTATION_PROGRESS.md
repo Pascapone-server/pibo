@@ -61,3 +61,19 @@ Related specs:
 ## Progress log
 
 - 2026-05-17: Created worktree, committed V2 specs/PRDs, spawned dedicated dev worker, and prepared Ralph prompt parameters.
+
+## 2026-05-17 run: PRD 01 current-state audit batch
+
+Selected story group:
+
+- `prd_01_product_scope_and_current_state.json` / `US-001` — Audit current Web and Ink terminal sharing.
+- `prd_01_product_scope_and_current_state.json` / `US-002` — Document V2 parity scope and command inventory.
+- `prd_01_product_scope_and_current_state.json` / `US-003` — Reproduce/document owner-scope visibility bug.
+
+Intended validation plan:
+
+- Add a canonical current-state report under `docs/reports/` covering shared `src/session-ui`, Web compact terminal DOM components, Ink components, CLI source/runtime integration, V2 command inventory, unsupported/product-area boundaries, PTY validation conventions, and the `user:unknown` Web visibility bug.
+- Add a focused test fixture documenting the current owner fallback and a pending regression for the future no-`user:unknown` behavior.
+- Run focused build/test for the new/changed tests inside `pibo-dev-ink-cli-v2-web-parity`.
+- Run `npm run typecheck` inside `pibo-dev-ink-cli-v2-web-parity`.
+- Update PRD JSON story notes with evidence and commit hash, then commit the coherent audit batch from the host worktree.
