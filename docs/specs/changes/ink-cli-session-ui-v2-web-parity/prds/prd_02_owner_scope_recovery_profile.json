@@ -16,8 +16,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed in 13c0b33. Implemented LocalCliSessionSource owner discovery and active owner resolution from explicit --owner-scope, session store, Pibo data rooms/session_navigation/sessions/event_log actor owner scopes, and custom-agent owner hints passed by the default CLI source context. Added stable Root recovery owner local:root with label Root recovery and no email requirement. listRooms/getStatus/createSession now ensure or expose a selected-owner Personal Chat/default room; createSession without owner no longer silently writes user:unknown and uses the resolved owner/default room. Evidence: docker exec pibo-dev-ink-cli-v2-web-parity bash -lc 'cd /workspace && npm run build >/tmp/pibo-build.log && node --test test/cli-session-source.test.mjs test/ink-cli-v2-current-state.test.mjs test/cli-ui-session-app.test.mjs' passed 25/25 focused tests (real source/unit path, no PTY required for this source-contract story). docker exec pibo-dev-ink-cli-v2-web-parity bash -lc 'cd /workspace && npm run typecheck' passed. docker exec pibo-dev-ink-cli-v2-web-parity bash -lc 'cd /workspace && npm test' was run; it failed in unrelated telemetry-store.test.mjs stale/prune test that also fails standalone, while this story's focused tests passed."
     },
     {
       "id": "US-002",

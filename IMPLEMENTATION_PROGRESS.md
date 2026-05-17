@@ -110,3 +110,19 @@ Intended validation plan:
 - Preserve `--session`/existing source compatibility by defaulting local sources with no explicit owner to the resolved single/fallback owner rather than `user:unknown`.
 - Add focused source tests for no owners, one owner, multiple owners, owner/room/session filtering, and create-session owner/default-room behavior.
 - Run `npm run build`, focused source tests, and `npm run typecheck` inside `pibo-dev-ink-cli-v2-web-parity` before committing.
+
+Validation and results for PRD 02 owner discovery/source contract batch:
+
+- Implemented `CliOwnerSummary`, active-owner source methods, owner-aware `listRooms`/`listSessions`, active owner status fields, selected-owner default-room creation, and deterministic Root recovery fallback `local:root`.
+- Local owner discovery now considers explicit `--owner-scope`, existing sessions, Pibo data `rooms`, `session_navigation`, `sessions`, event-log actor owner scopes, and custom-agent owner hints from the default CLI source context. Legacy implicit `user:unknown` is not selected unless explicitly requested.
+- Selected/fallback owners get a Personal Chat/default room through `ChatRoomService` when a `PiboDataStore` is available, or a deterministic virtual room otherwise.
+- Updated CLI status/header and `/status` formatting to show the active owner label/scope.
+- Updated the current-state regression fixture so the V2 default local source now verifies `local:root` instead of reproducing new `user:unknown` writes.
+- Validation commands:
+  - `docker exec pibo-dev-ink-cli-v2-web-parity bash -lc 'cd /workspace && npm run build >/tmp/pibo-build.log && node --test test/cli-session-source.test.mjs test/ink-cli-v2-current-state.test.mjs test/cli-ui-session-app.test.mjs'` — passed 25/25 focused tests.
+  - `docker exec pibo-dev-ink-cli-v2-web-parity bash -lc 'cd /workspace && npm run typecheck'` — passed.
+  - `docker exec pibo-dev-ink-cli-v2-web-parity bash -lc 'cd /workspace && npm test'` — failed in unrelated `test/telemetry-store.test.mjs` / `telemetry stale, stats, and prune are read-oriented by default`; standalone rerun of that telemetry test also failed. This batch's focused tests passed.
+- Path classification: real local source/unit integration path against in-memory and temp SQLite Pibo data stores. No user-facing interactive TUI flow changed in this batch beyond owner/status text, so no PTY raw/clean artifacts were required by these two source-contract stories.
+- Completed stories marked `passes: true`: PRD 02 `US-001`; PRD 04 `US-001`.
+- Implementation commit: `13c0b33` (`Add CLI owner discovery source contracts`).
+- Blocker/next step: investigate the unrelated telemetry prune test before relying on full `npm test`; next PRD group should implement PRD 02 `US-002` owner picker and active owner startup state, with PTY validation.

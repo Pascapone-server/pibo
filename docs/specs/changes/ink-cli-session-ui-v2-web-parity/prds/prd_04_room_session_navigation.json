@@ -16,8 +16,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed in 13c0b33. Expanded CliSessionSource with getActiveOwner(), listOwners(), owner-aware listRooms(), owner-aware listSessions(), active owner status fields, room owner/default metadata, and owner-scoped createSession default-room behavior. Local source maps selected owners to Personal Chat/default room via ChatRoomService when PiboDataStore is available and a deterministic virtual Personal Chat room otherwise; it merges persisted room rows with session-derived room metadata and preserves explicit --session compatibility through owner validation. Focused source tests cover active owner, Root recovery fallback, owner discovery, selected-owner room/session filtering, selected-owner default-room creation, and no implicit user:unknown writes. Evidence: docker exec pibo-dev-ink-cli-v2-web-parity bash -lc 'cd /workspace && npm run build >/tmp/pibo-build.log && node --test test/cli-session-source.test.mjs test/ink-cli-v2-current-state.test.mjs test/cli-ui-session-app.test.mjs' passed 25/25 focused tests (real source/unit path, no PTY required because no interactive picker flow was implemented in this story). docker exec pibo-dev-ink-cli-v2-web-parity bash -lc 'cd /workspace && npm run typecheck' passed. docker exec pibo-dev-ink-cli-v2-web-parity bash -lc 'cd /workspace && npm test' was run and only the unrelated telemetry-store stale/prune test failed; standalone rerun of that telemetry test also failed."
     },
     {
       "id": "US-002",
