@@ -10,6 +10,7 @@ import {
 } from '../dist/compute/resource-policy.js';
 import {
 	LABEL_IDLE_SECONDS,
+	LABEL_LAST_USED_AT,
 	LABEL_OWNER_SCOPE,
 	LABEL_PORT_BLOCK,
 	LABEL_RALPH_JOB_ID,
@@ -19,9 +20,11 @@ import {
 	LABEL_WORKTREE_PATH,
 	buildDevWorkerDockerRunArgs,
 	buildWorkerDockerRunArgs,
+	parseDockerWorkerInspect,
 	parseDockerWorkerListLine,
 	resolveComputeWorkerLifecycle,
 } from '../dist/compute/docker.js';
+import { renderComputeWorkerListText } from '../dist/compute/cli.js';
 
 const customPolicy = Object.freeze({
 	memory: '3g',
@@ -159,6 +162,7 @@ test('compute list parsing exposes Ralph ownership from Docker labels', () => {
 	const line = [
 		'abc123',
 		'pibo-dev-ralph-test',
+		'exited',
 		'Exited (137) 2 minutes ago',
 		'0.0.0.0:4830->4789/tcp',
 		[
@@ -167,24 +171,93 @@ test('compute list parsing exposes Ralph ownership from Docker labels', () => {
 			'pibo.compute.ownerScope=user:test',
 			'pibo.compute.worktree=ralph-test',
 			'pibo.compute.worktreePath=/repo/.worktrees/ralph-test',
+			`${LABEL_LAST_USED_AT}=2026-05-17T00:10:00.000Z`,
 			'pibo.ralph.jobId=ralph_job_1',
 			'pibo.ralph.runId=rrun_1',
+			`${COMPUTE_RESOURCE_POLICY_LABELS.memory}=2g`,
+			`${COMPUTE_RESOURCE_POLICY_LABELS.pidsLimit}=512`,
 		].join(','),
 	].join('\t');
 
-	assert.deepEqual(parseDockerWorkerListLine(line), {
-		id: 'abc123',
-		name: 'pibo-dev-ralph-test',
-		role: 'dev',
-		status: 'Exited (137) 2 minutes ago',
-		ports: '0.0.0.0:4830->4789/tcp',
-		createdAt: '2026-05-17T00:00:00.000Z',
-		ownerScope: 'user:test',
-		worktree: 'ralph-test',
-		worktreePath: '/repo/.worktrees/ralph-test',
-		ralphJobId: 'ralph_job_1',
-		ralphRunId: 'rrun_1',
+	const worker = parseDockerWorkerListLine(line);
+	assert.equal(worker.id, 'abc123');
+	assert.equal(worker.name, 'pibo-dev-ralph-test');
+	assert.equal(worker.role, 'dev');
+	assert.equal(worker.state, 'exited');
+	assert.equal(worker.status, 'Exited (137) 2 minutes ago');
+	assert.equal(worker.ports, '0.0.0.0:4830->4789/tcp');
+	assert.equal(worker.createdAt, '2026-05-17T00:00:00.000Z');
+	assert.equal(worker.lastUsedAt, '2026-05-17T00:10:00.000Z');
+	assert.equal(worker.ownerScope, 'user:test');
+	assert.equal(worker.worktree, 'ralph-test');
+	assert.equal(worker.worktreePath, '/repo/.worktrees/ralph-test');
+	assert.equal(worker.ralphJobId, 'ralph_job_1');
+	assert.equal(worker.ralphRunId, 'rrun_1');
+	assert.deepEqual(worker.resourcePolicy, { memory: '2g', pidsLimit: 512 });
+	assert.deepEqual(worker.cleanupEligibility, {
+		eligible: false,
+		reasons: ['dev-worker-preserved', 'stopped'],
+		nextCommands: ['pibo compute reap --include-dev --max-age-minutes <n>'],
 	});
+});
+
+function inspectFixture(overrides = {}) {
+	return {
+		Id: overrides.Id ?? 'container-1',
+		Name: overrides.Name ?? '/pibo-worker-running',
+		Created: overrides.Created ?? '2026-05-17T00:00:00.000Z',
+		Config: {
+			Labels: {
+				'pibo.compute.role': 'worker',
+				'pibo.compute.createdAt': '2026-05-17T00:00:00.000Z',
+				'pibo.compute.ownerScope': 'user:test',
+				'pibo.compute.worktree': 'repo',
+				...(overrides.omitPortLabel ? {} : { 'pibo.compute.port.gateway': '4789' }),
+				[COMPUTE_RESOURCE_POLICY_LABELS.memory]: '2g',
+				[COMPUTE_RESOURCE_POLICY_LABELS.memorySwap]: '2g',
+				[COMPUTE_RESOURCE_POLICY_LABELS.pidsLimit]: '512',
+				[COMPUTE_RESOURCE_POLICY_LABELS.shmSize]: '512m',
+				[COMPUTE_RESOURCE_POLICY_LABELS.restart]: 'no',
+				...(overrides.Labels ?? {}),
+			},
+		},
+		State: overrides.State ?? { Status: 'running', Running: true, OOMKilled: false, Dead: false, ExitCode: 0, StartedAt: '2026-05-17T00:01:00.000Z' },
+		NetworkSettings: overrides.NetworkSettings ?? { Ports: { '4789/tcp': [{ HostIp: '0.0.0.0', HostPort: '4830' }] } },
+	};
+}
+
+test('all-state compute inspect parsing covers running stopped OOM-killed and no-port containers', () => {
+	const running = parseDockerWorkerInspect(inspectFixture());
+	assert.equal(running.state, 'running');
+	assert.equal(running.oomKilled, false);
+	assert.deepEqual(running.portMap, { '4789/tcp': '0.0.0.0:4830', gateway: '4789' });
+	assert.deepEqual(running.cleanupEligibility, { eligible: false, reasons: ['running-or-retained'], nextCommands: ['pibo compute list --all --json'] });
+
+	const stopped = parseDockerWorkerInspect(inspectFixture({ Id: 'container-2', Name: '/pibo-worker-stopped', State: { Status: 'exited', Running: false, OOMKilled: false, Dead: false, ExitCode: 0 } }));
+	assert.equal(stopped.state, 'exited');
+	assert.equal(stopped.status, 'exited (0)');
+	assert.deepEqual(stopped.cleanupEligibility, { eligible: true, reasons: ['stopped'], nextCommands: ['pibo compute reap --max-age-minutes <n>'] });
+
+	const oom = parseDockerWorkerInspect(inspectFixture({ Id: 'container-3', Name: '/pibo-worker-oom', State: { Status: 'exited', Running: false, OOMKilled: true, Dead: false, ExitCode: 137 } }));
+	assert.equal(oom.oomKilled, true);
+	assert.deepEqual(oom.cleanupEligibility.reasons, ['oom-killed', 'stopped']);
+
+	const noPort = parseDockerWorkerInspect(inspectFixture({ Id: 'container-4', Name: '/pibo-worker-no-port', State: { Status: 'exited', Running: false, OOMKilled: false, Dead: false, ExitCode: 1 }, NetworkSettings: { Ports: {} }, omitPortLabel: true }));
+	assert.equal(noPort.ports, '-');
+});
+
+test('compute list text output has empty state guidance and all-state columns', () => {
+	const empty = renderComputeWorkerListText([], { all: true });
+	assert.match(empty, /No Pibo worker containers found/);
+	assert.match(empty, /pibo compute list --all --json/);
+	assert.match(empty, /pibo compute reap --help/);
+
+	const worker = parseDockerWorkerInspect(inspectFixture({ State: { Status: 'exited', Running: false, OOMKilled: true, Dead: false, ExitCode: 137 } }));
+	const text = renderComputeWorkerListText([worker], { all: true });
+	assert.match(text, /NAME\tROLE\tSTATE\tSTATUS\tOOM\tPORTS/);
+	assert.match(text, /pibo-worker-running\tworker\texited\texited \(137\)\tyes/);
+	assert.match(text, /mem=2g,pids=512,shm=512m/);
+	assert.match(text, /eligible:oom-killed\+stopped/);
 });
 
 test('dev worker docker run args include resource policy labels worktree metadata and bounded logs', () => {

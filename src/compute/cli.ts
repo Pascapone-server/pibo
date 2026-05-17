@@ -13,6 +13,7 @@ import {
 	releaseWorker,
 	reapWorkers,
 	getSourceHash,
+	type WorkerInfo,
 } from "./docker.js";
 import { writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
@@ -30,6 +31,38 @@ function parsePositiveIntegerOption(value: string | undefined): number | undefin
 	if (value === undefined || value.trim() === "") return undefined;
 	const parsed = Number(value);
 	return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function formatResourcePolicy(worker: WorkerInfo): string {
+	const policy = worker.resourcePolicy;
+	if (!policy) return "-";
+	const parts = [
+		policy.memory ? `mem=${policy.memory}` : undefined,
+		policy.pidsLimit !== undefined ? `pids=${policy.pidsLimit}` : undefined,
+		policy.shmSize ? `shm=${policy.shmSize}` : undefined,
+	].filter(Boolean);
+	return parts.length ? parts.join(",") : "-";
+}
+
+function formatCleanup(worker: WorkerInfo): string {
+	const prefix = worker.cleanupEligibility.eligible ? "eligible" : "skip";
+	return `${prefix}:${worker.cleanupEligibility.reasons.join("+") || "none"}`;
+}
+
+export function renderComputeWorkerListText(workers: WorkerInfo[], options: { all?: boolean } = {}): string {
+	if (workers.length === 0) {
+		return [
+			options.all ? "No Pibo worker containers found." : "No worker containers running.",
+			"Next: pibo compute list --all --json",
+			"Next: pibo compute reap --help",
+		].join("\n");
+	}
+	const lines = ["NAME\tROLE\tSTATE\tSTATUS\tOOM\tPORTS\tCREATED\tLAST_USED\tOWNER\tWORKTREE\tRALPH_JOB\tRALPH_RUN\tRESOURCE\tCLEANUP"];
+	for (const w of workers) {
+		lines.push(`${w.name}\t${w.role}\t${w.state}\t${w.status}\t${w.oomKilled ? "yes" : "no"}\t${w.ports || "-"}\t${w.createdAt}\t${w.lastUsedAt ?? "-"}\t${w.ownerScope ?? "-"}\t${w.worktree ?? "-"}\t${w.ralphJobId ?? "-"}\t${w.ralphRunId ?? "-"}\t${formatResourcePolicy(w)}\t${formatCleanup(w)}`);
+	}
+	lines.push("Next: pibo compute list --all --json");
+	return lines.join("\n");
 }
 
 export async function runComputeCli(argv: string[]): Promise<void> {
@@ -200,14 +233,7 @@ Next:
 				printJson({ workers });
 				return;
 			}
-			if (workers.length === 0) {
-				console.log(options.all ? "No Pibo worker containers found." : "No worker containers running.");
-				return;
-			}
-			console.log("NAME\tROLE\tSTATUS\tPORTS\tCREATED\tOWNER\tRALPH_JOB\tRALPH_RUN");
-			for (const w of workers) {
-				console.log(`${w.name}\t${w.role}\t${w.status}\t${w.ports}\t${w.createdAt}\t${w.ownerScope ?? "-"}\t${w.ralphJobId ?? "-"}\t${w.ralphRunId ?? "-"}`);
-			}
+			console.log(renderComputeWorkerListText(workers, { all: options.all === true }));
 		});
 
 	program

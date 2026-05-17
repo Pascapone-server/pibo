@@ -49,8 +49,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented all-state compute worker listing with Docker ps --all plus inspect enrichment for running/exited/dead/restarting/OOM-killed Pibo containers, stable JSON fields for state/status/OOM/ports/owner/worktree/Ralph/resource policy/cleanup eligibility, and text output with OOM/resource/cleanup columns plus empty-state next-command guidance. Added fixtures covering running, stopped, OOM-killed, no-port stopped, and empty-state rendering. Evidence recorded in IMPLEMENTATION_PROGRESS.md; focused compute tests, read-only real host compute list --all text/JSON validation, and full Docker-worker npm run typecheck passed."
     },
     {
       "id": "US-004",

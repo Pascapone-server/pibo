@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { readFile, readdir, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import {
+	COMPUTE_RESOURCE_POLICY_LABELS,
 	buildComputeResourcePolicyLabels,
 	buildDockerResourcePolicyArgs,
 	resolveComputeResourcePolicy,
@@ -22,6 +23,7 @@ export const LABEL_WORKTREE_PATH = "pibo.compute.worktreePath";
 export const LABEL_PORT_BLOCK = "pibo.compute.portBlock";
 export const LABEL_TTL_SECONDS = "pibo.compute.ttlSeconds";
 export const LABEL_IDLE_SECONDS = "pibo.compute.idleSeconds";
+export const LABEL_LAST_USED_AT = "pibo.compute.lastUsedAt";
 export const LABEL_RALPH_JOB_ID = "pibo.ralph.jobId";
 export const LABEL_RALPH_RUN_ID = "pibo.ralph.runId";
 
@@ -513,18 +515,41 @@ async function detectHost(): Promise<string> {
 	}
 }
 
+export interface ComputeWorkerCleanupEligibility {
+	eligible: boolean;
+	reasons: string[];
+	nextCommands: string[];
+}
+
 export interface WorkerInfo {
 	id: string;
 	name: string;
 	role: "worker" | "dev" | string;
+	state: string;
 	status: string;
 	ports: string;
+	portMap: Record<string, string>;
 	createdAt: string;
+	lastUsedAt?: string;
 	ownerScope?: string;
 	worktree?: string;
 	worktreePath?: string;
 	ralphJobId?: string;
 	ralphRunId?: string;
+	oomKilled?: boolean;
+	exitCode?: number;
+	resourcePolicy?: Partial<ComputeResourcePolicy>;
+	cleanupEligibility: ComputeWorkerCleanupEligibility;
+}
+
+interface DockerInspectContainer {
+	Id?: string;
+	Name?: string;
+	Created?: string;
+	Config?: { Labels?: Record<string, string> | null };
+	State?: { Status?: string; Running?: boolean; OOMKilled?: boolean; Dead?: boolean; ExitCode?: number; StartedAt?: string; FinishedAt?: string };
+	HostConfig?: { Memory?: number; MemorySwap?: number; PidsLimit?: number; ShmSize?: number; RestartPolicy?: { Name?: string }; LogConfig?: { Type?: string; Config?: Record<string, string> } };
+	NetworkSettings?: { Ports?: Record<string, Array<{ HostIp?: string; HostPort?: string }> | null> | null };
 }
 
 export function parseDockerLabels(labelsStr: string | undefined): Record<string, string> {
@@ -537,24 +562,166 @@ export function parseDockerLabels(labelsStr: string | undefined): Record<string,
 	return labels;
 }
 
-export function parseDockerWorkerListLine(line: string, fallbackRole?: string): WorkerInfo | undefined {
-	const [containerId, name, status, ports, labelsStr] = line.split("\t");
-	if (!containerId || !name) return undefined;
-	const labels = parseDockerLabels(labelsStr);
-	const role = labels[LABEL_ROLE] ?? fallbackRole ?? "unknown";
+function numberLabel(value: string | undefined): number | undefined {
+	if (value === undefined || value.trim() === "") return undefined;
+	const parsed = Number(value);
+	return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function resourcePolicyFromLabels(labels: Record<string, string>): Partial<ComputeResourcePolicy> | undefined {
+	const policy: Partial<ComputeResourcePolicy> = {};
+	if (labels[COMPUTE_RESOURCE_POLICY_LABELS.memory]) policy.memory = labels[COMPUTE_RESOURCE_POLICY_LABELS.memory];
+	if (labels[COMPUTE_RESOURCE_POLICY_LABELS.memorySwap]) policy.memorySwap = labels[COMPUTE_RESOURCE_POLICY_LABELS.memorySwap];
+	const pidsLimit = numberLabel(labels[COMPUTE_RESOURCE_POLICY_LABELS.pidsLimit]);
+	if (pidsLimit !== undefined) policy.pidsLimit = pidsLimit;
+	if (labels[COMPUTE_RESOURCE_POLICY_LABELS.shmSize]) policy.shmSize = labels[COMPUTE_RESOURCE_POLICY_LABELS.shmSize];
+	if (labels[COMPUTE_RESOURCE_POLICY_LABELS.init]) policy.init = labels[COMPUTE_RESOURCE_POLICY_LABELS.init] === "true";
+	if (labels[COMPUTE_RESOURCE_POLICY_LABELS.restart] === "no") policy.restart = "no";
+	if (labels[COMPUTE_RESOURCE_POLICY_LABELS.logDriver] === "json-file") policy.logDriver = "json-file";
+	if (labels[COMPUTE_RESOURCE_POLICY_LABELS.logMaxSize]) policy.logMaxSize = labels[COMPUTE_RESOURCE_POLICY_LABELS.logMaxSize];
+	const logMaxFile = numberLabel(labels[COMPUTE_RESOURCE_POLICY_LABELS.logMaxFile]);
+	if (logMaxFile !== undefined) policy.logMaxFile = logMaxFile;
+	return Object.keys(policy).length > 0 ? policy : undefined;
+}
+
+function portMapFromLabels(labels: Record<string, string>): Record<string, string> {
+	const portMap: Record<string, string> = {};
+	for (const [key, value] of Object.entries(labels)) {
+		if (!key.startsWith("pibo.compute.port.")) continue;
+		portMap[key.slice("pibo.compute.port.".length)] = value;
+	}
+	return portMap;
+}
+
+function portMapFromInspectPorts(ports: Record<string, Array<{ HostIp?: string; HostPort?: string }> | null> | null | undefined): Record<string, string> {
+	const portMap: Record<string, string> = {};
+	if (!ports) return portMap;
+	for (const [containerPort, bindings] of Object.entries(ports)) {
+		if (!bindings?.length) continue;
+		portMap[containerPort] = bindings.map((binding) => `${binding.HostIp ?? ""}:${binding.HostPort ?? ""}`).join(",");
+	}
+	return portMap;
+}
+
+function cleanupEligibilityForWorker(worker: Pick<WorkerInfo, "role" | "state" | "status" | "oomKilled">): ComputeWorkerCleanupEligibility {
+	const reasons: string[] = [];
+	const normalizedState = worker.state.toLowerCase();
+	const stopped = ["exited", "dead", "created"].includes(normalizedState) || /^exited\b/i.test(worker.status);
+	if (worker.oomKilled) reasons.push("oom-killed");
+	if (stopped) reasons.push("stopped");
+	if (normalizedState === "restarting") reasons.push("restarting");
+	if (worker.role === "dev" && reasons.length > 0) {
+		return {
+			eligible: false,
+			reasons: ["dev-worker-preserved", ...reasons],
+			nextCommands: ["pibo compute reap --include-dev --max-age-minutes <n>"],
+		};
+	}
+	if (reasons.length === 0) {
+		return { eligible: false, reasons: ["running-or-retained"], nextCommands: ["pibo compute list --all --json"] };
+	}
 	return {
-		id: containerId,
-		name,
-		role,
-		status: status ?? "",
-		ports: ports ?? "",
-		createdAt: labels[LABEL_CREATED_AT] ?? "unknown",
-		ownerScope: labels[LABEL_OWNER_SCOPE] ?? labels[LABEL_OWNER],
-		worktree: labels[LABEL_WORKTREE],
-		worktreePath: labels[LABEL_WORKTREE_PATH],
-		ralphJobId: labels[LABEL_RALPH_JOB_ID],
-		ralphRunId: labels[LABEL_RALPH_RUN_ID],
+		eligible: true,
+		reasons,
+		nextCommands: ["pibo compute reap --max-age-minutes <n>"],
 	};
+}
+
+function workerFromLabels(base: { id: string; name: string; state: string; status: string; ports: string; labels: Record<string, string>; fallbackRole?: string; oomKilled?: boolean; exitCode?: number }): WorkerInfo {
+	const role = base.labels[LABEL_ROLE] ?? base.fallbackRole ?? "unknown";
+	const portMap = portMapFromLabels(base.labels);
+	const worker: WorkerInfo = {
+		id: base.id,
+		name: base.name,
+		role,
+		state: base.state || stateFromStatus(base.status),
+		status: base.status ?? "",
+		ports: base.ports ?? "",
+		portMap,
+		createdAt: base.labels[LABEL_CREATED_AT] ?? "unknown",
+		lastUsedAt: base.labels[LABEL_LAST_USED_AT],
+		ownerScope: base.labels[LABEL_OWNER_SCOPE] ?? base.labels[LABEL_OWNER],
+		worktree: base.labels[LABEL_WORKTREE],
+		worktreePath: base.labels[LABEL_WORKTREE_PATH],
+		ralphJobId: base.labels[LABEL_RALPH_JOB_ID],
+		ralphRunId: base.labels[LABEL_RALPH_RUN_ID],
+		oomKilled: base.oomKilled,
+		exitCode: base.exitCode,
+		resourcePolicy: resourcePolicyFromLabels(base.labels),
+		cleanupEligibility: { eligible: false, reasons: [], nextCommands: [] },
+	};
+	worker.cleanupEligibility = cleanupEligibilityForWorker(worker);
+	return worker;
+}
+
+function stateFromStatus(status: string): string {
+	const lower = status.toLowerCase();
+	if (lower.startsWith("up")) return "running";
+	if (lower.startsWith("exited")) return "exited";
+	if (lower.includes("restarting")) return "restarting";
+	if (lower.startsWith("created")) return "created";
+	if (lower.startsWith("dead")) return "dead";
+	return "unknown";
+}
+
+export function parseDockerWorkerListLine(line: string, fallbackRole?: string): WorkerInfo | undefined {
+	const [containerId, name, stateOrStatus, statusOrPorts, portsOrLabels, labelsMaybe] = line.split("\t");
+	if (!containerId || !name) return undefined;
+	const hasStateColumn = labelsMaybe !== undefined;
+	const state = hasStateColumn ? stateOrStatus : stateFromStatus(stateOrStatus ?? "");
+	const status = hasStateColumn ? statusOrPorts : stateOrStatus;
+	const ports = hasStateColumn ? portsOrLabels : statusOrPorts;
+	const labels = parseDockerLabels(hasStateColumn ? labelsMaybe : portsOrLabels);
+	return workerFromLabels({ id: containerId, name, state: state ?? "unknown", status: status ?? "", ports: ports ?? "", labels, fallbackRole });
+}
+
+export function parseDockerWorkerInspect(value: DockerInspectContainer, fallback?: WorkerInfo): WorkerInfo | undefined {
+	const labels = value.Config?.Labels ?? {};
+	const role = labels[LABEL_ROLE] ?? fallback?.role;
+	if (!role) return fallback;
+	const state = value.State?.Status ?? fallback?.state ?? "unknown";
+	const status = statusFromInspectState(value.State, fallback?.status ?? state);
+	const portMap = { ...portMapFromInspectPorts(value.NetworkSettings?.Ports), ...portMapFromLabels(labels) };
+	const worker = workerFromLabels({
+		id: value.Id ?? fallback?.id ?? "unknown",
+		name: (value.Name ?? fallback?.name ?? "unknown").replace(/^\//, ""),
+		state,
+		status,
+		ports: fallback?.ports ?? portsTextFromPortMap(portMap),
+		labels,
+		fallbackRole: role,
+		oomKilled: value.State?.OOMKilled,
+		exitCode: value.State?.ExitCode,
+	});
+	worker.portMap = portMap;
+	if (value.Created && worker.createdAt === "unknown") worker.createdAt = value.Created;
+	return worker;
+}
+
+function statusFromInspectState(state: DockerInspectContainer["State"], fallback: string): string {
+	if (!state) return fallback;
+	if (state.Status === "running" && state.StartedAt) return `running since ${state.StartedAt}`;
+	if (state.Status === "exited") return `exited (${state.ExitCode ?? "unknown"})`;
+	if (state.Status) return state.Status;
+	return fallback;
+}
+
+function portsTextFromPortMap(portMap: Record<string, string>): string {
+	const entries = Object.entries(portMap);
+	return entries.length ? entries.map(([key, value]) => `${key}=${value}`).join(",") : "-";
+}
+
+async function enrichWorkersWithInspect(workers: WorkerInfo[]): Promise<WorkerInfo[]> {
+	if (workers.length === 0) return workers;
+	try {
+		const { stdout } = await execFileAsync("docker", ["inspect", ...workers.map((worker) => worker.id)]);
+		const inspected = JSON.parse(stdout) as DockerInspectContainer[];
+		const fallbackById = new Map(workers.map((worker) => [worker.id, worker]));
+		const fallbackByName = new Map(workers.map((worker) => [worker.name, worker]));
+		return inspected.map((container) => parseDockerWorkerInspect(container, fallbackById.get(container.Id ?? "") ?? fallbackByName.get((container.Name ?? "").replace(/^\//, "")))).filter((worker): worker is WorkerInfo => Boolean(worker));
+	} catch {
+		return workers;
+	}
 }
 
 export async function listWorkers(options: { includeDev?: boolean; all?: boolean } = {}): Promise<WorkerInfo[]> {
@@ -568,7 +735,7 @@ export async function listWorkers(options: { includeDev?: boolean; all?: boolean
 			"--filter",
 			`label=${LABEL_ROLE}=${role}`,
 			"--format",
-			"{{.ID}}\t{{.Names}}\t{{.Status}}\t{{.Ports}}\t{{.Labels}}",
+			"{{.ID}}\t{{.Names}}\t{{.State}}\t{{.Status}}\t{{.Ports}}\t{{.Labels}}",
 		]);
 
 		if (!stdout.trim()) continue;
@@ -580,7 +747,7 @@ export async function listWorkers(options: { includeDev?: boolean; all?: boolean
 		}
 	}
 
-	return workers;
+	return enrichWorkersWithInspect(workers);
 }
 
 export async function releaseWorker(id: string): Promise<void> {
