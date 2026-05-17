@@ -306,5 +306,5 @@ Validation and results for shared terminal descriptor foundation batch:
   - `docker exec pibo-dev-ink-cli-v2-web-parity bash -lc 'cd /workspace && npm test'` — ran 504 tests; 503 passed and only the pre-existing unrelated `test/telemetry-store.test.mjs` stale/prune assertion failed.
 - Path classification: shared renderer-neutral model/unit path only. This batch did not change user-facing Ink rendering or command execution, so PTY artifacts were not required.
 - Completed stories marked `passes: true`: PRD 03 `US-001`, `US-002`, `US-003`, `US-004`.
-- Implementation commit: ab6661aaf8f5f11ff26b8515bbad33550c2a61fa.
+- Implementation commit: a423768fbd55d80f3a8c18ffed8828efa17030a4.
 - Next recommended group: PRD 05 `US-001` and `US-005` to consume the shared command catalog in CLI help/suggestions groundwork, or PRD 03 `US-005` to wire a Web Compact Terminal rich-card path to the shared descriptors.
