@@ -497,6 +497,41 @@ test("Slash /model opens provider and model command menus", async () => {
 	assert.deepEqual(harness.state.status.activeModel, { provider: "openai", id: "gpt-fake-mini" });
 });
 
+test("Slash /login opens provider auth-method menus and safe API-key instructions", async () => {
+	const source = createDefaultFakeCliSessionSource();
+	const harness = stateHarness({ ...baseState(), activeOwner: { ownerScope: "user:fake", label: "Fake user", kind: "web-user" }, session: { id: "ps_fake_existing", title: "Existing fake session", profile: "pibo-agent", agentId: "pibo-agent", ownerScope: "user:fake", roomId: "room_fake_main", status: "idle" } });
+	const openSession = (sessionId, message) => openFakeSessionInto(source, harness, sessionId, message);
+	const submit = (input) => handleCliSessionSubmittedInput(input, source, harness.state, harness.setState, openSession, () => {});
+
+	await submit("/login");
+	assert.equal(harness.state.mode, "picker");
+	assert.equal(harness.state.picker.kind, "command-menu");
+	assert.equal(harness.state.picker.action, "login-provider");
+	assert.match(harness.state.picker.title, /Select login provider/);
+	assert.ok(harness.state.picker.items.some((item) => item.label === "OpenAI API"));
+
+	await submit("/login openai/api_key");
+	assert.match(harness.state.message, /API-key login requires hidden secret input/);
+	assert.doesNotMatch(harness.state.message, /sk-/);
+});
+
+test("Slash /fork-candidates opens a candidate picker and can fork by entry id", async () => {
+	const source = createDefaultFakeCliSessionSource();
+	const harness = stateHarness({ ...baseState(), activeOwner: { ownerScope: "user:fake", label: "Fake user", kind: "web-user" }, session: { id: "ps_fake_existing", title: "Existing fake session", profile: "pibo-agent", agentId: "pibo-agent", ownerScope: "user:fake", roomId: "room_fake_main", status: "idle" } });
+	const openSession = (sessionId, message) => openFakeSessionInto(source, harness, sessionId, message);
+	const submit = (input) => handleCliSessionSubmittedInput(input, source, harness.state, harness.setState, openSession, () => {});
+
+	await submit("/fork-candidates");
+	assert.equal(harness.state.mode, "picker");
+	assert.equal(harness.state.picker.action, "fork-candidate");
+	assert.match(harness.state.picker.title, /Select fork candidate/);
+	assert.ok(harness.state.picker.items.some((item) => item.label.includes("Hello from fake source")));
+
+	await submit("/fork-candidates entry_fake_1");
+	assert.match(harness.state.session.id, /^ps_fake_fork_/);
+	assert.match(harness.state.message, /fork-candidates: Existing fake session Fork/);
+});
+
 test("Slash Web action commands render shared results and open clone sessions", async () => {
 	const source = createDefaultFakeCliSessionSource();
 	const harness = stateHarness({ ...baseState(), activeOwner: { ownerScope: "user:fake", label: "Fake user", kind: "web-user" }, session: { id: "ps_fake_existing", title: "Existing fake session", profile: "pibo-agent", agentId: "pibo-agent", ownerScope: "user:fake", roomId: "room_fake_main", status: "idle" } });
@@ -515,8 +550,14 @@ test("Slash Web action commands render shared results and open clone sessions", 
 	assert.match(harness.state.message, /ps_fake_existing/);
 
 	await submit("/download");
-	assert.match(harness.state.message, /Browser download APIs/);
+	assert.match(harness.state.message, /browser download APIs/i);
 	assert.equal(harness.state.error, undefined);
+
+	await submit("/download /tmp/report.txt");
+	assert.match(harness.state.message, /Terminal download for \/tmp\/report\.txt/);
+
+	await submit("/upload /tmp/input.txt");
+	assert.match(harness.state.message, /Terminal upload for \/tmp\/input\.txt/);
 
 	await submit("/clone");
 	assert.match(harness.state.session.id, /^ps_fake_clone_/);

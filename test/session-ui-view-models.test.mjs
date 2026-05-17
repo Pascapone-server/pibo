@@ -95,13 +95,18 @@ test("shared command catalog merges gateway capabilities and filters prefixes", 
 	assert.deepEqual(filterSlashCommands(catalog, "/th now").map((command) => command.slash), ["/thinking", "/thinking-show"]);
 	const grouped = groupSlashCommandsForHelp(catalog);
 	assert.ok(grouped.available.some((command) => command.slash === "/status"));
+	assert.ok(grouped.available.some((command) => command.slash === "/download"));
 	assert.ok(grouped.navigation.some((command) => command.slash === "/owner"));
-	assert.ok(grouped.unsupported.some((command) => command.slash === "/download"));
+	assert.ok(grouped.unsupported.some((command) => command.slash === "/thinking-show"));
 });
 
 test("shared command result descriptors normalize menus status links unsupported and errors", () => {
 	assert.deepEqual(normalizeCommandResultDescriptor("status", { queuedMessages: 0, contextUsage: { percent: 1 } }), { kind: "status", title: "Status", status: { queuedMessages: 0, contextUsage: { percent: 1 } } });
 	assert.equal(normalizeCommandResultDescriptor("login", { action: "show_login_menu", providers: [{ id: "openai", name: "OpenAI", authMethods: ["device_code"] }] }).kind, "menu");
+	const forkMenu = normalizeCommandResultDescriptor("fork-candidates", { messages: [{ entryId: "entry_one", text: "Fork from this user message" }] });
+	assert.equal(forkMenu.kind, "menu");
+	assert.equal(forkMenu.items[0].id, "entry_one");
+	assert.match(forkMenu.items[0].label, /Fork from this user message/);
 	assert.equal(normalizeCommandResultDescriptor("clone", { piboSessionId: "ps_clone", roomId: "room_a", title: "Clone" }).kind, "session-link");
 	const unsupported = normalizeCommandResultDescriptor("download", { supported: false, unsupportedReason: "Browser API only" });
 	assert.equal(unsupported.kind, "unsupported");

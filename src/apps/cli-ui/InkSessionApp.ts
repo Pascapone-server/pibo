@@ -41,7 +41,7 @@ export type InkSessionPickerState = {
 	items: readonly InkSessionPickerItem[];
 	selectedIndex: number;
 	emptyMessage: string;
-	action?: "select-session" | "create-session" | "thinking-level" | "model-provider" | "model-choice";
+	action?: "select-session" | "create-session" | "thinking-level" | "model-provider" | "model-choice" | "login-provider" | "login-method" | "fork-candidate";
 	ownerScope?: string;
 	roomId?: string;
 	commandName?: string;
@@ -766,6 +766,43 @@ async function handleSlashCommand(
 		}, modelProviderPickerState(providers)));
 		return;
 	}
+	if (command.name === "login") {
+		const result = await source.executeSlashCommand({ command: command.name, args: command.args, sessionId: state.session?.id, ownerScope: state.activeOwner?.ownerScope });
+		if (command.args.trim()) {
+			const status = await source.getStatus({ sessionId: state.session?.id });
+			setState((current) => ({ ...current, status, message: renderCommandResultDescriptorText(result.descriptor, current.session), error: undefined }));
+			return;
+		}
+		const providers = loginProviderItemsFromActionResult(result.rawResult, result.descriptor);
+		if (providers.length === 0) {
+			setState((current) => ({ ...current, message: renderCommandResultDescriptorText(result.descriptor, current.session), error: undefined }));
+			return;
+		}
+		setState((current) => withPickerOverlay({
+			...current,
+			mode: "picker",
+			message: "Select a login provider, then choose a terminal-safe auth method.",
+			error: undefined,
+		}, loginProviderPickerState(providers)));
+		return;
+	}
+	if (command.name === "fork-candidates") {
+		const result = await source.executeSlashCommand({ command: command.name, args: command.args, sessionId: state.session?.id, ownerScope: state.activeOwner?.ownerScope });
+		const descriptor = result.descriptor;
+		if (command.args.trim() || descriptor.kind !== "menu" || descriptor.items.length === 0) {
+			const status = await source.getStatus({ sessionId: state.session?.id });
+			if (result.openSessionId && result.openSessionId !== state.session?.id) await openSession(result.openSessionId, renderCommandResultDescriptorText(descriptor, state.session));
+			else setState((current) => ({ ...current, status, message: renderCommandResultDescriptorText(descriptor, current.session), error: undefined }));
+			return;
+		}
+		setState((current) => withPickerOverlay({
+			...current,
+			mode: "picker",
+			message: "Select a fork candidate with arrow keys, then Enter.",
+			error: undefined,
+		}, forkCandidatePickerState(descriptor.items)));
+		return;
+	}
 	const handled = await executeSharedSlashCommand(command, source, state, setState, openSession);
 	if (handled) return;
 	setState((current) => ({ ...current, error: `Unknown command ${command.raw}. Use /help for supported CLI commands.`, message: undefined }));
@@ -796,6 +833,7 @@ const THINKING_LEVELS = ["current/default", "off", "minimal", "low", "medium", "
 const APPLY_THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
 
 type ModelProviderOption = CommandResultMenuItem & { models?: readonly CommandResultMenuItem[] };
+type LoginProviderOption = CommandResultMenuItem & { authMethods?: readonly CommandResultMenuItem[] };
 
 async function selectCommandMenuItem(
 	picker: InkSessionPickerState,
@@ -843,6 +881,33 @@ async function selectCommandMenuItem(
 		setState((current) => ({ ...current, status, mode: "transcript", picker: undefined, overlayStack: popInkSessionOverlay(popInkSessionOverlay(current.overlayStack)), message: renderCommandResultDescriptorText(result.descriptor, current.session), error: undefined }));
 		return;
 	}
+	if (picker.action === "login-provider") {
+		const provider = item.value as LoginProviderOption | undefined;
+		const methods = provider?.authMethods ?? [];
+		const next = loginMethodPickerState(item, methods, picker);
+		setState((current) => withPickerOverlay({ ...current, mode: "picker", message: methods.length === 0 ? `${item.label} has no terminal auth methods.` : `Select auth method for ${item.label}.`, error: undefined }, next));
+		return;
+	}
+	if (picker.action === "login-method") {
+		const providerValue = picker.parent?.items[picker.parent.selectedIndex]?.value as LoginProviderOption | undefined;
+		const providerId = String(providerValue?.id ?? "");
+		const methodId = String(item.id);
+		const args = providerId ? `${providerId}/${methodId}` : methodId;
+		const result = await source.executeSlashCommand({ command: "login", args, sessionId: state.session?.id, ownerScope: state.activeOwner?.ownerScope });
+		const status = await source.getStatus({ sessionId: state.session?.id });
+		setState((current) => ({ ...current, status, mode: "transcript", picker: undefined, overlayStack: popInkSessionOverlay(popInkSessionOverlay(current.overlayStack)), message: renderCommandResultDescriptorText(result.descriptor, current.session), error: undefined }));
+		return;
+	}
+	if (picker.action === "fork-candidate") {
+		const result = await source.executeSlashCommand({ command: "fork-candidates", args: item.id, sessionId: state.session?.id, ownerScope: state.activeOwner?.ownerScope });
+		if (result.openSessionId && result.openSessionId !== state.session?.id) {
+			await openSession(result.openSessionId, renderCommandResultDescriptorText(result.descriptor, state.session));
+			return;
+		}
+		const status = await source.getStatus({ sessionId: state.session?.id });
+		setState((current) => ({ ...current, status, mode: "transcript", picker: undefined, overlayStack: popInkSessionOverlay(current.overlayStack), message: renderCommandResultDescriptorText(result.descriptor, current.session), error: undefined }));
+		return;
+	}
 	setState((current) => ({ ...current, mode: "transcript", picker: undefined, message: `${item.label} selected.`, error: undefined }));
 }
 
@@ -888,6 +953,43 @@ function modelChoicePickerState(providerItem: InkSessionPickerItem, models: read
 	};
 }
 
+function loginProviderPickerState(providers: readonly LoginProviderOption[]): InkSessionPickerState {
+	return {
+		kind: "command-menu",
+		action: "login-provider",
+		commandName: "login",
+		title: "Select login provider",
+		items: providers.map((provider) => ({ id: provider.id, kind: "command-option", label: provider.label, description: provider.description, value: provider, disabled: provider.disabled })),
+		selectedIndex: 0,
+		emptyMessage: "No login providers are available.",
+	};
+}
+
+function loginMethodPickerState(providerItem: InkSessionPickerItem, methods: readonly CommandResultMenuItem[], parent: InkSessionPickerState): InkSessionPickerState {
+	return {
+		kind: "command-menu",
+		action: "login-method",
+		commandName: "login",
+		title: `Select auth method for ${providerItem.label}`,
+		items: methods.map((method) => ({ id: method.id, kind: "command-option", label: method.label, description: method.description, value: { ...method, provider: providerItem.id }, disabled: method.disabled })),
+		selectedIndex: 0,
+		emptyMessage: `${providerItem.label} did not return any terminal auth methods.`,
+		parent,
+	};
+}
+
+function forkCandidatePickerState(items: readonly CommandResultMenuItem[]): InkSessionPickerState {
+	return {
+		kind: "command-menu",
+		action: "fork-candidate",
+		commandName: "fork-candidates",
+		title: "Select fork candidate",
+		items: items.map((item) => ({ id: item.id, kind: "command-option", label: item.label, description: item.description, value: item, disabled: item.disabled })),
+		selectedIndex: 0,
+		emptyMessage: "No fork candidates are available.",
+	};
+}
+
 function modelProviderItemsFromActionResult(rawResult: unknown, descriptor: CommandResultDescriptor): ModelProviderOption[] {
 	const raw = unwrapActionPayload(rawResult);
 	const providers = recordsField(raw, "providers");
@@ -907,6 +1009,47 @@ function modelProviderItemsFromActionResult(rawResult: unknown, descriptor: Comm
 	return descriptor.kind === "menu" ? descriptor.items.map((item) => ({ ...item, models: [] })) : [];
 }
 
+function loginProviderItemsFromActionResult(rawResult: unknown, descriptor: CommandResultDescriptor): LoginProviderOption[] {
+	const raw = unwrapActionPayload(rawResult);
+	const providers = recordsField(raw, "providers");
+	if (providers.length > 0) return providers.map((provider, index) => {
+		const id = stringField(provider, "id") ?? stringField(provider, "provider") ?? `provider-${index}`;
+		const configured = provider.configured === true ? "configured" : provider.configured === false ? "not configured" : undefined;
+		return {
+			id,
+			label: stringField(provider, "label") ?? stringField(provider, "name") ?? id,
+			description: [configured, stringField(provider, "description")].filter(Boolean).join(" | ") || undefined,
+			disabled: provider.disabled === true,
+			authMethods: authMethodItems(provider),
+		};
+	});
+	return descriptor.kind === "menu" ? descriptor.items.map((item) => ({ ...item, authMethods: [] })) : [];
+}
+
+function authMethodItems(provider: Record<string, unknown>): CommandResultMenuItem[] {
+	const records = recordsField(provider, "authMethods");
+	if (records.length > 0) return records.map((method, index) => ({
+		id: stringField(method, "id") ?? stringField(method, "method") ?? `method-${index}`,
+		label: authMethodLabel(stringField(method, "label") ?? stringField(method, "name") ?? stringField(method, "method") ?? stringField(method, "id") ?? `Method ${index + 1}`),
+		description: stringField(method, "description") ?? stringField(method, "reason"),
+		disabled: method.disabled === true,
+		value: method,
+	}));
+	return arrayStringField(provider, "authMethods").map((method) => ({ id: method, label: authMethodLabel(method), description: authMethodDescription(method) }));
+}
+
+function authMethodLabel(method: string): string {
+	if (method === "device_code") return "Device code / OAuth";
+	if (method === "api_key") return "API key";
+	return method;
+}
+
+function authMethodDescription(method: string): string | undefined {
+	if (method === "device_code") return "Open a URL and complete sign-in in any browser.";
+	if (method === "api_key") return "Secret input is not echoed; this flow shows safe setup instructions.";
+	return undefined;
+}
+
 function unwrapActionPayload(value: unknown): unknown {
 	if (!value || typeof value !== "object" || Array.isArray(value)) return value;
 	const record = value as Record<string, unknown>;
@@ -919,6 +1062,12 @@ function recordsField(value: unknown, key: string): Record<string, unknown>[] {
 	if (!value || typeof value !== "object" || Array.isArray(value)) return [];
 	const field = (value as Record<string, unknown>)[key];
 	return Array.isArray(field) ? field.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item)) : [];
+}
+
+function arrayStringField(value: unknown, key: string): string[] {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+	const field = (value as Record<string, unknown>)[key];
+	return Array.isArray(field) ? field.filter((item): item is string => typeof item === "string") : [];
 }
 
 function stringField(record: Record<string, unknown>, key: string): string | undefined {

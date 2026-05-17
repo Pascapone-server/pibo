@@ -399,16 +399,21 @@ export class LocalCliSessionSource implements CliSessionSource {
 				updatedAt: session.updatedAt,
 			}));
 		}
+		if (input.command === "download") return terminalDownloadResult(input.args);
+		if (input.command === "upload") return terminalUploadResult(input.args);
 		if (!input.session) return { supported: false, unsupportedReason: `/${input.command} requires an open session.` };
+		if (input.command === "login" && loginAuthMethodFromArgs(input.args) === "api_key") return terminalApiKeyLoginInstructions(input.args);
 		if (!this.router) {
 			return { supported: false, unsupportedReason: `/${input.command} requires a routed local runtime. Open a local routed session or use a debug PTY mocked router.` };
 		}
+		const action = routedActionNameForSlash(input.command, input.actionName, input.args);
+		const params = executionParamsForSlash(input.command, input.args);
 		const event: PiboExecutionEvent = {
 			type: "execution",
 			piboSessionId: input.session.id,
-			action: input.actionName,
+			action,
 			id: randomUUID(),
-			...(executionParamsForSlash(input.command, input.args) !== undefined ? { params: executionParamsForSlash(input.command, input.args) } : {}),
+			...(params !== undefined ? { params } : {}),
 		};
 		const output = await this.router.emit(event);
 		if (output.type !== "execution_result") throw new CliSourceError("action_failed", `Action /${input.command} did not return an execution result.`);
@@ -977,6 +982,12 @@ function normalizeCommandName(command: string): string {
 	return command.trim().replace(/^\/+/, "").toLowerCase();
 }
 
+function routedActionNameForSlash(command: string, actionName: string, args: string | undefined): string {
+	if (command === "fork-candidates" && args?.trim()) return "session.fork";
+	if (command === "login" && loginAuthMethodFromArgs(args) === "device_code") return "login.start";
+	return actionName;
+}
+
 function executionParamsForSlash(command: string, args: string | undefined): PiboJsonValue | undefined {
 	const trimmed = args?.trim();
 	if (command === "compact" && trimmed) return { customInstructions: trimmed };
@@ -985,8 +996,44 @@ function executionParamsForSlash(command: string, args: string | undefined): Pib
 		const [provider, model] = trimmed.includes("/") ? trimmed.split("/", 2) : [undefined, trimmed];
 		return provider ? { provider, model } : { model };
 	}
+	if (command === "login" && trimmed) {
+		const [provider, method] = parseSlashSelectionArgs(trimmed);
+		if (method === "device_code") return { provider };
+	}
+	if (command === "fork-candidates" && trimmed) return { entryId: trimmed };
 	if (command === "fast" && trimmed) return { mode: trimmed };
 	return undefined;
+}
+
+function loginAuthMethodFromArgs(args: string | undefined): string | undefined {
+	const trimmed = args?.trim();
+	if (!trimmed) return undefined;
+	return parseSlashSelectionArgs(trimmed)[1];
+}
+
+function parseSlashSelectionArgs(value: string): [string, string | undefined] {
+	const [left, right] = value.includes("/") ? value.split("/", 2) : value.split(/\s+/, 2);
+	return [left ?? "", right];
+}
+
+function terminalApiKeyLoginInstructions(args: string | undefined): Record<string, unknown> {
+	const [provider] = parseSlashSelectionArgs(args?.trim() ?? "");
+	return {
+		message: `${provider || "Provider"} API-key login requires secret input. The Ink CLI will not echo or collect secrets in this flow; set credentials through provider environment variables or Web Settings, then run /login again.`,
+		supported: true,
+	};
+}
+
+function terminalDownloadResult(args: string | undefined): Record<string, unknown> {
+	const target = args?.trim();
+	if (!target) return { supported: false, unsupportedReason: "Usage: /download <path>. In a terminal, use shell tools such as cat, cp, scp, or rsync for server paths; browser download APIs are Web-only." };
+	return { message: `Terminal download for ${target}: this path is already on the server. Use shell tools such as cat, cp, scp, or rsync to copy it; browser download APIs are not used by the CLI.` };
+}
+
+function terminalUploadResult(args: string | undefined): Record<string, unknown> {
+	const target = args?.trim();
+	if (!target) return { supported: false, unsupportedReason: "Usage: /upload <path>. Browser file picker upload is Web-only; from SSH, copy files with scp/rsync or place them under ~/.pibo/uploads." };
+	return { message: `Terminal upload for ${target}: copy or move the file to ~/.pibo/uploads, or use Web /upload for browser file selection. The CLI did not copy file contents or echo secrets.` };
 }
 
 function sessionMetadataResult(session: PiboSession, defaultRoomId?: string): Record<string, unknown> {

@@ -417,3 +417,18 @@ Validation and results for interactive overlay thinking and model batch:
 - Implementation commit: `f98054b` (`Add Ink thinking and model command pickers`).
 - Evidence/PRD update commit: `c2a853b` (`Record interactive command picker PRD evidence`).
 - Next recommended group: PRD 06 `US-004` and `US-005` for `/login`, `/fork-candidates`, `/download`, and `/upload` terminal equivalents, then PRD 07 rendering/PTY validation stories.
+
+## 2026-05-17 run: login and terminal file/fork command equivalents batch
+
+Selected story group:
+
+- `prd_06_interactive_keyboard_flows.json` / `US-004` — Implement `/login` terminal provider flow.
+- `prd_06_interactive_keyboard_flows.json` / `US-005` — Define fork upload download terminal equivalents.
+
+Intended validation plan:
+
+- Reuse the command overlay stack to implement `/login` provider/auth-method keyboard selection from the source/routed login menu result, rendering OAuth URLs/completion instructions and safe API-key instructions without echoing secrets.
+- Add deterministic fake/debug PTY source fixtures for login providers/methods, fork candidates, and terminal file command results.
+- Implement terminal-safe `/fork-candidates`, `/download`, and `/upload` behavior as either keyboard-selectable candidates or explicit path-based/deferred unsupported command-result descriptors with clear reasons.
+- Add focused source/Ink/shared result tests for login menu parsing, OAuth/API-key output, fork candidate listing/selection or unsupported result, and download/upload path/unsupported behavior.
+- Run `npm run build` plus focused tests inside `pibo-dev-ink-cli-v2-web-parity`, then run `pibo debug pty` scripts for `/login` and fork/file commands with raw/clean artifacts, followed by `npm run typecheck` before committing.

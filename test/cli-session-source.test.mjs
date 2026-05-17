@@ -29,7 +29,7 @@ test("fake CLI session source exposes deterministic rooms sessions agents and st
 	const commands = await source.listSlashCommands();
 	assert.ok(commands.some((command) => command.slash === "/help"));
 	assert.ok(commands.some((command) => command.slash === "/thinking"));
-	assert.ok(commands.some((command) => command.slash === "/download" && command.support === "browser-only"));
+	assert.ok(commands.some((command) => command.slash === "/download" && command.support === "terminal-adapted"));
 
 	const status = await source.getStatus({ sessionId: "ps_fake_existing" });
 	assert.equal(status.source, "fake");
@@ -381,7 +381,7 @@ test("CLI session sources execute shared slash actions and normalize results", a
 	assert.equal(fast.descriptor.kind, "json");
 	const unsupported = await fake.executeSlashCommand({ command: "download", sessionId: "ps_fake_existing" });
 	assert.equal(unsupported.descriptor.kind, "unsupported");
-	assert.match(unsupported.descriptor.reason, /Browser download APIs/);
+	assert.match(unsupported.descriptor.reason, /browser download APIs/i);
 	const failed = await fake.executeSlashCommand({ command: "compact", sessionId: "ps_fake_existing" });
 	assert.equal(failed.descriptor.kind, "error");
 	assert.match(failed.descriptor.message, /TOKEN=\[redacted\]/);
@@ -436,6 +436,10 @@ test("local CLI session source routes slash actions under the selected owner and
 			if (event.action === "kill_all") return { type: "execution_result", piboSessionId: event.piboSessionId, eventId: event.id, action: event.action, result: { killed: [event.piboSessionId], cancelledRuns: ["run_1"] } };
 			if (event.action === "thinking") return { type: "execution_result", piboSessionId: event.piboSessionId, eventId: event.id, action: event.action, result: { message: `Thinking level set to ${event.params?.level}`, level: event.params?.level, supported: true, changed: true } };
 			if (event.action === "model") return { type: "execution_result", piboSessionId: event.piboSessionId, eventId: event.id, action: event.action, result: event.params?.model ? { message: `Model set to ${event.params.provider}/${event.params.model}`, provider: event.params.provider, model: event.params.model, supported: true, changed: true } : { action: "show_model_menu", providers: [{ id: "openai", label: "OpenAI", models: [{ id: "gpt-local", label: "GPT Local" }] }] } };
+			if (event.action === "login") return { type: "execution_result", piboSessionId: event.piboSessionId, eventId: event.id, action: event.action, result: { action: "show_login_menu", providers: [{ id: "openai-codex", name: "OpenAI Codex", authMethods: ["device_code"] }, { id: "openai", name: "OpenAI API", authMethods: ["api_key"] }] } };
+			if (event.action === "login.start") return { type: "execution_result", piboSessionId: event.piboSessionId, eventId: event.id, action: event.action, result: { message: `Open ${event.params.provider} login URL`, url: "https://example.test/device", userCode: "TEST-1234" } };
+			if (event.action === "session.fork_candidates") return { type: "execution_result", piboSessionId: event.piboSessionId, eventId: event.id, action: event.action, result: { messages: [{ entryId: "entry_local_1", text: "Fork local prompt" }] } };
+			if (event.action === "session.fork") return { type: "execution_result", piboSessionId: event.piboSessionId, eventId: event.id, action: event.action, result: { piboSessionId: event.piboSessionId, title: "Forked current", entryId: event.params.entryId } };
 			return { type: "execution_result", piboSessionId: event.piboSessionId, eventId: event.id, action: event.action, result: { ok: true } };
 		},
 	};
@@ -462,6 +466,24 @@ test("local CLI session source routes slash actions under the selected owner and
 	const modelSet = await source.executeSlashCommand({ command: "model", args: "openai/gpt-local", sessionId: created.id });
 	assert.deepEqual(emitted.at(-1).params, { provider: "openai", model: "gpt-local" });
 	assert.match(modelSet.descriptor.text, /Model set to openai\/gpt-local/);
+	const loginMenu = await source.executeSlashCommand({ command: "login", sessionId: created.id });
+	assert.equal(loginMenu.descriptor.kind, "menu");
+	assert.equal(emitted.at(-1).action, "login");
+	const loginStart = await source.executeSlashCommand({ command: "login", args: "openai-codex/device_code", sessionId: created.id });
+	assert.equal(emitted.at(-1).action, "login.start");
+	assert.deepEqual(emitted.at(-1).params, { provider: "openai-codex" });
+	assert.match(loginStart.descriptor.text, /Open openai-codex login URL/);
+	const apiKey = await source.executeSlashCommand({ command: "login", args: "openai/api_key", sessionId: created.id });
+	assert.equal(apiKey.descriptor.kind, "text");
+	assert.match(apiKey.descriptor.text, /requires secret input/);
+	assert.notEqual(emitted.at(-1).action, "login.apikey");
+	const forkCandidates = await source.executeSlashCommand({ command: "fork-candidates", sessionId: created.id });
+	assert.equal(forkCandidates.descriptor.kind, "menu");
+	assert.equal(emitted.at(-1).action, "session.fork_candidates");
+	const forked = await source.executeSlashCommand({ command: "fork-candidates", args: "entry_local_1", sessionId: created.id });
+	assert.equal(emitted.at(-1).action, "session.fork");
+	assert.deepEqual(emitted.at(-1).params, { entryId: "entry_local_1" });
+	assert.equal(forked.openSessionId, created.id);
 	const compact = await source.executeSlashCommand({ command: "compact", args: "summarize safely", sessionId: created.id });
 	assert.equal(compact.actionName, "compact");
 	assert.equal(emitted.at(-1).action, "compact");

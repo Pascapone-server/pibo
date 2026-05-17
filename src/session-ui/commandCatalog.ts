@@ -56,9 +56,9 @@ export const WEB_PARITY_SLASH_COMMANDS: readonly SlashCommandDescriptor[] = [
 	{ id: "session-current", slash: "/session-current", actionName: "session-current", description: "Show metadata for the active session.", group: "session", support: "terminal-adapted" },
 	{ id: "sessions", slash: "/sessions", actionName: "sessions", description: "List sessions for the selected owner and room.", group: "session", support: "terminal-adapted" },
 	{ id: "clone", slash: "/clone", actionName: "clone", description: "Clone or derive the active session when supported.", group: "session", support: "terminal-adapted" },
-	{ id: "fork-candidates", slash: "/fork-candidates", actionName: "fork-candidates", description: "Inspect Web fork candidates.", group: "unsupported", support: "deferred", unsupportedReason: "Terminal fork navigation is defined in a later keyboard-flow story." },
-	{ id: "download", slash: "/download", description: "Download browser-side transcript artifacts.", group: "unsupported", support: "browser-only", unsupportedReason: "Browser download APIs are not available in a terminal; use a path-based export command when implemented." },
-	{ id: "upload", slash: "/upload", description: "Upload files through browser file selection.", group: "unsupported", support: "browser-only", unsupportedReason: "Browser file picker APIs are not available in a terminal; use a path-based upload command when implemented." },
+	{ id: "fork-candidates", slash: "/fork-candidates", actionName: "session.fork_candidates", description: "Inspect terminal-selectable fork candidates.", argumentHint: "[entry-id]", group: "session", support: "terminal-adapted", terminalAdaptation: "Without an argument, list candidates; selecting one attempts a routed fork." },
+	{ id: "download", slash: "/download", actionName: "download", description: "Show terminal-safe download instructions for a server path.", argumentHint: "<path>", group: "session", support: "terminal-adapted", terminalAdaptation: "Use shell/server paths instead of browser download APIs." },
+	{ id: "upload", slash: "/upload", actionName: "upload", description: "Show terminal-safe upload instructions for a local path.", argumentHint: "<path>", group: "session", support: "terminal-adapted", terminalAdaptation: "Use path-based terminal instructions instead of browser file picker APIs." },
 	{ id: "thinking-show", slash: "/thinking-show", actionName: "thinking", description: "Show thinking controls in Web.", group: "unsupported", support: "deferred", unsupportedReason: "Use /thinking in terminal." },
 ];
 

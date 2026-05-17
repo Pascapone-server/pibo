@@ -199,6 +199,12 @@ class DebugMockCliSessionRouter implements LocalCliSessionRouter {
 			if (model) return { message: `Model set to ${provider}/${model}`, provider, model, supported: true, changed: true };
 			return { action: "show_model_menu", providers: [{ id: "openai", label: "OpenAI", description: "Debug PTY provider", models: [{ id: "gpt-pty-large", label: "GPT PTY Large" }, { id: "gpt-pty-mini", label: "GPT PTY Mini" }] }, { id: "offline", label: "Offline Provider", description: "Unavailable in debug PTY", disabled: true, reason: "Debug provider has no credentials", models: [{ id: "offline-model", label: "Offline Model", disabled: true, reason: "Provider unavailable" }] }] };
 		}
+		if (event.action === "login") {
+			return { action: "show_login_menu", providers: [{ id: "openai-codex", name: "OpenAI (ChatGPT Plus/Pro)", authMethods: ["device_code"], configured: false }, { id: "openai", name: "OpenAI API", authMethods: ["api_key"], configured: false }] };
+		}
+		if (event.action === "login.start") return { message: `Open ${params.provider ?? "provider"} login URL https://example.test/device and enter code PTY-1234. Complete sign-in in a browser, then return to the terminal.`, url: "https://example.test/device", userCode: "PTY-1234" };
+		if (event.action === "session.fork_candidates") return { action: "show_fork_candidates", messages: [{ entryId: "entry_pty_1", text: "Fork from PTY prompt one" }, { entryId: "entry_pty_2", text: "Fork from PTY prompt two" }] };
+		if (event.action === "session.fork") return { supported: false, unsupportedReason: "Debug PTY mocked router cannot fork Pi session state; live routed sessions return a visible fork when supported." };
 		if (event.action === "compact") return { queued: true, queuedMessages: 1 };
 		if (event.action === "clear_queue") return { cleared: 0 };
 		if (event.action === "abort") return { aborted: true };

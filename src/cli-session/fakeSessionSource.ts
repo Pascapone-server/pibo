@@ -321,11 +321,50 @@ export class FakeCliSessionSource implements CliSessionSource {
 				],
 			};
 		}
+		if (command === "login") return this.fakeLoginResult(args);
+		if (command === "fork-candidates") return this.fakeForkCandidatesResult(session, args);
+		if (command === "download") return fakeDownloadResult(args);
+		if (command === "upload") return fakeUploadResult(args);
 		if (command === "compact") return { queued: true, instructions: args?.trim() || undefined };
 		if (command === "abort") return { aborted: true };
 		if (command === "kill") return { killed: session ? [session.id] : [], cancelledRuns: [] };
 		if (command === "kill-all") return { killed: [...this.sessions.values()].filter((candidate) => candidate.ownerScope === undefined || candidate.ownerScope === this.activeOwnerScope).map((candidate) => candidate.id), cancelledRuns: [] };
 		return { supported: false, unsupportedReason: `No fake action fixture is registered for ${actionName}.` };
+	}
+
+	private fakeLoginResult(args: string | undefined): unknown {
+		const selection = args?.trim();
+		if (!selection) {
+			return {
+				action: "show_login_menu",
+				providers: [
+					{ id: "openai-codex", name: "OpenAI (ChatGPT Plus/Pro)", authMethods: ["device_code"], configured: false },
+					{ id: "openai", name: "OpenAI API", authMethods: ["api_key"], configured: false },
+				],
+			};
+		}
+		const [provider, method] = parseSlashSelectionArgs(selection);
+		if (method === "device_code") return { message: `Open ${provider} login URL https://example.test/device and enter code PTY-1234. Complete sign-in in a browser, then return to the terminal.`, url: "https://example.test/device", userCode: "PTY-1234" };
+		if (method === "api_key") return { message: `${provider} API-key login requires hidden secret input. The CLI does not echo secrets; configure credentials through environment variables or Web Settings.` };
+		return { supported: false, unsupportedReason: `Unsupported login method ${method ?? "unknown"} for ${provider}.` };
+	}
+
+	private fakeForkCandidatesResult(session: CliSessionSummary | undefined, args: string | undefined): unknown {
+		if (!session) return { supported: false, unsupportedReason: "No session is open." };
+		const entryId = args?.trim();
+		if (!entryId) {
+			return {
+				action: "show_fork_candidates",
+				messages: [
+					{ entryId: "entry_fake_1", text: "Hello from fake source" },
+					{ entryId: "entry_fake_2", text: "Follow up from fake source" },
+				],
+			};
+		}
+		const fork: CliSessionSummary = { ...session, id: `ps_fake_fork_${this.nextSessionNumber++}`, title: `${session.title} Fork`, status: "idle", updatedAt: this.now() };
+		this.sessions.set(fork.id, fork);
+		this.traceViews.set(fork.id, cloneTraceView(this.traceViews.get(session.id) ?? emptyTraceView(session)));
+		return { piboSessionId: fork.id, sessionId: fork.id, roomId: fork.roomId, title: fork.title, forkedFrom: session.id, entryId };
 	}
 
 	close(): void {
@@ -483,6 +522,23 @@ function deterministicNow(): string {
 
 function normalizeCommandName(command: string): string {
 	return command.trim().replace(/^\/+/, "").toLowerCase();
+}
+
+function parseSlashSelectionArgs(value: string): [string, string | undefined] {
+	const [left, right] = value.includes("/") ? value.split("/", 2) : value.split(/\s+/, 2);
+	return [left ?? "", right];
+}
+
+function fakeDownloadResult(args: string | undefined): unknown {
+	const target = args?.trim();
+	if (!target) return { supported: false, unsupportedReason: "Usage: /download <path>. In terminal, copy server paths with shell tools instead of browser download APIs." };
+	return { message: `Terminal download for ${target}: use cat, cp, scp, or rsync from the shell; browser download APIs are not used by the CLI.` };
+}
+
+function fakeUploadResult(args: string | undefined): unknown {
+	const target = args?.trim();
+	if (!target) return { supported: false, unsupportedReason: "Usage: /upload <path>. Browser file picker upload is Web-only; copy files to ~/.pibo/uploads from the shell." };
+	return { message: `Terminal upload for ${target}: copy the file to ~/.pibo/uploads or use Web /upload. The CLI did not copy file contents.` };
 }
 
 function sessionIdFromActionResult(value: unknown): string | undefined {

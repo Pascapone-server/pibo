@@ -37,7 +37,7 @@ export function normalizeCommandResultDescriptor(command: string, value: unknown
 			label: typeof record.title === "string" ? redactTerminalSecret(record.title) : undefined,
 		};
 	}
-	if (record.action === "show_login_menu" || record.action === "show_model_menu" || Array.isArray(record.items) || Array.isArray(record.providers)) {
+	if (record.action === "show_login_menu" || record.action === "show_model_menu" || record.action === "show_fork_candidates" || Array.isArray(record.items) || Array.isArray(record.providers) || Array.isArray(record.messages)) {
 		return { kind: "menu", title: menuTitle(command, record), items: menuItems(record) };
 	}
 	if (command === "status" || record.contextUsage || record.providerUsage || record.queuedMessages !== undefined) {
@@ -63,6 +63,7 @@ function unwrapActionPayload(value: unknown): unknown {
 function menuTitle(command: string, record: Record<string, unknown>): string {
 	if (record.action === "show_login_menu") return "Login";
 	if (record.action === "show_model_menu") return "Model";
+	if (record.action === "show_fork_candidates") return "Fork candidates";
 	return command;
 }
 
@@ -70,17 +71,20 @@ function menuItems(record: Record<string, unknown>): CommandResultMenuItem[] {
 	const explicitItems = arrayRecordField(record, "items");
 	if (explicitItems.length) return explicitItems.map((item, index) => itemFromRecord(item, index));
 	const providers = arrayRecordField(record, "providers");
-	return providers.map((provider, index) => itemFromRecord(provider, index));
+	if (providers.length) return providers.map((provider, index) => itemFromRecord(provider, index));
+	const messages = arrayRecordField(record, "messages");
+	return messages.map((message, index) => itemFromRecord(message, index));
 }
 
 function itemFromRecord(record: Record<string, unknown>, index: number): CommandResultMenuItem {
-	const id = stringField(record, "id") ?? stringField(record, "provider") ?? `item-${index}`;
+	const id = stringField(record, "id") ?? stringField(record, "entryId") ?? stringField(record, "provider") ?? `item-${index}`;
+	const text = stringField(record, "text");
 	return {
 		id,
-		label: redactTerminalSecret(stringField(record, "label") ?? stringField(record, "name") ?? id),
-		description: redactTerminalSecret(stringField(record, "description") ?? arrayStringField(record, "authMethods").join(", ")) || undefined,
+		label: redactTerminalSecret(stringField(record, "label") ?? stringField(record, "name") ?? trimLabel(text) ?? id),
+		description: redactTerminalSecret(stringField(record, "description") ?? (text && text.length > 80 ? text : undefined) ?? stringField(record, "reason") ?? arrayStringField(record, "authMethods").join(", ")) || undefined,
 		action: stringField(record, "action"),
-		value: record.value,
+		value: record.value ?? record,
 		disabled: record.disabled === true,
 	};
 }
@@ -98,4 +102,9 @@ function arrayStringField(record: Record<string, unknown>, key: string): string[
 function stringField(record: Record<string, unknown>, key: string): string | undefined {
 	const value = record[key];
 	return typeof value === "string" ? value : undefined;
+}
+
+function trimLabel(value: string | undefined): string | undefined {
+	if (!value) return undefined;
+	return value.length <= 64 ? value : `${value.slice(0, 61)}…`;
 }
