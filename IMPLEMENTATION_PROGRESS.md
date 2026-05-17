@@ -271,5 +271,5 @@ Validation and results for legacy unknown repair and existing transcript hydrati
 - `docker exec pibo-dev-ink-cli-v2-web-parity bash -lc 'cd /workspace && npm run typecheck'` — passed.
 - `docker exec pibo-dev-ink-cli-v2-web-parity bash -lc 'cd /workspace && npm test'` — ran 498 tests; 497 passed and only the pre-existing unrelated `test/telemetry-store.test.mjs` stale/prune assertion failed.
 - Completed stories marked `passes: true`: PRD 02 `US-004`; PRD 04 `US-005`.
-- Implementation commit: pending.
+- Implementation commit: `1b442ef` (`Repair legacy CLI owners and hydrate sessions`).
 - Next recommended group: PRD 03 `US-001` through `US-004` shared terminal/card/status/command/picker descriptors, then PRD 05 catalog stories that consume those descriptors.
