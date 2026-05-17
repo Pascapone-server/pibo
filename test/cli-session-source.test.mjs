@@ -231,7 +231,7 @@ test("local CLI session source discovers one owner and multiple owners from sess
 	});
 
 	const ownerScopes = (await source.listOwners()).map((owner) => owner.ownerScope);
-	assert.deepEqual(ownerScopes, ["user:custom", "user:four", "user:one", "user:three", "user:two"]);
+	assert.deepEqual(ownerScopes, ["user:custom", "user:four", "user:one", "user:three", "user:two", CLI_ROOT_RECOVERY_OWNER_SCOPE]);
 	assert.equal((await source.getActiveOwner()).ownerScope, "user:custom");
 
 	await source.setActiveOwner("user:two");
@@ -612,7 +612,7 @@ test("local CLI session source repairs legacy user:unknown CLI sessions to selec
 	});
 	const source = new LocalCliSessionSource({ dataStore, sessionStore, ownerScope: "user:repair", now: () => fixedNow });
 
-	assert.deepEqual((await source.listOwners()).map((owner) => owner.ownerScope), ["user:repair"]);
+	assert.deepEqual((await source.listOwners()).map((owner) => owner.ownerScope), ["user:repair", CLI_ROOT_RECOVERY_OWNER_SCOPE]);
 	assert.deepEqual((await source.listSessions()).map((session) => session.id), []);
 	const result = await source.repairLegacyUserUnknownSessions({ ownerScope: "user:repair", roomId: targetRoom.id });
 

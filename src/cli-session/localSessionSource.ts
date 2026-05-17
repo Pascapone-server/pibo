@@ -874,7 +874,7 @@ function resolveCliOwnerContext(input: { explicitOwnerScope?: string; sessionSto
 	const sessions = input.sessionStore.list ? input.sessionStore.list() : input.sessionStore.find({});
 	for (const session of sessions) if (session.ownerScope) addOwner(ownerSummaryForScope(session.ownerScope));
 	for (const ownerScope of discoverOwnerScopesFromDataStore(input.dataStore)) addOwner(ownerSummaryForScope(ownerScope));
-	if (owners.size === 0) addOwner(rootRecoveryOwnerSummary(), { explicit: true });
+	addOwner(rootRecoveryOwnerSummary(), { explicit: true });
 	const ownerList = [...owners.values()].sort(compareOwners);
 	const explicit = input.explicitOwnerScope ? ownerList.find((owner) => owner.ownerScope === normalizeOwnerScope(input.explicitOwnerScope)) : undefined;
 	const activeOwner = explicit ?? ownerList.find((owner) => owner.kind !== "legacy") ?? rootRecoveryOwnerSummary();

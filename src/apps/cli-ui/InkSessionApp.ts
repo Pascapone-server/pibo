@@ -281,7 +281,8 @@ export function InkSessionApp({ source, initialSessionId, skipOwnerPicker = fals
 				}
 				const activeOwner = await source.getActiveOwner();
 				const owners = await source.listOwners();
-				if (!skipOwnerPicker && owners.length > 1) {
+				const nonFallbackOwners = owners.filter((owner) => owner.isFallback !== true);
+				if (!skipOwnerPicker && nonFallbackOwners.length > 1) {
 					const selectedIndex = Math.max(0, owners.findIndex((owner) => owner.ownerScope === activeOwner.ownerScope));
 					const status = await source.getStatus();
 					setState((current) => ({
