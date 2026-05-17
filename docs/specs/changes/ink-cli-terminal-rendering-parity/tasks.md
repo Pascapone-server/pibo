@@ -59,7 +59,7 @@
 
 ## 8. Requirement: Collapsed Output Preview Parity
 
-- [ ] 8.1 Add/restore a shared fixture with at least 12 output lines for tool calls, execution commands, yielded runs, and async agents.
+- [x] 8.1 Add/restore a shared fixture with at least 12 output lines for tool calls, execution commands, yielded runs, and async agents.
 - [ ] 8.2 Restore shared collapsed preview bounds: 5 output preview lines for tool/result/async/yielded/execution rows and 6 child summary lines for grouped exploration.
 - [ ] 8.3 Preserve no character truncation in visible preview lines; assert wrapping/no `… truncated` separately from preview omission.
 - [ ] 8.4 Add omitted-line metadata or an equivalent descriptor so renderers can show `+N more lines` and expose details.
@@ -89,6 +89,8 @@
 - [ ] 11.5 Add shared JSON/markdown fixtures used by Web semantic-hook tests and Ink snapshots.
 
 ## 12. Final Web-Derived Validation
+
+Matrix source: keep `web-terminal-difference-matrix.md` current. Any new Web-vs-Ink difference must list Web law, Ink gap, target behavior, fixture coverage, owner PRD/story, and validation gate before completion.
 
 - [ ] 12.1 Run focused shared, Web, and Ink renderer tests.
 - [ ] 12.2 Run `npm run typecheck` and `npm test`.
