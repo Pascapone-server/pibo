@@ -9,7 +9,7 @@ import { PiboSessionRouter } from "../../core/session-router.js";
 import { PiboDataStore } from "../../data/pibo-store.js";
 import { createDefaultPiboPluginRegistry } from "../../plugins/builtin.js";
 import { PiboDataSessionStore } from "../../sessions/pibo-data-store.js";
-import { InkSessionApp } from "./InkSessionApp.js";
+import { cliCommandSummaryText, InkSessionApp } from "./InkSessionApp.js";
 
 export type RunCliSessionsUiOptions = {
 	source?: CliSessionSource;
@@ -219,7 +219,7 @@ Options:
   -h, --help           Show this help
 
 V2 commands inside the app:
-  /help /new /owner /profile /room /session /agent /status /repair-user-unknown /clear /exit /quit
+  ${cliCommandSummaryText()}
 
 Scope:
   CLI Sessions is a reduced session/chat UI for SSH, bootstrap, recovery, and quick local work.

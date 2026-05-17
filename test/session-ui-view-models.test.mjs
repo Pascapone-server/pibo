@@ -8,6 +8,7 @@ import {
 	buildSessionPickerDescriptor,
 	buildSlashCommandCatalog,
 	buildTerminalCardDescriptor,
+	groupSlashCommandsForHelp,
 	buildTerminalStatusViewModel,
 	filterSlashCommands,
 	normalizeCommandErrorDescriptor,
@@ -77,8 +78,9 @@ test("shared status view model preserves unavailable usage and redacts secrets",
 
 test("shared command catalog merges gateway capabilities and filters prefixes", () => {
 	const catalog = buildSlashCommandCatalog([
-		{ name: "custom-action", actionName: "custom.action", description: "Run TOKEN=secret_value action" },
+		{ name: "custom.action", slashCommands: ["custom-action"], description: "Run TOKEN=secret_value action" },
 		{ slash: "/browser-only", description: "Browser only", browserOnly: true, unsupportedReason: "Needs window.document" },
+		{ name: "session_id", slashCommands: ["session"], description: "Gateway session id should not replace CLI room-first session navigation" },
 	]);
 	assert.ok(catalog.some((command) => command.slash === "/help"));
 	assert.ok(catalog.some((command) => command.slash === "/owner"));
@@ -86,10 +88,15 @@ test("shared command catalog merges gateway capabilities and filters prefixes", 
 	const custom = catalog.find((command) => command.slash === "/custom-action");
 	assert.equal(custom.actionName, "custom.action");
 	assert.match(custom.description, /\[redacted\]/);
+	assert.match(catalog.find((command) => command.slash === "/session").description, /Select a room/);
 	const unsupported = catalog.find((command) => command.slash === "/browser-only");
 	assert.equal(unsupported.support, "browser-only");
 	assert.equal(unsupported.group, "unsupported");
-	assert.deepEqual(filterSlashCommands(catalog, "/th").map((command) => command.slash), ["/thinking", "/thinking-show"]);
+	assert.deepEqual(filterSlashCommands(catalog, "/th now").map((command) => command.slash), ["/thinking", "/thinking-show"]);
+	const grouped = groupSlashCommandsForHelp(catalog);
+	assert.ok(grouped.available.some((command) => command.slash === "/status"));
+	assert.ok(grouped.navigation.some((command) => command.slash === "/owner"));
+	assert.ok(grouped.unsupported.some((command) => command.slash === "/download"));
 });
 
 test("shared command result descriptors normalize menus status links unsupported and errors", () => {

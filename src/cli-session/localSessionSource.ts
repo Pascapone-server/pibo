@@ -11,6 +11,7 @@ import { ChatDataIngestService } from "../data/ingest-service.js";
 import { ChatRoomService } from "../apps/chat/data/room-service.js";
 import type { StoredPiboEventLogRow } from "../data/event-log.js";
 import type { PiboDataStore } from "../data/pibo-store.js";
+import { buildSlashCommandCatalog, type SlashCommandDescriptor } from "../session-ui/index.js";
 import type { PiboSessionTraceView, PiboTraceNode, PiboTraceNodeStatus } from "../shared/trace-types.js";
 import {
 	CliSourceError,
@@ -259,6 +260,15 @@ export class LocalCliSessionSource implements CliSessionSource {
 			description: profile.description,
 			profileName: profile.name,
 		}));
+	}
+
+	async listSlashCommands(): Promise<readonly SlashCommandDescriptor[]> {
+		this.assertOpen();
+		return buildSlashCommandCatalog(this.pluginRegistry.getGatewayActionInfos().map((action) => ({
+			name: action.name,
+			description: action.description,
+			slashCommands: action.slashCommands,
+		}))).map(cloneJson);
 	}
 
 	async setSessionAgent(sessionId: string, agentId: string): Promise<CliSessionSummary> {

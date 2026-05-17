@@ -1,4 +1,5 @@
 import type { PiboSessionTraceView, PiboTraceNode } from "../shared/trace-types.js";
+import { buildSlashCommandCatalog, type GatewayCommandCapability, type SlashCommandDescriptor } from "../session-ui/index.js";
 import {
 	CliSourceError,
 	type CliAgentSummary,
@@ -19,6 +20,7 @@ export type FakeCliSessionSourceOptions = {
 	rooms?: readonly CliRoomSummary[];
 	sessions?: readonly CliSessionSummary[];
 	agents?: readonly CliAgentSummary[];
+	commandCapabilities?: readonly GatewayCommandCapability[];
 	traceViews?: Readonly<Record<string, PiboSessionTraceView | null>>;
 	status?: Partial<CliRuntimeStatus>;
 	now?: () => string;
@@ -31,6 +33,7 @@ export class FakeCliSessionSource implements CliSessionSource {
 	private readonly rooms: CliRoomSummary[];
 	private readonly sessions = new Map<string, CliSessionSummary>();
 	private readonly agents: CliAgentSummary[];
+	private readonly slashCommands: SlashCommandDescriptor[];
 	private readonly traceViews = new Map<string, PiboSessionTraceView | null>();
 	private readonly listeners = new Map<string, Set<CliSessionUpdateListener>>();
 	private readonly openHandles = new Set<{ sessionId: string; close: () => void }>();
@@ -47,6 +50,7 @@ export class FakeCliSessionSource implements CliSessionSource {
 		this.activeOwnerScope = options.activeOwnerScope ?? this.owners[0]?.ownerScope ?? "user:fake";
 		this.rooms = [...(options.rooms ?? defaultRooms())].map(cloneJson);
 		this.agents = [...(options.agents ?? defaultAgents())].map(cloneJson);
+		this.slashCommands = buildSlashCommandCatalog(options.commandCapabilities).map(cloneJson);
 		for (const session of options.sessions ?? defaultSessions()) {
 			this.sessions.set(session.id, cloneJson(session));
 		}
@@ -205,6 +209,11 @@ export class FakeCliSessionSource implements CliSessionSource {
 	async listAgents(): Promise<readonly CliAgentSummary[]> {
 		this.assertOpen();
 		return this.agents.map(cloneJson);
+	}
+
+	async listSlashCommands(): Promise<readonly SlashCommandDescriptor[]> {
+		this.assertOpen();
+		return this.slashCommands.map(cloneJson);
 	}
 
 	async setSessionAgent(sessionId: string, agentId: string): Promise<CliSessionSummary> {

@@ -134,10 +134,31 @@ test("InkSessionAppView renders status bar transcript viewport and input line", 
 	}));
 
 	assert.match(output, /Pibo CLI Sessions \| fake \| owner unknown \| CLI app shell fixture \| pibo-agent/);
-	assert.match(output, /Commands: \/help \/new \/owner \/room \/session \/agent \/status \/repair-user-unknown\s+\/clear \/exit \/quit/);
+	assert.match(output, /Commands: \/help \/new \/room \/session \/agent \/owner \/repair-user-unknown/);
+	assert.match(output, /type \/ for suggestions, \/help for catalog/);
 	assert.match(output, /› Show me status/);
 	assert.match(output, /Status looks healthy\./);
 	assert.match(output, /› \/status/);
+});
+
+test("InkSessionAppView renders slash suggestions", () => {
+	const output = renderToString(React.createElement(InkSessionAppView, {
+		state: {
+			...baseState(),
+			input: "/th",
+			slashSuggestions: {
+				selectedIndex: 1,
+				items: [
+					{ id: "thinking", slash: "/thinking", actionName: "thinking", description: "Show or set model thinking level.", group: "runtime", support: "terminal-adapted" },
+					{ id: "thinking-show", slash: "/thinking-show", actionName: "thinking", description: "Show thinking controls in Web.", group: "unsupported", support: "deferred", unsupportedReason: "Use /thinking in terminal." },
+				],
+			},
+		},
+	}));
+	assert.match(output, /Slash commands/);
+	assert.match(output, /\/thinking — Show or set model thinking level/);
+	assert.match(output, /❯ \/thinking-show/);
+	assert.match(output, /Use \/thinking in terminal/);
 });
 
 test("InkSessionAppView renders owner room and create-session pickers", () => {
@@ -181,7 +202,7 @@ test("InkSessionAppView renders owner room and create-session pickers", () => {
 	assert.match(sessionOutput, /New session in Personal Chat/);
 });
 
-test("Ink session input reducer captures text, enter, navigation, and escape", () => {
+test("Ink session input reducer captures text, enter, navigation, escape, and slash suggestions", () => {
 	const base = { loading: false, rows: [], input: "", mode: "session-picker", picker: { kind: "session", title: "Pick", items: [{ id: "one", label: "One" }, { id: "two", label: "Two" }], selectedIndex: 0, emptyMessage: "None" } };
 	const typed = reduceInkSessionInputState(base, { type: "text", value: "hi" });
 	assert.equal(typed.input, "hi");
@@ -195,14 +216,27 @@ test("Ink session input reducer captures text, enter, navigation, and escape", (
 	assert.equal(escaped.mode, "transcript");
 	assert.equal(escaped.picker, undefined);
 	assert.equal(escaped.message, "Canceled.");
+
+	const slashBase = { loading: false, rows: [], input: "", mode: "transcript" };
+	const slash = reduceInkSessionInputState(slashBase, { type: "text", value: "/" });
+	assert.ok(slash.slashSuggestions.items.some((command) => command.slash === "/status"));
+	const filtered = reduceInkSessionInputState(slash, { type: "text", value: "th" });
+	assert.deepEqual(filtered.slashSuggestions.items.map((command) => command.slash), ["/thinking", "/thinking-show"]);
+	const moved = reduceInkSessionInputState(filtered, { type: "down" });
+	assert.equal(moved.slashSuggestions.selectedIndex, 1);
+	const closed = reduceInkSessionInputState(filtered, { type: "escape" });
+	assert.equal(closed.input, "/th");
+	assert.equal(closed.slashSuggestions, undefined);
 });
 
 test("Slash parser distinguishes messages, commands, and empty input", () => {
 	assert.deepEqual(parseCliSessionInput("  hello agent  "), { type: "message", text: "hello agent" });
 	assert.deepEqual(parseCliSessionInput(" /STATUS now "), { type: "command", command: { name: "status", args: "now", raw: "/STATUS now" } });
 	assert.deepEqual(parseCliSessionInput("   "), { type: "empty" });
-	assert.match(cliSessionSlashHelpText(), /\/help, \/new, \/owner, \/profile, \/room, \/session, \/agent, \/status, \/repair-user-unknown, \/clear, \/exit, \/quit/);
-	assert.match(cliSessionSlashHelpText(), /Web-only in V1/);
+	assert.match(cliSessionSlashHelpText(), /Slash command catalog/);
+	assert.match(cliSessionSlashHelpText(), /CLI navigation and recovery commands/);
+	assert.match(cliSessionSlashHelpText(), /Unsupported or deferred terminal commands/);
+	assert.match(cliSessionSlashHelpText(), /\/download/);
 });
 
 test("exit cleanup closes open session subscriptions and source idempotently", async () => {
@@ -357,8 +391,9 @@ test("Slash commands handle help status clear pickers unknown exit and normal se
 	const submit = (input) => handleCliSessionSubmittedInput(input, source, harness.state, harness.setState, openSession, () => { exited = true; });
 
 	await submit("/help");
+	assert.match(harness.state.message, /Slash command catalog/);
 	assert.match(harness.state.message, /\/new/);
-	assert.match(harness.state.message, /\/details/);
+	assert.match(harness.state.message, /\/download/);
 
 	await submit("/status");
 	assert.match(harness.state.message, /source=fake/);
@@ -462,7 +497,7 @@ test("runCliSessionsUi rejects non-interactive stdin or stdout before rendering"
 test("pibo tui:sessions command help and root discovery describe the new UI without hiding existing TUI commands", async () => {
 	const help = cliSessionsHelpText();
 	assert.match(help, /reduced Web Chat-derived session UI/);
-	assert.match(help, /\/help \/new \/owner \/profile \/room \/session \/agent \/status \/repair-user-unknown \/clear \/exit \/quit/);
+	assert.match(help, /Commands: \/help \/new \/room \/session \/agent \/owner \/repair-user-unknown/);
 	assert.match(help, /pibo tui\n/);
 	assert.match(help, /pibo tui:routed/);
 

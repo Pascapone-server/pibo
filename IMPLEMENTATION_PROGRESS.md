@@ -308,3 +308,20 @@ Validation and results for shared terminal descriptor foundation batch:
 - Completed stories marked `passes: true`: PRD 03 `US-001`, `US-002`, `US-003`, `US-004`.
 - Implementation commit: a423768fbd55d80f3a8c18ffed8828efa17030a4.
 - Next recommended group: PRD 05 `US-001` and `US-005` to consume the shared command catalog in CLI help/suggestions groundwork, or PRD 03 `US-005` to wire a Web Compact Terminal rich-card path to the shared descriptors.
+
+## 2026-05-17 run: shared slash catalog help and Ink suggestions batch
+
+Selected story group:
+
+- `prd_05_slash_command_catalog_and_actions.json` / `US-001` — Build shared slash command catalog for CLI and Web.
+- `prd_05_slash_command_catalog_and_actions.json` / `US-002` — Implement slash suggestions in Ink input.
+- `prd_05_slash_command_catalog_and_actions.json` / `US-005` — Replace hard-coded help with catalog help.
+
+Intended validation plan:
+
+- Extend the shared `src/session-ui` command catalog so it can merge gateway action infos with Web-added commands and CLI navigation commands while preserving terminal-specific ownership for `/session`, `/room`, `/owner`, `/profile`, `/new`, `/agent`, and exit/help commands.
+- Expose `CliSessionSource.listSlashCommands()` from fake and local sources, backed by the default plugin registry gateway action infos for the local source.
+- Replace hard-coded command header and `/help` text in the Ink app and CLI help with catalog-generated grouped output, including unsupported/deferred/browser-only reasons and owner/room/session keyboard controls.
+- Add Ink slash suggestions for `/`, prefix filtering such as `/th`, arrow-key selection, Enter accept/run behavior, and Escape dismissal without changing the typed input.
+- Add focused unit/render tests for catalog generation from gateway infos, grouped help output, suggestion reducer/view behavior, and source-provided command catalogs.
+- Run `npm run build` plus focused tests inside `pibo-dev-ink-cli-v2-web-parity`; run `pibo debug pty` for `/help` and suggestions with raw/clean artifacts; run `npm run typecheck` before committing.

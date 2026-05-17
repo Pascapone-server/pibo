@@ -26,6 +26,11 @@ test("fake CLI session source exposes deterministic rooms sessions agents and st
 	const agents = await source.listAgents();
 	assert.deepEqual(agents.map((agent) => agent.id), ["pibo-agent", "codex-compat-openai-web"]);
 
+	const commands = await source.listSlashCommands();
+	assert.ok(commands.some((command) => command.slash === "/help"));
+	assert.ok(commands.some((command) => command.slash === "/thinking"));
+	assert.ok(commands.some((command) => command.slash === "/download" && command.support === "browser-only"));
+
 	const status = await source.getStatus({ sessionId: "ps_fake_existing" });
 	assert.equal(status.source, "fake");
 	assert.equal(status.mode, "fake");
@@ -424,6 +429,10 @@ test("local CLI session source reports clear errors and current-session agent li
 	await assert.rejects(() => source.sendMessage("missing", "   "), (error) => error instanceof CliSourceError && error.code === "empty_message");
 	await assert.rejects(() => source.createSession({ agentId: "missing-agent" }), (error) => error instanceof CliSourceError && error.code === "agent_not_found");
 	assert.deepEqual((await source.listAgents()).map((agent) => agent.id), ["codex-compat-openai-web", "custom-agent"]);
+	const commands = await source.listSlashCommands();
+	assert.ok(commands.some((command) => command.slash === "/status" && command.actionName === "status"));
+	assert.ok(commands.some((command) => command.slash === "/clone" && command.actionName === "session.clone"));
+	assert.match(commands.find((command) => command.slash === "/session").description, /Select a room/);
 
 	const created = await source.createSession({ title: "Agent unchanged", profile: "codex-compat-openai-web" });
 	assert.equal((await source.setSessionAgent(created.id, "codex-compat-openai-web")).profile, "codex-compat-openai-web");

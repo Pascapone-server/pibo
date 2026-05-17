@@ -1,7 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import { isCliSourceError } from "../../cli-session/index.js";
-import { buildCompactTerminalRows, type CompactTerminalRow } from "../../session-ui/index.js";
+import {
+	buildCompactTerminalRows,
+	buildSlashCommandCatalog,
+	commandSupportLabel,
+	filterSlashCommands,
+	formatSlashCommand,
+	groupSlashCommandsForHelp,
+	type CompactTerminalRow,
+	type SlashCommandDescriptor,
+} from "../../session-ui/index.js";
 import type {
 	CliAgentSummary,
 	CliOpenSession,
@@ -33,6 +42,11 @@ export type InkSessionPickerState = {
 	roomId?: string;
 };
 
+export type InkSlashSuggestionState = {
+	items: readonly SlashCommandDescriptor[];
+	selectedIndex: number;
+};
+
 export type InkSessionAppState = {
 	loading: boolean;
 	status?: CliRuntimeStatus;
@@ -43,6 +57,8 @@ export type InkSessionAppState = {
 	input: string;
 	mode: "transcript" | "session-picker" | "agent-picker" | "detail" | "picker";
 	picker?: InkSessionPickerState;
+	slashCommands?: readonly SlashCommandDescriptor[];
+	slashSuggestions?: InkSlashSuggestionState;
 	message?: string;
 	error?: string;
 };
@@ -236,6 +252,8 @@ export function InkSessionApp({ source, initialSessionId, skipOwnerPicker = fals
 		closedRef.current = false;
 		void (async () => {
 			try {
+				const slashCommands = await safeListSlashCommands(source);
+				setState((current) => ({ ...current, slashCommands }));
 				if (initialSessionId) {
 					await openSession(initialSessionId);
 					return;
@@ -294,6 +312,16 @@ export function InkSessionApp({ source, initialSessionId, skipOwnerPicker = fals
 			return;
 		}
 		if (key.return) {
+			if (stateRef.current.slashSuggestions && !stateRef.current.picker) {
+				const accepted = acceptSlashSuggestion(stateRef.current);
+				if (accepted.runInput) {
+					setState((current) => ({ ...current, input: "", slashSuggestions: undefined, message: undefined, error: undefined }));
+					void submitCommandOrMessage(accepted.runInput);
+				} else {
+					setState((current) => ({ ...current, input: accepted.input, slashSuggestions: undefined, message: `Accepted ${accepted.input.trim()}. Press Enter to run or add arguments.`, error: undefined }));
+				}
+				return;
+			}
 			if (stateRef.current.picker) {
 				void selectPickerItem();
 				return;
@@ -324,14 +352,16 @@ export type InkSessionAppViewProps = {
 export function InkSessionAppView({ state, maxRows = 20, maxLineChars }: InkSessionAppViewProps): React.ReactElement {
 	const lineLimit = normalizeTerminalLineLimit(maxLineChars);
 	const statusText = useMemo(() => boundedLine(formatStatusLine(state), lineLimit), [lineLimit, state]);
+	const commandSummary = useMemo(() => boundedLine(cliCommandSummaryText(state.slashCommands), lineLimit), [lineLimit, state.slashCommands]);
 	return React.createElement(
 		Box,
 		{ flexDirection: "column" },
 		React.createElement(Text, { color: state.status?.connected === false ? "red" : "cyan" }, statusText),
-		React.createElement(Text, { color: "gray" }, boundedLine("Commands: /help /new /owner /room /session /agent /status /repair-user-unknown /clear /exit /quit", lineLimit)),
+		React.createElement(Text, { color: "gray" }, commandSummary),
 		state.loading ? React.createElement(Text, { color: "yellow" }, "Loading CLI session…") : null,
 		state.error ? React.createElement(Text, { color: "red" }, boundedLine(`Error: ${state.error}`, lineLimit)) : null,
-		state.message ? React.createElement(Text, { color: "gray" }, boundedLine(state.message, lineLimit)) : null,
+		...(state.message ? renderBoundedTextLines(state.message, "gray", lineLimit, "message") : []),
+		state.slashSuggestions ? React.createElement(InkSlashSuggestionsView, { suggestions: state.slashSuggestions, maxLineChars: lineLimit }) : null,
 		state.picker ? React.createElement(InkSessionPickerView, { picker: state.picker, maxLineChars: lineLimit }) : null,
 		React.createElement(InkTerminalView, { rows: state.rows, maxRows, maxLineChars: lineLimit }),
 		React.createElement(Text, { color: state.mode === "transcript" ? "green" : "yellow" }, boundedLine(`› ${state.input}`, lineLimit)),
@@ -341,6 +371,16 @@ export function InkSessionAppView({ state, maxRows = 20, maxLineChars }: InkSess
 export function normalizeTerminalLineLimit(maxLineChars: number | undefined): number {
 	if (maxLineChars === undefined || !Number.isFinite(maxLineChars)) return 220;
 	return Math.max(20, Math.floor(maxLineChars));
+}
+
+export function InkSlashSuggestionsView({ suggestions, maxLineChars }: { suggestions: InkSlashSuggestionState; maxLineChars?: number }): React.ReactElement {
+	const lineLimit = normalizeTerminalLineLimit(maxLineChars);
+	return React.createElement(
+		Box,
+		{ flexDirection: "column" },
+		React.createElement(Text, { color: "yellow" }, boundedLine("Slash commands (↑/↓ select, Enter accept/run, Esc close)", lineLimit)),
+		...suggestions.items.slice(0, 8).map((command, index) => React.createElement(Text, { key: command.id, color: index === suggestions.selectedIndex ? "green" : "white" }, boundedLine(`${index === suggestions.selectedIndex ? "❯" : " "} ${formatSlashCommand(command)} — ${command.description}${command.unsupportedReason ? ` (${command.unsupportedReason})` : ""}`, lineLimit))),
+	);
 }
 
 export function InkSessionPickerView({ picker, maxLineChars }: { picker: InkSessionPickerState; maxLineChars?: number }): React.ReactElement {
@@ -368,10 +408,18 @@ export type InkSessionInputAction =
 	| { type: "down" };
 
 export function reduceInkSessionInputState(state: InkSessionAppState, action: InkSessionInputAction): InkSessionAppState {
-	if (action.type === "text") return { ...state, input: state.input + action.value, message: undefined, error: undefined };
-	if (action.type === "backspace") return { ...state, input: state.input.slice(0, -1) };
-	if (action.type === "escape") return { ...state, input: "", mode: "transcript", picker: undefined, message: "Canceled." };
+	if (action.type === "text") return withSlashSuggestions({ ...state, input: state.input + action.value, message: undefined, error: undefined });
+	if (action.type === "backspace") return withSlashSuggestions({ ...state, input: state.input.slice(0, -1) });
+	if (action.type === "escape") {
+		if (state.slashSuggestions) return { ...state, slashSuggestions: undefined, message: "Closed slash suggestions." };
+		return { ...state, input: "", mode: "transcript", picker: undefined, message: "Canceled." };
+	}
 	if (action.type === "up" || action.type === "down") {
+		if (state.slashSuggestions && !state.picker && state.slashSuggestions.items.length > 0) {
+			const direction = action.type === "up" ? -1 : 1;
+			const selectedIndex = (state.slashSuggestions.selectedIndex + direction + state.slashSuggestions.items.length) % state.slashSuggestions.items.length;
+			return { ...state, slashSuggestions: { ...state.slashSuggestions, selectedIndex } };
+		}
 		if (!state.picker || state.picker.items.length === 0) return state;
 		const direction = action.type === "up" ? -1 : 1;
 		const selectedIndex = (state.picker.selectedIndex + direction + state.picker.items.length) % state.picker.items.length;
@@ -380,9 +428,29 @@ export function reduceInkSessionInputState(state: InkSessionAppState, action: In
 	return {
 		...state,
 		input: "",
+		slashSuggestions: undefined,
 		message: undefined,
 		error: undefined,
 	};
+}
+
+function withSlashSuggestions(state: InkSessionAppState): InkSessionAppState {
+	if (state.picker || !state.input.trimStart().startsWith("/")) return { ...state, slashSuggestions: undefined };
+	const catalog = state.slashCommands ?? buildSlashCommandCatalog();
+	const items = filterSlashCommands(catalog, state.input);
+	if (items.length === 0) return { ...state, slashSuggestions: undefined };
+	const previous = state.slashSuggestions?.items[state.slashSuggestions.selectedIndex]?.slash;
+	const selectedIndex = Math.max(0, previous ? items.findIndex((item) => item.slash === previous) : 0);
+	return { ...state, slashSuggestions: { items, selectedIndex } };
+}
+
+function acceptSlashSuggestion(state: InkSessionAppState): { input: string; runInput?: string } {
+	const suggestion = state.slashSuggestions?.items[state.slashSuggestions.selectedIndex];
+	if (!suggestion) return { input: state.input };
+	const trimmed = state.input.trim();
+	const token = trimmed.split(/\s+/, 1)[0] ?? "";
+	if (token === suggestion.slash && trimmed === suggestion.slash) return { input: suggestion.slash, runInput: suggestion.slash };
+	return { input: `${suggestion.slash} ` };
 }
 
 export type ParsedCliSessionInput =
@@ -405,8 +473,29 @@ export function parseCliSessionInput(input: string): ParsedCliSessionInput {
 	return { type: "command", command: { name: name.toLowerCase(), args: rest.join(" ").trim(), raw: trimmed } };
 }
 
-export function cliSessionSlashHelpText(): string {
-	return "Commands: /help, /new, /owner, /profile, /room, /session, /agent, /status, /repair-user-unknown, /clear, /exit, /quit. Web-only in V1: projects, workflows, Cron, Ralph, Agent Designer, full settings, context management, /model, /thinking, /fork, /details.";
+export function cliCommandSummaryText(catalog: readonly SlashCommandDescriptor[] = buildSlashCommandCatalog()): string {
+	const availableSlashes = new Set(catalog.map((command) => command.slash));
+	const preferred: `/${string}`[] = ["/help", "/new", "/room", "/session", "/agent", "/owner", "/repair-user-unknown", "/status", "/clear", "/exit", "/quit"];
+	const commands = preferred.filter((slash) => availableSlashes.has(slash));
+	return `Commands: ${commands.join(" ")} (type / for suggestions, /help for catalog)`;
+}
+
+export function cliSessionSlashHelpText(catalog: readonly SlashCommandDescriptor[] = buildSlashCommandCatalog()): string {
+	const grouped = groupSlashCommandsForHelp(catalog);
+	const format = (command: SlashCommandDescriptor) => `${formatSlashCommand(command)} — ${command.description}${command.unsupportedReason ? ` (${command.unsupportedReason})` : ""}`;
+	const available = grouped.available.map((command) => `  ${format(command)} [${commandSupportLabel(command)}]`).join("\n") || "  none";
+	const navigation = grouped.navigation.map((command) => `  ${format(command)} [${commandSupportLabel(command)}]`).join("\n") || "  none";
+	const unsupported = grouped.unsupported.map((command) => `  ${format(command)} [${commandSupportLabel(command)}]`).join("\n") || "  none";
+	return [
+		"Slash command catalog",
+		"Available Web/session actions:",
+		available,
+		"CLI navigation and recovery commands:",
+		navigation,
+		"Unsupported or deferred terminal commands:",
+		unsupported,
+		"Keyboard controls: type / for suggestions; ↑/↓ selects; Enter accepts or runs; Esc closes suggestions or backs out of pickers; room flow is owner → room → session.",
+	].join("\n");
 }
 
 export function formatCliSessionStatus(status: CliRuntimeStatus | undefined, session: CliSessionSummary | undefined): string {
@@ -466,7 +555,7 @@ async function handleSlashCommand(
 	requestExit: () => void,
 ): Promise<void> {
 	if (command.name === "help") {
-		setState((current) => ({ ...current, message: cliSessionSlashHelpText(), error: undefined }));
+		setState((current) => ({ ...current, message: cliSessionSlashHelpText(current.slashCommands ?? state.slashCommands), error: undefined }));
 		return;
 	}
 	if (command.name === "status") {
@@ -631,6 +720,10 @@ function agentPickerItem(agent: CliAgentSummary): InkSessionPickerItem {
 	};
 }
 
+function renderBoundedTextLines(value: string, color: string, max: number, keyPrefix: string): React.ReactElement[] {
+	return value.split(/\r?\n/).map((line, index) => React.createElement(Text, { key: `${keyPrefix}-${index}`, color }, boundedLine(line, max)));
+}
+
 function formatStatusLine(state: InkSessionAppState): string {
 	const source = state.status?.source ?? "starting";
 	const owner = state.status?.activeOwnerLabel ? `${state.status.activeOwnerLabel} (${state.status.activeOwnerScope ?? "unknown"})` : state.status?.activeOwnerScope ?? state.session?.ownerScope ?? "owner unknown";
@@ -660,6 +753,14 @@ export function createCliSessionCleanup(closeOpenSession: () => void, closeSourc
 			}
 		}
 	};
+}
+
+async function safeListSlashCommands(source: CliSessionSource): Promise<readonly SlashCommandDescriptor[]> {
+	try {
+		return await source.listSlashCommands();
+	} catch {
+		return buildSlashCommandCatalog();
+	}
 }
 
 async function safeListRooms(source: CliSessionSource): Promise<readonly unknown[]> {

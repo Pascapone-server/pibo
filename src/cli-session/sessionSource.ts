@@ -1,4 +1,5 @@
 import type { ModelProfile } from "../core/profiles.js";
+import type { SlashCommandDescriptor } from "../session-ui/index.js";
 import type { PiboSessionTraceView } from "../shared/trace-types.js";
 
 export type CliSourceCapability = "supported" | "unsupported" | "unknown";
@@ -109,6 +110,7 @@ export interface CliSessionSource {
 	openSession(sessionId: string): Promise<CliOpenSession>;
 	sendMessage(sessionId: string, text: string): Promise<void>;
 	listAgents(): Promise<readonly CliAgentSummary[]>;
+	listSlashCommands(): Promise<readonly SlashCommandDescriptor[]>;
 	setSessionAgent(sessionId: string, agentId: string): Promise<CliSessionSummary>;
 	repairLegacyUserUnknownSessions?(input?: RepairLegacyUserUnknownSessionsInput): Promise<RepairLegacyUserUnknownSessionsResult>;
 	getStatus(input?: { sessionId?: string }): Promise<CliRuntimeStatus>;
