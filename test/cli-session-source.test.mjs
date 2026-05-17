@@ -268,6 +268,65 @@ test("local CLI session source owner and room contract filters sessions and crea
 	dataStore.close();
 });
 
+test("local CLI session source writes Web-visible navigation and message read models for selected owner and room", async () => {
+	const dataStore = new PiboDataStore(":memory:");
+	const sessionStore = new PiboDataSessionStore(dataStore);
+	const rooms = new ChatRoomService(dataStore);
+	const room = rooms.ensureDefaultRoom({ ownerScope: "user:web", principalId: "user:web", name: "Personal Chat" });
+	const listeners = new Set();
+	const router = {
+		subscribe(listener) {
+			listeners.add(listener);
+			return () => listeners.delete(listener);
+		},
+		async emit(event) {
+			const assistant = { type: "assistant_message", piboSessionId: event.piboSessionId, eventId: event.id, assistantIndex: 0, contentIndex: 0, text: "Persisted assistant reply" };
+			for (const listener of listeners) {
+				listener({ type: "message_started", piboSessionId: event.piboSessionId, eventId: event.id, text: event.text, source: event.source });
+				listener(assistant);
+				listener({ type: "message_finished", piboSessionId: event.piboSessionId, eventId: event.id, source: event.source });
+			}
+			return assistant;
+		},
+	};
+	const source = new LocalCliSessionSource({ dataStore, sessionStore, router, ownerScope: "user:web", now: () => fixedNow });
+
+	const created = await source.createSession({ roomId: room.id, title: "Web Visible CLI", profile: "codex-compat-openai-web" });
+	assert.equal(created.ownerScope, "user:web");
+	assert.equal(created.roomId, room.id);
+
+	const sessionRow = dataStore.db.prepare("SELECT owner_scope, room_id FROM sessions WHERE id = ?").get(created.id);
+	assert.equal(sessionRow.owner_scope, "user:web");
+	assert.equal(sessionRow.room_id, room.id);
+	const navigationAfterCreate = dataStore.db.prepare("SELECT owner_scope, room_id, status FROM session_navigation WHERE session_id = ?").get(created.id);
+	assert.equal(navigationAfterCreate.owner_scope, "user:web");
+	assert.equal(navigationAfterCreate.room_id, room.id);
+	assert.equal(navigationAfterCreate.status, "idle");
+
+	const opened = await source.openSession(created.id);
+	opened.subscribe(() => {});
+	await source.sendMessage(created.id, "Persist this CLI message");
+
+	const navigationAfterSend = dataStore.db.prepare("SELECT owner_scope, room_id, status, last_message_preview FROM session_navigation WHERE session_id = ?").get(created.id);
+	assert.equal(navigationAfterSend.owner_scope, "user:web");
+	assert.equal(navigationAfterSend.room_id, room.id);
+	assert.equal(navigationAfterSend.status, "idle");
+	assert.match(navigationAfterSend.last_message_preview, /Persisted assistant reply|Persist this CLI message/);
+	const messages = dataStore.db.prepare("SELECT role, actor_id, room_id, content_preview FROM chat_messages WHERE session_id = ? ORDER BY sequence ASC").all(created.id);
+	assert.deepEqual(messages.map((row) => row.role), ["user", "assistant"]);
+	assert.equal(messages[0].actor_id, "user:web");
+	assert.equal(messages[0].room_id, room.id);
+	assert.match(messages[0].content_preview, /Persist this CLI message/);
+	assert.equal(messages[1].room_id, room.id);
+	assert.match(messages[1].content_preview, /Persisted assistant reply/);
+	const events = dataStore.db.prepare("SELECT type, room_id FROM event_log WHERE session_id = ? ORDER BY stream_id ASC").all(created.id);
+	assert.ok(events.some((row) => row.type === "user.message.accepted" && row.room_id === room.id));
+	assert.ok(events.some((row) => row.type === "assistant_message" && row.room_id === room.id));
+
+	await source.close();
+	dataStore.close();
+});
+
 test("local CLI session source creates opens sends and cleans local trace subscriptions", async () => {
 	const store = new InMemoryPiboSessionStore();
 	const source = new LocalCliSessionSource({ sessionStore: store, ownerScope: "user:one", now: () => fixedNow });

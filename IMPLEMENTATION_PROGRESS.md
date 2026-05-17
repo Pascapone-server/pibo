@@ -196,3 +196,37 @@ Validation and results for owner switch and room-first command flow batch:
 - Completed stories marked `passes: true`: PRD 02 `US-003`; PRD 04 `US-003`.
 - Implementation commit: `21dc2e6c35252141d37182d3aa59fa62678dfb7a`.
 - Next recommended group: PRD 04 `US-004` and PRD 02 `US-005` for `/new` Web-visible creation through the selected owner/room, with store/API/Web navigation validation.
+
+## 2026-05-17 run: /new Web-visible selected owner/room batch
+
+Selected story group:
+
+- `prd_04_room_session_navigation.json` / `US-004` — Make `/new` owner-scoped, room-scoped, and Web-visible.
+- `prd_02_owner_scope_recovery_profile.json` / `US-005` — Verify selected Web owner sessions appear in Web UI.
+
+Intended validation plan:
+
+- Tighten `/new` handling so it creates in the explicit active room only when one is selected; otherwise it opens a room picker with Personal Chat/default preselected and creates in the selected room.
+- Ensure local source session creation writes Web read-model session/navigation metadata for the selected owner/room immediately, and message send/output ingestion writes event-log/chat-message/observation rows under the same owner/room.
+- Add focused unit/source tests for `/new` active-room creation, `/new` no-active-room picker behavior, and persisted sessions/session_navigation/event_log/chat_messages ownership/room metadata.
+- Run focused tests after build in `pibo-dev-ink-cli-v2-web-parity`, then `npm run typecheck`.
+- Run `pibo debug pty` with a temp `PIBO_HOME`, selected Web owner, deterministic local mock router, scripted `/new`/message input, and raw/clean PTY artifacts; then query the temp Pibo data store to confirm Web navigation/read-model visibility and record the `/rooms/<roomId>/sessions/<sessionId>` URL.
+
+Validation and results for /new Web-visible selected owner/room batch:
+
+- Implemented `/new` so it creates immediately only when an explicit `activeRoom` is selected in Ink state; otherwise it opens an owner-scoped room picker with Personal Chat/default preselected and creates in the selected room.
+- Local CLI session creation now writes the Web read-model navigation row immediately for the selected owner/room. Sending a message through the local source writes `sessions`, `session_navigation`, `event_log`, `chat_messages`, and observations with selected owner/room metadata. Navigation preview updates now preserve user/assistant content instead of replacing it with `message_finished`.
+- Added focused tests for `/new` active-room creation, `/new` no-active-room picker behavior, and persisted Web-visible `sessions`/`session_navigation`/`event_log`/`chat_messages` owner-room metadata.
+- Validation commands:
+  - `docker exec pibo-dev-ink-cli-v2-web-parity bash -lc 'cd /workspace && npm run build >/tmp/pibo-build.log && node --test test/cli-ui-session-app.test.mjs test/cli-session-source.test.mjs test/ink-cli-v2-current-state.test.mjs'` — passed 32/32 focused tests.
+  - `docker exec pibo-dev-ink-cli-v2-web-parity bash -lc 'cd /workspace && rm -rf .tmp/pty-new-web .tmp/pty-new-web-home && mkdir -p .tmp/pty-new-web-home && npm run dev -- debug pty run --artifact --artifact-dir /workspace/.tmp/pty-new-web --timeout-ms 60000 --idle-timeout-ms 15000 --cols 120 --rows 32 --wait-for "Select room for Web user pty" --expect "Personal Chat" --press Enter --wait-for "New session in Personal Chat" --press Enter --wait-for "Created session" --type "/new" --press Enter --wait-for "Created session" --type "Persist from PTY" --press Enter --wait-for "PTY assistant persisted" --expect "Message sent" --press CtrlC -- env PIBO_HOME=/workspace/.tmp/pty-new-web-home PIBO_DEBUG_PTY_CLI_SESSIONS_MOCKED=1 PIBO_DEBUG_PTY_ASSISTANT_REPLY="PTY assistant persisted" node dist/bin/pibo.js tui:sessions --owner-scope user:pty'` — passed.
+  - PTY classification: real PTY path with `LocalCliSessionSource`, real `PiboDataStore` persistence, and deterministic mocked local router to avoid live provider credentials; not a fake source or demo path.
+  - PTY artifacts: raw `/root/code/pibo/.worktrees/ink-cli-v2-web-parity/.tmp/pty-new-web/raw.ansi.log`; clean `/root/code/pibo/.worktrees/ink-cli-v2-web-parity/.tmp/pty-new-web/clean.txt`.
+  - Observed PTY result: clean output shows `Web user pty (user:pty)`, Personal Chat selection, new-session creation, `/new`, sent message `Persist from PTY`, assistant reply `PTY assistant persisted`, and `Message sent.`
+  - Store/API read-model check: queried `/workspace/.tmp/pty-new-web-home/pibo.sqlite` after the PTY run. Latest created session `ps_e55f4202-e8d9-4de4-9830-b17598c1d881` had `sessions.owner_scope=user:pty`, `sessions.room_id=room_6b3d9f0e-5d58-4cc0-bfaa-ff3ee2665107`, matching `session_navigation` owner/room/status `idle`, user and assistant `chat_messages` in the same room, and `event_log` rows for `user.message.accepted` and `assistant_message` in the same room.
+  - Web URL for manual verification: `http://127.0.0.1:4822/apps/chat/rooms/room_6b3d9f0e-5d58-4cc0-bfaa-ff3ee2665107/sessions/ps_e55f4202-e8d9-4de4-9830-b17598c1d881`.
+  - `docker exec pibo-dev-ink-cli-v2-web-parity bash -lc 'cd /workspace && npm run typecheck'` — passed.
+  - `docker exec pibo-dev-ink-cli-v2-web-parity bash -lc 'cd /workspace && npm test'` — ran 494 tests; 493 passed and only the pre-existing unrelated `test/telemetry-store.test.mjs` stale/prune assertion failed.
+- Completed stories marked `passes: true`: PRD 04 `US-004`; PRD 02 `US-005`.
+- Implementation commit: pending.
+- Next recommended group: PRD 04 `US-005` existing room session/transcript hydration, then PRD 02 `US-004` diagnostics/repair for legacy `user:unknown` sessions.

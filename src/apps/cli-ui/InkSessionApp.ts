@@ -28,6 +28,7 @@ export type InkSessionPickerState = {
 	items: readonly InkSessionPickerItem[];
 	selectedIndex: number;
 	emptyMessage: string;
+	action?: "select-session" | "create-session";
 	ownerScope?: string;
 	roomId?: string;
 };
@@ -194,7 +195,14 @@ export function InkSessionApp({ source, initialSessionId, skipOwnerPicker = fals
 				return;
 			}
 			if (picker.kind === "room") {
-				await openSessionPickerForRoom({ id: item.roomId ?? item.id, title: item.label, description: item.description, ownerScope: item.ownerScope ?? picker.ownerScope, isDefault: item.id === stateRef.current.status?.activeRoomId }, item.ownerScope ?? picker.ownerScope ?? stateRef.current.activeOwner?.ownerScope ?? "");
+				const room = { id: item.roomId ?? item.id, title: item.label, description: item.description, ownerScope: item.ownerScope ?? picker.ownerScope, isDefault: item.id === stateRef.current.status?.activeRoomId };
+				const ownerScope = item.ownerScope ?? picker.ownerScope ?? stateRef.current.activeOwner?.ownerScope ?? "";
+				if (picker.action === "create-session") {
+					const created = await source.createSession({ roomId: room.id, ownerScope, agentId: stateRef.current.status?.activeAgentId });
+					await openSession(created.id, `Created session ${created.title}.`);
+					return;
+				}
+				await openSessionPickerForRoom(room, ownerScope);
 				return;
 			}
 			if (picker.kind === "session") {
@@ -475,9 +483,31 @@ async function handleSlashCommand(
 		return;
 	}
 	if (command.name === "new") {
-		const roomId = state.activeRoom?.id ?? state.status?.activeRoomId;
-		const ownerScope = state.activeOwner?.ownerScope ?? state.status?.activeOwnerScope;
-		const created = await source.createSession({ roomId, ownerScope, agentId: state.status?.activeAgentId });
+		const owner = state.activeOwner ?? await source.getActiveOwner();
+		if (!state.activeRoom?.id) {
+			const rooms = await source.listRooms({ ownerScope: owner.ownerScope });
+			const defaultIndex = Math.max(0, rooms.findIndex((room) => room.isDefault));
+			const status = await source.getStatus({ sessionId: state.session?.id });
+			setState((current) => ({
+				...current,
+				status,
+				activeOwner: owner,
+				mode: "picker",
+				picker: {
+					kind: "room",
+					action: "create-session",
+					title: `Select room for new session for ${owner.label}`,
+					items: rooms.map(roomPickerItem),
+					selectedIndex: defaultIndex,
+					emptyMessage: "No rooms are available for the selected owner.",
+					ownerScope: owner.ownerScope,
+				},
+				message: rooms.length === 0 ? "No rooms are available for the selected owner." : "Select the room for the new session.",
+				error: undefined,
+			}));
+			return;
+		}
+		const created = await source.createSession({ roomId: state.activeRoom.id, ownerScope: owner.ownerScope, agentId: state.status?.activeAgentId });
 		await openSession(created.id, `Created session ${created.title}.`);
 		return;
 	}

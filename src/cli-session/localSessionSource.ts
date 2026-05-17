@@ -161,7 +161,7 @@ export class LocalCliSessionSource implements CliSessionSource {
 		const agent = input.agentId ? this.resolveAgent(input.agentId) : undefined;
 		const profile = this.resolveProfile(input.profile ?? agent?.profileName ?? agent?.id ?? this.defaultProfileName());
 		const ownerScope = normalizeOwnerScope(input.ownerScope ?? this.ownerScope);
-		const room = input.roomId ? undefined : this.ensureDefaultRoomForOwner(ownerScope);
+		const room = input.roomId ? await this.findRoomSummary(ownerScope, input.roomId) : this.ensureDefaultRoomForOwner(ownerScope);
 		const roomId = input.roomId ?? room?.id;
 		const metadata = buildSessionMetadata(roomId, "idle", room?.title);
 		const session = this.sessionStore.create({
@@ -173,6 +173,7 @@ export class LocalCliSessionSource implements CliSessionSource {
 			title: input.title?.trim() || "New CLI session",
 			metadata,
 		});
+		if (roomId) this.upsertSessionNavigation(session, roomId, undefined, "idle");
 		this.traceViews.set(session.id, emptyTraceView(session));
 		const summary = sessionToSummary(session);
 		this.emit(session.id, { type: "session", session: summary, traceView: cloneJson(this.traceViews.get(session.id) ?? null), status: await this.getStatus({ sessionId: session.id }) });
@@ -547,12 +548,36 @@ export class LocalCliSessionSource implements CliSessionSource {
 		};
 	}
 
+	private async findRoomSummary(ownerScope: string, roomId: string): Promise<CliRoomSummary | undefined> {
+		return (await this.listRooms({ ownerScope })).find((room) => room.id === roomId);
+	}
+
 	private ensureDefaultRoomForOwner(ownerScope: string): CliRoomSummary {
 		if (this.roomService) {
 			const room = this.roomService.ensureDefaultRoom({ ownerScope, principalId: ownerScope, name: "Personal Chat" });
 			return { id: room.id, title: room.name, description: room.topic, ownerScope: room.ownerScope, isDefault: true };
 		}
 		return defaultCliRoomSummary(ownerScope);
+	}
+
+	private upsertSessionNavigation(session: PiboSession, roomId: string, lastMessagePreview: string | undefined, status: string): void {
+		if (!this.dataStore) return;
+		const now = this.now();
+		this.dataStore.navigation.upsertSession({
+			ownerScope: normalizeOwnerScope(session.ownerScope),
+			roomId,
+			sessionId: session.id,
+			rootSessionId: rootSessionIdFromSession(session),
+			parentId: session.parentId,
+			originId: session.originId,
+			title: session.title || lastMessagePreview || "Untitled Session",
+			profile: session.profile,
+			status,
+			lastActivityAt: now,
+			lastMessagePreview,
+			sortKey: now,
+			updatedAt: now,
+		});
 	}
 
 	private emit(sessionId: string, update: CliSessionUpdate): void {
@@ -626,6 +651,10 @@ function buildSessionMetadata(roomId: string | undefined, status: CliSessionSumm
 	return roomName
 		? { chatRoomId: roomId, roomId, chatRoomName: roomName, status, source: "pibo tui:sessions" }
 		: { chatRoomId: roomId, roomId, status, source: "pibo tui:sessions" };
+}
+
+function rootSessionIdFromSession(session: PiboSession): string {
+	return session.parentId ? (typeof session.metadata?.rootSessionId === "string" ? session.metadata.rootSessionId : session.parentId) : session.id;
 }
 
 function eventLogRowToV2MapperRow(row: StoredPiboEventLogRow): EventLogRow {

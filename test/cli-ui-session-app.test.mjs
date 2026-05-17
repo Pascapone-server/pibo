@@ -242,6 +242,29 @@ test("Slash /new uses selected owner and room from Ink state", async () => {
 	assert.match(harness.state.message, /Created session/);
 });
 
+test("Slash /new without an active room opens default-first room picker", async () => {
+	const source = new FakeCliSessionSource({
+		owners: [{ ownerScope: "user:alpha", label: "Alpha", kind: "web-user" }],
+		activeOwnerScope: "user:alpha",
+		rooms: [
+			{ id: "room_project", title: "Project Room", ownerScope: "user:alpha" },
+			{ id: "room_personal", title: "Personal Chat", ownerScope: "user:alpha", isDefault: true },
+		],
+		sessions: [],
+	});
+	const harness = stateHarness({ ...baseState(), session: undefined, activeOwner: { ownerScope: "user:alpha", label: "Alpha", kind: "web-user" }, activeRoom: undefined, rows: [] });
+	const openSession = (sessionId, message) => openFakeSessionInto(source, harness, sessionId, message);
+
+	await handleCliSessionSubmittedInput("/new", source, harness.state, harness.setState, openSession, () => {});
+
+	assert.equal(harness.state.mode, "picker");
+	assert.equal(harness.state.picker.kind, "room");
+	assert.equal(harness.state.picker.action, "create-session");
+	assert.match(harness.state.picker.title, /Select room for new session for Alpha/);
+	assert.equal(harness.state.picker.items[harness.state.picker.selectedIndex].roomId, "room_personal");
+	assert.match(harness.state.message, /Select the room for the new session/);
+});
+
 test("Slash /owner opens owner picker and cross-owner sends are rejected", async () => {
 	const source = new FakeCliSessionSource({
 		owners: [
@@ -342,6 +365,7 @@ test("Slash commands handle help status clear pickers unknown exit and normal se
 	assert.equal(harness.state.picker.kind, "agent");
 	assert.match(harness.state.picker.items[0].label, /Pibo Agent|pibo-agent/);
 
+	harness.setState((current) => ({ ...current, activeRoom: { id: "room_fake_main", title: "Fake Room" }, mode: "transcript", picker: undefined }));
 	await submit("/new");
 	assert.match(harness.state.session.id, /^ps_fake_created_/);
 	assert.match(harness.state.message, /Created session/);
