@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "status": "in_progress",
+  "status": "blocked_on_decisions",
   "baseline": {
     "baseRef": "upstream/dev",
     "baseCommit": "bdf219f906eb331a2f5343dd16e8124c2734878b",
     "mainRef": "main",
     "createdAt": "2026-05-17T00:17:50Z",
-    "lastUpdatedAt": "2026-05-17T01:20:50Z",
+    "lastUpdatedAt": "2026-05-17T01:30:23Z",
     "notes": [
       "This ledger is the durable resume state for the Ralph source-spec refresh loop.",
       "Current code in this worktree is the source of truth for source-backed specs.",
@@ -14,8 +14,8 @@
     ]
   },
   "cursor": {
-    "nextQueueId": "q-global-source-marked-inventory",
-    "lastIteration": 6
+    "nextQueueId": "blocked-on-decision-requests",
+    "lastIteration": 7
   },
   "decisionRequests": [
     {
@@ -197,14 +197,34 @@
     },
     {
       "id": "q-global-source-marked-inventory",
-      "status": "pending",
+      "status": "completed",
       "priority": 4,
       "title": "Full source-marked spec inventory and final stale sweep",
       "paths": [
         "docs/specs/capabilities/",
         "docs/specs/coverage/"
       ],
-      "reason": "After high-risk areas, perform a broad inventory to catch remaining source-backed specs that changed since 2026-05-11."
+      "reason": "After high-risk areas, perform a broad inventory to catch remaining source-backed specs that changed since 2026-05-11.",
+      "startedAt": "2026-05-17T01:30:23Z",
+      "completedAt": "2026-05-17T01:30:23Z",
+      "cursor": {
+        "auditedPaths": [
+          "docs/specs/capabilities/",
+          "docs/specs/coverage/",
+          "docs/specs/capabilities/continuous-ralph-jobs.md",
+          "docs/specs/capabilities/shared-terminal-view-model.md",
+          "docs/specs/capabilities/chat-web-persistence-diagnostics-api.md",
+          "docs/specs/capabilities/local-config-cli.md",
+          "docs/specs/capabilities/chat-web-static-shell-and-pwa-assets.md",
+          "docs/specs/capabilities/mcp-registry-python-runtimes.md",
+          "docs/specs/coverage/source-specs-refresh-final-sweep-2026-05-17.md"
+        ],
+        "result": "completed_with_spec_updates",
+        "next": "blocked-on-decision-requests",
+        "remainingOpenDecisionRequestIds": [
+          "dr-bootstrap-catalog-owner-cache"
+        ]
+      }
     }
   ],
   "completed": [
@@ -381,6 +401,49 @@
         "Classified the current Web Annotations proposal/spec/design/tasks as intentional future/target change documentation, not current source-backed behavior in this worktree.",
         "Read-only triage found parallel branch web-annotations-plugin with committed PRD01-PRD05 implementation/docs progress and uncommitted Chat Web/CDP changes; this loop must not import or merge that separate in-flight branch.",
         "Added a coverage note documenting that this refresh should ignore current-worktree absence, reference the parallel branch only as context, and continue without waiting until Web Annotations lands in the audited base."
+      ]
+    },
+    {
+      "id": "q-global-source-marked-inventory",
+      "completedAt": "2026-05-17T01:30:23Z",
+      "title": "Full source-marked spec inventory and final stale sweep",
+      "result": "completed_with_spec_updates",
+      "pathsAudited": [
+        "docs/specs/capabilities/",
+        "docs/specs/coverage/",
+        "docs/specs/capabilities/continuous-ralph-jobs.md",
+        "docs/specs/capabilities/shared-terminal-view-model.md",
+        "docs/specs/capabilities/chat-web-persistence-diagnostics-api.md",
+        "docs/specs/capabilities/local-config-cli.md",
+        "docs/specs/capabilities/chat-web-static-shell-and-pwa-assets.md",
+        "docs/specs/capabilities/mcp-registry-python-runtimes.md",
+        "docs/specs/coverage/source-specs-refresh-final-sweep-2026-05-17.md"
+      ],
+      "evidence": [
+        "find docs/specs/capabilities -maxdepth 1 -type f -name *.md",
+        "rg source-backed/current-code markers under docs/specs/capabilities and docs/specs/coverage",
+        "src/ralph/store.ts",
+        "src/ralph/service.ts",
+        "src/ralph/stopping.ts",
+        "src/ralph/templates.ts",
+        "src/ralph/cli.ts",
+        "src/apps/chat/ralph-api.ts",
+        "src/apps/chat-ui/src/RalphArea.tsx",
+        "test/ralph-runtime-overrides.test.mjs",
+        "test/ralph-stop-conditions.test.mjs",
+        "test/ralph-templates.test.mjs",
+        "src/session-ui/",
+        "src/apps/cli-ui/",
+        "test/session-ui-terminal-rows.test.mjs",
+        "test/cli-ui-ink-renderer.test.mjs",
+        "test/cli-ui-session-app.test.mjs",
+        "test/cli-session-source.test.mjs"
+      ],
+      "notes": [
+        "Final sweep updated Continuous Ralph Jobs for current stop-policy, condition, template, Chat Web, CLI, and test behavior.",
+        "Shared Terminal View Model was reclassified from target/extraction language to implemented source-backed behavior in src/session-ui with Chat Web re-exports and Ink CLI usage.",
+        "Small verification-basis/path hygiene updates were made for local config, static shell/PWA assets, MCP registry Python runtimes, and persistence diagnostics.",
+        "No new capability spec was created; a final coverage note records the inventory outcome. The remaining blocked store/data queue item is covered by the existing open bootstrap catalog owner-cache decision request."
       ]
     }
   ],
@@ -767,6 +830,62 @@
         "/root/code/pibo/.worktrees/dev/.worktrees/web-annotations-plugin"
       ],
       "resolution": "coverage_note_added"
+    },
+    {
+      "id": "sf-global-ralph-stop-policy-current",
+      "queueId": "q-global-source-marked-inventory",
+      "path": "docs/specs/capabilities/continuous-ralph-jobs.md",
+      "foundAt": "2026-05-17T01:30:23Z",
+      "severity": "stale_current_behavior",
+      "summary": "Ralph spec omitted current stopPolicy persistence/evaluation, registered stop conditions, built-in templates, policy CLI, Chat Web condition/template endpoints, and focused stop-condition/template tests.",
+      "sourceEvidence": [
+        "src/ralph/stopping.ts",
+        "src/ralph/store.ts",
+        "src/ralph/service.ts",
+        "src/ralph/templates.ts",
+        "src/ralph/cli.ts",
+        "src/apps/chat/ralph-api.ts",
+        "src/apps/chat-ui/src/RalphArea.tsx",
+        "test/ralph-stop-conditions.test.mjs",
+        "test/ralph-templates.test.mjs"
+      ],
+      "resolution": "updated_spec"
+    },
+    {
+      "id": "sf-global-shared-terminal-implemented",
+      "queueId": "q-global-source-marked-inventory",
+      "path": "docs/specs/capabilities/shared-terminal-view-model.md",
+      "foundAt": "2026-05-17T01:30:23Z",
+      "severity": "stale_current_behavior",
+      "summary": "Shared Terminal View Model spec still described extraction as target work, but current source implements the shared src/session-ui model, Web compatibility re-exports, Ink CLI consumers, and focused renderer-neutral tests.",
+      "sourceEvidence": [
+        "src/session-ui/index.ts",
+        "src/session-ui/terminalRows.ts",
+        "src/session-ui/terminalValue.ts",
+        "src/apps/chat-ui/src/session-views/compact-terminal/terminalRows.ts",
+        "src/apps/cli-ui/InkSessionApp.ts",
+        "test/session-ui-terminal-rows.test.mjs",
+        "test/cli-ui-ink-renderer.test.mjs",
+        "test/cli-ui-session-app.test.mjs",
+        "test/cli-session-source.test.mjs"
+      ],
+      "resolution": "updated_spec"
+    },
+    {
+      "id": "sf-global-verification-basis-path-hygiene",
+      "queueId": "q-global-source-marked-inventory",
+      "path": "docs/specs/capabilities/chat-web-persistence-diagnostics-api.md; docs/specs/capabilities/local-config-cli.md; docs/specs/capabilities/chat-web-static-shell-and-pwa-assets.md; docs/specs/capabilities/mcp-registry-python-runtimes.md",
+      "foundAt": "2026-05-17T01:30:23Z",
+      "severity": "traceability_gap",
+      "summary": "Final sweep found a stale persistence diagnostics source path and several source-backed specs using Source Basis or lacking explicit Verification Basis under current docs conventions.",
+      "sourceEvidence": [
+        "src/data/ingest-service.ts",
+        "src/config/config.ts",
+        "src/apps/chat/web-app.ts",
+        "src/mcp/registry.ts",
+        "src/mcp/python-runtime.ts"
+      ],
+      "resolution": "updated_spec"
     }
   ],
   "updatedSpecs": [
@@ -943,6 +1062,48 @@
       "queueId": "q-web-annotations-uncommitted",
       "updatedAt": "2026-05-17T01:19:27Z",
       "summary": "Added a coverage note classifying the existing Web Annotations change spec as target/future behavior in this worktree and documenting the separate in-flight web-annotations-plugin branch/uncommitted changes as context only."
+    },
+    {
+      "path": "docs/specs/capabilities/continuous-ralph-jobs.md",
+      "queueId": "q-global-source-marked-inventory",
+      "updatedAt": "2026-05-17T01:30:23Z",
+      "summary": "Refreshed current Ralph behavior for stopPolicy persistence/evaluation, built-in and plugin stop conditions, conditions/templates/policy CLI surfaces, Chat Web condition/template endpoints, stop-policy UI, and current focused tests."
+    },
+    {
+      "path": "docs/specs/capabilities/shared-terminal-view-model.md",
+      "queueId": "q-global-source-marked-inventory",
+      "updatedAt": "2026-05-17T01:30:23Z",
+      "summary": "Updated from target extraction language to current source-backed shared src/session-ui behavior, Chat Web re-exports, Ink CLI consumers, checked success criteria, traceability, and verification basis."
+    },
+    {
+      "path": "docs/specs/capabilities/chat-web-persistence-diagnostics-api.md",
+      "queueId": "q-global-source-marked-inventory",
+      "updatedAt": "2026-05-17T01:30:23Z",
+      "summary": "Corrected the ingestion source path in Verification Basis from the old Chat data path to src/data/ingest-service.ts."
+    },
+    {
+      "path": "docs/specs/capabilities/local-config-cli.md",
+      "queueId": "q-global-source-marked-inventory",
+      "updatedAt": "2026-05-17T01:30:23Z",
+      "summary": "Renamed Source Basis to Verification Basis and refreshed wording against current config source/test evidence."
+    },
+    {
+      "path": "docs/specs/capabilities/chat-web-static-shell-and-pwa-assets.md",
+      "queueId": "q-global-source-marked-inventory",
+      "updatedAt": "2026-05-17T01:30:23Z",
+      "summary": "Renamed Source Basis to Verification Basis and refreshed wording against current static shell/PWA source/test evidence."
+    },
+    {
+      "path": "docs/specs/capabilities/mcp-registry-python-runtimes.md",
+      "queueId": "q-global-source-marked-inventory",
+      "updatedAt": "2026-05-17T01:30:23Z",
+      "summary": "Added explicit Verification Basis for current MCP registry and Python runtime source evidence and empty-registry source-inspected boundary."
+    },
+    {
+      "path": "docs/specs/coverage/source-specs-refresh-final-sweep-2026-05-17.md",
+      "queueId": "q-global-source-marked-inventory",
+      "updatedAt": "2026-05-17T01:30:23Z",
+      "summary": "Added final sweep coverage note documenting the broad source-marked inventory outcome, no-new-capability decision, and remaining open decision boundary."
     }
   ],
   "blockedItems": [
@@ -1063,6 +1224,10 @@
     {
       "at": "2026-05-17T01:20:50Z",
       "note": "Recorded commit efd3e7e for q-web-annotations-uncommitted Web Annotations branch/spec triage; next queue item is q-global-source-marked-inventory."
+    },
+    {
+      "at": "2026-05-17T01:30:23Z",
+      "note": "Audited q-global-source-marked-inventory. Performed final broad capability/coverage inventory, updated Continuous Ralph Jobs and Shared Terminal View Model for current source-backed behavior, fixed verification-basis/path hygiene in existing owning specs, added final sweep coverage note, and left only the existing bootstrap catalog owner-cache decision request open."
     }
   ]
 }
