@@ -194,5 +194,5 @@ Validation and results for owner switch and room-first command flow batch:
   - `docker exec pibo-dev-ink-cli-v2-web-parity bash -lc 'cd /workspace && npm run typecheck'` — passed.
 - Path classification: real PTY-backed CLI/TUI smoke tests with deterministic mocked local router/source; focused source/Ink unit tests. No Web DOM behavior changed, so browser checks were not required for this batch.
 - Completed stories marked `passes: true`: PRD 02 `US-003`; PRD 04 `US-003`.
-- Implementation commit: `962da7969ad5e3f0a63b5d85848293fe4408a13f`.
+- Implementation commit: `21dc2e6c35252141d37182d3aa59fa62678dfb7a`.
 - Next recommended group: PRD 04 `US-004` and PRD 02 `US-005` for `/new` Web-visible creation through the selected owner/room, with store/API/Web navigation validation.
