@@ -9,6 +9,7 @@ import {
 	filterSlashCommands,
 	formatSlashCommand,
 	groupSlashCommandsForHelp,
+	normalizeCommandErrorDescriptor,
 	progressBarText,
 	type BuildTerminalStatusInput,
 	type CommandResultDescriptor,
@@ -38,13 +39,15 @@ export type InkSessionPickerItem = {
 	disabled?: boolean;
 };
 
+const IDENTIFIER_PATTERN = /^(?:user|room|ps|pi|entry|evt|run|create|provider|model|agent)[_:]/i;
+
 export type InkSessionPickerState = {
 	kind: "owner" | "room" | "session" | "agent" | "command-menu";
 	title: string;
 	items: readonly InkSessionPickerItem[];
 	selectedIndex: number;
 	emptyMessage: string;
-	action?: "select-session" | "create-session" | "thinking-level" | "model-provider" | "model-choice" | "login-provider" | "login-method" | "fork-candidate";
+	action?: "select-session" | "select-room" | "create-session" | "thinking-level" | "model-provider" | "model-choice" | "login-provider" | "login-method" | "fork-candidate";
 	ownerScope?: string;
 	roomId?: string;
 	commandName?: string;
@@ -119,11 +122,11 @@ export function InkSessionApp({ source, initialSessionId, skipOwnerPicker = fals
 		void source.close();
 	}), [closeOpenSession, source]);
 
-	const openSession = useCallback(async (sessionId: string, message?: string) => {
+	const openSession = useCallback(async (sessionId: string, message?: string, localRows?: readonly CompactTerminalRow[]) => {
 		closeOpenSession();
 		const opened = await source.openSession(sessionId);
 		openedRef.current = opened;
-		const rows = buildCompactTerminalRows(opened.traceView, { showThinking: false });
+		const rows = [...(localRows ?? []), ...buildCompactTerminalRows(opened.traceView, { showThinking: false })];
 		setState((current) => ({
 			...current,
 			loading: false,
@@ -156,13 +159,13 @@ export function InkSessionApp({ source, initialSessionId, skipOwnerPicker = fals
 		await handleCliSessionSubmittedInput(rawInput, source, stateRef.current, setState, openSession, requestExit);
 	}, [openSession, requestExit, source]);
 
-	const openSessionPickerForRoom = useCallback(async (room: CliRoomSummary, ownerScope: string) => {
+	const openSessionPickerForRoom = useCallback(async (room: CliRoomSummary, ownerScope: string, parent?: InkSessionPickerState) => {
 		const sessions = await source.listSessions({ roomId: room.id, ownerScope });
 		const createItem: InkSessionPickerItem = {
 			id: `create:${room.id}`,
 			kind: "create-session",
-			label: `+ New session in ${room.title}`,
-			description: "Create and open a new CLI session in this room",
+			label: "+ New session",
+			description: ["create and open", `room ${abbreviateIdentifier(room.id)}`].join(" · "),
 			roomId: room.id,
 			ownerScope,
 		};
@@ -181,6 +184,7 @@ export function InkSessionApp({ source, initialSessionId, skipOwnerPicker = fals
 				emptyMessage: `No sessions in ${room.title}. Create a new session to start chatting.`,
 				ownerScope,
 				roomId: room.id,
+				parent,
 			},
 			message: sessions.length === 0 ? `No sessions in ${room.title}. Press Enter to create one.` : "Select a session with arrow keys, or create a new one.",
 			error: undefined,
@@ -235,7 +239,12 @@ export function InkSessionApp({ source, initialSessionId, skipOwnerPicker = fals
 					await openSession(created.id, `Created session ${created.title}.`);
 					return;
 				}
-				await openSessionPickerForRoom(room, ownerScope);
+				if (picker.action === "select-room") {
+					const status = await source.getStatus({ sessionId: stateRef.current.session?.id });
+					setState((current) => ({ ...current, status, activeRoom: room, mode: "transcript", picker: undefined, overlayStack: undefined, message: `Selected room ${room.title}.`, error: undefined }));
+					return;
+				}
+				await openSessionPickerForRoom(room, ownerScope, picker);
 				return;
 			}
 			if (picker.kind === "session") {
@@ -388,9 +397,9 @@ export function InkSessionAppView({ state, maxRows = 20, maxLineChars }: InkSess
 		state.loading ? React.createElement(Text, { color: "yellow" }, "Loading CLI session…") : null,
 		state.error ? React.createElement(Text, { color: "red" }, boundedLine(`Error: ${state.error}`, lineLimit)) : null,
 		...(state.message ? renderBoundedTextLines(state.message, "gray", lineLimit, "message") : []),
-		state.slashSuggestions ? React.createElement(InkSlashSuggestionsView, { suggestions: state.slashSuggestions, maxLineChars: lineLimit }) : null,
 		state.picker ? React.createElement(InkSessionPickerView, { picker: state.picker, maxLineChars: lineLimit }) : null,
 		React.createElement(InkTerminalView, { rows: state.rows, maxRows, maxLineChars: lineLimit }),
+		state.slashSuggestions ? React.createElement(InkSlashSuggestionsView, { suggestions: state.slashSuggestions, maxLineChars: lineLimit }) : null,
 		React.createElement(Text, { color: state.mode === "transcript" ? "green" : "yellow" }, boundedLine(`› ${state.input}`, lineLimit)),
 	);
 }
@@ -405,24 +414,37 @@ export function InkSlashSuggestionsView({ suggestions, maxLineChars }: { suggest
 	return React.createElement(
 		Box,
 		{ flexDirection: "column" },
-		React.createElement(Text, { color: "yellow" }, boundedLine("Slash commands (↑/↓ select, Enter accept/run, Esc close)", lineLimit)),
-		...suggestions.items.slice(0, 8).map((command, index) => React.createElement(Text, { key: command.id, color: index === suggestions.selectedIndex ? "green" : "white" }, boundedLine(`${index === suggestions.selectedIndex ? "❯" : " "} ${formatSlashCommand(command)} — ${command.description}${command.unsupportedReason ? ` (${command.unsupportedReason})` : ""}`, lineLimit))),
+		React.createElement(Text, { color: "yellow" }, boundedLine("slash commands", lineLimit)),
+		...suggestions.items.slice(0, 8).map((command, index) => {
+			const disabled = command.support === "deferred" || command.support === "browser-only" || Boolean(command.unsupportedReason);
+			const item: InkSessionPickerItem = {
+				id: command.id,
+				label: formatSlashCommand(command),
+				description: [command.description, command.unsupportedReason ? `unavailable: ${command.unsupportedReason}` : undefined].filter(Boolean).join(" · "),
+				disabled,
+			};
+			return React.createElement(Text, { key: command.id, color: overlayItemColor(index === suggestions.selectedIndex, disabled) }, formatOverlayItemLine(item, index === suggestions.selectedIndex, lineLimit));
+		}),
+		React.createElement(Text, { color: "gray" }, boundedLine("↑↓ select · enter accept/run · esc close · ctrl-c exit", lineLimit)),
 	);
 }
 
 export function InkSessionPickerView({ picker, maxLineChars }: { picker: InkSessionPickerState; maxLineChars?: number }): React.ReactElement {
 	const lineLimit = normalizeTerminalLineLimit(maxLineChars);
+	const title = compactOverlayTitle(picker.title);
 	if (picker.items.length === 0) {
 		return React.createElement(Box, { flexDirection: "column" },
-			React.createElement(Text, { color: "yellow" }, boundedLine(picker.title, lineLimit)),
+			React.createElement(Text, { color: "yellow" }, boundedLine(title, lineLimit)),
 			React.createElement(Text, { color: "gray" }, boundedLine(picker.emptyMessage, lineLimit)),
+			React.createElement(Text, { color: "gray" }, boundedLine("esc back/cancel · ctrl-c exit", lineLimit)),
 		);
 	}
 	return React.createElement(
 		Box,
 		{ flexDirection: "column" },
-		React.createElement(Text, { color: "yellow" }, boundedLine(`${picker.title} (↑/↓ select, Enter open, Esc cancel)`, lineLimit)),
-		...picker.items.map((item, index) => React.createElement(Text, { key: item.id, color: index === picker.selectedIndex ? "green" : "white" }, boundedLine(`${index === picker.selectedIndex ? "❯" : " "} ${item.label}${item.description ? ` — ${item.description}` : ""}`, lineLimit))),
+		React.createElement(Text, { color: "yellow" }, boundedLine(title, lineLimit)),
+		...picker.items.map((item, index) => React.createElement(Text, { key: item.id, color: overlayItemColor(index === picker.selectedIndex, item.disabled === true) }, formatOverlayItemLine(item, index === picker.selectedIndex, lineLimit))),
+		React.createElement(Text, { color: "gray" }, boundedLine("↑↓ select · enter confirm · esc back/cancel · ctrl-c exit", lineLimit)),
 	);
 }
 
@@ -580,7 +602,7 @@ export async function handleCliSessionSubmittedInput(
 	source: CliSessionSource,
 	state: InkSessionAppState,
 	setState: React.Dispatch<React.SetStateAction<InkSessionAppState>>,
-	openSession: (sessionId: string, message?: string) => Promise<void>,
+	openSession: (sessionId: string, message?: string, localRows?: readonly CompactTerminalRow[]) => Promise<void>,
 	requestExit: () => void,
 ): Promise<void> {
 	const parsed = parseCliSessionInput(rawInput);
@@ -602,7 +624,7 @@ export async function handleCliSessionSubmittedInput(
 	try {
 		await handleSlashCommand(parsed.command, source, state, setState, openSession, requestExit);
 	} catch (error) {
-		setState((current) => ({ ...current, error: boundedLine(formatCliSessionError(error)), message: undefined, mode: "transcript", picker: undefined }));
+		setState((current) => applyCommandResultToState(current, parsed.command, normalizeCommandErrorDescriptor(parsed.command.name, error), current.status));
 	}
 }
 
@@ -611,7 +633,7 @@ async function handleSlashCommand(
 	source: CliSessionSource,
 	state: InkSessionAppState,
 	setState: React.Dispatch<React.SetStateAction<InkSessionAppState>>,
-	openSession: (sessionId: string, message?: string) => Promise<void>,
+	openSession: (sessionId: string, message?: string, localRows?: readonly CompactTerminalRow[]) => Promise<void>,
 	requestExit: () => void,
 ): Promise<void> {
 	if (command.name === "help") {
@@ -621,16 +643,7 @@ async function handleSlashCommand(
 	if (command.name === "status") {
 		const result = await source.executeSlashCommand({ command: command.name, args: command.args, sessionId: state.session?.id, ownerScope: state.activeOwner?.ownerScope });
 		const status = await source.getStatus({ sessionId: state.session?.id });
-		setState((current) => ({
-			...current,
-			status,
-			mode: "transcript",
-			picker: undefined,
-			slashSuggestions: undefined,
-			rows: appendCommandResultRows(current.rows, command, result.descriptor, status, current.session),
-			message: undefined,
-			error: undefined,
-		}));
+		setState((current) => applyCommandResultToState(current, command, result.descriptor, status));
 		return;
 	}
 	if (command.name === "clear") {
@@ -707,6 +720,7 @@ async function handleSlashCommand(
 			mode: "picker",
 			picker: {
 				kind: "room",
+				action: command.name === "room" ? "select-room" : undefined,
 				title: command.name === "room" ? `Select active room for ${owner.label}` : `Select room for sessions for ${owner.label}`,
 				items: rooms.map(roomPickerItem),
 				selectedIndex,
@@ -753,7 +767,7 @@ async function handleSlashCommand(
 			validateThinkingLevel(command.args);
 			const result = await source.executeSlashCommand({ command: command.name, args: command.args, sessionId: state.session?.id, ownerScope: state.activeOwner?.ownerScope });
 			const status = await source.getStatus({ sessionId: state.session?.id });
-			setState((current) => ({ ...current, status, message: renderCommandResultDescriptorText(result.descriptor, current.session), error: undefined }));
+			setState((current) => applyCommandResultToState(current, command, result.descriptor, status));
 			return;
 		}
 		setState((current) => withPickerOverlay({
@@ -768,12 +782,12 @@ async function handleSlashCommand(
 		const result = await source.executeSlashCommand({ command: command.name, args: command.args, sessionId: state.session?.id, ownerScope: state.activeOwner?.ownerScope });
 		if (command.args.trim()) {
 			const status = await source.getStatus({ sessionId: state.session?.id });
-			setState((current) => ({ ...current, status, message: renderCommandResultDescriptorText(result.descriptor, current.session), error: undefined }));
+			setState((current) => applyCommandResultToState(current, command, result.descriptor, status));
 			return;
 		}
 		const providers = modelProviderItemsFromActionResult(result.rawResult, result.descriptor);
 		if (providers.length === 0) {
-			setState((current) => ({ ...current, message: renderCommandResultDescriptorText(result.descriptor, current.session), error: undefined }));
+			setState((current) => applyCommandResultToState(current, command, result.descriptor, current.status));
 			return;
 		}
 		setState((current) => withPickerOverlay({
@@ -788,12 +802,12 @@ async function handleSlashCommand(
 		const result = await source.executeSlashCommand({ command: command.name, args: command.args, sessionId: state.session?.id, ownerScope: state.activeOwner?.ownerScope });
 		if (command.args.trim()) {
 			const status = await source.getStatus({ sessionId: state.session?.id });
-			setState((current) => ({ ...current, status, message: renderCommandResultDescriptorText(result.descriptor, current.session), error: undefined }));
+			setState((current) => applyCommandResultToState(current, command, result.descriptor, status));
 			return;
 		}
 		const providers = loginProviderItemsFromActionResult(result.rawResult, result.descriptor);
 		if (providers.length === 0) {
-			setState((current) => ({ ...current, message: renderCommandResultDescriptorText(result.descriptor, current.session), error: undefined }));
+			setState((current) => applyCommandResultToState(current, command, result.descriptor, current.status));
 			return;
 		}
 		setState((current) => withPickerOverlay({
@@ -809,8 +823,11 @@ async function handleSlashCommand(
 		const descriptor = result.descriptor;
 		if (command.args.trim() || descriptor.kind !== "menu" || descriptor.items.length === 0) {
 			const status = await source.getStatus({ sessionId: state.session?.id });
-			if (result.openSessionId && result.openSessionId !== state.session?.id) await openSession(result.openSessionId, renderCommandResultDescriptorText(descriptor, state.session));
-			else setState((current) => ({ ...current, status, message: renderCommandResultDescriptorText(descriptor, current.session), error: undefined }));
+			if (result.openSessionId && result.openSessionId !== state.session?.id) {
+				const localRows = commandResultDescriptorRows(command, descriptor, status, state.session, 0);
+				await openSession(result.openSessionId, undefined, localRows);
+			}
+			else setState((current) => applyCommandResultToState(current, command, descriptor, status));
 			return;
 		}
 		setState((current) => withPickerOverlay({
@@ -823,7 +840,7 @@ async function handleSlashCommand(
 	}
 	const handled = await executeSharedSlashCommand(command, source, state, setState, openSession);
 	if (handled) return;
-	setState((current) => ({ ...current, error: `Unknown command ${command.raw}. Use /help for supported CLI commands.`, message: undefined }));
+	setState((current) => applyCommandResultToState(current, command, { kind: "unsupported", command: command.raw, reason: "Use /help for supported CLI commands." }, current.status));
 }
 
 async function executeSharedSlashCommand(
@@ -831,19 +848,19 @@ async function executeSharedSlashCommand(
 	source: CliSessionSource,
 	state: InkSessionAppState,
 	setState: React.Dispatch<React.SetStateAction<InkSessionAppState>>,
-	openSession: (sessionId: string, message?: string) => Promise<void>,
+	openSession: (sessionId: string, message?: string, localRows?: readonly CompactTerminalRow[]) => Promise<void>,
 ): Promise<boolean> {
 	const catalog = state.slashCommands ?? buildSlashCommandCatalog();
 	const descriptor = catalog.find((candidate) => candidate.slash === `/${command.name}` || candidate.aliases?.includes(`/${command.name}` as `/${string}`));
 	if (!descriptor || descriptor.group === "cli" || descriptor.group === "navigation") return false;
 	const result = await source.executeSlashCommand({ command: command.name, args: command.args, sessionId: state.session?.id, ownerScope: state.activeOwner?.ownerScope });
-	const message = renderCommandResultDescriptorText(result.descriptor, state.session);
+	const status = await source.getStatus({ sessionId: state.session?.id });
 	if (result.openSessionId && result.openSessionId !== state.session?.id) {
-		await openSession(result.openSessionId, message);
+		const localRows = commandResultDescriptorRows(command, result.descriptor, status, state.session, 0);
+		await openSession(result.openSessionId, undefined, localRows);
 		return true;
 	}
-	const status = await source.getStatus({ sessionId: state.session?.id });
-	setState((current) => ({ ...current, status, message, error: undefined }));
+	setState((current) => applyCommandResultToState(current, command, result.descriptor, status));
 	return true;
 }
 
@@ -859,7 +876,7 @@ async function selectCommandMenuItem(
 	source: CliSessionSource,
 	state: InkSessionAppState,
 	setState: React.Dispatch<React.SetStateAction<InkSessionAppState>>,
-	openSession: (sessionId: string, message?: string) => Promise<void>,
+	openSession: (sessionId: string, message?: string, localRows?: readonly CompactTerminalRow[]) => Promise<void>,
 ): Promise<void> {
 	if (item.disabled) {
 		setState((current) => ({ ...current, message: item.description ? `${item.label}: ${item.description}` : `${item.label} is unavailable.`, error: undefined }));
@@ -874,7 +891,7 @@ async function selectCommandMenuItem(
 		validateThinkingLevel(level);
 		const result = await source.executeSlashCommand({ command: "thinking", args: level, sessionId: state.session?.id, ownerScope: state.activeOwner?.ownerScope });
 		const status = await source.getStatus({ sessionId: state.session?.id });
-		setState((current) => ({ ...current, status, mode: "transcript", picker: undefined, overlayStack: popInkSessionOverlay(current.overlayStack), message: renderCommandResultDescriptorText(result.descriptor, current.session), error: undefined }));
+		setState((current) => applyCommandResultToState(current, { name: "thinking", args: level, raw: `/thinking ${level}` }, result.descriptor, status));
 		return;
 	}
 	if (picker.action === "model-provider") {
@@ -892,11 +909,13 @@ async function selectCommandMenuItem(
 		const args = providerId ? `${providerId}/${modelId}` : modelId;
 		const result = await source.executeSlashCommand({ command: "model", args, sessionId: state.session?.id, ownerScope: state.activeOwner?.ownerScope });
 		const status = await source.getStatus({ sessionId: state.session?.id });
+		const command = { name: "model", args, raw: `/model ${args}` };
 		if (result.openSessionId && result.openSessionId !== state.session?.id) {
-			await openSession(result.openSessionId, renderCommandResultDescriptorText(result.descriptor, state.session));
+			const localRows = commandResultDescriptorRows(command, result.descriptor, status, state.session, 0);
+			await openSession(result.openSessionId, undefined, localRows);
 			return;
 		}
-		setState((current) => ({ ...current, status, mode: "transcript", picker: undefined, overlayStack: popInkSessionOverlay(popInkSessionOverlay(current.overlayStack)), message: renderCommandResultDescriptorText(result.descriptor, current.session), error: undefined }));
+		setState((current) => applyCommandResultToState(current, command, result.descriptor, status));
 		return;
 	}
 	if (picker.action === "login-provider") {
@@ -913,17 +932,19 @@ async function selectCommandMenuItem(
 		const args = providerId ? `${providerId}/${methodId}` : methodId;
 		const result = await source.executeSlashCommand({ command: "login", args, sessionId: state.session?.id, ownerScope: state.activeOwner?.ownerScope });
 		const status = await source.getStatus({ sessionId: state.session?.id });
-		setState((current) => ({ ...current, status, mode: "transcript", picker: undefined, overlayStack: popInkSessionOverlay(popInkSessionOverlay(current.overlayStack)), message: renderCommandResultDescriptorText(result.descriptor, current.session), error: undefined }));
+		setState((current) => applyCommandResultToState(current, { name: "login", args, raw: `/login ${args}` }, result.descriptor, status));
 		return;
 	}
 	if (picker.action === "fork-candidate") {
 		const result = await source.executeSlashCommand({ command: "fork-candidates", args: item.id, sessionId: state.session?.id, ownerScope: state.activeOwner?.ownerScope });
+		const status = await source.getStatus({ sessionId: state.session?.id });
+		const command = { name: "fork-candidates", args: item.id, raw: `/fork-candidates ${item.id}` };
 		if (result.openSessionId && result.openSessionId !== state.session?.id) {
-			await openSession(result.openSessionId, renderCommandResultDescriptorText(result.descriptor, state.session));
+			const localRows = commandResultDescriptorRows(command, result.descriptor, status, state.session, 0);
+			await openSession(result.openSessionId, undefined, localRows);
 			return;
 		}
-		const status = await source.getStatus({ sessionId: state.session?.id });
-		setState((current) => ({ ...current, status, mode: "transcript", picker: undefined, overlayStack: popInkSessionOverlay(current.overlayStack), message: renderCommandResultDescriptorText(result.descriptor, current.session), error: undefined }));
+		setState((current) => applyCommandResultToState(current, command, result.descriptor, status));
 		return;
 	}
 	setState((current) => ({ ...current, mode: "transcript", picker: undefined, message: `${item.label} selected.`, error: undefined }));
@@ -1093,6 +1114,25 @@ function stringField(record: Record<string, unknown>, key: string): string | und
 	return typeof value === "string" ? value : undefined;
 }
 
+function applyCommandResultToState(
+	current: InkSessionAppState,
+	command: CliSessionSlashCommand,
+	descriptor: CommandResultDescriptor,
+	status?: CliRuntimeStatus,
+): InkSessionAppState {
+	return {
+		...current,
+		...(status ? { status } : {}),
+		mode: "transcript",
+		picker: undefined,
+		slashSuggestions: undefined,
+		overlayStack: undefined,
+		rows: appendCommandResultRows(current.rows, command, descriptor, status, current.session),
+		message: undefined,
+		error: undefined,
+	};
+}
+
 export function appendCommandResultRows(
 	rows: readonly CompactTerminalRow[],
 	command: CliSessionSlashCommand,
@@ -1171,6 +1211,9 @@ function commandStatusRowOutput(rawStatus: unknown, status?: CliRuntimeStatus, s
 		cwd: status?.cwd ?? descriptorStatus.cwd,
 		contextUsage: status?.contextUsage ?? descriptorStatus.contextUsage,
 		providerUsage: status?.providerUsage ?? descriptorStatus.providerUsage,
+		activeTools: status?.activeTools ?? descriptorStatus.activeTools,
+		enabledTools: status?.enabledTools ?? descriptorStatus.enabledTools,
+		disposed: status?.disposed ?? descriptorStatus.disposed,
 		thinkingLevel: status?.thinkingLevel ?? descriptorStatus.thinkingLevel,
 		fastMode: status?.fastMode ?? descriptorStatus.fastMode,
 		warnings: status?.warnings ?? descriptorStatus.warnings,
@@ -1206,10 +1249,11 @@ function statusViewModelInput(status: CliRuntimeStatus | undefined, session?: Cl
 		owner: { label: status?.activeOwnerLabel, scope: status?.activeOwnerScope ?? session?.ownerScope },
 		session: { id: session?.id ?? status?.activeSessionId, title: session?.title, profile: session?.profile ?? session?.agentId ?? status?.activeAgentId, status: session?.status },
 		model: status?.activeModel ?? session?.model ?? { provider: "unknown", id: "unknown", label: "unknown" },
-		runtime: { state: runtimeState, connected: status?.connected, queuedMessages: status?.queuedMessages, processing: status?.processing, streaming: status?.streaming },
+		runtime: { state: runtimeState, connected: status?.connected, queuedMessages: status?.queuedMessages, processing: status?.processing, streaming: status?.streaming, disposed: status?.disposed },
 		cwd: status?.cwd,
 		contextUsage: status?.contextUsage,
 		providerUsage: status?.providerUsage,
+		tools: { enabled: status?.enabledTools, active: status?.activeTools },
 		thinking: status?.thinkingLevel ? { level: status.thinkingLevel } : undefined,
 		fastMode: status?.fastMode,
 		warnings: status?.warnings,
@@ -1218,24 +1262,80 @@ function statusViewModelInput(status: CliRuntimeStatus | undefined, session?: Cl
 	};
 }
 
+function compactOverlayTitle(title: string): string {
+	return title
+		.replace(/^Select effective owner$/i, "select owner")
+		.replace(/^Select existing agent\/profile$/i, "select agent")
+		.replace(/^Select thinking level$/i, "select thinking level")
+		.replace(/^Select model provider$/i, "select model provider")
+		.replace(/^Select login provider$/i, "select login provider")
+		.replace(/^Select fork candidate$/i, "select fork candidate")
+		.replace(/^Select auth method for /i, "select login method — ")
+		.replace(/^Select model for /i, "select model — ")
+		.replace(/^Select session in /i, "select session — ")
+		.replace(/^Select room for new session for /i, "select room — new session for ")
+		.replace(/^Select active room for /i, "select room — ")
+		.replace(/^Select room for sessions for /i, "select room — sessions for ")
+		.replace(/^Select room for /i, "select room — ")
+		.replace(/^Select /i, "select ");
+}
+
+function formatOverlayItemLine(item: InkSessionPickerItem, selected: boolean, max: number): string {
+	const marker = selected ? "❯" : " ";
+	const disabled = item.disabled === true;
+	const availability = disabled ? "× " : "";
+	const secondary = item.description ? ` · ${redactCliSessionStatusText(item.description)}` : "";
+	return boundedLine(`${marker} ${availability}${redactCliSessionStatusText(item.label)}${secondary}`, max);
+}
+
+function overlayItemColor(selected: boolean, disabled: boolean): string {
+	if (disabled) return "gray";
+	return selected ? "green" : "white";
+}
+
+function abbreviateIdentifier(value: string | undefined, max = 24): string | undefined {
+	if (!value) return undefined;
+	if (value.length <= max) return value;
+	const head = Math.max(6, Math.floor((max - 1) / 2));
+	const tail = Math.max(4, max - head - 1);
+	return `${value.slice(0, head)}…${value.slice(-tail)}`;
+}
+
+function itemMetadata(...parts: Array<string | undefined | false>): string | undefined {
+	return parts.filter(Boolean).join(" · ") || undefined;
+}
+
+function ownerKindLabel(owner: CliOwnerSummary): string {
+	if (owner.kind === "web-user") return "Web user";
+	if (owner.kind === "root-recovery") return "Root recovery";
+	if (owner.kind === "legacy") return "Legacy owner";
+	return "Local owner";
+}
+
+function modelLabel(model: CliSessionSummary["model"]): string | undefined {
+	if (!model) return undefined;
+	return `${model.provider}/${model.id}`;
+}
+
 function ownerPickerItem(owner: CliOwnerSummary): InkSessionPickerItem {
 	return {
 		id: owner.ownerScope,
 		kind: "owner",
 		ownerScope: owner.ownerScope,
 		label: owner.label,
-		description: [owner.ownerScope, owner.description].filter(Boolean).join(" | "),
+		description: itemMetadata(ownerKindLabel(owner), abbreviateIdentifier(owner.ownerScope), owner.description),
 	};
 }
 
 function roomPickerItem(room: CliRoomSummary): InkSessionPickerItem {
+	const label = room.title || abbreviateIdentifier(room.id) || room.id;
 	return {
 		id: room.id,
 		kind: "room",
 		roomId: room.id,
 		ownerScope: room.ownerScope,
-		label: room.title || room.id,
-		description: [room.isDefault ? "default" : undefined, room.description].filter(Boolean).join(" | "),
+		label,
+		description: itemMetadata(room.isDefault ? "default" : undefined, room.description, `room ${abbreviateIdentifier(room.id)}`),
 	};
 }
 
@@ -1245,8 +1345,8 @@ function sessionPickerItem(session: CliSessionSummary): InkSessionPickerItem {
 		kind: "session",
 		roomId: session.roomId,
 		ownerScope: session.ownerScope,
-		label: session.title || session.id,
-		description: [session.profile, session.status, session.updatedAt].filter(Boolean).join(" | "),
+		label: session.title || abbreviateIdentifier(session.id) || session.id,
+		description: itemMetadata(session.status, session.profile || session.agentId, modelLabel(session.model), session.updatedAt ? `updated ${session.updatedAt}` : undefined, abbreviateIdentifier(session.id)),
 	};
 }
 
@@ -1254,7 +1354,7 @@ function agentPickerItem(agent: CliAgentSummary): InkSessionPickerItem {
 	return {
 		id: agent.id,
 		label: agent.name || agent.id,
-		description: agent.description ?? agent.profileName,
+		description: itemMetadata(agent.profileName, agent.description, IDENTIFIER_PATTERN.test(agent.id) ? abbreviateIdentifier(agent.id) : undefined),
 	};
 }
 
