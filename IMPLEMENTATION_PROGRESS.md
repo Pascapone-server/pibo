@@ -214,4 +214,4 @@ Remaining limitations / next stories:
 
 Commit:
 
-- `2ce1525` feat: route CLI command results into transcript
+- `78db622` feat: route CLI command results into transcript
