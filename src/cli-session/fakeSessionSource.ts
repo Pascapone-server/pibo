@@ -116,6 +116,7 @@ export class FakeCliSessionSource implements CliSessionSource {
 	async openSession(sessionId: string): Promise<CliOpenSession> {
 		this.assertOpen();
 		const session = this.resolveSession(sessionId);
+		this.assertSessionOwner(session);
 		let handleClosed = false;
 		const handleListeners = new Set<CliSessionUpdateListener>();
 		const removeFromSource = () => {
@@ -163,6 +164,7 @@ export class FakeCliSessionSource implements CliSessionSource {
 		const trimmed = text.trim();
 		if (!trimmed) throw new CliSourceError("empty_message", "Message text is empty");
 		const session = this.resolveSession(sessionId);
+		this.assertSessionOwner(session);
 		const updated = { ...session, status: "running" as const, updatedAt: this.now() };
 		this.sessions.set(sessionId, updated);
 		const existing = this.traceViews.get(sessionId) ?? emptyTraceView(updated);
@@ -208,6 +210,7 @@ export class FakeCliSessionSource implements CliSessionSource {
 	async setSessionAgent(sessionId: string, agentId: string): Promise<CliSessionSummary> {
 		this.assertOpen();
 		const session = this.resolveSession(sessionId);
+		this.assertSessionOwner(session);
 		const agent = this.resolveAgent(agentId);
 		const updated: CliSessionSummary = {
 			...session,
@@ -294,6 +297,11 @@ export class FakeCliSessionSource implements CliSessionSource {
 		const agent = this.agents.find((candidate) => candidate.id === agentId || candidate.profileName === agentId);
 		if (!agent) throw new CliSourceError("agent_not_found", `No CLI agent fixture found for "${agentId}"`);
 		return agent;
+	}
+
+	private assertSessionOwner(session: CliSessionSummary): void {
+		if (session.ownerScope === undefined || session.ownerScope === this.activeOwnerScope) return;
+		throw new CliSourceError("session_owner_mismatch", `Session "${session.id}" belongs to ${session.ownerScope}; active owner is ${this.activeOwnerScope}`);
 	}
 
 	private assertOpen(): void {

@@ -134,7 +134,7 @@ test("InkSessionAppView renders status bar transcript viewport and input line", 
 	}));
 
 	assert.match(output, /Pibo CLI Sessions \| fake \| owner unknown \| CLI app shell fixture \| pibo-agent/);
-	assert.match(output, /Commands: \/help \/new \/session \/agent \/status \/clear \/exit \/quit/);
+	assert.match(output, /Commands: \/help \/new \/owner \/room \/session \/agent \/status \/clear \/exit \/quit/);
 	assert.match(output, /› Show me status/);
 	assert.match(output, /Status looks healthy\./);
 	assert.match(output, /› \/status/);
@@ -201,7 +201,7 @@ test("Slash parser distinguishes messages, commands, and empty input", () => {
 	assert.deepEqual(parseCliSessionInput("  hello agent  "), { type: "message", text: "hello agent" });
 	assert.deepEqual(parseCliSessionInput(" /STATUS now "), { type: "command", command: { name: "status", args: "now", raw: "/STATUS now" } });
 	assert.deepEqual(parseCliSessionInput("   "), { type: "empty" });
-	assert.match(cliSessionSlashHelpText(), /\/help, \/new, \/session, \/agent, \/status, \/clear, \/exit, \/quit/);
+	assert.match(cliSessionSlashHelpText(), /\/help, \/new, \/owner, \/profile, \/room, \/session, \/agent, \/status, \/clear, \/exit, \/quit/);
 	assert.match(cliSessionSlashHelpText(), /Web-only in V1/);
 });
 
@@ -242,6 +242,68 @@ test("Slash /new uses selected owner and room from Ink state", async () => {
 	assert.match(harness.state.message, /Created session/);
 });
 
+test("Slash /owner opens owner picker and cross-owner sends are rejected", async () => {
+	const source = new FakeCliSessionSource({
+		owners: [
+			{ ownerScope: "user:alpha", label: "Alpha", kind: "web-user" },
+			{ ownerScope: "user:beta", label: "Beta", kind: "web-user" },
+		],
+		activeOwnerScope: "user:alpha",
+		rooms: [
+			{ id: "room_alpha", title: "Alpha Room", ownerScope: "user:alpha" },
+			{ id: "room_beta", title: "Beta Room", ownerScope: "user:beta" },
+		],
+		sessions: [
+			{ id: "ps_alpha", title: "Alpha Session", roomId: "room_alpha", profile: "pibo-agent", ownerScope: "user:alpha", status: "idle" },
+			{ id: "ps_beta", title: "Beta Session", roomId: "room_beta", profile: "pibo-agent", ownerScope: "user:beta", status: "idle" },
+		],
+	});
+	const harness = stateHarness({ ...baseState(), activeOwner: { ownerScope: "user:alpha", label: "Alpha", kind: "web-user" }, session: { id: "ps_alpha", title: "Alpha Session", profile: "pibo-agent", ownerScope: "user:alpha", status: "idle" }, rows: [] });
+	const openSession = (sessionId, message) => openFakeSessionInto(source, harness, sessionId, message);
+	const submit = (input) => handleCliSessionSubmittedInput(input, source, harness.state, harness.setState, openSession, () => {});
+
+	await submit("/owner");
+	assert.equal(harness.state.mode, "picker");
+	assert.equal(harness.state.picker.kind, "owner");
+	assert.match(harness.state.picker.title, /Select effective owner/);
+	assert.deepEqual(harness.state.picker.items.map((item) => item.ownerScope), ["user:alpha", "user:beta"]);
+
+	await source.setActiveOwner("user:beta");
+	await submit("message should not cross owners");
+	assert.match(harness.state.error, /belongs to user:alpha; active owner is user:beta/);
+	assert.match(harness.state.error, /Recovery: use \/owner/);
+});
+
+test("Slash /session and /room open owner-scoped room-first pickers", async () => {
+	const source = new FakeCliSessionSource({
+		owners: [{ ownerScope: "user:alpha", label: "Alpha", kind: "web-user" }],
+		activeOwnerScope: "user:alpha",
+		rooms: [
+			{ id: "room_personal", title: "Personal Chat", ownerScope: "user:alpha", isDefault: true },
+			{ id: "room_project", title: "Project Room", ownerScope: "user:alpha" },
+		],
+		sessions: [
+			{ id: "ps_personal", title: "Personal Session", roomId: "room_personal", profile: "pibo-agent", ownerScope: "user:alpha", status: "idle", updatedAt: "2026-05-16T12:00:00.000Z" },
+			{ id: "ps_project", title: "Project Session", roomId: "room_project", profile: "pibo-agent", ownerScope: "user:alpha", status: "idle", updatedAt: "2026-05-16T12:01:00.000Z" },
+		],
+	});
+	const harness = stateHarness({ ...baseState(), activeOwner: { ownerScope: "user:alpha", label: "Alpha", kind: "web-user" }, activeRoom: { id: "room_project", title: "Project Room", ownerScope: "user:alpha" }, session: undefined, rows: [] });
+	const openSession = (sessionId, message) => openFakeSessionInto(source, harness, sessionId, message);
+	const submit = (input) => handleCliSessionSubmittedInput(input, source, harness.state, harness.setState, openSession, () => {});
+
+	await submit("/session");
+	assert.equal(harness.state.mode, "picker");
+	assert.equal(harness.state.picker.kind, "room");
+	assert.match(harness.state.picker.title, /Select room for sessions for Alpha/);
+	assert.equal(harness.state.picker.items[harness.state.picker.selectedIndex].roomId, "room_project");
+
+	await submit("/room");
+	assert.equal(harness.state.mode, "picker");
+	assert.equal(harness.state.picker.kind, "room");
+	assert.match(harness.state.picker.title, /Select active room for Alpha/);
+	assert.equal(harness.state.picker.items[harness.state.picker.selectedIndex].roomId, "room_project");
+});
+
 test("Slash commands handle help status clear pickers unknown exit and normal sends", async () => {
 	const source = createDefaultFakeCliSessionSource();
 	source.setStatus({ message: "TOKEN=secret-value" });
@@ -265,9 +327,15 @@ test("Slash commands handle help status clear pickers unknown exit and normal se
 	assert.match(harness.state.message, /Session data was not deleted/);
 
 	await submit("/session");
-	assert.equal(harness.state.mode, "session-picker");
-	assert.equal(harness.state.picker.kind, "session");
+	assert.equal(harness.state.mode, "picker");
+	assert.equal(harness.state.picker.kind, "room");
+	assert.match(harness.state.picker.title, /Select room for sessions/);
 	assert.ok(harness.state.picker.items.length >= 1);
+
+	await submit("/room");
+	assert.equal(harness.state.mode, "picker");
+	assert.equal(harness.state.picker.kind, "room");
+	assert.match(harness.state.picker.title, /Select active room/);
 
 	await submit("/agent");
 	assert.equal(harness.state.mode, "agent-picker");
@@ -291,16 +359,16 @@ test("Slash commands handle help status clear pickers unknown exit and normal se
 });
 
 test("empty picker states and recovery errors are actionable and redacted", async () => {
-	const source = new FakeCliSessionSource({ sessions: [], agents: [], status: { rooms: "unsupported", message: "TOKEN=secret-value" } });
+	const source = new FakeCliSessionSource({ rooms: [], sessions: [], agents: [], status: { rooms: "unsupported", message: "TOKEN=secret-value" } });
 	const harness = stateHarness({ ...baseState(), session: undefined, rows: [] });
 	const openSession = (sessionId, message) => openFakeSessionInto(source, harness, sessionId, message);
 	const submit = (input) => handleCliSessionSubmittedInput(input, source, harness.state, harness.setState, openSession, () => {});
 
 	await submit("/session");
-	assert.equal(harness.state.mode, "session-picker");
+	assert.equal(harness.state.mode, "picker");
+	assert.equal(harness.state.picker.kind, "room");
 	assert.equal(harness.state.picker.items.length, 0);
-	assert.match(harness.state.picker.emptyMessage, /Use \/new/);
-	assert.match(harness.state.picker.emptyMessage, /cannot list rooms/);
+	assert.match(harness.state.picker.emptyMessage, /No rooms are available/);
 
 	await submit("/agent");
 	assert.equal(harness.state.mode, "agent-picker");
@@ -349,7 +417,7 @@ test("runCliSessionsUi rejects non-interactive stdin or stdout before rendering"
 test("pibo tui:sessions command help and root discovery describe the new UI without hiding existing TUI commands", async () => {
 	const help = cliSessionsHelpText();
 	assert.match(help, /reduced Web Chat-derived session UI/);
-	assert.match(help, /\/help \/new \/session \/agent \/status \/clear \/exit \/quit/);
+	assert.match(help, /\/help \/new \/owner \/profile \/room \/session \/agent \/status \/clear \/exit \/quit/);
 	assert.match(help, /pibo tui\n/);
 	assert.match(help, /pibo tui:routed/);
 

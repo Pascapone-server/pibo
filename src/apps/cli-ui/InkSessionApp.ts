@@ -320,7 +320,7 @@ export function InkSessionAppView({ state, maxRows = 20, maxLineChars }: InkSess
 		Box,
 		{ flexDirection: "column" },
 		React.createElement(Text, { color: state.status?.connected === false ? "red" : "cyan" }, statusText),
-		React.createElement(Text, { color: "gray" }, boundedLine("Commands: /help /new /session /agent /status /clear /exit /quit", lineLimit)),
+		React.createElement(Text, { color: "gray" }, boundedLine("Commands: /help /new /owner /room /session /agent /status /clear /exit /quit", lineLimit)),
 		state.loading ? React.createElement(Text, { color: "yellow" }, "Loading CLI session…") : null,
 		state.error ? React.createElement(Text, { color: "red" }, boundedLine(`Error: ${state.error}`, lineLimit)) : null,
 		state.message ? React.createElement(Text, { color: "gray" }, boundedLine(state.message, lineLimit)) : null,
@@ -398,7 +398,7 @@ export function parseCliSessionInput(input: string): ParsedCliSessionInput {
 }
 
 export function cliSessionSlashHelpText(): string {
-	return "Commands: /help, /new, /session, /agent, /status, /clear, /exit, /quit. Web-only in V1: projects, workflows, Cron, Ralph, Agent Designer, full settings, context management, /model, /thinking, /fork, /details.";
+	return "Commands: /help, /new, /owner, /profile, /room, /session, /agent, /status, /clear, /exit, /quit. Web-only in V1: projects, workflows, Cron, Ralph, Agent Designer, full settings, context management, /model, /thinking, /fork, /details.";
 }
 
 export function formatCliSessionStatus(status: CliRuntimeStatus | undefined, session: CliSessionSummary | undefined): string {
@@ -481,23 +481,49 @@ async function handleSlashCommand(
 		await openSession(created.id, `Created session ${created.title}.`);
 		return;
 	}
-	if (command.name === "session") {
-		const sessions = await source.listSessions();
+	if (command.name === "owner" || command.name === "profile") {
+		const activeOwner = await source.getActiveOwner();
+		const owners = await source.listOwners();
+		const selectedIndex = Math.max(0, owners.findIndex((owner) => owner.ownerScope === activeOwner.ownerScope));
 		const status = await source.getStatus({ sessionId: state.session?.id });
-		const rooms = await safeListRooms(source);
-		const emptyMessage = emptySessionRecoveryMessage(status, rooms);
 		setState((current) => ({
 			...current,
 			status,
-			mode: "session-picker",
+			activeOwner,
+			mode: "picker",
 			picker: {
-				kind: "session",
-				title: "Select session",
-				items: sessions.map(sessionPickerItem),
-				selectedIndex: 0,
-				emptyMessage,
+				kind: "owner",
+				title: "Select effective owner",
+				items: owners.map(ownerPickerItem),
+				selectedIndex,
+				emptyMessage: "No owners are available.",
 			},
-			message: sessions.length === 0 ? emptyMessage : "Select a session with arrow keys.",
+			message: "Select the Web user or Root recovery owner to use in this CLI session.",
+			error: undefined,
+		}));
+		return;
+	}
+	if (command.name === "session" || command.name === "room") {
+		const owner = state.activeOwner ?? await source.getActiveOwner();
+		const rooms = await source.listRooms({ ownerScope: owner.ownerScope });
+		const status = await source.getStatus({ sessionId: state.session?.id });
+		const activeRoomId = state.activeRoom?.id ?? status.activeRoomId;
+		const activeRoomIndex = rooms.findIndex((room) => room.id === activeRoomId);
+		const selectedIndex = Math.max(0, activeRoomIndex >= 0 ? activeRoomIndex : rooms.findIndex((room) => room.isDefault));
+		setState((current) => ({
+			...current,
+			status,
+			activeOwner: owner,
+			mode: "picker",
+			picker: {
+				kind: "room",
+				title: command.name === "room" ? `Select active room for ${owner.label}` : `Select room for sessions for ${owner.label}`,
+				items: rooms.map(roomPickerItem),
+				selectedIndex,
+				emptyMessage: "No rooms are available for the selected owner.",
+				ownerScope: owner.ownerScope,
+			},
+			message: rooms.length === 0 ? "No rooms are available for the selected owner." : command.name === "room" ? "Select the active room with arrow keys." : "Select a room, then choose or create a session.",
 			error: undefined,
 		}));
 		return;
@@ -612,6 +638,7 @@ export function formatCliSessionError(error: unknown): string {
 	if (isCliSourceError(error)) {
 		if (error.code === "source_closed") return `${message}. Recovery: restart pibo tui:sessions.`;
 		if (error.code === "session_not_found") return `${message}. Recovery: use /session to select another session or /new to create one.`;
+		if (error.code === "session_owner_mismatch") return `${message}. Recovery: use /owner to switch back, or /session to select a session for the active owner.`;
 		if (error.code === "agent_not_found") return `${message}. Recovery: use /agent to pick an available existing profile.`;
 		if (error.code === "empty_message") return `${message}. Type a message or use /help.`;
 		return `${message}. Recovery: check local Pibo state, then use /status, /session, or /new.`;

@@ -158,3 +158,41 @@ Validation and results for owner/startup picker flow batch:
 - Completed stories marked `passes: true`: PRD 02 `US-002`; PRD 04 `US-002`.
 - Implementation commit: `19aea5d` (`Add Ink owner and startup room pickers`).
 - Next recommended group: PRD 02 `US-003` and PRD 04 `US-003` for `/owner`, `/room`, and room-first `/session` switching, building on the new picker/source primitives.
+
+## 2026-05-17 run: owner switch and room-first command flow batch
+
+Selected story group:
+
+- `prd_02_owner_scope_recovery_profile.json` / `US-003` — Add `/owner` or `/profile` switch flow.
+- `prd_04_room_session_navigation.json` / `US-003` — Make `/session` and `/room` room-first.
+
+Intended validation plan:
+
+- Refactor Ink command handling just enough to reuse owner and room picker construction for startup, `/owner`, `/profile`, `/session`, and `/room`.
+- Implement owner switching so it closes any open session, clears transcript state, reloads rooms for the selected owner, and keeps owner/status/header visible.
+- Implement `/session` as room picker -> room-scoped session picker with create-new action; implement `/room` as room picker for changing active room and reloading room-scoped sessions.
+- Add focused reducer/command/source tests for owner switch state reset, cross-owner send rejection, `/session` room-first behavior, `/room` behavior, and empty-room create-new action.
+- Run `npm run build` plus focused tests inside `pibo-dev-ink-cli-v2-web-parity`.
+- Run `pibo debug pty` scripts for `/owner` switching and `/session`/`/room` room selection with raw/clean artifacts.
+- Run `npm run typecheck`; run broader tests if changes affect shared behavior beyond the focused Ink/source paths.
+
+Validation and results for owner switch and room-first command flow batch:
+
+- Implemented `/owner` and `/profile` commands that open the effective-owner picker during an active CLI session. The existing owner selection path now closes the open session, clears transcript/session state, and reloads rooms for the newly selected owner.
+- Implemented `/session` as room-first: it opens an owner-scoped room picker, then a room-scoped session picker with `+ New session in this room` for empty rooms.
+- Implemented `/room` as an active-room picker using the same room-scoped session reload path.
+- Added fake-source owner mismatch protection so attempts to send or mutate a session owned by a different owner fail clearly, matching the local source's owner validation.
+- Added deterministic debug PTY room fixtures with `PIBO_DEBUG_PTY_CLI_SESSIONS_ROOMS` for owner/room command validation.
+- Validation commands:
+  - `docker exec pibo-dev-ink-cli-v2-web-parity bash -lc 'cd /workspace && npm run build >/tmp/pibo-build.log && node --test test/cli-ui-session-app.test.mjs test/cli-session-source.test.mjs test/ink-cli-v2-current-state.test.mjs'` — passed 30/30 focused tests.
+  - `docker exec pibo-dev-ink-cli-v2-web-parity bash -lc 'cd /workspace && rm -rf .tmp/pty-owner-switch && npm run dev -- debug pty run --artifact --artifact-dir /workspace/.tmp/pty-owner-switch --timeout-ms 60000 --idle-timeout-ms 15000 --cols 110 --rows 30 --wait-for "Select effective owner" --expect "Web user alpha" --expect "Web user beta" --press Enter --wait-for "Select room for Web user alpha" --expect "Alpha Room" --press Down --press Enter --wait-for "New session in Alpha Room" --press Enter --wait-for "Created session" --type "/owner" --press Enter --wait-for "Select effective owner" --press Down --press Enter --wait-for "Select room for Web user beta" --expect "Beta Room" --expect "Pibo CLI Sessions | local/direct | Web user beta (user:beta)" --press CtrlC -- env PIBO_DEBUG_PTY_CLI_SESSIONS_MOCKED=1 PIBO_DEBUG_PTY_CLI_SESSIONS_OWNERS=user:alpha,user:beta PIBO_DEBUG_PTY_CLI_SESSIONS_ROOMS="user:alpha|room_alpha|Alpha Room;user:beta|room_beta|Beta Room" node dist/bin/pibo.js tui:sessions'` — passed.
+  - Owner-switch PTY classification: real PTY path with deterministic mocked local router/source, not live provider. Raw artifact: `/root/code/pibo/.worktrees/ink-cli-v2-web-parity/.tmp/pty-owner-switch/raw.ansi.log`. Clean artifact: `/root/code/pibo/.worktrees/ink-cli-v2-web-parity/.tmp/pty-owner-switch/clean.txt`.
+  - Observed owner-switch PTY result: clean output shows alpha and beta owner picker choices, Alpha Room, created session in Alpha Room, `/owner`, switch to Web user beta, beta header, and Beta Room.
+  - `docker exec pibo-dev-ink-cli-v2-web-parity bash -lc 'cd /workspace && rm -rf .tmp/pty-room-session-commands && npm run dev -- debug pty run --artifact --artifact-dir /workspace/.tmp/pty-room-session-commands --timeout-ms 60000 --idle-timeout-ms 15000 --cols 110 --rows 30 --wait-for "Select room for Web user alpha" --expect "Personal Chat" --expect "Project Room" --press Enter --wait-for "New session in Personal Chat" --press Enter --wait-for "Created session" --type "/session" --press Enter --wait-for "Select room for sessions for Web user alpha" --expect "Project Room" --press Down --press Enter --wait-for "New session in Project Room" --press Escape --type "/room" --press Enter --wait-for "Select active room for Web user alpha" --expect "Project Room" --press Up --press Enter --wait-for "Select session in Personal Chat" --press CtrlC -- env PIBO_DEBUG_PTY_CLI_SESSIONS_MOCKED=1 PIBO_DEBUG_PTY_CLI_SESSIONS_OWNERS=user:alpha PIBO_DEBUG_PTY_CLI_SESSIONS_ROOMS="user:alpha|room_personal|Personal Chat;user:alpha|room_project|Project Room" node dist/bin/pibo.js tui:sessions --owner-scope user:alpha'` — passed.
+  - Room/session command PTY classification: real PTY path with deterministic mocked local router/source, not live provider. Raw artifact: `/root/code/pibo/.worktrees/ink-cli-v2-web-parity/.tmp/pty-room-session-commands/raw.ansi.log`. Clean artifact: `/root/code/pibo/.worktrees/ink-cli-v2-web-parity/.tmp/pty-room-session-commands/clean.txt`.
+  - Observed room/session command PTY result: clean output shows `/session` opening a room picker, selecting Project Room, reaching its empty create-new action, then `/room` opening the active-room picker and switching back to Personal Chat with the created session listed.
+  - `docker exec pibo-dev-ink-cli-v2-web-parity bash -lc 'cd /workspace && npm run typecheck'` — passed.
+- Path classification: real PTY-backed CLI/TUI smoke tests with deterministic mocked local router/source; focused source/Ink unit tests. No Web DOM behavior changed, so browser checks were not required for this batch.
+- Completed stories marked `passes: true`: PRD 02 `US-003`; PRD 04 `US-003`.
+- Implementation commit: `962da7969ad5e3f0a63b5d85848293fe4408a13f`.
+- Next recommended group: PRD 04 `US-004` and PRD 02 `US-005` for `/new` Web-visible creation through the selected owner/room, with store/API/Web navigation validation.
