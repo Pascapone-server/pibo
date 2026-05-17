@@ -6,7 +6,7 @@ import test from "node:test";
 import { renderToString } from "ink";
 import { buildCompactTerminalRows } from "../dist/session-ui/index.js";
 import { formatInkJson, formatStatusHeaderLines, InkSessionAppView, InkTerminalView, renderInkMarkdownLines, rowWindow } from "../dist/apps/cli-ui/index.js";
-import { buildCanonicalTerminalRows, buildExpandableDetailFixtureRow, highUsageStatusPayload } from "./fixtures/terminal-parity-fixtures.mjs";
+import { buildCanonicalTerminalRows, buildExpandableDetailFixtureRow, fullStatusPayload, highUsageStatusPayload, partialStatusPayload, unavailableStatusPayload } from "./fixtures/terminal-parity-fixtures.mjs";
 
 const sessionId = "pibo:ink-renderer-test";
 
@@ -133,7 +133,7 @@ test("Ink renderer consumes the canonical shared parity fixture", () => {
 	assert.match(output, /▣ Thinking — thinking · done/);
 	assert.match(output, /▣ Model — model · done/);
 	assert.match(output, /▣ Login — login · done/);
-	assert.match(output, /Provider usage unavailable/);
+	assert.match(output, /Provider quota: unavailable/);
 	assert.doesNotMatch(output, /sk_fixture_secret|detail-secret-value/);
 });
 
@@ -162,6 +162,26 @@ test("Ink renderer renders inline detail sections with bounded redacted values",
 	assert.match(output, /token=\[redacted\]/);
 	assert.doesNotMatch(output, /detail-secret-value|sk_fixture_secret/);
 	assert.ok(output.length < 5000, "detail rendering stays bounded");
+});
+
+test("Ink status card renders compact runtime fields bars unavailable states tools credits and provider labels", () => {
+	const rows = [
+		{ id: "status-full", kind: "tool.status", status: "done", lines: [], output: fullStatusPayload(), sourceNodeIds: ["status-full"] },
+		{ id: "status-partial", kind: "tool.status", status: "done", lines: [], output: partialStatusPayload(), sourceNodeIds: ["status-partial"] },
+		{ id: "status-unavailable", kind: "tool.status", status: "done", lines: [], output: unavailableStatusPayload(), sourceNodeIds: ["status-unavailable"] },
+	];
+	const output = renderToString(React.createElement(InkTerminalView, { rows, maxRows: 10, maxLineChars: 180 }));
+
+	assert.match(output, /Status — status · done · status · idle · session Terminal parity fixture/);
+	assert.match(output, /model GPT Test · owner Web user Fixture/);
+	assert.match(output, /Provider plan: pro/);
+	assert.match(output, /Credits: unlimited/);
+	assert.match(output, /Enabled tools: 3 \(read, edit, bash\)/);
+	assert.match(output, /anthropic messages: .*25\.0%/);
+	assert.match(output, /local-ai requests: unavailable/);
+	assert.match(output, /Provider quota: unavailable/);
+	assert.match(output, /Context: unavailable/);
+	assert.doesNotMatch(output, /sk_fixture_secret|warning-secret-value/);
 });
 
 test("Ink status progress bars use readable ASCII fallback when color or glyph support is limited", () => {

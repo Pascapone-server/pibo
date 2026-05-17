@@ -28,7 +28,7 @@
 ## 4. Web Regression and Synchronization
 
 - [x] 4.1 Add Web Compact Terminal tests or source-level checks for shared descriptor consumption across status/model/login/thinking/tool cards.
-- [ ] 4.2 Add stable semantic hooks where missing, without changing Web visuals.
+- [x] 4.2 Add stable semantic hooks where missing, without changing Web visuals.
 - [x] 4.3 Use the shared fixture to verify Web and Ink agree on row/card kinds, progress ids, labels, and redaction.
 - [x] 4.4 Run `npm run chat-ui:typecheck` and `npm run chat-ui:build` after renderer changes.
 

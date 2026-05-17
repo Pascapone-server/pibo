@@ -13,12 +13,16 @@ import { InkTerminalView } from "../dist/apps/cli-ui/index.js";
 import {
 	TERMINAL_PARITY_REDACTED,
 	TERMINAL_PARITY_SECRET,
+	TERMINAL_PARITY_SESSION_ID,
 	buildCanonicalTerminalCards,
 	buildCanonicalTerminalRows,
 	buildCanonicalTerminalTraceView,
 	buildExpandableDetailFixtureRow,
 	buildStreamingTerminalRows,
+	disposedStatusPayload,
+	fullStatusPayload,
 	highUsageStatusPayload,
+	partialStatusPayload,
 	unavailableStatusPayload,
 	zeroUsageStatusPayload,
 } from "./fixtures/terminal-parity-fixtures.mjs";
@@ -149,6 +153,7 @@ test("status progress fixture preserves unavailable zero warning high labels per
 	const highStatus = buildTerminalStatusViewModel({
 		contextUsage: highUsageStatusPayload().contextUsage,
 		providerUsage: highUsageStatusPayload().providerUsage,
+		tools: { enabled: highUsageStatusPayload().enabledTools, active: highUsageStatusPayload().activeTools },
 		warnings: highUsageStatusPayload().warnings,
 		errors: highUsageStatusPayload().errors,
 		message: highUsageStatusPayload().message,
@@ -163,11 +168,59 @@ test("status progress fixture preserves unavailable zero warning high labels per
 	assert.deepEqual([contextHigh.state, contextHigh.value, contextHigh.max, contextHigh.percent, contextHigh.tone], ["available", 920, 1000, 92, "red"]);
 	assert.deepEqual([providerZero.label, providerZero.percent, providerZero.tone], ["openai requests", 0, "green"]);
 	assert.deepEqual([providerWarning.label, providerWarning.percent, providerWarning.tone], ["openai tokens", 55, "yellow"]);
+	assert.match(providerWarning.text, /45\.0% remaining, resets 2026-05-17/);
 	assert.deepEqual([providerHigh.label, providerHigh.percent, providerHigh.tone], ["openai spend", 91, "red"]);
+	assert.equal(highStatus.fields.find((item) => item.id === "provider-plan").value, "team");
+	assert.equal(highStatus.fields.find((item) => item.id === "provider-credits").value, "$42.00");
+	assert.equal(highStatus.fields.find((item) => item.id === "enabled-tools").value, "3 (read, edit, bash)");
+	assert.equal(highStatus.fields.find((item) => item.id === "active-tools").value, "1 (bash)");
 	assert.equal(progressBarText(zeroStatus.progress.find((item) => item.id === "context"), 8), "░░░░░░░░ 0.0%");
 	assert.equal(unavailableStatus.progress.find((item) => item.id === "context").state, "unavailable");
 	assert.equal(unavailableStatus.progress.find((item) => item.id === "provider").text, "Provider usage unavailable");
 	assert.doesNotMatch(JSON.stringify(highStatus), /sk_fixture_secret|warning-secret-value/);
+});
+
+test("status fixtures cover full partial unavailable zero non-OpenAI queued streaming and disposed states", () => {
+	const full = buildTerminalStatusViewModel({
+		owner: { label: fullStatusPayload().activeOwnerLabel, scope: fullStatusPayload().activeOwnerScope },
+		session: { id: fullStatusPayload().piboSessionId, title: fullStatusPayload().sessionTitle, profile: fullStatusPayload().profile, status: "running" },
+		model: fullStatusPayload().activeModel,
+		runtime: { state: "queued", connected: fullStatusPayload().connected, queuedMessages: fullStatusPayload().queuedMessages, processing: fullStatusPayload().processing, streaming: fullStatusPayload().streaming },
+		cwd: fullStatusPayload().cwd,
+		contextUsage: fullStatusPayload().contextUsage,
+		providerUsage: fullStatusPayload().providerUsage,
+		tools: { enabled: fullStatusPayload().enabledTools, active: fullStatusPayload().activeTools },
+	});
+	assert.equal(full.title, "Status");
+	assert.ok(full.fields.some((field) => field.id === "owner" && field.value.includes("Web user Fixture")));
+	assert.ok(full.fields.some((field) => field.id === "session" && field.value.includes(TERMINAL_PARITY_SESSION_ID)));
+	assert.equal(full.fields.find((field) => field.id === "profile").value, "pibo-agent");
+	assert.equal(full.fields.find((field) => field.id === "model").value, "GPT Test");
+	assert.equal(full.fields.find((field) => field.id === "queue").value, "3");
+	assert.equal(full.fields.find((field) => field.id === "processing").value, "no");
+	assert.equal(full.fields.find((field) => field.id === "streaming").value, "no");
+	assert.equal(full.progress.find((progress) => progress.id === "provider-0").label, "anthropic messages");
+	assert.equal(full.fields.find((field) => field.id === "provider-plan").value, "pro");
+	assert.equal(full.fields.find((field) => field.id === "provider-credits").value, "unlimited");
+
+	const partial = buildTerminalStatusViewModel({
+		owner: { label: partialStatusPayload().activeOwnerLabel, scope: partialStatusPayload().activeOwnerScope },
+		runtime: { state: "streaming", queuedMessages: partialStatusPayload().queuedMessages, processing: partialStatusPayload().processing, streaming: partialStatusPayload().streaming },
+		contextUsage: partialStatusPayload().contextUsage,
+		providerUsage: partialStatusPayload().providerUsage,
+	});
+	assert.equal(partial.progress.find((progress) => progress.id === "context").state, "available");
+	assert.equal(partial.progress.find((progress) => progress.id === "provider-0").state, "unavailable");
+	assert.equal(partial.fields.find((field) => field.id === "streaming").value, "yes");
+
+	const disposed = buildTerminalStatusViewModel({
+		runtime: { state: "disposed", connected: false, disposed: disposedStatusPayload().disposed },
+		contextUsage: disposedStatusPayload().contextUsage,
+		providerUsage: disposedStatusPayload().providerUsage,
+		message: disposedStatusPayload().message,
+	});
+	assert.equal(disposed.fields.find((field) => field.id === "disposed").value, "yes");
+	assert.equal(disposed.fields.find((field) => field.id === "runtime").tone, "red");
 });
 
 test("detail fixture shares bounded preview labels and avoids unredacted detail payload expansion by default", () => {
@@ -218,7 +271,7 @@ test("Web source hooks and Ink output consume the same canonical terminal fixtur
 	assert.match(output, /▣ Login — login · done/);
 	assert.match(output, /▣ Tool — tool · error/);
 	assert.match(output, /Context: /);
-	assert.match(output, /Provider usage unavailable/);
+	assert.match(output, /Provider quota: unavailable/);
 	assert.doesNotMatch(output, /sk_fixture_secret|detail-secret-value/);
 	assert.ok(cards.some((card) => card.kind === "status"));
 });

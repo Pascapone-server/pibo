@@ -36,8 +36,9 @@ export function InkTerminalCard({ card, maxLineChars = 220 }: { card: TerminalCa
 	const marker = markerForStatus(card.status);
 	const color = colorForCardTone(card.tone) ?? colorForStatus(card.status);
 	const statusLabel = card.status === "neutral" ? card.kind : `${card.kind} · ${card.status}`;
+	const statusSummary = card.kind === "status" ? statusCardSummary(card) : undefined;
 	const lines: React.ReactElement[] = [
-		React.createElement(Text, { color, key: "header", bold: true }, truncateCardLine(`${marker} ▣ ${card.title} — ${statusLabel}`, maxLineChars)),
+		React.createElement(Text, { color, key: "header", bold: true }, truncateCardLine(`${marker} ▣ ${card.title} — ${statusLabel}${statusSummary ? ` · ${statusSummary}` : ""}`, maxLineChars)),
 	];
 	for (const [index, row] of card.rows.entries()) {
 		const text = row.label ? `  ↳ ${row.label}: ${row.value}` : `  ↳ ${row.value}`;
@@ -45,7 +46,8 @@ export function InkTerminalCard({ card, maxLineChars = 220 }: { card: TerminalCa
 	}
 	for (const progress of card.statusView?.progress ?? []) {
 		const bar = inkProgressBarText(progress, progress.state === "available" ? 18 : 12);
-		lines.push(React.createElement(Text, { color: progress.tone === "neutral" ? "gray" : colorForTone(progress.tone), key: `progress-${progress.id}` }, truncateCardLine(`  ↳ ${progress.label}: ${bar} — ${progress.text}`, maxLineChars)));
+		const detail = progress.state === "available" ? ` — ${progress.text}` : "";
+		lines.push(React.createElement(Text, { color: progress.tone === "neutral" ? "gray" : colorForTone(progress.tone), key: `progress-${progress.id}` }, truncateCardLine(`  ↳ ${progress.label}: ${bar}${detail}`, maxLineChars)));
 	}
 	for (const [index, warning] of (card.statusView?.warnings ?? []).entries()) {
 		lines.push(React.createElement(Text, { color: "yellow", key: `warning-${index}` }, truncateCardLine(`  ⚠ ${warning}`, maxLineChars)));
@@ -75,6 +77,26 @@ function rowMarkerColor(row: CompactTerminalRow): ReturnType<typeof colorForRowK
 function colorForCardTone(tone: TerminalCardTone | undefined): InkTerminalColor | undefined {
 	if (tone === "neutral") return "gray";
 	return colorForTone(tone as Parameters<typeof colorForTone>[0]);
+}
+
+function statusCardSummary(card: TerminalCardDescriptor): string {
+	const fields = new Map((card.statusView?.fields ?? []).map((field) => [field.id, field.value]));
+	const runtime = fields.get("runtime") ?? card.status;
+	const session = shortStatusValue(fields.get("session"));
+	const model = shortStatusValue(fields.get("model"));
+	const owner = abbreviateOwner(fields.get("owner"));
+	return ["status", runtime, session ? `session ${session}` : undefined, model ? `model ${model}` : undefined, owner ? `owner ${owner}` : undefined].filter(Boolean).join(" · ");
+}
+
+function shortStatusValue(value: string | undefined): string | undefined {
+	if (!value) return undefined;
+	return value.split("|")[0]?.trim() || value;
+}
+
+function abbreviateOwner(value: string | undefined): string | undefined {
+	if (!value) return undefined;
+	const label = value.replace(/\s*\([^)]*\)\s*$/, "").trim() || value;
+	return label.length <= 28 ? label : `${label.slice(0, 12)}…${label.slice(-8)}`;
 }
 
 function truncateCardLine(value: string, maxChars: number): string {

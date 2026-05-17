@@ -271,7 +271,9 @@ test("renderCliStatusCardText renders shared status bars and redacts secrets", (
 		streaming: false,
 		cwd: "/workspace",
 		contextUsage: { tokens: 500, contextWindow: 1000, percent: 50 },
-		providerUsage: { provider: "openai", limits: [{ label: "requests", usedPercent: 80 }] },
+		providerUsage: { provider: "openai", planType: "team", limits: [{ label: "requests", usedPercent: 80, remainingPercent: 20, resetsAt: "2026-05-17T01:00:00.000Z" }], credits: { balance: "$5.00" } },
+		activeTools: ["bash"],
+		enabledTools: ["read", "bash"],
 		warnings: ["TOKEN=secret-value"],
 		updatedAt: "2026-05-17T00:00:00.000Z",
 	}, { id: "ps_status", title: "Status Session", profile: "pibo-agent", status: "running" });
@@ -284,6 +286,10 @@ test("renderCliStatusCardText renders shared status bars and redacts secrets", (
 	assert.match(text, /Queue: 2/);
 	assert.match(text, /Context: .*50\.0%/);
 	assert.match(text, /openai requests: .*80\.0%/);
+	assert.match(text, /Provider plan: team/);
+	assert.match(text, /Credits: \$5\.00/);
+	assert.match(text, /Enabled tools: 2 \(read, bash\)/);
+	assert.match(text, /Active tools: 1 \(bash\)/);
 	assert.match(text, /TOKEN=\[redacted\]/);
 	assert.doesNotMatch(text, /secret-value/);
 });
@@ -516,6 +522,8 @@ test("Slash commands handle help status clear pickers unknown exit and normal se
 		fastMode: true,
 		contextUsage: { tokens: 0, contextWindow: 1000, percent: 0 },
 		providerUsage: { provider: "openai", planType: "pro", limits: [{ label: "requests", usedPercent: 25 }] },
+		activeTools: ["bash"],
+		enabledTools: ["read", "edit", "bash"],
 		warnings: ["API_KEY=secret-value warning"],
 		errors: ["token:secret-value error"],
 	});
@@ -549,6 +557,9 @@ test("Slash commands handle help status clear pickers unknown exit and normal se
 	assert.match(statusText, /Runtime: fake/);
 	assert.match(statusText, /Context: 0\/1000 tokens \(0\.0%\)/);
 	assert.match(statusText, /openai requests: 25\.0% used/);
+	assert.match(statusText, /Provider plan: pro/);
+	assert.match(statusText, /Enabled tools: 3 \(read, edit, bash\)/);
+	assert.match(statusText, /Active tools: 1 \(bash\)/);
 	assert.match(statusText, /Thinking: high/);
 	assert.match(statusText, /Fast mode: on/);
 	assert.match(statusText, /TOKEN=\[redacted\]/);

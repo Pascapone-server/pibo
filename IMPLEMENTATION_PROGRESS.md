@@ -270,3 +270,57 @@ Remaining limitations / next stories:
 Commit:
 
 - `ecbdafd` feat: refine Ink compact terminal renderer
+
+## 2026-05-17 Ralph run: PRD 05 status and runtime cards
+
+### Selected coherent story group
+
+- PRD 05 `US-001` Create shared status fixtures and view-model assertions.
+- PRD 05 `US-002` Render compact Ink status card with bars and unavailable states.
+- PRD 05 `US-003` Place `/status` in transcript flow for live controller path.
+- PRD 05 `US-004` Keep Web TerminalStatusCard parity hooks and shared descriptor use.
+- PRD 05 `US-005` Validate status cards through PTY artifacts, if focused tests and PTY status artifacts complete in this run.
+
+### Plan and validation approach
+
+1. Extend the renderer-neutral status view model and fixture helpers to cover full/partial/unavailable/zero/high/error/disposed/non-OpenAI/queued/streaming/tool/credit states with provider labels, reset/remaining/plan/credit details, tool counts, and redaction.
+2. Refine Ink status-card rendering only in `src/apps/cli-ui` to keep owner/session compact, render unavailable usage concisely, preserve context/provider bars including NO_COLOR ASCII fallback, and keep warnings/errors high signal.
+3. Add Web status semantic hooks without redesigning the Web card and remove any provider hardcoding that conflicts with descriptor data.
+4. Extend focused shared-model, Ink renderer, Web source, and CLI controller tests for `/status` transcript flow, partial/no-session/source-error handling, streaming-tail order, non-OpenAI provider labels, credits/tools, unavailable vs zero, and redaction.
+5. Run Docker validation: `npm run build`, focused `node --test ...`, status PTY scenarios under `.tmp/ink-cli-terminal-rendering-parity/prd05-2026-05-17`, `npm run typecheck`, and `npm test`; then mark PRD 05 stories true only with evidence notes and commit from the host worktree.
+
+### Result
+
+Completed PRD 05 `US-001` through `US-005`.
+
+Changes:
+
+- Extended the shared status view model with session status, disposed state, active/enabled tools, provider plan, provider credits, provider remaining/reset details, and redaction-preserving status fields.
+- Added deterministic status fixtures for full, partial, unavailable, zero, high-usage, non-OpenAI provider, queued/processing/streaming, warning/error, secret-bearing, and disposed states.
+- Refined Ink status cards with a compact primary summary, status bars, concise unavailable rows, NO_COLOR ASCII fallback, tool/credit fields, and warning/error lines.
+- Kept `/status` in transcript flow and preserved live/streaming row ordering with controller tests.
+- Added Web Compact Terminal semantic hooks for shared status fields, progress availability, provider progress, warnings, and errors while keeping Web status rendering descriptor-driven.
+- Marked PRD 05 stories `passes: true` with evidence notes and checked off task 4.2.
+
+Validation run in Docker worker:
+
+- `npm run build` — passed; includes `chat-ui:build` and `context-files-ui:build`.
+- `node --test test/terminal-parity-fixtures.test.mjs test/cli-ui-ink-renderer.test.mjs test/cli-ui-session-app.test.mjs test/session-ui-view-models.test.mjs` — passed, 57 tests.
+- `node scripts/ink-cli-v2-pty-smoke.mjs --scenario slash-suggestions-status-thinking --artifact-root .tmp/ink-cli-terminal-rendering-parity/prd05-2026-05-17` — passed.
+- `node dist/bin/pibo.js debug pty run --artifact ... status-fixture-bars ...` — passed.
+- `node dist/bin/pibo.js debug pty run --artifact ... status-fixture-narrow-no-color ... --env NO_COLOR=1` — passed.
+- Secret/NO_COLOR artifact grep over status PTY `clean.txt`/`screen.txt` — passed.
+- `npm run typecheck && npm test && npm run chat-ui:typecheck && npm run chat-ui:build` — passed; `npm test` reported 674 tests.
+
+Evidence/artifacts:
+
+- `/workspace/.tmp/ink-cli-terminal-rendering-parity/prd05-2026-05-17/slash-suggestions-status-thinking`
+- `/workspace/.tmp/ink-cli-terminal-rendering-parity/prd05-2026-05-17/status-fixture-bars`
+- `/workspace/.tmp/ink-cli-terminal-rendering-parity/prd05-2026-05-17/status-fixture-narrow-no-color`
+
+Each artifact directory contains `raw.ansi.log`, `clean.txt`, `screen.txt`, `metadata.json`, `input.json`, `assertions.json`, and `events.jsonl`. Evidence classification is mocked default TUI path for `/status` flow plus deterministic fixture/demo renderer PTY for rich quota/context bars, unavailable state, narrow width, and NO_COLOR fallback. Visual HTML/SVG/PNG conversion remains the existing documented fallback; PRD 07 still owns standardizing visual conversion.
+
+Remaining limitations / next stories:
+
+- PRD 06 remains incomplete for polished picker/overlay semantics and PTY keyboard-flow evidence.
+- PRD 07 remains incomplete for standardized visual artifacts, installed/global CLI smoke, final Web checks, and final evidence report.

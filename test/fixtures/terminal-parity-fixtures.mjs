@@ -320,17 +320,60 @@ export function highUsageStatusPayload() {
 		contextUsage: { tokens: 920, contextWindow: 1000, percent: 92 },
 		providerUsage: {
 			provider: "openai",
+			planType: "team",
 			limits: [
 				{ label: "requests", usedPercent: 0, remainingPercent: 100 },
 				{ label: "tokens", usedPercent: 55, remainingPercent: 45, resetsAt: "2026-05-17T13:00:00.000Z" },
 				{ label: "spend", usedPercent: 91, remainingPercent: 9 },
 			],
+			credits: { balance: "$42.00" },
 		},
+		activeTools: ["bash"],
+		enabledTools: ["read", "edit", "bash"],
 		thinkingLevel: "high",
 		fastMode: true,
 		warnings: [`quota warning for token=warning-secret-value`],
 		errors: [`provider error for ${TERMINAL_PARITY_SECRET}`],
 		message: `Status contains ${TERMINAL_PARITY_SECRET}`,
+	};
+}
+
+export function fullStatusPayload() {
+	return {
+		...highUsageStatusPayload(),
+		processing: false,
+		streaming: false,
+		queuedMessages: 3,
+		contextUsage: { tokens: 720, contextWindow: 1000, percent: 72 },
+		providerUsage: {
+			provider: "anthropic",
+			planType: "pro",
+			limits: [{ label: "messages", usedPercent: 25, remainingPercent: 75, resetsAt: "2026-05-17T14:00:00.000Z" }],
+			credits: { unlimited: true },
+		},
+	};
+}
+
+export function partialStatusPayload() {
+	return {
+		activeOwnerLabel: "Partial fixture owner",
+		activeOwnerScope: "user:partial-fixture",
+		piboSessionId: "ps_partial_status",
+		connected: true,
+		queuedMessages: 1,
+		processing: false,
+		streaming: true,
+		contextUsage: { percent: 12.5 },
+		providerUsage: { provider: "local-ai", planType: "debug", limits: [{ label: "requests" }] },
+	};
+}
+
+export function disposedStatusPayload() {
+	return {
+		...unavailableStatusPayload(),
+		disposed: true,
+		connected: false,
+		message: "Runtime disposed",
 	};
 }
 

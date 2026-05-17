@@ -178,6 +178,11 @@ test("Web and Ink rich terminal renderers consume shared descriptors without cro
 	assert.match(statusCardSource, /buildTerminalCardDescriptor/, "Web status card should consume shared terminal card descriptors");
 	assert.match(statusCardSource, /statusView/, "Web status card should render from the shared status view model");
 	assert.match(statusCardSource, /data-shared-terminal-card/, "Web status card should expose a stable shared-descriptor hook for regression checks");
+	assert.match(statusCardSource, /data-shared-status-field/, "Web status card should expose shared status field hooks");
+	assert.match(statusCardSource, /data-shared-progress-state/, "Web status card should expose shared progress availability hooks");
+	assert.match(statusCardSource, /data-shared-status-warning/, "Web status card should expose warning hooks");
+	assert.match(statusCardSource, /data-shared-status-error/, "Web status card should expose error hooks");
+	assert.doesNotMatch(statusCardSource, /OpenAI Codex quota/, "Web status card should use provider labels from descriptors instead of hardcoding OpenAI");
 
 	const inkRowSource = fs.readFileSync(path.resolve("src/apps/cli-ui/InkTerminalRow.ts"), "utf8");
 	assert.match(inkRowSource, /buildTerminalCardDescriptor\(row\)/, "Ink rich rows must pass through shared terminal card descriptors");
