@@ -15,6 +15,8 @@ This directory translates the Web Annotations proposal, behavior spec, technical
 - `../design.md`
 - `../tasks.md`
 - `../../../capabilities/web-annotations-plugin.md`
+- `../../../../project/web-annotations.md`
+- `../../../../project/web-annotations-rollout-checklist.md`
 
 ## Product Position
 
@@ -82,7 +84,7 @@ Each story is intended to fit into one Ralph iteration and includes `Typecheck p
 
 ## Rollout Checklist
 
-Use this checklist before enabling Web Annotations outside the Docker worker:
+The canonical project checklist is `docs/project/web-annotations-rollout-checklist.md`. Use this summary before enabling Web Annotations outside the Docker worker:
 
 - [ ] Run implementation and validation in a Docker compute worker, not the host gateway.
 - [ ] Run root `npm run typecheck`.
@@ -96,6 +98,15 @@ Use this checklist before enabling Web Annotations outside the Docker worker:
 - [ ] Validate the dev gateway with authenticated Chat Web before production deployment.
 - [ ] Obtain explicit user approval before production deployment with `./scripts/deploy-web.sh`.
 - [ ] Confirm Chrome Extension support, public sharing, and automatic source/code edits remain out of scope for V1.
+
+## Browser Fixtures and Validation
+
+Browser validation fixtures live under `test/fixtures/web-annotations/`:
+
+- `static/index.html` covers element annotation, pin fallback, large text, missing source hints, and cross-origin iframe unavailable handling.
+- `react-like/index.html` covers React-development-style stable attributes and LocatorJS-compatible source-hint capture without requiring a networked React install.
+
+After `npm run build`, run `node scripts/validate-web-annotations-browser.mjs` inside the Docker worker to check URL binding, existing-target attach, overlay inject, annotation creation, reload/re-inject, message attachment rendering, and API resolution.
 
 ## Traceability Matrix
 

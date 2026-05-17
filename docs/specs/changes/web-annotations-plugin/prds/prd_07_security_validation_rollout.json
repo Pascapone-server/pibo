@@ -47,8 +47,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed by adding deterministic browser fixtures under test/fixtures/web-annotations and scripts/validate-web-annotations-browser.mjs. Docker-worker validation covered URL target open, existing-target attach, overlay injection, element and pin annotation creation, reload/re-inject, bounded attachment context rendering, and API resolution. Docker typecheck and focused tests passed."
     },
     {
       "id": "US-004",
@@ -61,8 +61,8 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed by docs/project/web-annotations.md plus capability/PRD README links. Docs cover V1 user flow, tool list, status lifecycle, source-hint confidence, target close/reload recovery, privacy behavior, V1 non-goals, and common troubleshooting errors. Docker typecheck passed."
     },
     {
       "id": "US-005",
@@ -76,8 +76,8 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed by docs/project/web-annotations-rollout-checklist.md and PRD README link. Checklist covers Docker worker workflow, typecheck, focused tests, Chat Web validation, browser checks, security/privacy gates, dev deployment with ./scripts/deploy-web-dev.sh, explicit production approval, and no production deploy in this story. Docker typecheck passed."
     }
   ]
 }

@@ -112,6 +112,12 @@ V1 implementation work may defer CLI helpers while still completing the Chat Web
 - Cross-origin iframe details are represented as unavailable when they cannot be inspected.
 - Model-visible blocks remain concise and omit full DOM/page dumps.
 
+## User Flow and Operations
+
+The canonical V1 operator guide is `docs/project/web-annotations.md`. It covers the Chat Web URL and existing-target flows, status lifecycle, source-hint confidence, target reload/close recovery, privacy behavior, common errors, and V1 non-goals.
+
 ## Validation
 
 Before production deployment, validation MUST include Docker worker typecheck, focused store/API/tool/UI tests, browser/CDP overlay checks, owner-scope isolation, payload-limit and redaction tests, dev gateway deployment, and explicit production approval.
+
+Browser fixtures live in `test/fixtures/web-annotations/`. After building, run `node scripts/validate-web-annotations-browser.mjs` in the Docker worker to verify target open/attach, overlay injection, annotation creation, reload/re-inject, attachment context rendering, and API resolution. The rollout checklist is `docs/project/web-annotations-rollout-checklist.md`.
