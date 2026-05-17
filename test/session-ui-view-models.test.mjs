@@ -176,6 +176,21 @@ function listSourceFiles(dir) {
 	});
 }
 
+test("Web Compact Terminal source preserves shared flow ordering hooks and streaming semantics", () => {
+	const compactSource = fs.readFileSync(path.resolve("src/apps/chat-ui/src/session-views/compact-terminal/CompactTerminalSessionView.tsx"), "utf8");
+	assert.match(compactSource, /buildCompactTerminalRows\(traceView, \{ showThinking \}\)/, "Web terminal must derive rows from shared row builder");
+	assert.match(compactSource, /computeItemKey=\{\(_, row\) => row\.id\}/, "Web terminal should use shared row ids as stable render keys");
+	assert.match(compactSource, /data-row-kind=\{row\.kind\}/, "Web terminal should expose shared row kind hooks");
+	assert.match(compactSource, /data-row-status=\{row\.status\}/, "Web terminal should expose shared row status hooks");
+	assert.match(compactSource, /data-order-source=\{row\.orderSource\}/, "Web terminal should expose shared ordering source hooks");
+	assert.match(compactSource, /data-order-stream-id=\{row\.orderStreamId\}/, "Web terminal should expose stream id hooks");
+	assert.match(compactSource, /data-order-frame-index=\{row\.orderStreamFrameIndex\}/, "Web terminal should expose stream frame hooks");
+	assert.match(compactSource, /followOutput=\{stickyView\.followOutput\}/, "Web terminal should preserve sticky follow-output behavior for streaming");
+	assert.match(compactSource, /selectedSessionStatus === "running"/, "Web terminal should treat running sessions as streaming");
+	assert.match(compactSource, /runningCount > 0/, "Web terminal should treat running shared rows as streaming");
+	assert.match(compactSource, /TerminalStreamingFooter/, "Web terminal should render a streaming footer while work is active");
+});
+
 test("all shared session-ui view-model modules stay renderer-neutral", () => {
 	const sourceDir = path.resolve("src/session-ui");
 	for (const file of fs.readdirSync(sourceDir).filter((name) => name.endsWith(".ts"))) {

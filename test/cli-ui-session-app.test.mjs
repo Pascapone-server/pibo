@@ -6,7 +6,7 @@ import React from "react";
 import test from "node:test";
 import { renderToString } from "ink";
 import { CliSourceError, createDefaultFakeCliSessionSource, FakeCliSessionSource } from "../dist/cli-session/index.js";
-import { buildCompactTerminalRows } from "../dist/session-ui/index.js";
+import { buildCompactTerminalRows, buildTerminalCardDescriptor } from "../dist/session-ui/index.js";
 import {
 	cliSessionsHelpText,
 	cliSessionSlashHelpText,
@@ -15,8 +15,10 @@ import {
 	formatCliSessionStatus,
 	handleCliSessionSubmittedInput,
 	InkSessionAppView,
+	InkTerminalView,
 	activeInkSessionOverlay,
 	renderCliStatusCardText,
+	commandResultDescriptorRows,
 	parseCliSessionInput,
 	popInkSessionOverlay,
 	pushInkSessionOverlay,
@@ -433,6 +435,69 @@ test("Slash /repair-user-unknown runs source repair for the active owner and roo
 	assert.equal(harness.state.error, undefined);
 });
 
+test("status command result rows preserve transcript flow and can render as Ink card", () => {
+	const rows = commandResultDescriptorRows(
+		{ name: "status", args: "", raw: "/status" },
+		{ kind: "status", title: "Status", status: { contextUsage: { tokens: 50, contextWindow: 100, percent: 50 }, providerUsage: { provider: "openai", limits: [{ label: "requests", usedPercent: 75 }] } } },
+		{ source: "fake", mode: "fake", connected: true, rooms: "supported", sessions: "supported", agents: "supported", activeOwnerLabel: "Web user alpha", activeOwnerScope: "user:alpha", activeSessionId: "ps_status", activeModel: { provider: "openai", id: "gpt-status" }, updatedAt: "2026-05-17T00:00:00.000Z" },
+		{ id: "ps_status", title: "Status Session", profile: "pibo-agent", ownerScope: "user:alpha", status: "idle" },
+	);
+	assert.deepEqual(rows.map((row) => row.kind), ["execution.command", "tool.status"]);
+	const output = renderToString(React.createElement(InkTerminalView, { rows, maxRows: 10, maxLineChars: 140 }));
+	assert.match(output, /Command — command · done/);
+	assert.match(output, /Ran \/status/);
+	assert.match(output, /Status — status · done/);
+	assert.match(output, /Owner: Web user alpha/);
+	assert.match(output, /Session: Status Session \| ps_status/);
+	assert.match(output, /Context: .*50\.0%/);
+	assert.match(output, /openai requests: .*75\.0%/);
+});
+
+test("/status closes an open picker and appends transcript rows instead of header message", async () => {
+	const source = createDefaultFakeCliSessionSource();
+	const harness = stateHarness({
+		...baseState(),
+		session: { id: "ps_fake_existing", title: "Existing fake session", profile: "pibo-agent", agentId: "pibo-agent", status: "idle" },
+		mode: "picker",
+		picker: { kind: "room", title: "Select room", items: [{ id: "room_fake_main", kind: "room", roomId: "room_fake_main", label: "Fake Room" }], selectedIndex: 0, emptyMessage: "No rooms" },
+	});
+	await handleCliSessionSubmittedInput("/status", source, harness.state, harness.setState, (sessionId, message) => openFakeSessionInto(source, harness, sessionId, message), () => {});
+	assert.equal(harness.state.mode, "transcript");
+	assert.equal(harness.state.picker, undefined);
+	assert.equal(harness.state.message, undefined);
+	assert.deepEqual(harness.state.rows.slice(-2).map((row) => row.kind), ["execution.command", "tool.status"]);
+});
+
+test("/status preserves existing streaming rows and appends after the live transcript tail", async () => {
+	const source = createDefaultFakeCliSessionSource();
+	source.setStatus({ processing: true, streaming: true, queuedMessages: 1, contextUsage: { tokens: 900, contextWindow: 1000, percent: 90 } });
+	const streamingRows = [
+		{ id: "assistant-running", kind: "message.assistant", status: "running", lines: [], output: "Partial streamed reply", sourceNodeIds: ["assistant-running"] },
+		{ id: "tool-running", kind: "tool.call", status: "running", lines: [{ prefix: "bullet", tokens: [{ text: "Calling", tone: "cyan", weight: "semibold" }, { text: " " }], functionCall: { name: "read", input: { path: "src/index.ts" } } }], input: { path: "src/index.ts" }, sourceNodeIds: ["tool-running"], expandable: true },
+	];
+	const harness = stateHarness({
+		...baseState(),
+		session: { id: "ps_fake_existing", title: "Existing fake session", profile: "pibo-agent", agentId: "pibo-agent", status: "running" },
+		rows: streamingRows,
+	});
+	await handleCliSessionSubmittedInput("/status", source, harness.state, harness.setState, (sessionId, message) => openFakeSessionInto(source, harness, sessionId, message), () => {});
+	assert.deepEqual(harness.state.rows.map((row) => [row.id, row.kind, row.status]), [
+		["assistant-running", "message.assistant", "running"],
+		["tool-running", "tool.call", "running"],
+		["cli-command:2:status", "execution.command", "done"],
+		["cli-command-result:3:status", "tool.status", "done"],
+	]);
+	const output = renderToString(React.createElement(InkTerminalView, { rows: harness.state.rows, maxRows: 10, maxLineChars: 160 }));
+	assert.match(output, /Partial streamed reply/);
+	assert.match(output, /Calling read/);
+	assert.ok(output.indexOf("Partial streamed reply") < output.indexOf("Ran /status"));
+	assert.ok(output.indexOf("Ran /status") < output.indexOf("Status — status · done"));
+	assert.match(output, /Processing: yes/);
+	assert.match(output, /Streaming: yes/);
+	assert.match(output, /Queue: 1/);
+	assert.match(output, /Context: .*90\.0%/);
+});
+
 test("Slash commands handle help status clear pickers unknown exit and normal sends", async () => {
 	const source = createDefaultFakeCliSessionSource();
 	source.setStatus({
@@ -458,20 +523,32 @@ test("Slash commands handle help status clear pickers unknown exit and normal se
 	assert.match(harness.state.message, /\/new/);
 	assert.match(harness.state.message, /\/download/);
 
+	const rowsBeforeStatus = harness.state.rows.length;
 	await submit("/status");
-	assert.match(harness.state.message, /source=fake/);
-	assert.match(harness.state.message, /Owner:/);
-	assert.match(harness.state.message, /Session: Existing fake session \| ps_fake_existing/);
-	assert.match(harness.state.message, /Model: unknown/);
-	assert.match(harness.state.message, /Runtime: fake/);
-	assert.match(harness.state.message, /Context: .*0\.0%/);
-	assert.match(harness.state.message, /openai requests: .*25\.0%/);
-	assert.match(harness.state.message, /Thinking: high/);
-	assert.match(harness.state.message, /Fast mode: on/);
-	assert.match(harness.state.message, /TOKEN=\[redacted\]/);
-	assert.match(harness.state.message, /API_KEY=\[redacted\]/);
-	assert.match(harness.state.message, /token=\[redacted\]/);
-	assert.doesNotMatch(harness.state.message, /secret-value/);
+	assert.equal(harness.state.message, undefined);
+	assert.equal(harness.state.mode, "transcript");
+	assert.equal(harness.state.picker, undefined);
+	assert.equal(harness.state.rows.length, rowsBeforeStatus + 2);
+	assert.deepEqual(harness.state.rows.slice(-2).map((row) => row.kind), ["execution.command", "tool.status"]);
+	const statusCard = buildTerminalCardDescriptor(harness.state.rows.at(-1));
+	assert.equal(statusCard.kind, "status");
+	const statusText = [
+		...statusCard.rows.map((row) => `${row.label ?? ""}: ${row.value}`),
+		...(statusCard.statusView?.progress ?? []).map((progress) => `${progress.label}: ${progress.text}`),
+		...(statusCard.statusView?.warnings ?? []),
+		...(statusCard.statusView?.errors ?? []),
+	].join("\n");
+	assert.match(statusText, /Owner:/);
+	assert.match(statusText, /Session: Existing fake session \| ps_fake_existing/);
+	assert.match(statusText, /Runtime: fake/);
+	assert.match(statusText, /Context: 0\/1000 tokens \(0\.0%\)/);
+	assert.match(statusText, /openai requests: 25\.0% used/);
+	assert.match(statusText, /Thinking: high/);
+	assert.match(statusText, /Fast mode: on/);
+	assert.match(statusText, /TOKEN=\[redacted\]/);
+	assert.match(statusText, /API_KEY=\[redacted\]/);
+	assert.match(statusText, /token=\[redacted\]/);
+	assert.doesNotMatch(statusText, /secret-value/);
 	assert.match(formatCliSessionStatus(harness.state.status, harness.state.session), /connected=yes/);
 
 	await submit("/clear");

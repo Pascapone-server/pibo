@@ -621,7 +621,16 @@ async function handleSlashCommand(
 	if (command.name === "status") {
 		const result = await source.executeSlashCommand({ command: command.name, args: command.args, sessionId: state.session?.id, ownerScope: state.activeOwner?.ownerScope });
 		const status = await source.getStatus({ sessionId: state.session?.id });
-		setState((current) => ({ ...current, status, mode: "transcript", picker: undefined, slashSuggestions: undefined, message: renderCommandResultDescriptorText(result.descriptor, current.session), error: undefined }));
+		setState((current) => ({
+			...current,
+			status,
+			mode: "transcript",
+			picker: undefined,
+			slashSuggestions: undefined,
+			rows: appendCommandResultRows(current.rows, command, result.descriptor, status, current.session),
+			message: undefined,
+			error: undefined,
+		}));
 		return;
 	}
 	if (command.name === "clear") {
@@ -1082,6 +1091,92 @@ function arrayStringField(value: unknown, key: string): string[] {
 function stringField(record: Record<string, unknown>, key: string): string | undefined {
 	const value = record[key];
 	return typeof value === "string" ? value : undefined;
+}
+
+export function appendCommandResultRows(
+	rows: readonly CompactTerminalRow[],
+	command: CliSessionSlashCommand,
+	descriptor: CommandResultDescriptor,
+	status?: CliRuntimeStatus,
+	session?: CliSessionSummary,
+): CompactTerminalRow[] {
+	return [...rows, ...commandResultDescriptorRows(command, descriptor, status, session, rows.length)];
+}
+
+export function commandResultDescriptorRows(
+	command: CliSessionSlashCommand,
+	descriptor: CommandResultDescriptor,
+	status?: CliRuntimeStatus,
+	session?: CliSessionSummary,
+	startIndex = 0,
+): CompactTerminalRow[] {
+	const commandLabel = command.raw || `/${command.name}${command.args ? ` ${command.args}` : ""}`;
+	const commandRow: CompactTerminalRow = {
+		id: `cli-command:${startIndex}:${command.name}`,
+		kind: "execution.command",
+		status: descriptor.kind === "error" ? "error" : "done",
+		lines: [{ prefix: "bullet", tokens: [{ text: `Ran ${commandLabel}`, tone: "yellow", weight: "semibold" }] }],
+		sourceNodeIds: [`cli-command:${startIndex}:${command.name}`],
+	};
+	const resultRow = commandResultDescriptorRow(command, descriptor, status, session, startIndex + 1);
+	return resultRow ? [commandRow, resultRow] : [commandRow];
+}
+
+function commandResultDescriptorRow(
+	command: CliSessionSlashCommand,
+	descriptor: CommandResultDescriptor,
+	status: CliRuntimeStatus | undefined,
+	session: CliSessionSummary | undefined,
+	index: number,
+): CompactTerminalRow | undefined {
+	const id = `cli-command-result:${index}:${command.name}`;
+	if (descriptor.kind === "status") {
+		return {
+			id,
+			kind: "tool.status",
+			status: "done",
+			lines: [],
+			output: commandStatusRowOutput(descriptor.status, status, session),
+			sourceNodeIds: [id],
+		};
+	}
+	if (descriptor.kind === "error") {
+		return { id, kind: "error", status: "error", lines: [], error: descriptor.message, sourceNodeIds: [id] };
+	}
+	return {
+		id,
+		kind: "execution.command",
+		status: descriptor.kind === "unsupported" ? "error" : "done",
+		lines: [],
+		output: renderCommandResultDescriptorText(descriptor, session),
+		sourceNodeIds: [id],
+	};
+}
+
+function commandStatusRowOutput(rawStatus: unknown, status?: CliRuntimeStatus, session?: CliSessionSummary): Record<string, unknown> {
+	const descriptorStatus = rawStatus && typeof rawStatus === "object" && !Array.isArray(rawStatus) ? rawStatus as Record<string, unknown> : {};
+	return {
+		...descriptorStatus,
+		activeOwnerLabel: status?.activeOwnerLabel,
+		activeOwnerScope: status?.activeOwnerScope ?? session?.ownerScope,
+		piboSessionId: session?.id ?? status?.activeSessionId ?? descriptorStatus.piboSessionId,
+		sessionTitle: session?.title,
+		profile: session?.profile ?? session?.agentId ?? status?.activeAgentId,
+		activeModel: status?.activeModel ?? descriptorStatus.activeModel,
+		mode: status?.mode ?? descriptorStatus.mode,
+		connected: status?.connected,
+		queuedMessages: status?.queuedMessages ?? descriptorStatus.queuedMessages,
+		processing: status?.processing ?? descriptorStatus.processing,
+		streaming: status?.streaming ?? descriptorStatus.streaming,
+		cwd: status?.cwd ?? descriptorStatus.cwd,
+		contextUsage: status?.contextUsage ?? descriptorStatus.contextUsage,
+		providerUsage: status?.providerUsage ?? descriptorStatus.providerUsage,
+		thinkingLevel: status?.thinkingLevel ?? descriptorStatus.thinkingLevel,
+		fastMode: status?.fastMode ?? descriptorStatus.fastMode,
+		warnings: status?.warnings ?? descriptorStatus.warnings,
+		errors: status?.errors ?? descriptorStatus.errors,
+		message: status?.message ?? descriptorStatus.message,
+	};
 }
 
 export function renderCommandResultDescriptorText(descriptor: CommandResultDescriptor, session?: CliSessionSummary): string {

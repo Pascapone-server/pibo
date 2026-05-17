@@ -1,9 +1,9 @@
 # Spec: Ink CLI Session UI V2 Web Parity
 
-**Status:** Draft  
+**Status:** Implemented with follow-up rendering gaps  
 **Created:** 2026-05-16  
 **Owner / Source:** User follow-up after testing `pibo tui:sessions` V1 over SSH  
-**Related docs:** `proposal.md`, `design.md`, `../ink-cli-session-ui/spec.md`, `docs/reports/ink-cli-session-subset-report.md`
+**Related docs:** `proposal.md`, `design.md`, `../ink-cli-session-ui/spec.md`, `docs/reports/ink-cli-session-subset-report.md`, `../ink-cli-terminal-rendering-parity/spec.md`
 
 ## Why
 
@@ -27,6 +27,8 @@ Upgrade `pibo tui:sessions` from a reduced chat subset into a room-aware Ink ter
 - `buildCompactTerminalRows()` already lives under `src/session-ui` and is consumed by both Web Compact Terminal View and Ink CLI.
 
 ### Gaps today
+
+> 2026-05-17 update: Owner scope, room navigation, slash catalog, routed local source, Root recovery selection, and several shared descriptors have been implemented. The main remaining gap is rendering parity: some command results still render as top-level CLI messages rather than chronological Compact Terminal rows, and the Ink visuals do not yet fully conform to `TERMINAL_DESIGN.md`. The follow-up change is `docs/specs/changes/ink-cli-terminal-rendering-parity/`.
 
 - The Ink UI is visually and structurally separate from the Web Compact Terminal View.
 - Only compact terminal rows are shared. Web card components such as status/model/login/thinking cards are DOM-specific and not shared as headless view models.

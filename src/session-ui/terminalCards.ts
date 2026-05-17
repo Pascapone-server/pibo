@@ -67,10 +67,19 @@ export function buildTerminalCardDescriptors(rows: readonly CompactTerminalRow[]
 
 function buildStatusCard(row: CompactTerminalRow): TerminalCardDescriptor {
 	const data = parseRecord(row.output);
+	const model = recordField(data, "activeModel") ?? recordField(data, "model");
 	const statusView = buildTerminalStatusViewModel({
-		session: { id: stringField(data, "piboSessionId"), status: boolField(data, "disposed") ? "disposed" : undefined },
+		owner: { label: stringField(data, "activeOwnerLabel") ?? stringField(data, "ownerLabel"), scope: stringField(data, "activeOwnerScope") ?? stringField(data, "ownerScope") },
+		session: {
+			id: stringField(data, "piboSessionId") ?? stringField(data, "sessionId"),
+			title: stringField(data, "sessionTitle") ?? stringField(data, "title"),
+			profile: stringField(data, "profile") ?? stringField(data, "activeAgentId") ?? stringField(data, "agentId"),
+			status: boolField(data, "disposed") ? "disposed" : stringField(data, "sessionStatus"),
+		},
+		model: model ? { provider: stringField(model, "provider"), id: stringField(model, "id"), label: stringField(model, "label") } : undefined,
 		runtime: {
-			state: boolField(data, "disposed") ? "disposed" : boolField(data, "processing") ? "processing" : boolField(data, "streaming") ? "streaming" : "idle",
+			state: boolField(data, "disposed") ? "disposed" : boolField(data, "processing") ? "processing" : boolField(data, "streaming") ? "streaming" : stringField(data, "mode") ?? "idle",
+			connected: boolField(data, "connected"),
 			queuedMessages: numberField(data, "queuedMessages"),
 			processing: boolField(data, "processing"),
 			streaming: boolField(data, "streaming"),
@@ -78,6 +87,11 @@ function buildStatusCard(row: CompactTerminalRow): TerminalCardDescriptor {
 		cwd: stringField(data, "cwd"),
 		contextUsage: recordField(data, "contextUsage") as { tokens?: number; contextWindow?: number; percent?: number } | undefined,
 		providerUsage: recordField(data, "providerUsage") as BuildTerminalStatusInput["providerUsage"],
+		thinking: stringField(data, "thinkingLevel") ? { level: stringField(data, "thinkingLevel") } : undefined,
+		fastMode: boolField(data, "fastMode"),
+		warnings: arrayStringField(data, "warnings"),
+		errors: arrayStringField(data, "errors"),
+		message: stringField(data, "message"),
 	});
 	return {
 		id: row.id,
