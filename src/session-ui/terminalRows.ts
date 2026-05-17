@@ -673,7 +673,7 @@ function previewQuery(value?: Record<string, unknown>): string | undefined {
 
 function previewLines(
 	value: unknown,
-	_maxVisibleLines: number,
+	maxVisibleLines: number,
 	tone: TerminalInlineToken["tone"] = "dim",
 	_maxLineLength = 160,
 ): { lines: CompactTerminalLine[]; truncated: boolean } {
@@ -684,11 +684,18 @@ function previewLines(
 		.map((line) => line.trimEnd())
 		.filter((line, index, lines) => line.length > 0 || lines.length === 1);
 	if (!allLines.length) return { lines: [], truncated: false };
-	const lines: CompactTerminalLine[] = allLines.map((line, index) => ({
+	const visible = allLines.slice(0, maxVisibleLines);
+	const lines: CompactTerminalLine[] = visible.map((line, index) => ({
 		prefix: index === 0 ? "detail" : "continuation",
 		tokens: [token(line, tone)],
 	}));
-	return { lines, truncated: false };
+	if (allLines.length > maxVisibleLines) {
+		lines.push({
+			prefix: "continuation",
+			tokens: [token(`+${allLines.length - maxVisibleLines} more lines`, "dim", "normal", true)],
+		});
+	}
+	return { lines, truncated: allLines.length > maxVisibleLines };
 }
 
 function previewText(value: unknown): string {
@@ -705,7 +712,7 @@ function previewText(value: unknown): string {
 
 function compactInlinePreview(value: unknown): string {
 	const text = typeof value === "string" ? value : previewText(value);
-	return text.replace(/s+/g, " ").trim();
+	return text.replace(/\s+/g, " ").trim();
 }
 
 function isShellToolName(name: string | undefined): boolean {
