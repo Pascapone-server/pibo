@@ -6,7 +6,7 @@
     "baseCommit": "bdf219f906eb331a2f5343dd16e8124c2734878b",
     "mainRef": "main",
     "createdAt": "2026-05-17T00:17:50Z",
-    "lastUpdatedAt": "2026-05-17T01:04:03Z",
+    "lastUpdatedAt": "2026-05-17T01:05:34Z",
     "notes": [
       "This ledger is the durable resume state for the Ralph source-spec refresh loop.",
       "Current code in this worktree is the source of truth for source-backed specs.",
@@ -793,6 +793,15 @@
         "q-skills-context-runtime"
       ],
       "message": "docs: refresh skills context runtime specs"
+    },
+    {
+      "hash": "c5cc832dc7d3d4d1d52c5d61c419d4942ef43e16",
+      "shortHash": "c5cc832",
+      "committedAt": "2026-05-17T01:05:34Z",
+      "queueIds": [
+        "q-gateway-channel-cli"
+      ],
+      "message": "docs: refresh gateway cli pty specs"
     }
   ],
   "runNotes": [
@@ -827,6 +836,10 @@
     {
       "at": "2026-05-17T01:04:03Z",
       "note": "Audited q-gateway-channel-cli. Updated channel, gateway, operator CLI, CLI Session UI, CLI PTY Validation, and PTY Debug change docs against current source; preserved PTY Docker/custom-agent scenario gaps as follow-up test gaps."
+    },
+    {
+      "at": "2026-05-17T01:05:34Z",
+      "note": "Recorded commit c5cc832 for q-gateway-channel-cli source-spec refresh."
     }
   ]
 }
