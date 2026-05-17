@@ -177,7 +177,8 @@ test("Ink status card renders compact runtime fields bars unavailable states too
 	assert.match(output, /Provider plan: pro/);
 	assert.match(output, /Credits: unlimited/);
 	assert.match(output, /Enabled tools: 3 \(read, edit, bash\)/);
-	assert.match(output, /anthropic messages: .*25\.0%/);
+	assert.match(output, /anthropic messages: .*75\.0%/);
+	assert.match(output, /anthropic messages: .*75\.0% remaining/);
 	assert.match(output, /local-ai requests: unavailable · [░-]+/);
 	assert.match(output, /Provider quota: unavailable · [░-]+/);
 	assert.match(output, /Context: unavailable · [░-]+/);
@@ -191,8 +192,8 @@ test("Ink status progress bars use readable ASCII fallback when color or glyph s
 		const rows = [{ id: "status-ascii", kind: "tool.status", status: "done", lines: [], output: highUsageStatusPayload(), sourceNodeIds: ["status-ascii"] }];
 		const output = renderToString(React.createElement(InkTerminalView, { rows, maxRows: 5, maxLineChars: 160 }));
 		assert.match(output, /Context: #################-/);
-		assert.match(output, /openai requests: ------------------ 0\.0%/);
-		assert.match(output, /openai spend: ################-+/);
+		assert.match(output, /openai requests: ################## 100\.0%/);
+		assert.match(output, /openai spend: ##---------------- 9\.0%/);
 		assert.doesNotMatch(output, /█|░|sk_fixture_secret|warning-secret-value/);
 	} finally {
 		if (previousNoColor === undefined) delete process.env.NO_COLOR;

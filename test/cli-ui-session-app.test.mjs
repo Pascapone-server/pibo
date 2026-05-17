@@ -314,7 +314,8 @@ test("renderCliStatusCardText renders shared status bars and redacts secrets", (
 	assert.match(text, /Runtime: processing/);
 	assert.match(text, /Queue: 2/);
 	assert.match(text, /Context: .*50\.0%/);
-	assert.match(text, /openai requests: .*80\.0%/);
+	assert.match(text, /openai requests: .*20\.0%/);
+	assert.match(text, /20\.0% remaining/);
 	assert.match(text, /Provider plan: team/);
 	assert.match(text, /Credits: \$5\.00/);
 	assert.match(text, /Enabled tools: 2 \(read, bash\)/);
@@ -491,7 +492,8 @@ test("status command result rows preserve transcript flow and can render as Ink 
 	assert.match(output, /Owner: Web user alpha/);
 	assert.match(output, /Session: Status Session \| ps_status/);
 	assert.match(output, /Context: .*50\.0%/);
-	assert.match(output, /openai requests: .*75\.0%/);
+	assert.match(output, /openai requests: .*25\.0%/);
+	assert.match(output, /25\.0% remaining/);
 });
 
 test("/status closes an open picker and appends transcript rows instead of header message", async () => {
@@ -585,7 +587,8 @@ test("Slash commands handle help status clear pickers unknown exit and normal se
 	assert.match(statusText, /Session: Existing fake session \| ps_fake_existing/);
 	assert.match(statusText, /Runtime: fake/);
 	assert.match(statusText, /Context: 0\/1000 tokens \(0\.0%\)/);
-	assert.match(statusText, /openai requests: 25\.0% used/);
+	assert.match(statusText, /openai requests: 75\.0% remaining/);
+	assert.doesNotMatch(statusText, /used/);
 	assert.match(statusText, /Provider plan: pro/);
 	assert.match(statusText, /Enabled tools: 3 \(read, edit, bash\)/);
 	assert.match(statusText, /Active tools: 1 \(bash\)/);
