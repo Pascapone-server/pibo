@@ -190,24 +190,28 @@ The compute CLI MUST let operators inspect, stop, and remove workers explicitly,
 
 #### Current
 
-`releaseWorker()` stops a named container with a 10-second timeout and removes it. `listWorkers()` lists role `worker` and `dev` containers by default. `reapWorkers()` removes old one-time workers by default and includes dev workers only when `--include-dev` is supplied.
+`releaseWorker()` stops a named container with a 10-second timeout and removes it. `listWorkers()` lists role `worker` and `dev` containers by default. `pibo compute reap` builds a dry-run cleanup plan by default, selects stopped, dirty/OOM, and old one-time workers, and includes dev workers only when `--include-dev` is supplied. Destructive removal requires `--apply`.
 
 #### Acceptance
 
 - `pibo compute release <id>` stops and removes the named container or id.
 - Releasing an already stopped container still attempts removal.
-- `pibo compute reap --max-age-minutes <n>` removes one-time workers older than the requested age.
+- `pibo compute reap --dry-run --max-age-minutes <n>` previews one-time workers selected because they are stopped, dirty/OOM-killed, or older than the requested age.
 - The default reap age is 60 minutes.
-- `pibo compute reap --include-dev` also makes old dev workers eligible for removal.
+- `pibo compute reap --apply --max-age-minutes <n>` removes selected containers.
+- `pibo compute reap --include-dev` also makes selected dev workers eligible for removal.
 - `pibo compute list` shows running one-time and dev workers with name, role, status, ports, and created time, or an empty-state message.
 - Releasing or reaping a dev worker container does not remove its Git worktree automatically.
 
-#### Scenario: Reap old one-time worker
+#### Scenario: Preview and reap old one-time worker
 
 - GIVEN a running one-time worker has a created-at label older than 60 minutes
-- WHEN an operator runs `pibo compute reap`
-- THEN Pibo stops and removes that worker container
-- AND old dev workers are left running unless `--include-dev` is supplied.
+- WHEN an operator runs `pibo compute reap --dry-run`
+- THEN Pibo reports that worker as selected with reason `old`
+- AND old dev workers are skipped unless `--include-dev` is supplied.
+- WHEN the operator runs `pibo compute reap --apply`
+- THEN Pibo stops and removes only selected containers
+- AND Git worktrees are preserved.
 
 ### Requirement: Worker containers enforce resource budgets
 
@@ -244,7 +248,7 @@ The compute CLI MUST make stopped, OOM-killed, and dirty Pibo worker containers 
 
 #### Current
 
-Listing and reaping focus on running containers, and dev-worker cleanup requires explicit inclusion.
+Listing covers all-state containers when `--all` is supplied. Reaping is plan-first, defaults to dry-run, selects stopped/dirty/OOM/old one-time workers, and requires explicit `--include-dev` before dev workers can be removed.
 
 #### Target
 
@@ -254,7 +258,9 @@ Operators can inspect all Pibo compute containers and preview cleanup for stoppe
 
 - `pibo compute list --all` or an equivalent command shows running and stopped Pibo compute containers.
 - Output includes status, OOM flag when available, role, owner, worktree, Ralph ids, created time, last-used time, and cleanup eligibility.
-- Reap supports a dry-run/preview mode for destructive cleanup.
+- Reap supports dry-run/preview output and `--apply` for destructive cleanup.
+- Reap selectors cover stopped containers, dirty/OOM workers, age filters, one-time workers, and explicitly included dev workers.
+- Reap explains why each worker is selected or skipped.
 - Reap never deletes Git worktrees unless an explicit worktree cleanup option or command is used.
 
 #### Scenario: Stopped OOM worker remains inspectable
@@ -302,7 +308,8 @@ This capability participates in the compute/browser resource lifecycle change. I
 - Existing Git branches or worktrees can make `git worktree add -b <name>` fail; the current code retries by adding the existing branch name.
 - Docker port parsing can return `0` if Docker returns no parseable host port; callers should treat that as unusable connection data.
 - `pibo compute list` includes dev containers by default, but `pibo compute reap` excludes dev containers unless `--include-dev` is supplied.
-- `release` removes containers but intentionally does not delete worktree directories.
+- `pibo compute reap` is dry-run by default; `--apply` is required to remove containers.
+- `release` and `reap --apply` remove containers but intentionally do not delete worktree directories.
 
 ## Constraints
 
@@ -318,7 +325,7 @@ This capability participates in the compute/browser resource lifecycle change. I
 - [ ] SC-002: `pibo compute dev spawn --worktree <name>` creates a worktree, starts a dev container, and returns deterministic non-overlapping ports.
 - [ ] SC-003: Worker `gateway:web` exposes Chat Web with Docker-only dev auth and rejects host dev-auth activation.
 - [ ] SC-004: `pibo compute release <id>` removes the target container without deleting source worktrees.
-- [ ] SC-005: `pibo compute reap` removes old one-time worker containers, leaves dev workers running by default, and includes old dev workers only with `--include-dev`.
+- [ ] SC-005: `pibo compute reap --dry-run` previews old/stopped/dirty one-time worker cleanup, `--apply` removes selected containers, dev workers are skipped by default, and old dev workers are included only with `--include-dev`.
 - [ ] SC-006: A built-CLI discovery test verifies `pibo compute --help` and `pibo compute dev --help` expose only immediate next-step commands without starting Docker.
 - [ ] SC-007: Worker Docker run command tests verify resource limits and labels for one-time and dev workers.
 - [ ] SC-008: `pibo compute list --all` and reap dry-run tests cover stopped/OOM containers, dirty workers, and worktree-preserving cleanup.
@@ -333,7 +340,7 @@ This capability participates in the compute/browser resource lifecycle change. I
 ### Source-Inspected Only
 
 - Compute CLI discovery, command registration, help text, required `--worktree`, and JSON printing are source-inspected from `src/compute/cli.ts`.
-- Image rebuild predicates, source/dependency hash files, Docker build invocation, one-time worker spawn, dev worker spawn, deterministic port blocks, worktree creation, list/release/reap behavior, and `--include-dev` cleanup selection are source-inspected from `src/compute/docker.ts`.
+- Image rebuild predicates, source/dependency hash files, Docker build invocation, one-time worker spawn, dev worker spawn, deterministic port blocks, worktree creation, list/release/reap behavior, dry-run/apply planning, and `--include-dev` cleanup selection are source-inspected from `src/compute/docker.ts`.
 - Worker entrypoint browser setup and dev-auth gateway dispatch are source-inspected from `scripts/docker-entrypoint.sh`.
 - Docker image dependencies and port exposure are source-inspected from `Dockerfile`.
 

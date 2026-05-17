@@ -9,6 +9,8 @@ import {
 	resolveComputeResourcePolicy,
 } from '../dist/compute/resource-policy.js';
 import {
+	LABEL_CLEANUP_STATE,
+	LABEL_DIRTY_REASON,
 	LABEL_IDLE_SECONDS,
 	LABEL_LAST_USED_AT,
 	LABEL_OWNER_SCOPE,
@@ -18,13 +20,15 @@ import {
 	LABEL_TTL_SECONDS,
 	LABEL_WORKTREE,
 	LABEL_WORKTREE_PATH,
+	applyComputeWorkerReapPlan,
+	buildComputeWorkerReapPlan,
 	buildDevWorkerDockerRunArgs,
 	buildWorkerDockerRunArgs,
 	parseDockerWorkerInspect,
 	parseDockerWorkerListLine,
 	resolveComputeWorkerLifecycle,
 } from '../dist/compute/docker.js';
-import { renderComputeWorkerListText } from '../dist/compute/cli.js';
+import { renderComputeReapPlanText, renderComputeWorkerListText } from '../dist/compute/cli.js';
 
 const customPolicy = Object.freeze({
 	memory: '3g',
@@ -258,6 +262,68 @@ test('compute list text output has empty state guidance and all-state columns', 
 	assert.match(text, /pibo-worker-running\tworker\texited\texited \(137\)\tyes/);
 	assert.match(text, /mem=2g,pids=512,shm=512m/);
 	assert.match(text, /eligible:oom-killed\+stopped/);
+});
+
+function workerFixture(name, overrides = {}) {
+	return parseDockerWorkerInspect(inspectFixture({
+		Id: overrides.Id ?? name,
+		Name: `/${name}`,
+		Created: overrides.Created ?? '2026-05-17T00:00:00.000Z',
+		Labels: { ...(overrides.Created ? { 'pibo.compute.createdAt': overrides.Created } : {}), ...(overrides.Labels ?? {}) },
+		State: overrides.State,
+		NetworkSettings: overrides.NetworkSettings,
+		omitPortLabel: overrides.omitPortLabel,
+	}));
+}
+
+test('compute reap dry-run plans selected and skipped workers with worktree preservation', () => {
+	const plan = buildComputeWorkerReapPlan([
+		workerFixture('pibo-worker-stopped', { State: { Status: 'exited', Running: false, OOMKilled: false, Dead: false, ExitCode: 0 } }),
+		workerFixture('pibo-dev-stopped', { Labels: { 'pibo.compute.role': 'dev', 'pibo.compute.worktreePath': '/repo/.worktrees/dev' }, State: { Status: 'exited', Running: false, OOMKilled: false, Dead: false, ExitCode: 0 } }),
+		workerFixture('pibo-worker-running', { Created: '2026-05-17T00:59:00.000Z', State: { Status: 'running', Running: true, OOMKilled: false, Dead: false, ExitCode: 0 } }),
+	], { now: new Date('2026-05-17T01:00:00.000Z'), maxAgeMinutes: 59 });
+
+	assert.equal(plan.summary.selected, 1);
+	assert.equal(plan.items.find((item) => item.worker.name === 'pibo-worker-stopped').action, 'remove');
+	assert.deepEqual(plan.items.find((item) => item.worker.name === 'pibo-worker-stopped').reasons, ['stopped', 'old']);
+	assert.deepEqual(plan.items.find((item) => item.worker.name === 'pibo-dev-stopped').skipReasons, ['dev-worker-preserved']);
+	assert.deepEqual(plan.items.find((item) => item.worker.name === 'pibo-worker-running').skipReasons, ['not-selected']);
+
+	const text = renderComputeReapPlanText(plan);
+	assert.match(text, /Compute reap dry-run: 1 selected/);
+	assert.match(text, /Dry-run only/);
+	assert.match(text, /Worktrees are preserved/);
+});
+
+test('compute reap include-dev, dirty, and max-age selectors choose expected containers', () => {
+	const plan = buildComputeWorkerReapPlan([
+		workerFixture('pibo-dev-old', { Labels: { 'pibo.compute.role': 'dev', 'pibo.compute.worktreePath': '/repo/.worktrees/dev-old' } }),
+		workerFixture('pibo-worker-dirty', { Created: '2026-05-17T01:30:00.000Z', Labels: { [LABEL_CLEANUP_STATE]: 'dirty', [LABEL_DIRTY_REASON]: 'browser cleanup failed' }, State: { Status: 'running', Running: true, OOMKilled: false, Dead: false, ExitCode: 0 } }),
+		workerFixture('pibo-worker-oom', { Created: '2026-05-17T01:30:00.000Z', State: { Status: 'exited', Running: false, OOMKilled: true, Dead: false, ExitCode: 137 } }),
+	], { includeDev: true, now: new Date('2026-05-17T02:00:00.000Z'), maxAgeMinutes: 60 });
+
+	assert.deepEqual(plan.items.map((item) => [item.worker.name, item.action, item.reasons]), [
+		['pibo-dev-old', 'remove', ['old']],
+		['pibo-worker-dirty', 'remove', ['dirty']],
+		['pibo-worker-oom', 'remove', ['stopped', 'oom-killed']],
+	]);
+	assert.equal(plan.summary.worktreesPreserved, 1);
+});
+
+test('compute reap apply removes only selected containers and never deletes worktrees', async () => {
+	const plan = buildComputeWorkerReapPlan([
+		workerFixture('pibo-worker-stopped', { State: { Status: 'exited', Running: false, OOMKilled: false, Dead: false, ExitCode: 0 } }),
+		workerFixture('pibo-dev-stopped', { Labels: { 'pibo.compute.role': 'dev', 'pibo.compute.worktreePath': '/repo/.worktrees/dev' }, State: { Status: 'exited', Running: false, OOMKilled: false, Dead: false, ExitCode: 0 } }),
+	], { now: new Date('2026-05-17T01:00:00.000Z'), maxAgeMinutes: 59 });
+	const released = [];
+	const removed = await applyComputeWorkerReapPlan(plan, { release: async (id) => { released.push(id); } });
+
+	assert.deepEqual(removed, ['pibo-worker-stopped']);
+	assert.deepEqual(released, ['pibo-worker-stopped']);
+	assert.equal(plan.summary.worktreesPreserved, 0);
+	const applied = renderComputeReapPlanText(plan, { applied: true, removed });
+	assert.match(applied, /Removed: pibo-worker-stopped/);
+	assert.match(applied, /Worktrees are preserved/);
 });
 
 test('dev worker docker run args include resource policy labels worktree metadata and bounded logs', () => {

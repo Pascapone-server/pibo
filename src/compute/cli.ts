@@ -11,8 +11,10 @@ import {
 	spawnDevWorker,
 	listWorkers,
 	releaseWorker,
-	reapWorkers,
+	planReapWorkers,
+	applyComputeWorkerReapPlan,
 	getSourceHash,
+	type ComputeWorkerReapPlan,
 	type WorkerInfo,
 } from "./docker.js";
 import { writeFile, mkdir } from "node:fs/promises";
@@ -62,6 +64,24 @@ export function renderComputeWorkerListText(workers: WorkerInfo[], options: { al
 		lines.push(`${w.name}\t${w.role}\t${w.state}\t${w.status}\t${w.oomKilled ? "yes" : "no"}\t${w.ports || "-"}\t${w.createdAt}\t${w.lastUsedAt ?? "-"}\t${w.ownerScope ?? "-"}\t${w.worktree ?? "-"}\t${w.ralphJobId ?? "-"}\t${w.ralphRunId ?? "-"}\t${formatResourcePolicy(w)}\t${formatCleanup(w)}`);
 	}
 	lines.push("Next: pibo compute list --all --json");
+	return lines.join("\n");
+}
+
+export function renderComputeReapPlanText(plan: ComputeWorkerReapPlan, options: { applied?: boolean; removed?: string[] } = {}): string {
+	const mode = options.applied ? "apply" : "dry-run";
+	const lines = [`Compute reap ${mode}: ${plan.summary.selected} selected, ${plan.summary.skipped} skipped, ${plan.summary.worktreesPreserved} worktree(s) preserved`];
+	if (plan.items.length === 0) {
+		lines.push("No Pibo worker containers found.");
+	} else {
+		lines.push("ACTION\tNAME\tROLE\tSTATE\tAGE_MIN\tREASONS\tSKIP_REASONS\tWORKTREE");
+		for (const item of plan.items) {
+			lines.push(`${item.action}\t${item.worker.name}\t${item.worker.role}\t${item.worker.state}\t${item.ageMinutes === undefined ? "-" : Math.floor(item.ageMinutes)}\t${item.reasons.join("+") || "-"}\t${item.skipReasons.join("+") || "-"}\t${item.preservesWorktree ? "preserve" : "-"}`);
+		}
+	}
+	if (options.applied) lines.push(`Removed: ${options.removed?.join(", ") || "none"}`);
+	else lines.push("Dry-run only. Apply with: pibo compute reap --apply");
+	lines.push("Worktrees are preserved; remove Git worktrees only with an explicit worktree cleanup command.");
+	lines.push(...plan.nextCommands.map((command) => `Next: ${command}`));
 	return lines.join("\n");
 }
 
@@ -254,23 +274,37 @@ Use the name or id shown by:
 
 	program
 		.command("reap")
-		.description("Remove old worker containers")
-		.option("--max-age-minutes <n>", "Remove workers older than this many minutes", "60")
-		.option("--include-dev", "Also remove old dev-worker containers")
+		.description("Preview or apply compute worker container cleanup")
+		.option("--max-age-minutes <n>", "Select workers older than this many minutes", "60")
+		.option("--include-dev", "Also select dev-worker containers; dev workers are skipped by default")
+		.option("--no-stopped", "Do not select stopped, dead, created, or restarting containers")
+		.option("--no-dirty", "Do not select dirty or OOM-killed containers")
+		.option("--dry-run", "Preview the cleanup plan without removing containers")
+		.option("--apply", "Apply the cleanup plan and remove selected containers")
+		.option("--json", "Print machine-readable cleanup plan/result")
 		.addHelpText(
 			"after",
 			`
-Defaults to 60 minutes and one-time workers only. Use --include-dev to reap dev workers too.
+Defaults to a dry-run plan for one-time workers. Dev workers require --include-dev.
+Stopped, dirty/OOM, and old workers are selected unless disabled by selector flags.
+Worktrees are preserved; container cleanup never deletes Git worktrees.
 `,
 		)
-		.action(async (options: { maxAgeMinutes: string; includeDev?: boolean }) => {
+		.action(async (options: { maxAgeMinutes: string; includeDev?: boolean; stopped?: boolean; dirty?: boolean; dryRun?: boolean; apply?: boolean; json?: boolean }) => {
 			const maxAge = Number(options.maxAgeMinutes);
-			const removed = await reapWorkers(maxAge, { includeDev: options.includeDev === true });
-			if (removed.length === 0) {
-				console.log("No old workers to reap.");
-			} else {
-				console.log(`Reaped ${removed.length} worker(s): ${removed.join(", ")}`);
+			const plan = await planReapWorkers({
+				includeDev: options.includeDev === true,
+				includeStopped: options.stopped !== false,
+				includeDirty: options.dirty !== false,
+				maxAgeMinutes: Number.isFinite(maxAge) ? maxAge : 60,
+			});
+			const shouldApply = options.apply === true;
+			const removed = shouldApply ? await applyComputeWorkerReapPlan(plan) : [];
+			if (options.json) {
+				printJson({ dryRun: !shouldApply, applied: shouldApply, removed, plan });
+				return;
 			}
+			console.log(renderComputeReapPlanText(plan, { applied: shouldApply, removed }));
 		});
 
 	await program.parseAsync(argv);

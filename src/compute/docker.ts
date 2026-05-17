@@ -24,6 +24,8 @@ export const LABEL_PORT_BLOCK = "pibo.compute.portBlock";
 export const LABEL_TTL_SECONDS = "pibo.compute.ttlSeconds";
 export const LABEL_IDLE_SECONDS = "pibo.compute.idleSeconds";
 export const LABEL_LAST_USED_AT = "pibo.compute.lastUsedAt";
+export const LABEL_CLEANUP_STATE = "pibo.compute.cleanupState";
+export const LABEL_DIRTY_REASON = "pibo.compute.dirtyReason";
 export const LABEL_RALPH_JOB_ID = "pibo.ralph.jobId";
 export const LABEL_RALPH_RUN_ID = "pibo.ralph.runId";
 
@@ -536,6 +538,8 @@ export interface WorkerInfo {
 	worktreePath?: string;
 	ralphJobId?: string;
 	ralphRunId?: string;
+	cleanupState?: string;
+	dirtyReason?: string;
 	oomKilled?: boolean;
 	exitCode?: number;
 	resourcePolicy?: Partial<ComputeResourcePolicy>;
@@ -603,11 +607,12 @@ function portMapFromInspectPorts(ports: Record<string, Array<{ HostIp?: string; 
 	return portMap;
 }
 
-function cleanupEligibilityForWorker(worker: Pick<WorkerInfo, "role" | "state" | "status" | "oomKilled">): ComputeWorkerCleanupEligibility {
+function cleanupEligibilityForWorker(worker: Pick<WorkerInfo, "role" | "state" | "status" | "oomKilled" | "cleanupState" | "dirtyReason">): ComputeWorkerCleanupEligibility {
 	const reasons: string[] = [];
 	const normalizedState = worker.state.toLowerCase();
 	const stopped = ["exited", "dead", "created"].includes(normalizedState) || /^exited\b/i.test(worker.status);
 	if (worker.oomKilled) reasons.push("oom-killed");
+	if (worker.cleanupState === "dirty" || worker.dirtyReason) reasons.push("dirty");
 	if (stopped) reasons.push("stopped");
 	if (normalizedState === "restarting") reasons.push("restarting");
 	if (worker.role === "dev" && reasons.length > 0) {
@@ -645,6 +650,8 @@ function workerFromLabels(base: { id: string; name: string; state: string; statu
 		worktreePath: base.labels[LABEL_WORKTREE_PATH],
 		ralphJobId: base.labels[LABEL_RALPH_JOB_ID],
 		ralphRunId: base.labels[LABEL_RALPH_RUN_ID],
+		cleanupState: base.labels[LABEL_CLEANUP_STATE],
+		dirtyReason: base.labels[LABEL_DIRTY_REASON],
 		oomKilled: base.oomKilled,
 		exitCode: base.exitCode,
 		resourcePolicy: resourcePolicyFromLabels(base.labels),
@@ -750,6 +757,91 @@ export async function listWorkers(options: { includeDev?: boolean; all?: boolean
 	return enrichWorkersWithInspect(workers);
 }
 
+export interface ComputeWorkerReapPlanOptions {
+	includeDev?: boolean;
+	includeStopped?: boolean;
+	includeDirty?: boolean;
+	maxAgeMinutes?: number;
+	now?: Date;
+}
+
+export interface ComputeWorkerReapPlanItem {
+	worker: WorkerInfo;
+	action: "remove" | "skip";
+	reasons: string[];
+	skipReasons: string[];
+	ageMinutes?: number;
+	preservesWorktree: boolean;
+}
+
+export interface ComputeWorkerReapPlan {
+	createdAt: string;
+	options: Required<Omit<ComputeWorkerReapPlanOptions, "now">>;
+	items: ComputeWorkerReapPlanItem[];
+	summary: {
+		selected: number;
+		skipped: number;
+		worktreesPreserved: number;
+	};
+	nextCommands: string[];
+}
+
+function isStoppedWorker(worker: WorkerInfo): boolean {
+	const normalizedState = worker.state.toLowerCase();
+	return ["exited", "dead", "created"].includes(normalizedState) || /^exited\b/i.test(worker.status) || normalizedState === "restarting";
+}
+
+function isDirtyWorker(worker: WorkerInfo): boolean {
+	return worker.cleanupState === "dirty" || Boolean(worker.dirtyReason) || worker.oomKilled === true;
+}
+
+export function buildComputeWorkerReapPlan(workers: WorkerInfo[], options: ComputeWorkerReapPlanOptions = {}): ComputeWorkerReapPlan {
+	const now = options.now ?? new Date();
+	const maxAgeMinutes = options.maxAgeMinutes ?? 60;
+	const resolved = {
+		includeDev: options.includeDev === true,
+		includeStopped: options.includeStopped !== false,
+		includeDirty: options.includeDirty !== false,
+		maxAgeMinutes,
+	};
+	const items = workers.map((worker): ComputeWorkerReapPlanItem => {
+		const reasons: string[] = [];
+		const skipReasons: string[] = [];
+		const created = new Date(worker.createdAt).getTime();
+		const ageMinutes = Number.isNaN(created) ? undefined : (now.getTime() - created) / 1000 / 60;
+		if (worker.role === "dev" && !resolved.includeDev) skipReasons.push("dev-worker-preserved");
+		if (worker.role !== "worker" && worker.role !== "dev") skipReasons.push("unsupported-role");
+		if (resolved.includeStopped && isStoppedWorker(worker)) reasons.push("stopped");
+		if (resolved.includeDirty && isDirtyWorker(worker)) reasons.push(worker.oomKilled ? "oom-killed" : "dirty");
+		if (ageMinutes !== undefined && ageMinutes > resolved.maxAgeMinutes) reasons.push("old");
+		if (reasons.length === 0) skipReasons.push("not-selected");
+		const action = skipReasons.length === 0 ? "remove" : "skip";
+		return {
+			worker,
+			action,
+			reasons,
+			skipReasons,
+			ageMinutes,
+			preservesWorktree: Boolean(worker.worktreePath),
+		};
+	});
+	return {
+		createdAt: now.toISOString(),
+		options: resolved,
+		items,
+		summary: {
+			selected: items.filter((item) => item.action === "remove").length,
+			skipped: items.filter((item) => item.action === "skip").length,
+			worktreesPreserved: items.filter((item) => item.action === "remove" && item.preservesWorktree).length,
+		},
+		nextCommands: [
+			"pibo compute reap --dry-run --max-age-minutes <n>",
+			"pibo compute reap --apply --max-age-minutes <n>",
+			"pibo compute list --all --json",
+		],
+	};
+}
+
 export async function releaseWorker(id: string): Promise<void> {
 	try {
 		await execFileAsync("docker", ["stop", "-t", "10", id]);
@@ -759,21 +851,23 @@ export async function releaseWorker(id: string): Promise<void> {
 	await execFileAsync("docker", ["rm", id]);
 }
 
-export async function reapWorkers(maxAgeMinutes: number, options: { includeDev?: boolean } = {}): Promise<string[]> {
-	const workers = await listWorkers({ includeDev: options.includeDev === true });
-	const now = Date.now();
+export async function applyComputeWorkerReapPlan(plan: ComputeWorkerReapPlan, options: { release?: (id: string) => Promise<void> } = {}): Promise<string[]> {
+	const release = options.release ?? releaseWorker;
 	const removed: string[] = [];
-
-	for (const worker of workers) {
-		const created = new Date(worker.createdAt).getTime();
-		if (Number.isNaN(created)) continue;
-		const ageMinutes = (now - created) / 1000 / 60;
-
-		if (ageMinutes > maxAgeMinutes) {
-			await releaseWorker(worker.name);
-			removed.push(worker.name);
-		}
+	for (const item of plan.items) {
+		if (item.action !== "remove") continue;
+		await release(item.worker.name);
+		removed.push(item.worker.name);
 	}
-
 	return removed;
+}
+
+export async function planReapWorkers(options: ComputeWorkerReapPlanOptions = {}): Promise<ComputeWorkerReapPlan> {
+	const workers = await listWorkers({ all: true });
+	return buildComputeWorkerReapPlan(workers, options);
+}
+
+export async function reapWorkers(maxAgeMinutes: number, options: { includeDev?: boolean; includeStopped?: boolean; includeDirty?: boolean } = {}): Promise<string[]> {
+	const plan = await planReapWorkers({ ...options, maxAgeMinutes });
+	return applyComputeWorkerReapPlan(plan);
 }

@@ -66,8 +66,8 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented plan-first compute reap cleanup: pibo compute reap now dry-runs by default, supports --apply for removal, --include-dev for dev containers, --no-stopped/--no-dirty selector control, max-age selection, JSON/text plan output with selected/skipped reasons, and worktree preservation messaging. Added dirty cleanup labels to worker parsing/listing and pure planning/apply helpers with fake-release test seam. Tests cover dry-run, apply, dev exclusion by default, include-dev behavior, stopped cleanup, dirty/OOM cleanup, max-age selection, skipped reasons, and worktree preservation. Evidence recorded in IMPLEMENTATION_PROGRESS.md; focused compute tests, real read-only host dry-run JSON/text validation, Docker-worker CLI help validation, and full npm run typecheck passed."
     },
     {
       "id": "US-005",
