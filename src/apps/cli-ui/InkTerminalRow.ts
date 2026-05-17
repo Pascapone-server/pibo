@@ -15,7 +15,7 @@ export type InkTerminalRowProps = {
 };
 
 export function InkTerminalRow({ row, maxLineChars = 220, maxMarkdownLines = 80, isExpanded = false, isSelected = false }: InkTerminalRowProps): React.ReactElement {
-	const card = buildTerminalCardDescriptor(row);
+	const card = isStructuredCardException(row) ? buildTerminalCardDescriptor(row) : undefined;
 	const detailLines = isExpanded ? rowDetailLines(row, maxLineChars) : [];
 	const selectedHint = isSelected && isExpandableTerminalRow(row) && !isExpanded
 		? [React.createElement(Text, { color: "cyan", key: `${row.id}:selected-detail-hint` }, "  ↳ details available · press d or enter")]
@@ -36,6 +36,13 @@ export function InkTerminalRow({ row, maxLineChars = 220, maxMarkdownLines = 80,
 		...selectedHint,
 		...detailLines,
 	);
+}
+
+function isStructuredCardException(row: CompactTerminalRow): boolean {
+	return row.kind === "tool.status"
+		|| row.kind === "tool.thinking"
+		|| row.kind === "tool.login"
+		|| row.kind === "tool.model";
 }
 
 export function isExpandableTerminalRow(row: CompactTerminalRow): boolean {

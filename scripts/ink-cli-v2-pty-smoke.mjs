@@ -153,7 +153,7 @@ const scenarios = [
 	},
 	{
 		name: "mixed-transcript-fixture",
-		description: "Deterministic shared-fixture mixed transcript with rich cards, ordering, and redaction.",
+		description: "Deterministic shared-fixture mixed transcript with row-first normal events, structured exceptions, ordering, and redaction.",
 		cols: 120,
 		rows: 42,
 		timeoutMs: 20_000,
@@ -165,7 +165,8 @@ const scenarios = [
 			["--expect", "▣ Thinking — thinking · done"],
 			["--expect", "▣ Model — model · done"],
 			["--expect", "▣ Login — login · done"],
-			["--expect", "▣ Tool — tool · error"],
+			["--expect", "Call failed detail_tool"],
+			["--reject", "▣ Tool"],
 			["--expect", "token=[redacted]"],
 			["--reject", "sk_fixture_secret"],
 			["--reject", "detail-secret-value"],

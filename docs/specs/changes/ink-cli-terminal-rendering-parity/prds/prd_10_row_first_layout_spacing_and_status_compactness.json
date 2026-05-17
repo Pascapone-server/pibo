@@ -1,5 +1,5 @@
 {
-  "project": "Ink CLI Terminal Rendering Parity — Web-Derived Completion",
+  "project": "Ink CLI Terminal Rendering Parity \u2014 Web-Derived Completion",
   "branchName": "ralph/ink-cli-row-first-layout-spacing",
   "description": "Make Ink normal transcript events use Web row-first grammar, tighten spacing, and compact status/header chrome according to the Web Terminal layout contract.",
   "userStories": [
@@ -10,7 +10,7 @@
       "acceptanceCriteria": [
         "Ink renderer bypasses `TerminalCardDescriptor` card headers for normal row kinds: tool.call, tool.group.exploring, agent.delegation, agent.async, yielded.run, execution.command, execution.compaction, and error",
         "Normal rows render prefix glyphs, terse verbs, inline tokens, bounded previews, and optional detail affordance",
-        "Snapshots assert normal rows do not contain `▣` card headers",
+        "Snapshots assert normal rows do not contain `\u25a3` card headers",
         "Web UI preservation gate passes: Web Compact Terminal visual/behavioral render logic remains unchanged unless the story explicitly documents user-approved Web behavior changes; shared `src/session-ui/**` changes include Web regression evidence.",
         "Implementation does not import Web DOM/Tailwind/lucide components into CLI modules",
         "Secrets are redacted in previews, details, fixtures, snapshots, and PTY artifacts",
@@ -19,8 +19,8 @@
         "When marking passes true, notes include commands run, evidence tier, artifact paths where applicable, and fake/demo/mocked/real classification"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "2026-05-17: PASS. InkTerminalRow now builds TerminalCardDescriptor only for Web-equivalent structured exceptions (`tool.status`, `tool.thinking`, `tool.login`, `tool.model`). Normal row kinds render directly through InkTerminalLine with prefix glyphs, bounded preview lines, detail affordance, and expansion support. Added row-first tests for tool.call, yielded.run, execution.command, execution.compaction, and error rows, including assertions that normal rows do not contain decorative `\u25a3` card headers and secrets are redacted after bypassing card rendering. PTY evidence: /tmp/pibo-pty-row-first-us010 shows `Called long_output_demo` and `Ran /status`, rejects `\u25a3 Tool` and `\u25a3 Command`. Commands run in Docker: npm run build; focused node --test suite; npm run typecheck; npm test. Evidence tier: focused renderer tests plus deterministic fake/demo real Ink TUI PTY path. Web preservation: CLI-only production changes plus fake CLI session fixture; no Web Compact Terminal or shared session-ui production code changed."
     },
     {
       "id": "US-002",
@@ -38,8 +38,8 @@
         "When marking passes true, notes include commands run, evidence tier, artifact paths where applicable, and fake/demo/mocked/real classification"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "2026-05-17: PASS. Structured exception card rendering remains in place for `tool.status`, `tool.thinking`, `tool.login`, and `tool.model`; tests explicitly assert those rows still render as distinguishable `\u25a3 Status`, `\u25a3 Thinking`, `\u25a3 Model`, and `\u25a3 Login` terminal-native structured panels while normal rows bypass card headers. PTY evidence /tmp/pibo-pty-row-first-us010 includes `\u25a3 Status \u2014 status \u00b7 done` after `/status`, proving a structured exception remains card-like beside row-first normal command/tool rows. Commands run in Docker: npm run build; focused node --test suite; npm run typecheck; npm test. Evidence tier: focused renderer tests plus deterministic fake/demo real Ink TUI PTY path. Web preservation: no Web Compact Terminal or shared session-ui production code changed."
     },
     {
       "id": "US-003",
@@ -58,8 +58,8 @@
         "When marking passes true, notes include commands run, evidence tier, artifact paths where applicable, and fake/demo/mocked/real classification"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "2026-05-17: PASS. Added dense row-first spacing coverage for adjacent user, assistant, reasoning, tool, command, status, and error rows. Tests assert no unexplained blank lines, stable row prefixes (`\u203a`, `\u2022`, `\u2715`), no decorative normal-row card headers, narrow error/header readability, and no-color row readability. Normal detail/continuation lines remain under the content column through InkTerminalLine prefixes. PTY evidence /tmp/pibo-pty-row-first-us010 shows dense demo transcript spacing with long-output preview, row-first `/status` command, and structured status exception. Commands run in Docker: npm run build; focused node --test suite; npm run typecheck; npm test. Evidence tier: focused snapshot/semantic tests plus deterministic fake/demo real Ink TUI PTY path. Web preservation: no Web Compact Terminal or shared session-ui production code changed."
     },
     {
       "id": "US-004",
@@ -88,7 +88,7 @@
       "acceptanceCriteria": [
         "PTY scenario includes normal tool, command, yielded/error row, and status structured exception",
         "Screen artifact shows row-first grammar for normal events and compact structured status",
-        "Artifact assertions reject decorative `▣` headers for normal row kinds where feasible",
+        "Artifact assertions reject decorative `\u25a3` headers for normal row kinds where feasible",
         "Artifacts include raw ANSI, clean text, final screen, metadata, input/assertions, and exact command invocation",
         "Web UI preservation gate passes: Web Compact Terminal visual/behavioral render logic remains unchanged unless the story explicitly documents user-approved Web behavior changes; shared `src/session-ui/**` changes include Web regression evidence.",
         "Implementation does not import Web DOM/Tailwind/lucide components into CLI modules",

@@ -6,7 +6,7 @@ import test from "node:test";
 import { renderToString } from "ink";
 import { buildCompactTerminalRows } from "../dist/session-ui/index.js";
 import { formatInkJson, formatStatusHeaderLines, InkSessionAppView, InkTerminalView, renderInkMarkdownLines, rowWindow } from "../dist/apps/cli-ui/index.js";
-import { buildCanonicalTerminalRows, buildExpandableDetailFixtureRow, fullStatusPayload, highUsageStatusPayload, partialStatusPayload, unavailableStatusPayload } from "./fixtures/terminal-parity-fixtures.mjs";
+import { buildCanonicalTerminalRows, buildExpandableDetailFixtureRow, buildWebDerivedLongOutputRows, fullStatusPayload, highUsageStatusPayload, partialStatusPayload, unavailableStatusPayload } from "./fixtures/terminal-parity-fixtures.mjs";
 
 const sessionId = "pibo:ink-renderer-test";
 
@@ -61,13 +61,11 @@ test("InkTerminalView renders representative compact rows to terminal text", () 
 	assert.match(output, /› Investigate issue/);
 	assert.match(output, /I will check\./);
 	assert.match(output, /- first/);
-	assert.match(output, /▣ Tool — tool · done/);
-	assert.match(output, /Called read/);
+	assert.match(output, /• Called read/);
 	assert.match(output, /src\/index\.ts/);
-	assert.match(output, /▣ Yielded run — yielded-run · running/);
-	assert.match(output, /Waiting on runs typecheck/);
-	assert.match(output, /✕ ▣ Error — error · error/);
-	assert.match(output, /Error: boom/);
+	assert.match(output, /• Waiting on runs typecheck/);
+	assert.match(output, /✕ • Error boom/);
+	assert.doesNotMatch(output, /▣ (Tool|Yielded run|Error)/);
 });
 
 test("InkTerminalView renders rich shared card descriptors with Web-parity labels", () => {
@@ -90,8 +88,8 @@ test("InkTerminalView renders rich shared card descriptors with Web-parity label
 	assert.match(output, /› User prompt/);
 	assert.match(output, /Assistant reply/);
 	assert.match(output, /Thought/);
-	assert.match(output, /▣ Tool — tool · done/);
-	assert.match(output, /Called read/);
+	assert.match(output, /• Called read/);
+	assert.doesNotMatch(output, /▣ Tool/);
 	assert.match(output, /▣ Status — status · done/);
 	assert.match(output, /Context: █/);
 	assert.match(output, /openai requests:/);
@@ -100,10 +98,11 @@ test("InkTerminalView renders rich shared card descriptors with Web-parity label
 	assert.match(output, /▣ Model — model · done/);
 	assert.match(output, /OpenAI \/ GPT Test/);
 	assert.match(output, /▣ Login — login · done/);
-	assert.match(output, /▣ Yielded run — yielded-run · running/);
-	assert.match(output, /▣ Compaction — compaction · done/);
-	assert.match(output, /▣ Command — command · done/);
-	assert.match(output, /✕ ▣ Error — error · error/);
+	assert.match(output, /• Waiting on runs typecheck/);
+	assert.match(output, /• Compacted transcript/);
+	assert.match(output, /• Ran \/status/);
+	assert.match(output, /✕ TOKEN=\[redacted\] failed/);
+	assert.doesNotMatch(output, /▣ (Yielded run|Compaction|Command|Error)/);
 	assert.match(output, /TOKEN=\[redacted\]/);
 	assert.doesNotMatch(output, /secret-value/);
 });
@@ -134,6 +133,7 @@ test("Ink renderer consumes the canonical shared parity fixture", () => {
 	assert.match(output, /▣ Model — model · done/);
 	assert.match(output, /▣ Login — login · done/);
 	assert.match(output, /Provider quota: unavailable/);
+	assert.doesNotMatch(output, /▣ (Tool|Yielded run|Compaction|Command|Error)/);
 	assert.doesNotMatch(output, /sk_fixture_secret|detail-secret-value/);
 });
 
@@ -143,6 +143,41 @@ function rowsForMarkerTest() {
 		{ id: "assistant-marker", kind: "message.assistant", status: "done", lines: [{ prefix: "none", tokens: [{ text: "assistant marker" }] }], sourceNodeIds: ["assistant-marker"] },
 	];
 }
+
+test("Ink normal rows are row-first and dense while structured exceptions remain card-like", () => {
+	const rows = [
+		{ id: "user", kind: "message.user", status: "done", lines: [{ prefix: "prompt", tokens: [{ text: "user row" }] }], sourceNodeIds: ["user"] },
+		{ id: "assistant", kind: "message.assistant", status: "done", lines: [{ prefix: "none", tokens: [{ text: "assistant row" }] }], sourceNodeIds: ["assistant"] },
+		{ id: "reason", kind: "reasoning", status: "done", lines: [{ prefix: "bullet", tokens: [{ text: "thinking row", tone: "amber" }] }], sourceNodeIds: ["reason"] },
+		{ id: "tool", kind: "tool.call", status: "done", lines: [{ prefix: "bullet", tokens: [{ text: "Called read" }] }], sourceNodeIds: ["tool"], output: "preview" },
+		{ id: "command", kind: "execution.command", status: "done", lines: [{ prefix: "bullet", tokens: [{ text: "Command /status" }] }], sourceNodeIds: ["command"] },
+		{ id: "status", kind: "tool.status", status: "done", lines: [], output: unavailableStatusPayload(), sourceNodeIds: ["status"] },
+		{ id: "error", kind: "error", status: "error", lines: [], error: "TOKEN=secret-value failed", sourceNodeIds: ["error"] },
+	];
+	const output = renderToString(React.createElement(InkTerminalView, { rows, maxRows: 20, maxLineChars: 120 }));
+
+	assert.match(output, /› user row\n  assistant row\n✓ • thinking row\n✓ • Called read\n✓ • Command \/status\n✓ ▣ Status — status · done/);
+	assert.match(output, /✕ TOKEN=\[redacted\] failed/);
+	assert.doesNotMatch(output, /▣ (Tool|Command|Error)/);
+	assert.doesNotMatch(output, /\n\n/);
+	assert.doesNotMatch(output, /secret-value/);
+});
+
+test("Ink long-output rows collapse to five lines and expand full details", () => {
+	const row = buildWebDerivedLongOutputRows().find((item) => item.id === "web-derived-tool-call-long-output");
+	assert.ok(row, "fixture row exists");
+	const collapsed = renderToString(React.createElement(InkTerminalView, { rows: [row], selectedRowId: row.id, maxRows: 5, maxLineChars: 220 }));
+	assert.match(collapsed, /web-derived output line 05/);
+	assert.doesNotMatch(collapsed, /web-derived output line 06/);
+	assert.match(collapsed, /\+7 more lines/);
+	assert.match(collapsed, /details available/);
+
+	const expanded = renderToString(React.createElement(InkTerminalView, { rows: [row], selectedRowId: row.id, expandedRowIds: [row.id], maxRows: 5, maxLineChars: 220 }));
+	assert.match(expanded, /Output:.*web-derived output line 01/s);
+	assert.match(expanded, /web-derived output line 12/);
+	assert.match(expanded, /7 hidden while collapsed/);
+	assert.doesNotMatch(expanded, /long-output-secret/);
+});
 
 test("Ink renderer gives user and assistant rows distinct terminal markers", () => {
 	const output = renderToString(React.createElement(InkTerminalView, { rows: rowsForMarkerTest(), maxRows: 5, maxLineChars: 80 }));
@@ -162,7 +197,7 @@ test("Ink renderer renders selected detail affordance collapsed and inline detai
 	for (const label of ["Input", "Output", "Error", "Linked session", "Command args", "Tool result preview", "Large JSON", "Long markdown"]) {
 		assert.match(output, new RegExp(`${label}:`));
 	}
-	assert.match(output, /↳ Call failed detail_tool/);
+	assert.match(output, /Call failed detail_tool/);
 	assert.match(output, /more items|fixture-value-0/);
 	assert.match(output, /token=\[redacted\]/);
 	assert.doesNotMatch(output, /detail-secret-value|sk_fixture_secret/);
@@ -237,7 +272,8 @@ test("Ink Session app keeps owner, session, error, and command state readable at
 	assert.match(output, /Error:/);
 	assert.match(output, /Status card remains readable/);
 	assert.match(output, /› \/status/);
-	assert.match(output, /✕ ▣ Error/);
+	assert.match(output, /✕ Provider TOKEN=\[redacted\] failed/);
+	assert.doesNotMatch(output, /▣ Error/);
 	assert.match(output, /TOKEN=\[redacted\]/);
 	assert.doesNotMatch(output, /secret-value/);
 });
@@ -248,9 +284,9 @@ test("Ink renderer no-color output remains readable through text markers", () =>
 	try {
 		const output = renderToString(React.createElement(InkTerminalView, { rows: fixtureRows(), maxRows: 20, maxLineChars: 80 }));
 		assert.match(output, /› Investigate issue/);
-		assert.match(output, /▣ Tool — tool · done/);
-		assert.match(output, /↳ Called read/);
-		assert.match(output, /✕ ▣ Error — error · error/);
+		assert.match(output, /• Called read/);
+		assert.match(output, /✕ • Error boom/);
+		assert.doesNotMatch(output, /▣ (Tool|Error)/);
 		assert.doesNotMatch(output, /\u001b\[/);
 	} finally {
 		if (previousNoColor === undefined) delete process.env.NO_COLOR;

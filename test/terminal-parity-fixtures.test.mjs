@@ -344,7 +344,8 @@ test("Web source hooks and Ink output consume the same canonical terminal fixtur
 	assert.match(output, /▣ Thinking — thinking · done/);
 	assert.match(output, /▣ Model — model · done/);
 	assert.match(output, /▣ Login — login · done/);
-	assert.match(output, /▣ Tool — tool · error/);
+	assert.match(output, /Call failed detail_tool/);
+	assert.doesNotMatch(output, /▣ (Tool|Yielded run|Compaction|Command|Error)/);
 	assert.match(output, /Context: /);
 	assert.match(output, /Provider quota: unavailable/);
 	assert.doesNotMatch(output, /sk_fixture_secret|detail-secret-value/);
