@@ -388,7 +388,7 @@ export type InkSessionAppViewProps = {
 export function InkSessionAppView({ state, maxRows = 20, maxLineChars }: InkSessionAppViewProps): React.ReactElement {
 	const lineLimit = normalizeTerminalLineLimit(maxLineChars);
 	const statusLines = useMemo(() => formatStatusHeaderLines(state, lineLimit), [lineLimit, state]);
-	const commandSummary = useMemo(() => boundedLine(cliCommandSummaryText(state.slashCommands), lineLimit), [lineLimit, state.slashCommands]);
+	const commandSummary = useMemo(() => boundedLine(cliCommandHintText(), lineLimit), [lineLimit]);
 	return React.createElement(
 		Box,
 		{ flexDirection: "column" },
@@ -560,6 +560,10 @@ export function cliCommandSummaryText(catalog: readonly SlashCommandDescriptor[]
 	const preferred: `/${string}`[] = ["/help", "/new", "/room", "/session", "/agent", "/owner", "/repair-user-unknown", "/status", "/clear", "/exit", "/quit"];
 	const commands = preferred.filter((slash) => availableSlashes.has(slash));
 	return `Commands: ${commands.join(" ")} (type / for suggestions, /help for catalog)`;
+}
+
+export function cliCommandHintText(): string {
+	return "commands: / opens palette · /status runtime · /room /session navigate · /help catalog · ctrl-c exit";
 }
 
 export function cliSessionSlashHelpText(catalog: readonly SlashCommandDescriptor[] = buildSlashCommandCatalog()): string {
@@ -1369,13 +1373,13 @@ export function formatStatusHeaderLines(state: InkSessionAppState, max = 220): s
 	const agent = state.session?.agentId ?? state.session?.profile ?? state.status?.activeAgentId ?? "default";
 	const model = state.status?.activeModel ? `${state.status.activeModel.provider}/${state.status.activeModel.id}` : "model unknown";
 	const mode = state.mode === "transcript" ? "transcript" : state.mode;
-	const full = `Pibo CLI Sessions | ${source} | ${owner} | ${session} | ${agent} | ${model} | ${mode}`;
-	if (max >= 72 || full.length <= max) return [boundedLine(full, max)];
+	const full = `pibo sessions · ${source} · ${mode} · owner ${owner} · session ${session} · agent ${agent} · model ${model}`;
+	if (max >= 96 || full.length <= max) return [boundedLine(full, max)];
 	return [
-		boundedLine(`Pibo CLI Sessions | ${source} | ${mode}`, max),
-		boundedLine(`Owner: ${owner}`, max),
-		boundedLine(`Session: ${session}`, max),
-		boundedLine(`Agent: ${agent} | Model: ${model}`, max),
+		boundedLine(`pibo sessions · ${source} · ${mode}`, max),
+		boundedLine(`owner ${owner}`, max),
+		boundedLine(`session ${session}`, max),
+		boundedLine(`agent ${agent} · model ${model}`, max),
 	];
 }
 

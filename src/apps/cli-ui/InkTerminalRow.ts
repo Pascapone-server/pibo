@@ -45,7 +45,7 @@ export function InkTerminalCard({ card, maxLineChars = 220 }: { card: TerminalCa
 		lines.push(React.createElement(Text, { color: colorForCardTone(row.tone) ?? "white", key: `row-${index}` }, truncateCardLine(text, maxLineChars)));
 	}
 	for (const progress of card.statusView?.progress ?? []) {
-		const bar = inkProgressBarText(progress, progress.state === "available" ? 18 : 12);
+		const bar = inkProgressBarText(progress, 18);
 		const detail = progress.state === "available" ? ` — ${progress.text}` : "";
 		lines.push(React.createElement(Text, { color: progress.tone === "neutral" ? "gray" : colorForTone(progress.tone), key: `progress-${progress.id}` }, truncateCardLine(`  ↳ ${progress.label}: ${bar}${detail}`, maxLineChars)));
 	}
@@ -85,7 +85,7 @@ function statusCardSummary(card: TerminalCardDescriptor): string {
 	const session = shortStatusValue(fields.get("session"));
 	const model = shortStatusValue(fields.get("model"));
 	const owner = abbreviateOwner(fields.get("owner"));
-	return ["status", runtime, session ? `session ${session}` : undefined, model ? `model ${model}` : undefined, owner ? `owner ${owner}` : undefined].filter(Boolean).join(" · ");
+	return [runtime, session ? `session ${session}` : undefined, model ? `model ${model}` : undefined, owner ? `owner ${owner}` : undefined].filter(Boolean).join(" · ");
 }
 
 function shortStatusValue(value: string | undefined): string | undefined {
@@ -105,10 +105,14 @@ function truncateCardLine(value: string, maxChars: number): string {
 }
 
 function inkProgressBarText(progress: Parameters<typeof progressBarText>[0], width: number): string {
-	const text = progressBarText(progress, width);
-	if (progress.state !== "available" || progress.percent === undefined) return text;
-	if (!shouldUseAsciiProgress()) return text;
 	const boundedWidth = Math.max(4, Math.min(80, Math.floor(width)));
+	const ascii = shouldUseAsciiProgress();
+	if (progress.state !== "available" || progress.percent === undefined) {
+		const empty = ascii ? "-".repeat(boundedWidth) : "░".repeat(boundedWidth);
+		return `unavailable · ${empty}`;
+	}
+	const text = progressBarText(progress, boundedWidth);
+	if (!ascii) return text;
 	const filled = Math.round((Math.max(0, Math.min(100, progress.percent)) / 100) * boundedWidth);
 	return `${"#".repeat(filled)}${"-".repeat(boundedWidth - filled)} ${progress.percent.toFixed(1)}%`;
 }
