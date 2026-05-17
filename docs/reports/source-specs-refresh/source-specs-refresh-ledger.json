@@ -6,7 +6,7 @@
     "baseCommit": "bdf219f906eb331a2f5343dd16e8124c2734878b",
     "mainRef": "main",
     "createdAt": "2026-05-17T00:17:50Z",
-    "lastUpdatedAt": "2026-05-17T00:43:43Z",
+    "lastUpdatedAt": "2026-05-17T00:46:29Z",
     "notes": [
       "This ledger is the durable resume state for the Ralph source-spec refresh loop.",
       "Current code in this worktree is the source of truth for source-backed specs.",
@@ -14,8 +14,8 @@
     ]
   },
   "cursor": {
-    "nextQueueId": "q-skills-context-runtime",
-    "lastIteration": 2
+    "nextQueueId": "q-gateway-channel-cli",
+    "lastIteration": 3
   },
   "decisionRequests": [],
   "queue": [
@@ -75,7 +75,7 @@
     },
     {
       "id": "q-skills-context-runtime",
-      "status": "pending",
+      "status": "completed",
       "priority": 8,
       "title": "Skills, context build, runtime/profile/plugin surfaces",
       "paths": [
@@ -87,8 +87,19 @@
       ],
       "reason": "Built-in skill creator, context inspector, native debug tooling, and plugin/profile changes may have moved source behavior.",
       "cursor": {
-        "next": true
-      }
+        "auditedPaths": [
+          "docs/specs/capabilities/user-skills.md",
+          "docs/specs/capabilities/core-plugin-profiles-and-built-in-skill.md",
+          "docs/specs/capabilities/plugin-registry-and-capability-catalog.md",
+          "docs/specs/capabilities/pibo-runtime-assembly-and-inspection.md",
+          "docs/specs/capabilities/chat-web-context-area.md",
+          "docs/specs/changes/context-build-inspector/"
+        ],
+        "result": "completed_with_spec_updates",
+        "next": "q-gateway-channel-cli"
+      },
+      "startedAt": "2026-05-17T00:46:29Z",
+      "completedAt": "2026-05-17T00:46:29Z"
     },
     {
       "id": "q-gateway-channel-cli",
@@ -204,6 +215,49 @@
         "Debug CLI spec refreshed from planned telemetry language to current telemetry, web, and PTY debug surfaces, including provider payload-unavailable diagnostics.",
         "Runtime Observability Telemetry spec refreshed with current implementation sources, CLI payload command, and source-backed traceability/verification basis.",
         "Observability Debug Telemetry change spec classified as proposal-time baseline plus implemented V1; current-code behavior remains owned by capability specs."
+      ]
+    },
+    {
+      "id": "q-skills-context-runtime",
+      "completedAt": "2026-05-17T00:46:29Z",
+      "title": "Skills, context build, runtime/profile/plugin surfaces",
+      "result": "completed_with_spec_updates",
+      "pathsAudited": [
+        "docs/specs/capabilities/user-skills.md",
+        "docs/specs/capabilities/core-plugin-profiles-and-built-in-skill.md",
+        "docs/specs/capabilities/plugin-registry-and-capability-catalog.md",
+        "docs/specs/capabilities/pibo-runtime-assembly-and-inspection.md",
+        "docs/specs/capabilities/chat-web-context-area.md",
+        "docs/specs/changes/context-build-inspector/"
+      ],
+      "evidence": [
+        "src/user-skills/store.ts",
+        "src/user-skills/manager.ts",
+        "src/skills/cli.ts",
+        "src/apps/chat/web-app.ts",
+        "src/apps/chat/agent-profiles.ts",
+        "src/plugins/builtin.ts",
+        "src/plugins/native-tooling.ts",
+        "src/plugins/registry.ts",
+        "src/plugins/types.ts",
+        "src/core/runtime.ts",
+        "src/core/context-build.ts",
+        "src/apps/chat-ui/src/App.tsx",
+        "src/apps/chat-ui/src/context/ContextBuildView.tsx",
+        "src/apps/chat-ui/src/api.ts",
+        "test/plugin-registry.test.mjs",
+        "test/user-skills.test.mjs",
+        "test/skills-cli.test.mjs",
+        "test/agent-profiles.test.mjs",
+        "test/context-build-inspector.test.mjs"
+      ],
+      "notes": [
+        "Core plugin spec refreshed for the expanded built-in skill set and Pibo Native Tooling context registration/selection.",
+        "Plugin registry spec refreshed for Ralph stop-condition registration and catalog metadata.",
+        "Runtime assembly spec refreshed for current Build Context inspection snapshots.",
+        "Chat Web Context Area spec refreshed for the sixth Build Context panel and View Context navigation.",
+        "Context Build Inspector change spec classified as implemented current code; tasks and traceability updated while preserving proposal-time Current sections as historical baseline.",
+        "User Skills spec refreshed for current user-home root behavior and stronger conflict/rollback wording."
       ]
     }
   ],
@@ -342,6 +396,95 @@
         "src/core/provider-telemetry.ts"
       ],
       "resolution": "updated_spec_preserved_change_spec_baseline"
+    },
+    {
+      "id": "sf-skills-core-builtins-native-tooling",
+      "queueId": "q-skills-context-runtime",
+      "path": "docs/specs/capabilities/core-plugin-profiles-and-built-in-skill.md",
+      "foundAt": "2026-05-17T00:46:29Z",
+      "severity": "stale_current_behavior",
+      "summary": "Core plugin spec described only the Pi Agent Harness built-in skill and omitted the current built-in skill set plus Pibo Native Tooling context registration and base-profile selection.",
+      "sourceEvidence": [
+        "src/plugins/builtin.ts",
+        "src/plugins/native-tooling.ts",
+        "test/plugin-registry.test.mjs",
+        "test/context-build-inspector.test.mjs"
+      ],
+      "resolution": "updated_spec"
+    },
+    {
+      "id": "sf-skills-plugin-registry-ralph-stop-conditions",
+      "queueId": "q-skills-context-runtime",
+      "path": "docs/specs/capabilities/plugin-registry-and-capability-catalog.md",
+      "foundAt": "2026-05-17T00:46:29Z",
+      "severity": "stale_current_behavior",
+      "summary": "Plugin registry spec omitted current Ralph stop-condition registration, validation, plugin attribution, and capability catalog metadata.",
+      "sourceEvidence": [
+        "src/plugins/registry.ts",
+        "src/plugins/types.ts",
+        "src/ralph/types.ts"
+      ],
+      "resolution": "updated_spec"
+    },
+    {
+      "id": "sf-skills-runtime-context-build-snapshot",
+      "queueId": "q-skills-context-runtime",
+      "path": "docs/specs/capabilities/pibo-runtime-assembly-and-inspection.md",
+      "foundAt": "2026-05-17T00:46:29Z",
+      "severity": "stale_current_behavior",
+      "summary": "Runtime assembly spec covered profile inspection but omitted the implemented read-only redacted Build Context snapshot inspector and Chat Web endpoint/UI integration.",
+      "sourceEvidence": [
+        "src/core/context-build.ts",
+        "src/core/runtime.ts",
+        "src/apps/chat/web-app.ts",
+        "src/apps/chat-ui/src/context/ContextBuildView.tsx",
+        "test/context-build-inspector.test.mjs"
+      ],
+      "resolution": "updated_spec"
+    },
+    {
+      "id": "sf-skills-chat-context-build-panel",
+      "queueId": "q-skills-context-runtime",
+      "path": "docs/specs/capabilities/chat-web-context-area.md",
+      "foundAt": "2026-05-17T00:46:29Z",
+      "severity": "stale_current_behavior",
+      "summary": "Chat Web Context Area spec still described five panels and omitted the current Build Context panel, View Context navigation, and selected-session route state.",
+      "sourceEvidence": [
+        "src/apps/chat-ui/src/App.tsx",
+        "src/apps/chat-ui/src/context/ContextBuildView.tsx",
+        "src/apps/chat-ui/src/api.ts"
+      ],
+      "resolution": "updated_spec"
+    },
+    {
+      "id": "sf-skills-context-build-change-implemented",
+      "queueId": "q-skills-context-runtime",
+      "path": "docs/specs/changes/context-build-inspector/spec.md; docs/specs/changes/context-build-inspector/tasks.md",
+      "foundAt": "2026-05-17T00:46:29Z",
+      "severity": "classification_and_stale_traceability",
+      "summary": "Context Build Inspector change spec and task checklist still marked the work as draft/pending even though current code implements the backend snapshot, authenticated API, UI, and core tests.",
+      "sourceEvidence": [
+        "src/core/context-build.ts",
+        "src/apps/chat/web-app.ts",
+        "src/apps/chat-ui/src/App.tsx",
+        "src/apps/chat-ui/src/context/ContextBuildView.tsx",
+        "test/context-build-inspector.test.mjs"
+      ],
+      "resolution": "updated_spec_preserved_change_spec_baseline"
+    },
+    {
+      "id": "sf-skills-user-skills-home-root-conflict",
+      "queueId": "q-skills-context-runtime",
+      "path": "docs/specs/capabilities/user-skills.md",
+      "foundAt": "2026-05-17T00:46:29Z",
+      "severity": "stale_current_behavior",
+      "summary": "User Skills spec treated local storage root and conflict behavior ambiguously; current CLI and Chat Web both use os.homedir(), and Chat Web rejects or rolls back catalog name conflicts on create/install/enable/rename.",
+      "sourceEvidence": [
+        "src/skills/cli.ts",
+        "src/apps/chat/web-app.ts",
+        "src/user-skills/manager.ts"
+      ],
+      "resolution": "updated_spec"
     }
   ],
   "updatedSpecs": [
@@ -392,6 +535,48 @@
       "queueId": "q-signals-telemetry",
       "updatedAt": "2026-05-17T00:42:36Z",
       "summary": "Clarified proposal-time baseline versus current code and marked V1 telemetry traceability rows as implemented with source/test evidence."
+    },
+    {
+      "path": "docs/specs/capabilities/core-plugin-profiles-and-built-in-skill.md",
+      "queueId": "q-skills-context-runtime",
+      "updatedAt": "2026-05-17T00:46:29Z",
+      "summary": "Refreshed core plugin current behavior for expanded built-in skills, Pibo Native Tooling context registration, base-profile context selection, traceability, and verification basis."
+    },
+    {
+      "path": "docs/specs/capabilities/plugin-registry-and-capability-catalog.md",
+      "queueId": "q-skills-context-runtime",
+      "updatedAt": "2026-05-17T00:46:29Z",
+      "summary": "Added Ralph stop-condition registration, validation, plugin attribution, and capability catalog behavior."
+    },
+    {
+      "path": "docs/specs/capabilities/pibo-runtime-assembly-and-inspection.md",
+      "queueId": "q-skills-context-runtime",
+      "updatedAt": "2026-05-17T00:46:29Z",
+      "summary": "Added current Build Context snapshot inspection behavior, Chat Web endpoint/UI integration, redaction, ordering, and verification evidence."
+    },
+    {
+      "path": "docs/specs/capabilities/chat-web-context-area.md",
+      "queueId": "q-skills-context-runtime",
+      "updatedAt": "2026-05-17T00:46:29Z",
+      "summary": "Refreshed Context area current behavior for the Build Context panel, View Context navigation, and selected-session route state."
+    },
+    {
+      "path": "docs/specs/changes/context-build-inspector/spec.md",
+      "queueId": "q-skills-context-runtime",
+      "updatedAt": "2026-05-17T00:46:29Z",
+      "summary": "Marked the change spec implemented, updated background and traceability to current source evidence, and preserved historical proposal-time Current sections."
+    },
+    {
+      "path": "docs/specs/changes/context-build-inspector/tasks.md",
+      "queueId": "q-skills-context-runtime",
+      "updatedAt": "2026-05-17T00:46:29Z",
+      "summary": "Checked implemented backend, API, UI, acceptance, and covered test tasks while leaving missing focused validation tests open."
+    },
+    {
+      "path": "docs/specs/capabilities/user-skills.md",
+      "queueId": "q-skills-context-runtime",
+      "updatedAt": "2026-05-17T00:46:29Z",
+      "summary": "Clarified current user-home storage root and Chat Web catalog conflict rejection/rollback behavior with updated verification basis."
     }
   ],
   "blockedItems": [],
@@ -435,6 +620,10 @@
     {
       "at": "2026-05-17T00:43:43Z",
       "note": "Recorded commit d0888dc for q-signals-telemetry source-spec refresh."
+    },
+    {
+      "at": "2026-05-17T00:46:29Z",
+      "note": "Audited q-skills-context-runtime. Updated user skills, core plugin built-in skills/native tooling, plugin registry Ralph stop conditions, runtime Build Context inspection, Chat Web Context area, and Context Build Inspector change spec/tasks."
     }
   ]
 }
