@@ -15,8 +15,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented shared CDP client/target helpers in src/tools/cdp-client.ts and kept debug-web using the extracted client."
     },
     {
       "id": "US-002",
@@ -30,8 +30,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented WebAnnotationCdpService URL binding and same-origin API POST /api/web-annotations/bindings with URL validation and concise errors."
     },
     {
       "id": "US-003",
@@ -46,8 +46,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented bounded target listing and explicit existing-target binding through service/API."
     },
     {
       "id": "US-004",
@@ -62,8 +62,8 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented authorized binding inject/reinject/stop operations with recoverable closed-target state and browser smoke coverage."
     },
     {
       "id": "US-005",
@@ -77,8 +77,8 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Deferred dedicated debug-web annotation CLI; defer decision remains documented in PRD README/capability docs and no separate persistence path was added."
     },
     {
       "id": "US-006",

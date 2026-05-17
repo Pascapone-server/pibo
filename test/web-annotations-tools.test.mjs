@@ -52,6 +52,7 @@ test("default registry catalogs Web Annotation tools without selecting them in c
 	const catalog = registry.getCapabilityCatalog();
 	const packageInfo = catalog.packages.find((pkg) => pkg.name === "web-annotation-agent-tools");
 	assert.ok(packageInfo);
+	assert.ok(registry.getWebApps().some((app) => app.name === "web-annotations" && app.apiPrefix === "/api/web-annotations"));
 	assert.equal(packageInfo.pluginId, "pibo.web-annotations");
 	assert.equal(packageInfo.pluginName, "Pibo Web Annotations");
 	assert.deepEqual(packageInfo.toolNames, [...WEB_ANNOTATION_TOOL_NAMES]);
