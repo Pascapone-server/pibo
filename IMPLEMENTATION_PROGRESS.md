@@ -378,3 +378,65 @@ Each artifact directory contains `raw.ansi.log`, `clean.txt`, `screen.txt`, `met
 Remaining limitations / next stories:
 
 - PRD 07 remains incomplete for standardized visual artifacts/goldens, installed/global `pibo tui:sessions` PTY smoke, final Web checks, and the final parity evidence report.
+
+## 2026-05-17 Ralph run: PRD 07 visual debugging and final validation
+
+### Selected coherent story group
+
+- PRD 07 `US-001` Standardize PTY rendering-parity artifact capture.
+- PRD 07 `US-002` Generate reviewable ANSI visual artifacts or documented fallback.
+- PRD 07 `US-003` Add golden and semantic screen regression checks.
+- PRD 07 `US-004` Complete Web regression and shared-fixture validation.
+- PRD 07 `US-005` Run final installed CLI and full validation gates.
+- PRD 07 `US-006` Publish final parity evidence report.
+
+### Plan and validation approach
+
+1. Extend the reusable PTY smoke runner and docs for final rendering-parity scenarios: startup owner/room/session, slash/status, status while picker open, deterministic model/login overlay, existing transcript, mixed transcript fixture, narrow width, and `NO_COLOR=1`, with bounded timeouts, deterministic env, expect/reject assertions, exact command output, and artifact paths.
+2. Add a lightweight review artifact generator for captured PTY directories that emits terminal-styled HTML from `screen.txt`/`clean.txt` as the documented fallback when full ANSI-to-image tooling is unavailable.
+3. Add focused golden/semantic regression tests for normalized Ink screens and Web shared-descriptor hooks so dashboard-style dumps, detached `state.message` status payloads, dominant UUID labels, ordering drift, missing hooks, and secret leaks fail early.
+4. Run focused Docker validation first (`npm run build`, focused node tests, PTY final scenarios, visual artifact generation), then final gates: `npm run typecheck`, `npm test`, `npm run chat-ui:typecheck`, `npm run chat-ui:build`, plus a globally installed `pibo tui:sessions` PTY smoke in the dedicated worker.
+5. Update PRD 07 JSON notes, tasks, PRD catalog, and final report with commands, evidence tiers, artifact directories, visual artifact/fallback paths, Web checks, limitations, and commit hash; run container browser cleanup before ending and commit from the host worktree.
+
+### Result
+
+Completed PRD 07 `US-001` through `US-006`; all 35 PRD JSON stories now have `passes: true`.
+
+Changes:
+
+- Extended `scripts/ink-cli-v2-pty-smoke.mjs` with final rendering-parity scenarios for mixed transcript/rich cards and narrow `NO_COLOR=1` status output, including reject assertions for secrets and Unicode bars where appropriate.
+- Added `scripts/render-pty-artifact-html.mjs`, a terminal-styled HTML fallback generator for captured PTY artifact directories.
+- Added `test/ink-cli-terminal-rendering-parity-final.test.mjs` for golden/semantic screen checks, visual artifact script checks, final PTY runner coverage, and Web shared-hook/source regression checks.
+- Added Web shared terminal card hooks for thinking, model, and login cards while preserving renderer separation.
+- Added `docs/reports/ink-cli-terminal-rendering-parity-final-2026-05-17.md` and updated PTY scenario docs, PRD catalog, tasks, and PRD 07 JSON notes.
+
+Validation run in Docker worker:
+
+- `npm run build` — passed.
+- Focused: `node --test test/ink-cli-terminal-rendering-parity-final.test.mjs test/ink-cli-v2-pty-smoke.test.mjs test/terminal-parity-fixtures.test.mjs test/cli-ui-ink-renderer.test.mjs test/cli-ui-session-app.test.mjs` — passed, 57 tests.
+- PTY final scenarios — passed: `mixed-transcript-fixture`, `narrow-no-color-status`, `slash-suggestions-status-thinking`, `overlay-keyboard-model-login`, `owner-room-session-message`, `existing-session-hydration` under `.tmp/ink-cli-terminal-rendering-parity/prd07-2026-05-17`.
+- Visual fallback generation — passed for mixed transcript, slash/status, overlay/model/login, and installed slash/status artifact dirs.
+- Installed/global smoke — passed after `npm install -g .`: `installed-owner-room-session-message`, `installed-slash-status-thinking`, `installed-picker-open-status`, `installed-narrow-no-color-status` using installed `pibo debug pty run -- ... pibo tui:sessions`.
+- Final gates — passed: `npm run typecheck`, `npm test` (680 tests), `npm run chat-ui:typecheck`, `npm run chat-ui:build`.
+- Final browser cleanup in the Docker worker — completed.
+
+Evidence/artifacts:
+
+- `/workspace/.tmp/ink-cli-terminal-rendering-parity/prd07-2026-05-17/owner-room-session-message`
+- `/workspace/.tmp/ink-cli-terminal-rendering-parity/prd07-2026-05-17/slash-suggestions-status-thinking`
+- `/workspace/.tmp/ink-cli-terminal-rendering-parity/prd07-2026-05-17/overlay-keyboard-model-login`
+- `/workspace/.tmp/ink-cli-terminal-rendering-parity/prd07-2026-05-17/existing-session-hydration`
+- `/workspace/.tmp/ink-cli-terminal-rendering-parity/prd07-2026-05-17/mixed-transcript-fixture`
+- `/workspace/.tmp/ink-cli-terminal-rendering-parity/prd07-2026-05-17/narrow-no-color-status`
+- `/workspace/.tmp/ink-cli-terminal-rendering-parity/prd07-2026-05-17/installed-owner-room-session-message`
+- `/workspace/.tmp/ink-cli-terminal-rendering-parity/prd07-2026-05-17/installed-slash-status-thinking`
+- `/workspace/.tmp/ink-cli-terminal-rendering-parity/prd07-2026-05-17/installed-picker-open-status`
+- `/workspace/.tmp/ink-cli-terminal-rendering-parity/prd07-2026-05-17/installed-narrow-no-color-status`
+
+Each PTY directory contains raw ANSI, clean text, final screen, metadata, input, assertions, and events where available. Reviewable fallback HTML was generated as `visual.html` for representative deterministic and installed artifact directories.
+
+Remaining limitations:
+
+- `visual.html` is a documented review fallback from `screen.txt`/`clean.txt`, not a color-accurate ANSI-to-PNG/SVG terminal emulator screenshot.
+- Live-provider streaming was not exercised; deterministic fixtures and mocked default TUI paths cover streaming/running row order without credentials.
+- Web browser screenshot capture was not run; shared descriptors, source hooks, typecheck, and build are the Web reference evidence.

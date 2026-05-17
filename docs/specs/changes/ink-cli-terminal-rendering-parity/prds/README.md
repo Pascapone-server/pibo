@@ -42,6 +42,8 @@ This catalog converts the Ink CLI Terminal Rendering Parity change spec into imp
 
 Before implementing PRDs 02-07, apply the reusable gate in `../terminal-design-contract.md#visual-evidence-checklist`. Record the story id, design rules checked, exact PTY command, artifact directory, evidence tier, observed screen result, limitations, Web impact, redaction check, and gate commands.
 
+Final PRD 07 evidence is summarized in `../../../../reports/ink-cli-terminal-rendering-parity-final-2026-05-17.md`. Reusable PTY scenarios are documented in `../../../../reports/ink-cli-v2-pty-smoke-scenarios.md`; generate review HTML with `node scripts/render-pty-artifact-html.mjs --artifact-dir <artifact-dir>`.
+
 - Every TUI story that changes user-visible rendering must include a `pibo debug pty ...` validation scenario when feasible.
 - Fake/demo/mocked tests may support a story, but default-path behavior must be validated with a real installed `pibo tui:sessions` path before final completion.
 - Web-impacting stories must include Web Compact Terminal regression checks.

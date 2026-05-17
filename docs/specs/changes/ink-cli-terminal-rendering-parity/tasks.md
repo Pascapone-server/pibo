@@ -36,7 +36,7 @@
 
 - [x] 5.1 Extend the PTY smoke script or add a new script for rendering-parity flows.
 - [x] 5.2 Ensure PTY artifacts include raw ANSI, clean text, final screen text, event stream, metadata, and assertions.
-- [ ] 5.3 Investigate ANSI-to-HTML/SVG/PNG generation for artifact review.
+- [x] 5.3 Investigate ANSI-to-HTML/SVG/PNG generation for artifact review.
 - [x] 5.4 If visual conversion is unavailable, document the fallback and keep screen/ANSI artifacts in a report.
 - [x] 5.5 Add a report under `docs/reports/` with exact PTY commands and artifact paths.
 
@@ -49,4 +49,4 @@
 - [x] 6.5 Run `npm test`.
 - [x] 6.6 Run `npm run chat-ui:typecheck`.
 - [x] 6.7 Run `npm run chat-ui:build`.
-- [ ] 6.8 Install globally and manually test `pibo tui:sessions` over SSH.
+- [x] 6.8 Install globally and manually test `pibo tui:sessions` over SSH.

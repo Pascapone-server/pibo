@@ -152,6 +152,50 @@ const scenarios = [
 		command: ["node", "dist/bin/pibo.js", "tui:sessions", "--owner-scope", "user:overlay"],
 	},
 	{
+		name: "mixed-transcript-fixture",
+		description: "Deterministic shared-fixture mixed transcript with rich cards, ordering, and redaction.",
+		cols: 120,
+		rows: 42,
+		timeoutMs: 20_000,
+		idleTimeoutMs: 5_000,
+		env: {},
+		steps: [
+			["--wait-for", "Audit the compact terminal renderer"],
+			["--expect", "▣ Status — status · done"],
+			["--expect", "▣ Thinking — thinking · done"],
+			["--expect", "▣ Model — model · done"],
+			["--expect", "▣ Login — login · done"],
+			["--expect", "▣ Tool — tool · error"],
+			["--expect", "token=[redacted]"],
+			["--reject", "sk_fixture_secret"],
+			["--reject", "detail-secret-value"],
+		],
+		command: fixtureRenderCommand("mixed-transcript"),
+	},
+	{
+		name: "narrow-no-color-status",
+		description: "Deterministic narrow NO_COLOR status card with ASCII progress and redaction checks.",
+		cols: 64,
+		rows: 24,
+		timeoutMs: 20_000,
+		idleTimeoutMs: 5_000,
+		env: {
+			NO_COLOR: "1",
+			TERM: "dumb",
+			PIBO_ASCII_PROGRESS: "1",
+		},
+		steps: [
+			["--wait-for", "▣ Status — status · done"],
+			["--expect", "Context: #"],
+			["--expect", "openai spend:"],
+			["--expect", "Provider plan: team"],
+			["--reject", "█"],
+			["--reject", "sk_fixture_secret"],
+			["--reject", "warning-secret-value"],
+		],
+		command: fixtureRenderCommand("narrow-no-color"),
+	},
+	{
 		name: "existing-session-hydration",
 		description: "Open a prepared existing session with --session and assert transcript hydration.",
 		cols: 100,
@@ -198,6 +242,23 @@ for (const scenario of selected) {
 	if (scenario.prepare) await scenario.prepare({ homeDir });
 	const result = spawnSync(process.execPath, args, { cwd: repoRoot, stdio: "inherit", env: process.env });
 	if (result.status !== 0) process.exit(result.status ?? 1);
+}
+
+function fixtureRenderCommand(kind) {
+	const source = kind === "narrow-no-color"
+		? `import React from "react";
+import { renderToString } from "ink";
+import { InkTerminalView } from "./dist/apps/cli-ui/index.js";
+import { highUsageStatusPayload } from "./test/fixtures/terminal-parity-fixtures.mjs";
+const rows = [{ id: "status-narrow-no-color", kind: "tool.status", status: "done", lines: [], output: highUsageStatusPayload(), sourceNodeIds: ["status-narrow-no-color"] }];
+console.log(renderToString(React.createElement(InkTerminalView, { rows, maxRows: 8, maxLineChars: 62 })));`
+		: `import React from "react";
+import { renderToString } from "ink";
+import { InkTerminalView } from "./dist/apps/cli-ui/index.js";
+import { buildCanonicalTerminalRows } from "./test/fixtures/terminal-parity-fixtures.mjs";
+const rows = buildCanonicalTerminalRows();
+console.log(renderToString(React.createElement(InkTerminalView, { rows, maxRows: 40, maxLineChars: 120 })));`;
+	return ["node", "--input-type=module", "-e", source];
 }
 
 function debugPtyArgs(scenario, artifactDir, env) {
