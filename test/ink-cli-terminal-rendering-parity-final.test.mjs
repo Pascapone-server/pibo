@@ -105,9 +105,10 @@ test("golden terminal screens keep transcript-first slash picker and command pla
 test("golden mixed transcript status and NO_COLOR screens reject visual regressions", () => {
 	const mixedRows = buildCanonicalTerminalRows();
 	const mixed = normalizeScreen(renderToString(React.createElement(InkTerminalView, { rows: mixedRows, maxRows: 40, maxLineChars: 140 })));
-	for (const snippet of ["› Audit the compact terminal renderer", "▣ Status — status · done", "▣ Thinking — thinking · done", "▣ Model — model · done", "▣ Login — login · done", "✕ ▣ Error — error · error"]) {
+	for (const snippet of ["› Audit the compact terminal renderer", "▣ Status — status · done", "▣ Thinking — thinking · done", "▣ Model — model · done", "▣ Login — login · done", "✕ • Error Provider failed"]) {
 		assert.match(mixed, new RegExp(snippet.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 	}
+	assert.doesNotMatch(mixed, /▣ (Tool|Yielded run|Compaction|Command|Error)/);
 	assert.ok(mixed.indexOf("Audit the compact terminal renderer") < mixed.indexOf("▣ Status — status · done"));
 	assert.match(mixed, /(?:TOKEN|token)=\[redacted\]/);
 	assert.doesNotMatch(mixed, /sk_fixture_secret|detail-secret-value|warning-secret-value/);

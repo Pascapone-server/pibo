@@ -100,8 +100,8 @@
         "When marking passes true, notes include commands run, evidence tier, artifact paths where applicable, and fake/demo/mocked/real classification"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "2026-05-17: PASS. Added a deterministic long-output row to the real `pibo tui:sessions --demo` default-path fixture (12 logical output lines, secret-bearing input) so PTY validation exercises the actual Ink app instead of a renderer-only script. Collapsed TUI output shows line 05 plus `+7 more lines` and `details available`, rejects line 06 and the long-output secret; expanded TUI output opened with `d` shows `Details`, `7 hidden while collapsed`, and line 12 while still rejecting the secret. Artifact paths in Docker worker: /tmp/pibo-pty-long-output-us005-collapsed and /tmp/pibo-pty-long-output-us005-expanded, each containing raw.ansi.log, clean.txt, screen.txt, events.jsonl, input.json, metadata.json, and assertions.json. Commands run in Docker: npm run build; node --test test/cli-ui-ink-renderer.test.mjs test/terminal-parity-fixtures.test.mjs test/session-ui-view-models.test.mjs test/cli-session-source.test.mjs test/ink-cli-terminal-rendering-parity-final.test.mjs test/ink-cli-v2-pty-smoke.test.mjs; npm run typecheck; npm test; PTY collapsed and expanded commands recorded in IMPLEMENTATION_PROGRESS.md. Evidence tier: deterministic fake/demo source through the real Ink TUI PTY path, not live provider. Web preservation: no Web Compact Terminal or src/session-ui production code changed."
     }
   ]
 }

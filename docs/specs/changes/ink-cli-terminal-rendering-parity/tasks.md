@@ -63,14 +63,14 @@
 - [x] 8.2 Restore shared collapsed preview bounds: 5 output preview lines for tool/result/async/yielded/execution rows and 6 child summary lines for grouped exploration.
 - [x] 8.3 Preserve no character truncation in visible preview lines; assert wrapping/no `… truncated` separately from preview omission.
 - [x] 8.4 Add omitted-line metadata or an equivalent descriptor so renderers can show `+N more lines` and expose details.
-- [ ] 8.5 Add Web and Ink tests proving collapsed previews are bounded and expanded details show full output.
+- [x] 8.5 Add Web and Ink tests proving collapsed previews are bounded and expanded details show full output.
 
 ## 9. Requirement: Ink Row Grammar and Spacing
 
-- [ ] 9.1 Change Ink rendering so normal rows (`tool.call`, `tool.group.exploring`, `yielded.run`, `execution.command`, `execution.compaction`, `error`) render as terminal rows rather than `▣` card headers.
-- [ ] 9.2 Keep structured renderers for Web-equivalent exceptions: `tool.status`, `tool.thinking`, `tool.login`, and `tool.model`.
-- [ ] 9.3 Add spacing snapshots for adjacent user/assistant/tool/status/command rows.
-- [ ] 9.4 Add a regression assertion that normal rows do not contain decorative card headers.
+- [x] 9.1 Change Ink rendering so normal rows (`tool.call`, `tool.group.exploring`, `yielded.run`, `execution.command`, `execution.compaction`, `error`) render as terminal rows rather than `▣` card headers.
+- [x] 9.2 Keep structured renderers for Web-equivalent exceptions: `tool.status`, `tool.thinking`, `tool.login`, and `tool.model`.
+- [x] 9.3 Add spacing snapshots for adjacent user/assistant/tool/status/command rows.
+- [x] 9.4 Add a regression assertion that normal rows do not contain decorative card headers.
 
 ## 10. Requirement: Ink Row Expansion and Details
 
@@ -78,7 +78,7 @@
 - [x] 10.2 Add keyboard handling for selecting expandable rows and toggling details without breaking text input/slash picker behavior.
 - [x] 10.3 Render terminal-native details below the parent row with `Input`, `Output`, `Error`, linked session controls, compacted-output disclosure, and redaction.
 - [x] 10.4 Add controller and renderer tests for expand/collapse, full output visibility, and collapsed transcript density.
-- [ ] 10.5 Add a PTY flow that opens details for a long-output row.
+- [x] 10.5 Add a PTY flow that opens details for a long-output row.
 
 ## 11. Requirement: Ink JSON and Markdown Semantic Parity
 

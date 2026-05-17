@@ -185,9 +185,9 @@ test("Web and Ink rich terminal renderers consume shared descriptors without cro
 	assert.doesNotMatch(statusCardSource, /OpenAI Codex quota/, "Web status card should use provider labels from descriptors instead of hardcoding OpenAI");
 
 	const inkRowSource = fs.readFileSync(path.resolve("src/apps/cli-ui/InkTerminalRow.ts"), "utf8");
-	assert.match(inkRowSource, /buildTerminalCardDescriptor\(row\)/, "Ink rich rows must pass through shared terminal card descriptors");
-	assert.match(inkRowSource, /InkTerminalCard/, "Ink should render shared cards with terminal-native card primitives");
-	assert.doesNotMatch(inkRowSource, /case\s+["']tool\.(?:status|thinking|model|login)["']/, "Ink renderer should not fork rich supported card kinds away from shared descriptors");
+	assert.match(inkRowSource, /buildTerminalCardDescriptor\(row\)/, "Ink structured exceptions must pass through shared terminal card descriptors");
+	assert.match(inkRowSource, /InkTerminalCard/, "Ink should render shared structured exceptions with terminal-native card primitives");
+	assert.match(inkRowSource, /isStructuredCardException/, "Ink should explicitly limit card rendering to Web-equivalent structured exceptions");
 
 	const cliSourceDir = path.resolve("src/apps/cli-ui");
 	const cliFiles = listSourceFiles(cliSourceDir);

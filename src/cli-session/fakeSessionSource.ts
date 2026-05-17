@@ -470,13 +470,14 @@ function defaultSessions(): CliSessionSummary[] {
 }
 
 function defaultTraceViews(): Record<string, PiboSessionTraceView> {
+	const longOutput = Array.from({ length: 12 }, (_, index) => `web-derived output line ${String(index + 1).padStart(2, "0")} -- ${"x".repeat(90)}`).join("\n");
 	return {
 		ps_fake_existing: {
 			piboSessionId: "ps_fake_existing",
 			piSessionId: "pi_fake_existing",
 			title: "Existing fake session",
 			version: "fake-v1",
-			eventCount: 2,
+			eventCount: 3,
 			nodes: [
 				{
 					id: "node_fake_user_1",
@@ -496,6 +497,17 @@ function defaultTraceViews(): Record<string, PiboSessionTraceView> {
 					status: "done",
 					startedAt: "2026-05-16T12:00:01.000Z",
 					output: "Fake assistant response",
+					children: [],
+				},
+				{
+					id: "node_fake_long_output_1",
+					piboSessionId: "ps_fake_existing",
+					type: "tool.call",
+					title: "long_output_demo",
+					status: "done",
+					startedAt: "2026-05-16T12:00:02.000Z",
+					input: { command: "produce-long-output", token: "token=long-output-secret" },
+					output: longOutput,
 					children: [],
 				},
 			],

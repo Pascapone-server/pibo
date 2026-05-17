@@ -1,6 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
-import type { CompactTerminalLine, TerminalInlineToken } from "../../session-ui/index.js";
+import { redactTerminalSecret, type CompactTerminalLine, type TerminalInlineToken } from "../../session-ui/index.js";
 import { colorForTone, type InkTerminalColor } from "./inkColors.js";
 import { formatInlineJson } from "./inkJson.js";
 
@@ -60,5 +60,7 @@ function buildLineChunks(line: CompactTerminalLine, _maxChars: number): LineChun
 		if (line.functionCall.input !== undefined) chunks.push({ text: ` ${formatInlineJson(line.functionCall.input)}`, tone: "dim" });
 	}
 	if (chunks.length === 0) return [{ text: "∅", tone: "dim" }];
-	return chunks.map((chunk) => ({ ...chunk, text: chunk.text.replace(/\n/g, " ") })).filter((chunk) => chunk.text.length > 0);
+	return chunks
+		.map((chunk) => ({ ...chunk, text: redactTerminalSecret(chunk.text).replace(/\n/g, " ") }))
+		.filter((chunk) => chunk.text.length > 0);
 }

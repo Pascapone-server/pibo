@@ -502,7 +502,7 @@ test("Slash /repair-user-unknown runs source repair for the active owner and roo
 	assert.equal(harness.state.error, undefined);
 });
 
-test("status command result rows preserve transcript flow and can render as Ink card", () => {
+test("status command result rows preserve transcript flow with row-first command and structured status card", () => {
 	const rows = commandResultDescriptorRows(
 		{ name: "status", args: "", raw: "/status" },
 		{ kind: "status", title: "Status", status: { contextUsage: { tokens: 50, contextWindow: 100, percent: 50 }, providerUsage: { provider: "openai", limits: [{ label: "requests", usedPercent: 75 }] } } },
@@ -511,8 +511,8 @@ test("status command result rows preserve transcript flow and can render as Ink 
 	);
 	assert.deepEqual(rows.map((row) => row.kind), ["execution.command", "tool.status"]);
 	const output = renderToString(React.createElement(InkTerminalView, { rows, maxRows: 10, maxLineChars: 140 }));
-	assert.match(output, /Command — command · done/);
-	assert.match(output, /Ran \/status/);
+	assert.match(output, /• Ran \/status/);
+	assert.doesNotMatch(output, /▣ Command/);
 	assert.match(output, /Status — status · done/);
 	assert.match(output, /Owner: Web user alpha/);
 	assert.match(output, /Session: Status Session \| ps_status/);
