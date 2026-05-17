@@ -96,6 +96,7 @@ test("browser pool lock times out when another mutation holds it", async () => {
 		const releaseHeldLock = withBrowserPoolLock(paths.lockPath, { timeoutMs: 200, owner: "holder" }, async () => {
 			await new Promise((resolve) => setTimeout(resolve, 150));
 		});
+		await new Promise((resolve) => setTimeout(resolve, 10));
 
 		await assert.rejects(
 			withBrowserPoolLock(paths.lockPath, { timeoutMs: 25, pollIntervalMs: 5, staleMs: 0, owner: "waiter" }, async () => undefined),

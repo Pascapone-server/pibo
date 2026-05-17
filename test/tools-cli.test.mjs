@@ -43,6 +43,57 @@ function terminateProcess(child) {
 	if (!child.killed && processIsAlive(child.pid)) child.kill("SIGKILL");
 }
 
+function terminatePid(pid) {
+	if (pid && processIsAlive(pid)) process.kill(pid, "SIGKILL");
+}
+
+async function waitForFile(path) {
+	for (let attempt = 0; attempt < 40; attempt += 1) {
+		try {
+			return await readFile(path, "utf8");
+		} catch {
+			await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+		}
+	}
+	return await readFile(path, "utf8");
+}
+
+async function processIsRunningOrSleeping(pid) {
+	try {
+		const statText = await readFile(`/proc/${pid}/stat`, "utf8");
+		const endCommand = statText.lastIndexOf(")");
+		const state = statText.slice(endCommand + 2).split(" ")[0];
+		return state !== "Z";
+	} catch {
+		return false;
+	}
+}
+
+async function waitForProcessGoneOrZombie(pid) {
+	for (let attempt = 0; attempt < 40; attempt += 1) {
+		if (!(await processIsRunningOrSleeping(pid))) return;
+		await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+	}
+	assert.equal(await processIsRunningOrSleeping(pid), false);
+}
+
+function spawnManagedBrowserProcessTree(commandName, userDataDir, leaderPidPath, childPidPath) {
+	const childScript = "setInterval(() => {}, 1000)";
+	const script = `
+const { spawn } = require("node:child_process");
+const { writeFileSync } = require("node:fs");
+const child = spawn(process.execPath, ["-e", ${JSON.stringify(childScript)}], { stdio: "ignore" });
+writeFileSync(${JSON.stringify(leaderPidPath)}, String(process.pid));
+writeFileSync(${JSON.stringify(childPidPath)}, String(child.pid));
+setInterval(() => {}, 1000);
+`;
+	return spawn(process.execPath, ["-e", script, "--", `--user-data-dir=${userDataDir}`], {
+		argv0: commandName,
+		detached: true,
+		stdio: "ignore",
+	});
+}
+
 async function withTargetListServer(targets, run) {
 	const server = createServer((request, response) => {
 		if (request.url === "/json/list") {
@@ -348,6 +399,110 @@ test("pibo tools env wraps browser-use with the PIBo default profile", async () 
 		});
 		assert.doesNotMatch(explicitProfile.stderr, /starting new session/);
 		assert.match(explicitProfile.stdout, /--profile\nDefault\nopen\nhttps:\/\/example\.test/);
+	} finally {
+		await rm(cwd, { recursive: true, force: true });
+	}
+});
+
+test("pibo browser-use wrapper terminates stale managed process trees and stale CDP files safely", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pibo-tools-env-tree-cleanup-"));
+	try {
+		const env = { ...process.env, PIBO_HOME: join(cwd, "pibo-home") };
+		await execFileAsync("node", [cliPath, "tools", "env", "browser-use"], { cwd, env });
+		const wrapperPath = join(env.PIBO_HOME, "tools", "browser-use", "home", "bin", "browser-use");
+		const browserUseHome = join(cwd, "browser-use-home");
+		const chromeUserDataDir = join(cwd, "chrome-user-data");
+		const statePath = join(browserUseHome, "pibo-browser-pool", "browser-pools", "tree-worker", "default", "state.json");
+		const cdpDir = join(browserUseHome, "pibo-cdp");
+		const pidFile = join(cdpDir, "tree.pid");
+		const portFile = join(cdpDir, "tree.port");
+		const fakeChromePath = join(cwd, "failing-chrome");
+		await mkdir(dirname(statePath), { recursive: true });
+		await mkdir(cdpDir, { recursive: true });
+		await mkdir(chromeUserDataDir, { recursive: true });
+		await writeFile(fakeChromePath, "#!/bin/sh\nexit 1\n");
+		await chmod(fakeChromePath, 0o755);
+
+		const leaderPidPath = join(cwd, "leader.pid");
+		const childPidPath = join(cwd, "child.pid");
+		const processTree = spawnManagedBrowserProcessTree("/usr/bin/chromium", chromeUserDataDir, leaderPidPath, childPidPath);
+		let leaderPid;
+		let childPid;
+		try {
+			leaderPid = Number.parseInt(await waitForFile(leaderPidPath), 10);
+			childPid = Number.parseInt(await waitForFile(childPidPath), 10);
+			await waitForProcess(leaderPid, true);
+			await waitForProcess(childPid, true);
+			await writeFile(statePath, `${JSON.stringify({
+				workerId: "tree-worker",
+				poolId: "default",
+				maxBrowserProcesses: 1,
+				pid: leaderPid,
+				processGroupId: leaderPid,
+				cdpPort: 47777,
+				cdpUrl: "http://127.0.0.1:47777",
+				userDataDir: chromeUserDataDir,
+				state: "stale",
+			}, null, 2)}\n`, "utf8");
+			await writeFile(pidFile, `${leaderPid}\n`, "utf8");
+			await writeFile(portFile, "47777\n", "utf8");
+
+			await assert.rejects(
+				execFileAsync(wrapperPath, ["--session", "tree", "--pibo-ensure-chrome"], {
+					cwd,
+					env: {
+						...env,
+						BROWSER_USE_HOME: browserUseHome,
+						PIBO_BROWSER_POOL_WORKER_ID: "tree-worker",
+						PIBO_BROWSER_USE_CHROME: fakeChromePath,
+						PIBO_BROWSER_USE_CHROME_USER_DATA_DIR: chromeUserDataDir,
+					},
+				}),
+				(error) => {
+					assert.match(error.stderr, /terminating stale Chrome process group/);
+					return true;
+				},
+			);
+			await waitForProcessGoneOrZombie(leaderPid);
+			await waitForProcessGoneOrZombie(childPid);
+			await assert.rejects(readFile(pidFile, "utf8"), /ENOENT/);
+			await assert.rejects(readFile(portFile, "utf8"), /ENOENT/);
+		} finally {
+			terminatePid(childPid);
+			terminatePid(leaderPid);
+			terminateProcess(processTree);
+		}
+
+		await writeFile(pidFile, "999999\n", "utf8");
+		await writeFile(portFile, "47778\n", "utf8");
+		await rm(statePath, { force: true });
+		await assert.rejects(
+			execFileAsync(wrapperPath, ["--session", "tree", "--pibo-ensure-chrome"], {
+				cwd,
+				env: {
+					...env,
+					BROWSER_USE_HOME: browserUseHome,
+					PIBO_BROWSER_POOL_WORKER_ID: "tree-worker",
+					PIBO_BROWSER_USE_CHROME: fakeChromePath,
+					PIBO_BROWSER_USE_CHROME_USER_DATA_DIR: chromeUserDataDir,
+				},
+			}),
+		);
+		await assert.rejects(readFile(pidFile, "utf8"), /ENOENT/);
+		await assert.rejects(readFile(portFile, "utf8"), /ENOENT/);
+
+		await assert.rejects(
+			execFileAsync(wrapperPath, ["--session", "missing-pid", "--pibo-ensure-chrome"], {
+				cwd,
+				env: {
+					...env,
+					BROWSER_USE_HOME: browserUseHome,
+					PIBO_BROWSER_POOL_WORKER_ID: "tree-worker",
+					PIBO_BROWSER_USE_CHROME: fakeChromePath,
+					PIBO_BROWSER_USE_CHROME_USER_DATA_DIR: chromeUserDataDir,
+				},
+			}),
+		);
 	} finally {
 		await rm(cwd, { recursive: true, force: true });
 	}

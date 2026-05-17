@@ -175,38 +175,168 @@ for line in output.splitlines():
 PYFINDCHROME
 }
 
+find_recorded_browser_targets_for_profile() {
+  user_data_dir=$1
+  pid_file=$2
+  pool_state_file=$3
+  "$python_cmd" - "$user_data_dir" "$pid_file" "$pool_state_file" <<'PYRECORDED'
+import json
+import os
+import sys
+from pathlib import Path
+
+managed_dir = os.path.normpath(os.path.abspath(sys.argv[1]))
+pid_file = Path(sys.argv[2])
+pool_state_file = Path(sys.argv[3])
+
+def normalize_path(value):
+    return os.path.normpath(os.path.abspath(value))
+
+def print_target(source, pid, pgid=""):
+    try:
+        pid_text = str(int(str(pid).strip()))
+    except Exception:
+        return
+    if int(pid_text) <= 0:
+        return
+    pgid_text = ""
+    if pgid not in (None, ""):
+        try:
+            pgid_text = str(int(str(pgid).strip()))
+        except Exception:
+            pgid_text = ""
+    print(f"{source}\t{pid_text}\t{pgid_text}")
+
+try:
+    data = json.loads(pool_state_file.read_text())
+    if normalize_path(str(data.get("userDataDir", ""))) == managed_dir:
+        print_target("pool-state", data.get("pid"), data.get("processGroupId"))
+except FileNotFoundError:
+    pass
+except Exception:
+    pass
+
+try:
+    print_target("cdp-pid-file", pid_file.read_text())
+except FileNotFoundError:
+    pass
+except Exception:
+    pass
+PYRECORDED
+}
+
+process_group_for_pid() {
+  pid=$1
+  ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' '
+}
+
+process_is_running() {
+  pid=$1
+  if ! kill -0 "$pid" 2>/dev/null; then
+    return 1
+  fi
+  state=$(ps -o stat= -p "$pid" 2>/dev/null | tr -d ' ' | cut -c1)
+  [ "$state" != "Z" ]
+}
+
+wait_for_pid_exit() {
+  pid=$1
+  attempts=0
+  while [ "$attempts" -lt "\${PIBO_BROWSER_POOL_TERM_WAIT_ATTEMPTS:-10}" ]; do
+    if ! process_is_running "$pid"; then
+      return 0
+    fi
+    attempts=$((attempts + 1))
+    sleep "\${PIBO_BROWSER_POOL_TERM_WAIT_SECONDS:-0.1}"
+  done
+  return 1
+}
+
+terminate_managed_browser_target() {
+  source=$1
+  pid=$2
+  recorded_pgid=$3
+  if [ -z "$pid" ] || ! process_is_running "$pid"; then
+    return 0
+  fi
+
+  actual_pgid=$(process_group_for_pid "$pid")
+  target_group=
+  if [ -n "$recorded_pgid" ] && [ "$actual_pgid" = "$recorded_pgid" ]; then
+    target_group=$recorded_pgid
+  elif [ -n "$actual_pgid" ] && [ "$actual_pgid" = "$pid" ]; then
+    target_group=$actual_pgid
+  fi
+
+  if [ -n "$target_group" ]; then
+    echo "pibo browser-use: terminating stale Chrome process group $target_group for managed profile ($source pid $pid)..." >&2
+    kill -TERM "-$target_group" 2>/dev/null || true
+    if ! wait_for_pid_exit "$pid"; then
+      kill -KILL "-$target_group" 2>/dev/null || true
+      wait_for_pid_exit "$pid" || true
+    fi
+    return 0
+  fi
+
+  echo "pibo browser-use: terminating stale Chrome process $pid for managed profile ($source)..." >&2
+  kill -TERM "$pid" 2>/dev/null || true
+  if ! wait_for_pid_exit "$pid"; then
+    kill -KILL "$pid" 2>/dev/null || true
+    wait_for_pid_exit "$pid" || true
+  fi
+}
+
+pid_file_process_is_dead() {
+  pid_file=$1
+  if [ ! -s "$pid_file" ]; then
+    return 0
+  fi
+  recorded_pid=$(cat "$pid_file" 2>/dev/null || true)
+  if [ -z "$recorded_pid" ]; then
+    return 0
+  fi
+  ! process_is_running "$recorded_pid"
+}
+
 kill_stale_chrome_for_profile() {
   user_data_dir=$1
-
-  # Find and terminate any Chrome process using this profile directory
-  stale_pids=$(find_chrome_pids_for_profile "$user_data_dir")
-  for stale_pid in $stale_pids; do
-    if [ -n "$stale_pid" ] && kill -0 "$stale_pid" 2>/dev/null; then
-      echo "pibo browser-use: terminating stale Chrome process $stale_pid for profile..." >&2
-      kill -TERM "$stale_pid" 2>/dev/null || true
-    fi
-  done
-
-  # Give processes a moment to exit gracefully
-  sleep 0.5
-  for stale_pid in $stale_pids; do
-    if [ -n "$stale_pid" ] && kill -0 "$stale_pid" 2>/dev/null; then
-      kill -KILL "$stale_pid" 2>/dev/null || true
-    fi
-  done
-  sleep 0.2
-
-  # Remove stale lock files if they remain
-  for stale_file in SingletonLock SingletonCookie SingletonSocket; do
-    if [ -f "$user_data_dir/$stale_file" ]; then
-      rm -f "$user_data_dir/$stale_file" 2>/dev/null || true
-    fi
-  done
-
-  # Also clean up stale state files for this session
   safe_session=$(printf '%s' "$session" | tr -c 'A-Za-z0-9_.-' '_')
   state_dir=\${BROWSER_USE_HOME:-$HOME/.browser-use}/pibo-cdp
-  rm -f "$state_dir/$safe_session.pid" "$state_dir/$safe_session.port" 2>/dev/null || true
+  pid_file=$state_dir/$safe_session.pid
+  port_file=$state_dir/$safe_session.port
+  paths=$(browser_pool_paths)
+  pool_state_file=$(printf '%s\n' "$paths" | sed -n '1p')
+
+  # Prefer recorded pool/CDP pid metadata before falling back to exact profile matching.
+  recorded_targets=$(find_recorded_browser_targets_for_profile "$user_data_dir" "$pid_file" "$pool_state_file")
+  if [ -n "$recorded_targets" ]; then
+    while IFS='\t' read -r source recorded_pid recorded_pgid; do
+      terminate_managed_browser_target "$source" "$recorded_pid" "$recorded_pgid"
+    done <<EOFRECORDED
+$recorded_targets
+EOFRECORDED
+  fi
+
+  # Then terminate any Chrome/Chromium process using this exact managed profile directory.
+  stale_pids=$(find_chrome_pids_for_profile "$user_data_dir")
+  for stale_pid in $stale_pids; do
+    terminate_managed_browser_target "profile-match" "$stale_pid" ""
+  done
+
+  # Remove stale lock files if the managed browser is confirmed gone.
+  sleep 0.2
+  if [ -z "$(find_chrome_pids_for_profile "$user_data_dir")" ]; then
+    for stale_file in SingletonLock SingletonCookie SingletonSocket; do
+      if [ -f "$user_data_dir/$stale_file" ]; then
+        rm -f "$user_data_dir/$stale_file" 2>/dev/null || true
+      fi
+    done
+  fi
+
+  # Remove stale CDP pid/port files only after their recorded process is gone.
+  if pid_file_process_is_dead "$pid_file"; then
+    rm -f "$pid_file" "$port_file" 2>/dev/null || true
+  fi
 }
 
 persistent_chrome_url_if_alive() {

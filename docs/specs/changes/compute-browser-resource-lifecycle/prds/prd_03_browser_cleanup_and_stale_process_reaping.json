@@ -33,8 +33,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented safer stale managed browser cleanup in the browser-use wrapper. Cleanup now prefers recorded browser-pool state and CDP pid metadata, uses bounded TERM then KILL for the matching managed process group when safe, falls back to exact Pibo-managed chrome/chromium user-data-dir process matching, tolerates dead or missing pid metadata, treats zombies as gone, and removes stale CDP pid/port and Singleton files only after the managed browser is confirmed gone. Added focused tests for live process-group termination, dead pid stale CDP cleanup, missing pid-file tolerance, and stale CDP file cleanup. Evidence recorded in IMPLEMENTATION_PROGRESS.md: focused Docker-worker tests passed, real Docker-worker Chromium wrapper validation passed, and npm run typecheck passed."
     },
     {
       "id": "US-003",
