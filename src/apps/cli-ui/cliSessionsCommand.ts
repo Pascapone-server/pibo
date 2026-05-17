@@ -186,7 +186,19 @@ class DebugMockCliSessionRouter implements LocalCliSessionRouter {
 	}
 
 	private executionResult(event: Extract<PiboInputEvent, { type: "execution" }>): unknown {
+		const params = "params" in event && event.params && typeof event.params === "object" && !Array.isArray(event.params) ? event.params as Record<string, unknown> : {};
 		if (event.action === "fast_mode") return { mode: "fast", supported: true, changed: true };
+		if (event.action === "thinking") {
+			const level = typeof params.level === "string" ? params.level : undefined;
+			if (level) return { message: `Thinking level set to ${level}`, level, supported: true, changed: true };
+			return { action: "show_thinking_menu", items: ["off", "minimal", "low", "medium", "high", "xhigh"].map((value) => ({ id: value, label: value })) };
+		}
+		if (event.action === "model") {
+			const model = typeof params.model === "string" ? params.model : undefined;
+			const provider = typeof params.provider === "string" ? params.provider : "openai";
+			if (model) return { message: `Model set to ${provider}/${model}`, provider, model, supported: true, changed: true };
+			return { action: "show_model_menu", providers: [{ id: "openai", label: "OpenAI", description: "Debug PTY provider", models: [{ id: "gpt-pty-large", label: "GPT PTY Large" }, { id: "gpt-pty-mini", label: "GPT PTY Mini" }] }, { id: "offline", label: "Offline Provider", description: "Unavailable in debug PTY", disabled: true, reason: "Debug provider has no credentials", models: [{ id: "offline-model", label: "Offline Model", disabled: true, reason: "Provider unavailable" }] }] };
+		}
 		if (event.action === "compact") return { queued: true, queuedMessages: 1 };
 		if (event.action === "clear_queue") return { cleared: 0 };
 		if (event.action === "abort") return { aborted: true };

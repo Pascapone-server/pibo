@@ -387,6 +387,16 @@ test("CLI session sources execute shared slash actions and normalize results", a
 	assert.match(failed.descriptor.message, /TOKEN=\[redacted\]/);
 	assert.doesNotMatch(failed.descriptor.message, /secret-value/);
 
+	const thinking = await fake.executeSlashCommand({ command: "thinking", args: "high", sessionId: "ps_fake_existing" });
+	assert.equal(thinking.descriptor.kind, "text");
+	assert.match(thinking.descriptor.text, /Thinking level set to high/);
+	const modelMenu = await fake.executeSlashCommand({ command: "model", sessionId: "ps_fake_existing" });
+	assert.equal(modelMenu.descriptor.kind, "menu");
+	assert.match(JSON.stringify(modelMenu.rawResult), /gpt-fake-mini/);
+	const modelSet = await fake.executeSlashCommand({ command: "model", args: "openai/gpt-fake-mini", sessionId: "ps_fake_existing" });
+	assert.equal(modelSet.descriptor.kind, "text");
+	assert.deepEqual((await fake.getStatus({ sessionId: "ps_fake_existing" })).activeModel, { provider: "openai", id: "gpt-fake-mini" });
+
 	const cloned = await fake.executeSlashCommand({ command: "clone", sessionId: "ps_fake_existing" });
 	assert.equal(cloned.descriptor.kind, "session-link");
 	assert.match(cloned.openSessionId, /^ps_fake_clone_/);
@@ -424,6 +434,8 @@ test("local CLI session source routes slash actions under the selected owner and
 			if (event.action === "abort") return { type: "execution_result", piboSessionId: event.piboSessionId, eventId: event.id, action: event.action, result: { aborted: true } };
 			if (event.action === "kill") return { type: "execution_result", piboSessionId: event.piboSessionId, eventId: event.id, action: event.action, result: { killed: [event.piboSessionId], cancelledRuns: [] } };
 			if (event.action === "kill_all") return { type: "execution_result", piboSessionId: event.piboSessionId, eventId: event.id, action: event.action, result: { killed: [event.piboSessionId], cancelledRuns: ["run_1"] } };
+			if (event.action === "thinking") return { type: "execution_result", piboSessionId: event.piboSessionId, eventId: event.id, action: event.action, result: { message: `Thinking level set to ${event.params?.level}`, level: event.params?.level, supported: true, changed: true } };
+			if (event.action === "model") return { type: "execution_result", piboSessionId: event.piboSessionId, eventId: event.id, action: event.action, result: event.params?.model ? { message: `Model set to ${event.params.provider}/${event.params.model}`, provider: event.params.provider, model: event.params.model, supported: true, changed: true } : { action: "show_model_menu", providers: [{ id: "openai", label: "OpenAI", models: [{ id: "gpt-local", label: "GPT Local" }] }] } };
 			return { type: "execution_result", piboSessionId: event.piboSessionId, eventId: event.id, action: event.action, result: { ok: true } };
 		},
 	};
@@ -440,6 +452,16 @@ test("local CLI session source routes slash actions under the selected owner and
 	const fast = await source.executeSlashCommand({ command: "fast", args: "on", sessionId: created.id });
 	assert.equal(fast.actionName, "fast_mode");
 	assert.equal(emitted.at(-1).action, "fast_mode");
+	const thinking = await source.executeSlashCommand({ command: "thinking", args: "high", sessionId: created.id });
+	assert.equal(thinking.actionName, "thinking");
+	assert.deepEqual(emitted.at(-1).params, { level: "high" });
+	assert.match(thinking.descriptor.text, /Thinking level set to high/);
+	const modelMenu = await source.executeSlashCommand({ command: "model", sessionId: created.id });
+	assert.equal(modelMenu.descriptor.kind, "menu");
+	assert.match(JSON.stringify(modelMenu.rawResult), /gpt-local/);
+	const modelSet = await source.executeSlashCommand({ command: "model", args: "openai/gpt-local", sessionId: created.id });
+	assert.deepEqual(emitted.at(-1).params, { provider: "openai", model: "gpt-local" });
+	assert.match(modelSet.descriptor.text, /Model set to openai\/gpt-local/);
 	const compact = await source.executeSlashCommand({ command: "compact", args: "summarize safely", sessionId: created.id });
 	assert.equal(compact.actionName, "compact");
 	assert.equal(emitted.at(-1).action, "compact");

@@ -15,7 +15,10 @@ import {
 	formatCliSessionStatus,
 	handleCliSessionSubmittedInput,
 	InkSessionAppView,
+	activeInkSessionOverlay,
 	parseCliSessionInput,
+	popInkSessionOverlay,
+	pushInkSessionOverlay,
 	reduceInkSessionInputState,
 	runCliSessionsUi,
 	terminalLineLimitFromColumns,
@@ -229,6 +232,19 @@ test("Ink session input reducer captures text, enter, navigation, escape, and sl
 	assert.equal(closed.slashSuggestions, undefined);
 });
 
+test("generic Ink overlay stack supports nested picker back and active overlay", () => {
+	const ownerPicker = { kind: "owner", title: "Owner", items: [{ id: "user:alpha", label: "Alpha" }], selectedIndex: 0, emptyMessage: "No owners" };
+	const roomPicker = { kind: "room", title: "Room", items: [{ id: "room_alpha", label: "Alpha Room" }], selectedIndex: 0, emptyMessage: "No rooms", parent: ownerPicker };
+	const stack = pushInkSessionOverlay(pushInkSessionOverlay(undefined, { kind: "picker", picker: ownerPicker }), { kind: "picker", picker: roomPicker });
+	assert.equal(activeInkSessionOverlay(stack).picker.title, "Room");
+	assert.equal(activeInkSessionOverlay(popInkSessionOverlay(stack)).picker.title, "Owner");
+
+	const escaped = reduceInkSessionInputState({ loading: false, rows: [], input: "", mode: "picker", picker: roomPicker, overlayStack: stack }, { type: "escape" });
+	assert.equal(escaped.picker.title, "Owner");
+	assert.equal(escaped.mode, "picker");
+	assert.equal(activeInkSessionOverlay(escaped.overlayStack).picker.title, "Owner");
+});
+
 test("Slash parser distinguishes messages, commands, and empty input", () => {
 	assert.deepEqual(parseCliSessionInput("  hello agent  "), { type: "message", text: "hello agent" });
 	assert.deepEqual(parseCliSessionInput(" /STATUS now "), { type: "command", command: { name: "status", args: "now", raw: "/STATUS now" } });
@@ -436,6 +452,49 @@ test("Slash commands handle help status clear pickers unknown exit and normal se
 
 	await submit("/quit");
 	assert.equal(exited, true);
+});
+
+test("Slash /thinking supports direct levels and picker flow", async () => {
+	const source = createDefaultFakeCliSessionSource();
+	const harness = stateHarness({ ...baseState(), activeOwner: { ownerScope: "user:fake", label: "Fake user", kind: "web-user" }, session: { id: "ps_fake_existing", title: "Existing fake session", profile: "pibo-agent", agentId: "pibo-agent", ownerScope: "user:fake", roomId: "room_fake_main", status: "idle" } });
+	const openSession = (sessionId, message) => openFakeSessionInto(source, harness, sessionId, message);
+	const submit = (input) => handleCliSessionSubmittedInput(input, source, harness.state, harness.setState, openSession, () => {});
+
+	await submit("/thinking high");
+	assert.match(harness.state.message, /Thinking level set to high/);
+	assert.match(harness.state.status.message, /Thinking level high/);
+
+	await submit("/thinking");
+	assert.equal(harness.state.mode, "picker");
+	assert.equal(harness.state.picker.kind, "command-menu");
+	assert.equal(harness.state.picker.action, "thinking-level");
+	assert.match(harness.state.picker.title, /Select thinking level/);
+	assert.ok(harness.state.picker.items.some((item) => item.label === "xhigh"));
+
+	const escaped = reduceInkSessionInputState({ ...harness.state, picker: { ...harness.state.picker, parent: { kind: "room", title: "Back Room", items: [], selectedIndex: 0, emptyMessage: "none" } } }, { type: "escape" });
+	assert.equal(escaped.picker.title, "Back Room");
+});
+
+test("Slash /model opens provider and model command menus", async () => {
+	const source = createDefaultFakeCliSessionSource();
+	const harness = stateHarness({ ...baseState(), activeOwner: { ownerScope: "user:fake", label: "Fake user", kind: "web-user" }, session: { id: "ps_fake_existing", title: "Existing fake session", profile: "pibo-agent", agentId: "pibo-agent", ownerScope: "user:fake", roomId: "room_fake_main", status: "idle" } });
+	const openSession = (sessionId, message) => openFakeSessionInto(source, harness, sessionId, message);
+	const submit = (input) => handleCliSessionSubmittedInput(input, source, harness.state, harness.setState, openSession, () => {});
+
+	await submit("/model");
+	assert.equal(harness.state.mode, "picker");
+	assert.equal(harness.state.picker.kind, "command-menu");
+	assert.equal(harness.state.picker.action, "model-provider");
+	assert.match(harness.state.picker.title, /Select model provider/);
+	assert.deepEqual(harness.state.picker.items.map((item) => item.label), ["OpenAI", "Anthropic"]);
+	assert.equal(harness.state.picker.items[1].disabled, true);
+
+	const providerPicker = harness.state.picker;
+	const modelPickerState = { ...harness.state, picker: providerPicker, overlayStack: pushInkSessionOverlay(undefined, { kind: "picker", picker: providerPicker }) };
+	const providerItem = providerPicker.items[0];
+	await handleCliSessionSubmittedInput("/model openai/gpt-fake-mini", source, modelPickerState, harness.setState, openSession, () => {});
+	assert.match(harness.state.message, /Model set to openai\/gpt-fake-mini/);
+	assert.deepEqual(harness.state.status.activeModel, { provider: "openai", id: "gpt-fake-mini" });
 });
 
 test("Slash Web action commands render shared results and open clone sessions", async () => {

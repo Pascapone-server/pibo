@@ -981,6 +981,10 @@ function executionParamsForSlash(command: string, args: string | undefined): Pib
 	const trimmed = args?.trim();
 	if (command === "compact" && trimmed) return { customInstructions: trimmed };
 	if (command === "thinking" && trimmed) return { level: trimmed };
+	if (command === "model" && trimmed) {
+		const [provider, model] = trimmed.includes("/") ? trimmed.split("/", 2) : [undefined, trimmed];
+		return provider ? { provider, model } : { model };
+	}
 	if (command === "fast" && trimmed) return { mode: trimmed };
 	return undefined;
 }

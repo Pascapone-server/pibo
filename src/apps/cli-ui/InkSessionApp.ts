@@ -9,6 +9,7 @@ import {
 	formatSlashCommand,
 	groupSlashCommandsForHelp,
 	type CommandResultDescriptor,
+	type CommandResultMenuItem,
 	type CompactTerminalRow,
 	type SlashCommandDescriptor,
 } from "../../session-ui/index.js";
@@ -27,21 +28,32 @@ export type InkSessionPickerItem = {
 	id: string;
 	label: string;
 	description?: string;
-	kind?: "owner" | "room" | "session" | "create-session" | "agent";
+	kind?: "owner" | "room" | "session" | "create-session" | "agent" | "command-option";
 	ownerScope?: string;
 	roomId?: string;
+	value?: unknown;
+	disabled?: boolean;
 };
 
 export type InkSessionPickerState = {
-	kind: "owner" | "room" | "session" | "agent";
+	kind: "owner" | "room" | "session" | "agent" | "command-menu";
 	title: string;
 	items: readonly InkSessionPickerItem[];
 	selectedIndex: number;
 	emptyMessage: string;
-	action?: "select-session" | "create-session";
+	action?: "select-session" | "create-session" | "thinking-level" | "model-provider" | "model-choice";
 	ownerScope?: string;
 	roomId?: string;
+	commandName?: string;
+	parent?: InkSessionPickerState;
 };
+
+export type InkOverlayState =
+	| { kind: "picker"; picker: InkSessionPickerState }
+	| { kind: "suggestions"; suggestions: InkSlashSuggestionState }
+	| { kind: "detail"; title: string; lines: readonly string[] }
+	| { kind: "confirmation"; title: string; message: string; confirmLabel: string; cancelLabel: string };
+
 
 export type InkSlashSuggestionState = {
 	items: readonly SlashCommandDescriptor[];
@@ -60,6 +72,7 @@ export type InkSessionAppState = {
 	picker?: InkSessionPickerState;
 	slashCommands?: readonly SlashCommandDescriptor[];
 	slashSuggestions?: InkSlashSuggestionState;
+	overlayStack?: readonly InkOverlayState[];
 	message?: string;
 	error?: string;
 };
@@ -229,6 +242,10 @@ export function InkSessionApp({ source, initialSessionId, skipOwnerPicker = fals
 					return;
 				}
 				await openSession(item.id, `Opened session ${item.label}.`);
+				return;
+			}
+			if (picker.kind === "command-menu") {
+				await selectCommandMenuItem(picker, item, source, stateRef.current, setState, openSession);
 				return;
 			}
 			const sessionId = stateRef.current.session?.id;
@@ -412,8 +429,11 @@ export function reduceInkSessionInputState(state: InkSessionAppState, action: In
 	if (action.type === "text") return withSlashSuggestions({ ...state, input: state.input + action.value, message: undefined, error: undefined });
 	if (action.type === "backspace") return withSlashSuggestions({ ...state, input: state.input.slice(0, -1) });
 	if (action.type === "escape") {
-		if (state.slashSuggestions) return { ...state, slashSuggestions: undefined, message: "Closed slash suggestions." };
-		return { ...state, input: "", mode: "transcript", picker: undefined, message: "Canceled." };
+		if (state.slashSuggestions) return { ...state, slashSuggestions: undefined, overlayStack: popInkSessionOverlay(state.overlayStack), message: "Closed slash suggestions." };
+		if (state.picker?.parent) {
+			return withPickerOverlay({ ...state, picker: state.picker.parent, mode: pickerMode(state.picker.parent), message: "Back." }, state.picker.parent);
+		}
+		return { ...state, input: "", mode: "transcript", picker: undefined, overlayStack: popInkSessionOverlay(state.overlayStack), message: "Canceled." };
 	}
 	if (action.type === "up" || action.type === "down") {
 		if (state.slashSuggestions && !state.picker && state.slashSuggestions.items.length > 0) {
@@ -436,13 +456,14 @@ export function reduceInkSessionInputState(state: InkSessionAppState, action: In
 }
 
 function withSlashSuggestions(state: InkSessionAppState): InkSessionAppState {
-	if (state.picker || !state.input.trimStart().startsWith("/")) return { ...state, slashSuggestions: undefined };
+	if (state.picker || !state.input.trimStart().startsWith("/")) return { ...state, slashSuggestions: undefined, overlayStack: state.slashSuggestions ? popInkSessionOverlay(state.overlayStack) : state.overlayStack };
 	const catalog = state.slashCommands ?? buildSlashCommandCatalog();
 	const items = filterSlashCommands(catalog, state.input);
-	if (items.length === 0) return { ...state, slashSuggestions: undefined };
+	if (items.length === 0) return { ...state, slashSuggestions: undefined, overlayStack: state.slashSuggestions ? popInkSessionOverlay(state.overlayStack) : state.overlayStack };
 	const previous = state.slashSuggestions?.items[state.slashSuggestions.selectedIndex]?.slash;
 	const selectedIndex = Math.max(0, previous ? items.findIndex((item) => item.slash === previous) : 0);
-	return { ...state, slashSuggestions: { items, selectedIndex } };
+	const suggestions = { items, selectedIndex };
+	return { ...state, slashSuggestions: suggestions, overlayStack: replaceTopOverlay(state.overlayStack, { kind: "suggestions", suggestions }) };
 }
 
 function acceptSlashSuggestion(state: InkSessionAppState): { input: string; runInput?: string } {
@@ -450,8 +471,37 @@ function acceptSlashSuggestion(state: InkSessionAppState): { input: string; runI
 	if (!suggestion) return { input: state.input };
 	const trimmed = state.input.trim();
 	const token = trimmed.split(/\s+/, 1)[0] ?? "";
+	if (token === suggestion.slash && trimmed.length > suggestion.slash.length) return { input: state.input, runInput: trimmed };
 	if (token === suggestion.slash && trimmed === suggestion.slash) return { input: suggestion.slash, runInput: suggestion.slash };
 	return { input: `${suggestion.slash} ` };
+}
+
+export function pushInkSessionOverlay(stack: readonly InkOverlayState[] | undefined, overlay: InkOverlayState): readonly InkOverlayState[] {
+	return [...(stack ?? []), overlay];
+}
+
+export function popInkSessionOverlay(stack: readonly InkOverlayState[] | undefined): readonly InkOverlayState[] | undefined {
+	if (!stack || stack.length <= 1) return undefined;
+	return stack.slice(0, -1);
+}
+
+export function activeInkSessionOverlay(stack: readonly InkOverlayState[] | undefined): InkOverlayState | undefined {
+	return stack?.[stack.length - 1];
+}
+
+function replaceTopOverlay(stack: readonly InkOverlayState[] | undefined, overlay: InkOverlayState): readonly InkOverlayState[] {
+	if (!stack || stack.length === 0) return [overlay];
+	return [...stack.slice(0, -1), overlay];
+}
+
+function withPickerOverlay(state: InkSessionAppState, picker: InkSessionPickerState): InkSessionAppState {
+	return { ...state, picker, overlayStack: replaceTopOverlay(state.overlayStack, { kind: "picker", picker }) };
+}
+
+function pickerMode(picker: InkSessionPickerState): InkSessionAppState["mode"] {
+	if (picker.kind === "agent") return "agent-picker";
+	if (picker.kind === "session") return "session-picker";
+	return "picker";
 }
 
 export type ParsedCliSessionInput =
@@ -680,6 +730,42 @@ async function handleSlashCommand(
 		}));
 		return;
 	}
+	if (command.name === "thinking") {
+		if (command.args.trim()) {
+			validateThinkingLevel(command.args);
+			const result = await source.executeSlashCommand({ command: command.name, args: command.args, sessionId: state.session?.id, ownerScope: state.activeOwner?.ownerScope });
+			const status = await source.getStatus({ sessionId: state.session?.id });
+			setState((current) => ({ ...current, status, message: renderCommandResultDescriptorText(result.descriptor, current.session), error: undefined }));
+			return;
+		}
+		setState((current) => withPickerOverlay({
+			...current,
+			mode: "picker",
+			message: "Select a thinking level with arrow keys, then Enter.",
+			error: undefined,
+		}, thinkingPickerState()));
+		return;
+	}
+	if (command.name === "model") {
+		const result = await source.executeSlashCommand({ command: command.name, args: command.args, sessionId: state.session?.id, ownerScope: state.activeOwner?.ownerScope });
+		if (command.args.trim()) {
+			const status = await source.getStatus({ sessionId: state.session?.id });
+			setState((current) => ({ ...current, status, message: renderCommandResultDescriptorText(result.descriptor, current.session), error: undefined }));
+			return;
+		}
+		const providers = modelProviderItemsFromActionResult(result.rawResult, result.descriptor);
+		if (providers.length === 0) {
+			setState((current) => ({ ...current, message: renderCommandResultDescriptorText(result.descriptor, current.session), error: undefined }));
+			return;
+		}
+		setState((current) => withPickerOverlay({
+			...current,
+			mode: "picker",
+			message: "Select a provider, then choose a model.",
+			error: undefined,
+		}, modelProviderPickerState(providers)));
+		return;
+	}
 	const handled = await executeSharedSlashCommand(command, source, state, setState, openSession);
 	if (handled) return;
 	setState((current) => ({ ...current, error: `Unknown command ${command.raw}. Use /help for supported CLI commands.`, message: undefined }));
@@ -704,6 +790,140 @@ async function executeSharedSlashCommand(
 	const status = await source.getStatus({ sessionId: state.session?.id });
 	setState((current) => ({ ...current, status, message, error: undefined }));
 	return true;
+}
+
+const THINKING_LEVELS = ["current/default", "off", "minimal", "low", "medium", "high", "xhigh"] as const;
+const APPLY_THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
+
+type ModelProviderOption = CommandResultMenuItem & { models?: readonly CommandResultMenuItem[] };
+
+async function selectCommandMenuItem(
+	picker: InkSessionPickerState,
+	item: InkSessionPickerItem,
+	source: CliSessionSource,
+	state: InkSessionAppState,
+	setState: React.Dispatch<React.SetStateAction<InkSessionAppState>>,
+	openSession: (sessionId: string, message?: string) => Promise<void>,
+): Promise<void> {
+	if (item.disabled) {
+		setState((current) => ({ ...current, message: item.description ? `${item.label}: ${item.description}` : `${item.label} is unavailable.`, error: undefined }));
+		return;
+	}
+	if (picker.action === "thinking-level") {
+		const level = String(item.value ?? item.id);
+		if (level === "current/default") {
+			setState((current) => ({ ...current, mode: "transcript", picker: undefined, overlayStack: popInkSessionOverlay(current.overlayStack), message: "Kept current/default thinking level.", error: undefined }));
+			return;
+		}
+		validateThinkingLevel(level);
+		const result = await source.executeSlashCommand({ command: "thinking", args: level, sessionId: state.session?.id, ownerScope: state.activeOwner?.ownerScope });
+		const status = await source.getStatus({ sessionId: state.session?.id });
+		setState((current) => ({ ...current, status, mode: "transcript", picker: undefined, overlayStack: popInkSessionOverlay(current.overlayStack), message: renderCommandResultDescriptorText(result.descriptor, current.session), error: undefined }));
+		return;
+	}
+	if (picker.action === "model-provider") {
+		const provider = item.value as ModelProviderOption | undefined;
+		const models = provider?.models ?? [];
+		const next = modelChoicePickerState(item, models, picker);
+		setState((current) => withPickerOverlay({ ...current, mode: "picker", message: models.length === 0 ? `${item.label} has no terminal-selectable models.` : `Select model for ${item.label}.`, error: undefined }, next));
+		return;
+	}
+	if (picker.action === "model-choice") {
+		const providerValue = picker.parent?.items[picker.parent.selectedIndex]?.value as ModelProviderOption | undefined;
+		const itemValue = item.value && typeof item.value === "object" ? item.value as { provider?: unknown; id?: unknown } : undefined;
+		const providerId = String(providerValue?.id ?? itemValue?.provider ?? "");
+		const modelId = String(itemValue?.id ?? item.id);
+		const args = providerId ? `${providerId}/${modelId}` : modelId;
+		const result = await source.executeSlashCommand({ command: "model", args, sessionId: state.session?.id, ownerScope: state.activeOwner?.ownerScope });
+		const status = await source.getStatus({ sessionId: state.session?.id });
+		if (result.openSessionId && result.openSessionId !== state.session?.id) {
+			await openSession(result.openSessionId, renderCommandResultDescriptorText(result.descriptor, state.session));
+			return;
+		}
+		setState((current) => ({ ...current, status, mode: "transcript", picker: undefined, overlayStack: popInkSessionOverlay(popInkSessionOverlay(current.overlayStack)), message: renderCommandResultDescriptorText(result.descriptor, current.session), error: undefined }));
+		return;
+	}
+	setState((current) => ({ ...current, mode: "transcript", picker: undefined, message: `${item.label} selected.`, error: undefined }));
+}
+
+function thinkingPickerState(): InkSessionPickerState {
+	return {
+		kind: "command-menu",
+		action: "thinking-level",
+		commandName: "thinking",
+		title: "Select thinking level",
+		items: THINKING_LEVELS.map((level) => ({ id: level, kind: "command-option", label: level, value: level, description: level === "current/default" ? "Keep current runtime/default setting" : `Set thinking to ${level}` })),
+		selectedIndex: 0,
+		emptyMessage: "No thinking levels are available.",
+	};
+}
+
+function validateThinkingLevel(value: string): void {
+	const level = value.trim().toLowerCase();
+	if (!APPLY_THINKING_LEVELS.has(level)) throw new Error(`Unsupported thinking level "${value}". Use off, minimal, low, medium, high, or xhigh.`);
+}
+
+function modelProviderPickerState(providers: readonly ModelProviderOption[]): InkSessionPickerState {
+	return {
+		kind: "command-menu",
+		action: "model-provider",
+		commandName: "model",
+		title: "Select model provider",
+		items: providers.map((provider) => ({ id: provider.id, kind: "command-option", label: provider.label, description: provider.description, value: provider, disabled: provider.disabled })),
+		selectedIndex: 0,
+		emptyMessage: "No model providers are available.",
+	};
+}
+
+function modelChoicePickerState(providerItem: InkSessionPickerItem, models: readonly CommandResultMenuItem[], parent: InkSessionPickerState): InkSessionPickerState {
+	return {
+		kind: "command-menu",
+		action: "model-choice",
+		commandName: "model",
+		title: `Select model for ${providerItem.label}`,
+		items: models.map((model) => ({ id: model.id, kind: "command-option", label: model.label, description: model.description, value: { ...model, provider: providerItem.id }, disabled: model.disabled })),
+		selectedIndex: 0,
+		emptyMessage: `${providerItem.label} did not return any terminal-selectable models.`,
+		parent,
+	};
+}
+
+function modelProviderItemsFromActionResult(rawResult: unknown, descriptor: CommandResultDescriptor): ModelProviderOption[] {
+	const raw = unwrapActionPayload(rawResult);
+	const providers = recordsField(raw, "providers");
+	if (providers.length > 0) return providers.map((provider, index) => ({
+		id: stringField(provider, "id") ?? stringField(provider, "provider") ?? `provider-${index}`,
+		label: stringField(provider, "label") ?? stringField(provider, "name") ?? stringField(provider, "provider") ?? `Provider ${index + 1}`,
+		description: stringField(provider, "description") ?? (provider.disabled === true ? stringField(provider, "reason") : undefined),
+		disabled: provider.disabled === true,
+		models: recordsField(provider, "models").map((model, modelIndex) => ({
+			id: stringField(model, "id") ?? stringField(model, "model") ?? `model-${modelIndex}`,
+			label: stringField(model, "label") ?? stringField(model, "name") ?? stringField(model, "model") ?? stringField(model, "id") ?? `Model ${modelIndex + 1}`,
+			description: stringField(model, "description") ?? (model.disabled === true ? stringField(model, "reason") : undefined),
+			disabled: model.disabled === true,
+			value: model,
+		})),
+	}));
+	return descriptor.kind === "menu" ? descriptor.items.map((item) => ({ ...item, models: [] })) : [];
+}
+
+function unwrapActionPayload(value: unknown): unknown {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+	const record = value as Record<string, unknown>;
+	if (record.ok === true && "result" in record) return record.result;
+	if (record.success === true && "data" in record) return record.data;
+	return value;
+}
+
+function recordsField(value: unknown, key: string): Record<string, unknown>[] {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+	const field = (value as Record<string, unknown>)[key];
+	return Array.isArray(field) ? field.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item)) : [];
+}
+
+function stringField(record: Record<string, unknown>, key: string): string | undefined {
+	const value = record[key];
+	return typeof value === "string" ? value : undefined;
 }
 
 export function renderCommandResultDescriptorText(descriptor: CommandResultDescriptor, session?: CliSessionSummary): string {

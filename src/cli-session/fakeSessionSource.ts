@@ -299,6 +299,28 @@ export class FakeCliSessionSource implements CliSessionSource {
 		}
 		if (command === "clear") return { cleared: 0 };
 		if (command === "fast") return { mode: args === "off" ? "normal" : "fast", supported: true, changed: true };
+		if (command === "thinking") {
+			const level = args?.trim().toLowerCase();
+			if (!level) return { action: "show_thinking_menu", items: ["off", "minimal", "low", "medium", "high", "xhigh"].map((value) => ({ id: value, label: value })) };
+			if (!["off", "minimal", "low", "medium", "high", "xhigh"].includes(level)) return { supported: false, unsupportedReason: `Unsupported thinking level ${level}.` };
+			this.statusOverrides = { ...this.statusOverrides, message: `Thinking level ${level}` };
+			return { message: `Thinking level set to ${level}`, level, supported: true, changed: true };
+		}
+		if (command === "model") {
+			const selection = args?.trim();
+			if (selection) {
+				const [provider, model] = selection.includes("/") ? selection.split("/", 2) : ["", selection];
+				this.statusOverrides = { ...this.statusOverrides, activeModel: { provider: provider || "fake", id: model } };
+				return { message: `Model set to ${provider ? `${provider}/` : ""}${model}`, provider: provider || "fake", model, supported: true, changed: true };
+			}
+			return {
+				action: "show_model_menu",
+				providers: [
+					{ id: "openai", label: "OpenAI", description: "Fake OpenAI provider", models: [{ id: "gpt-fake-large", label: "GPT Fake Large" }, { id: "gpt-fake-mini", label: "GPT Fake Mini" }] },
+					{ id: "anthropic", label: "Anthropic", description: "Missing terminal auth", disabled: true, reason: "Sign in before selecting Anthropic", models: [{ id: "claude-fake", label: "Claude Fake", disabled: true, reason: "Provider unavailable" }] },
+				],
+			};
+		}
 		if (command === "compact") return { queued: true, instructions: args?.trim() || undefined };
 		if (command === "abort") return { aborted: true };
 		if (command === "kill") return { killed: session ? [session.id] : [], cancelledRuns: [] };

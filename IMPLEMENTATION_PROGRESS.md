@@ -381,3 +381,19 @@ Validation and results for routed slash action execution batch:
 - Completed stories marked `passes: true`: PRD 05 `US-003`, `US-004`.
 - Implementation commit: `9132d08` (`Execute Ink routed slash actions`).
 - Next recommended group: PRD 06 `US-001` through `US-003` for the generic overlay stack plus `/thinking` and `/model` picker flows, or PRD 03 `US-005` if Web Compact Terminal descriptor consumption should be prioritized first.
+
+## 2026-05-17 run: interactive overlay thinking and model batch
+
+Selected story group:
+
+- `prd_06_interactive_keyboard_flows.json` / `US-001` — Implement generic overlay stack for command menus.
+- `prd_06_interactive_keyboard_flows.json` / `US-002` — Implement `/thinking` direct and picker flows.
+- `prd_06_interactive_keyboard_flows.json` / `US-003` — Implement `/model` provider and model picker.
+
+Intended validation plan:
+
+- Add a small generic Ink overlay stack model that can host existing owner/room/session/agent pickers plus command-menu/detail/confirmation overlays without importing Web DOM/CSS dependencies.
+- Wire `/thinking <level>` to validate and execute directly; wire `/thinking` to a keyboard picker using Web-parity thinking levels and routed/source action execution on selection.
+- Wire `/model` to request the routed/source model menu, render disabled providers/models with reasons, select provider then model through nested terminal pickers, and apply through a terminal-safe action argument.
+- Add focused reducer/view/command/source tests for overlay stack navigation, nested command menu back/cancel behavior, `/thinking` direct/picker flows, and `/model` provider/model menu flows.
+- Run focused tests after build inside `pibo-dev-ink-cli-v2-web-parity`, run `pibo debug pty` scripts for `/thinking` and `/model` with raw/clean artifacts, then run `npm run typecheck` before committing.
