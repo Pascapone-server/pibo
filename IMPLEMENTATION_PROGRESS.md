@@ -572,4 +572,4 @@ Validation and results for Web compact terminal descriptor consumption and final
 - Path classification: Web DOM renderer path consuming shared renderer-neutral descriptors; shared/unit/static tests; installed global CLI real PTY path with deterministic mocked local router/source and real local persistence.
 - Completed stories marked `passes: true`: PRD 03 `US-005`; PRD 07 `US-005`.
 - Implementation commit: `0370e039a1de7782b863858927af73fe4eceafd6`.
-- Evidence/PRD hash update commit: `COMMIT_PENDING_EVIDENCE_UPDATE`.
+- Evidence/PRD hash update commit: `c2c12c91b587808f6d5c11f28b274572cbe181df`.
