@@ -6,7 +6,7 @@
     "baseCommit": "bdf219f906eb331a2f5343dd16e8124c2734878b",
     "mainRef": "main",
     "createdAt": "2026-05-17T00:17:50Z",
-    "lastUpdatedAt": "2026-05-17T01:30:23Z",
+    "lastUpdatedAt": "2026-05-17T01:32:31Z",
     "notes": [
       "This ledger is the durable resume state for the Ralph source-spec refresh loop.",
       "Current code in this worktree is the source of truth for source-backed specs.",
@@ -1170,6 +1170,15 @@
         "q-web-annotations-uncommitted"
       ],
       "message": "docs: triage web annotations branch specs"
+    },
+    {
+      "hash": "3fa28dd94ff32084931f8eb82664b19b6e939b0b",
+      "shortHash": "3fa28dd",
+      "committedAt": "2026-05-17T01:32:31Z",
+      "queueIds": [
+        "q-global-source-marked-inventory"
+      ],
+      "message": "docs: refresh final source spec sweep"
     }
   ],
   "runNotes": [
@@ -1228,6 +1237,10 @@
     {
       "at": "2026-05-17T01:30:23Z",
       "note": "Audited q-global-source-marked-inventory. Performed final broad capability/coverage inventory, updated Continuous Ralph Jobs and Shared Terminal View Model for current source-backed behavior, fixed verification-basis/path hygiene in existing owning specs, added final sweep coverage note, and left only the existing bootstrap catalog owner-cache decision request open."
+    },
+    {
+      "at": "2026-05-17T01:32:31Z",
+      "note": "Recorded commit 3fa28dd for q-global-source-marked-inventory final source-spec sweep. Ledger status is blocked_on_decisions because the bootstrap catalog owner-cache decision request remains open."
     }
   ]
 }
