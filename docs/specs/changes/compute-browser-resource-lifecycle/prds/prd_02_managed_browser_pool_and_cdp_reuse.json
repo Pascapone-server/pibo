@@ -82,8 +82,8 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented read-only `pibo tools browser-use pool status [--json]` with stable fields, text next-command hints, CLI tests, Docker real-path read-only validation, and typecheck evidence recorded in IMPLEMENTATION_PROGRESS.md."
     }
   ]
 }

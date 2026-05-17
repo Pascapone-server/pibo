@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/pr
 import { createServer } from "node:http";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 import { formatBrowserUseTargets, selectBestChatTarget } from "../dist/tools/browser-use-cdp.js";
@@ -282,6 +282,70 @@ test("pibo tools env wraps browser-use with the PIBo default profile", async () 
 	}
 });
 
+test("pibo tools browser-use pool status reports empty, ready, stale, text, and JSON read-only", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "pibo-tools-browser-pool-status-"));
+	try {
+		const env = { ...process.env, PIBO_HOME: join(cwd, "pibo-home"), BROWSER_USE_HOME: join(cwd, "browser-use-home") };
+		const statePath = join(env.BROWSER_USE_HOME, "pibo-browser-pool", "browser-pools", "worker-status", "default", "state.json");
+
+		const empty = await execFileAsync("node", [cliPath, "tools", "browser-use", "pool", "status", "--worker-id", "worker-status"], { cwd, env });
+		assert.match(empty.stdout, /browser pool status: empty/);
+		assert.match(empty.stdout, /worker id: worker-status/);
+		assert.match(empty.stdout, /pool id: default/);
+		assert.match(empty.stdout, /state file: .*state\.json \(missing\)/);
+		await assert.rejects(readFile(statePath, "utf8"), /ENOENT/);
+
+		await mkdir(dirname(statePath), { recursive: true });
+		await writeFile(statePath, `${JSON.stringify({
+			workerId: "worker-status",
+			poolId: "default",
+			maxBrowserProcesses: 1,
+			pid: 1234,
+			processGroupId: 1234,
+			cdpPort: 4831,
+			cdpUrl: "http://127.0.0.1:4831",
+			userDataDir: join(cwd, "profile"),
+			lastUsedAt: "2026-05-17T00:00:00.000Z",
+			idleExpiresAt: "2026-05-17T00:10:00.000Z",
+			state: "ready",
+		}, null, 2)}\n`, "utf8");
+
+		const readyJson = await execFileAsync("node", [cliPath, "tools", "browser-use", "pool", "status", "--worker-id", "worker-status", "--json"], { cwd, env });
+		const ready = JSON.parse(readyJson.stdout);
+		assert.equal(ready.state, "ready");
+		assert.equal(ready.readOnly, true);
+		assert.equal(ready.cdpUrl, "http://127.0.0.1:4831");
+		assert.equal(ready.stateFileExists, true);
+		assert.deepEqual(ready.nextCommands, ["pibo tools browser-use pool status --json"]);
+
+		await writeFile(statePath, `${JSON.stringify({
+			...ready,
+			rootDir: undefined,
+			statePath: undefined,
+			lockPath: undefined,
+			stateFileExists: undefined,
+			readOnly: undefined,
+			nextCommands: undefined,
+			state: "stale",
+			lastError: "Recorded browser pid 1234 is not alive",
+		}, null, 2)}\n`, "utf8");
+
+		const staleText = await execFileAsync("node", [cliPath, "tools", "browser-use", "pool", "status", "--worker-id", "worker-status"], { cwd, env });
+		assert.match(staleText.stdout, /browser pool status: stale/);
+		assert.match(staleText.stdout, /stale\/dirty reason: Recorded browser pid 1234 is not alive/);
+		assert.match(staleText.stdout, /Next:/);
+		assert.match(staleText.stdout, /pibo tools browser-use pool status --json/);
+		assert.match(staleText.stdout, /pibo tools browser-use health/);
+
+		const staleJson = await execFileAsync("node", [cliPath, "tools", "browser-use", "pool", "status", "--worker-id", "worker-status", "--json"], { cwd, env });
+		const stale = JSON.parse(staleJson.stdout);
+		assert.equal(stale.state, "stale");
+		assert.equal(stale.staleReason, "Recorded browser pid 1234 is not alive");
+	} finally {
+		await rm(cwd, { recursive: true, force: true });
+	}
+});
+
 test("pibo tools browser-use manages isolated authenticated leases", async () => {
 	const cwd = await mkdtemp(join(tmpdir(), "pibo-tools-browser-use-leases-"));
 	try {
@@ -298,6 +362,7 @@ test("pibo tools browser-use manages isolated authenticated leases", async () =>
 		assert.match(discovery.stdout, /targets/);
 		assert.match(discovery.stdout, /attach-chat/);
 		assert.match(discovery.stdout, /lease acquire/);
+		assert.match(discovery.stdout, /pool status/);
 
 		const templateEnv = await execFileAsync("node", [cliPath, "tools", "browser-use", "auth-template", "env"], { cwd, env });
 		assert.match(templateEnv.stdout, /PIBO_BROWSER_USE_SESSION='pibo-auth-template'/);
