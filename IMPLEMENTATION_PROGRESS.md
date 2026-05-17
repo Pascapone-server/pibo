@@ -77,3 +77,20 @@ Intended validation plan:
 - Run focused build/test for the new/changed tests inside `pibo-dev-ink-cli-v2-web-parity`.
 - Run `npm run typecheck` inside `pibo-dev-ink-cli-v2-web-parity`.
 - Update PRD JSON story notes with evidence and commit hash, then commit the coherent audit batch from the host worktree.
+
+Validation and results for PRD 01 current-state audit batch:
+
+- Added `docs/reports/ink-cli-session-ui-v2-current-state.md` with the current shared Web/Ink surface, DOM-only Web compact terminal map, Ink renderer map, CLI source/runtime integration map, V2 scope matrix, gateway/Web/CLI command inventory, unsupported/product-area boundaries, owner-scope bug analysis, and PTY validation convention.
+- Added `test/ink-cli-v2-current-state.test.mjs`:
+  - active report coverage test for shared surface, command inventory, owner-scope fields, and PTY convention;
+  - active persistent-path reproduction showing no-owner CLI creation writes `sessions.owner_scope = user:unknown` and message ingest writes `session_navigation.owner_scope = user:unknown`, making the session absent from `find({ ownerScope: "user:real-web-owner" })`;
+  - skipped pending regression fixture for the future V2 no-implicit-`user:unknown` behavior.
+- Validation commands:
+  - `docker exec pibo-dev-ink-cli-v2-web-parity bash -lc 'cd /workspace && npm run dev -- debug pty --help'` — passed; confirmed PTY debug command surface for documentation.
+  - `docker exec pibo-dev-ink-cli-v2-web-parity bash -lc 'cd /workspace && npm run build && node --test test/ink-cli-v2-current-state.test.mjs'` — build passed; first test run exposed the fixture used unavailable `pibo-agent` in this registry, then the fixture was corrected to `codex-compat-openai-web`.
+  - `docker exec pibo-dev-ink-cli-v2-web-parity bash -lc 'cd /workspace && node --test test/ink-cli-v2-current-state.test.mjs'` — passed: 2 passing, 1 skipped pending fixture.
+  - `docker exec pibo-dev-ink-cli-v2-web-parity bash -lc 'cd /workspace && npm run typecheck'` — passed.
+- Path classification: documentation/test audit plus real persistent local source reproduction. No user-facing TUI behavior changed, so no PTY raw/clean artifacts were required for this batch.
+- Completed stories marked `passes: true`: PRD 01 `US-001`, `US-002`, `US-003`.
+- Implementation commit: `d8095bc` (`Audit Ink CLI V2 current state`).
+- Next recommended group: PRD 02 `US-001` owner discovery and Root recovery owner, then PRD 04 `US-001` source owner/room contract expansion if needed as a dependency.
