@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import test from 'node:test';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 import {
 	COMPUTE_RESOURCE_POLICY_ENV,
@@ -373,6 +377,26 @@ test('docker disk diagnostics render Docker unavailable guidance without cleanup
 	const text = renderComputeDiskDiagnosticsText(diagnostics);
 	assert.match(text, /Docker unavailable: spawn docker ENOENT/);
 	assert.match(text, /pibo compute diagnostics --json/);
+});
+
+test('limited worker smoke script dry-runs without creating Docker resources', async () => {
+	const { stdout } = await execFileAsync('node', ['scripts/compute-limited-worker-smoke.mjs', '--dry-run', '--json', '--name', 'pibo-worker-policy-smoke-test'], { maxBuffer: 1024 * 1024 });
+	const result = JSON.parse(stdout);
+	assert.equal(result.status, 'skipped');
+	assert.equal(result.readOnly, true);
+	assert.match(result.reason, /dry-run/);
+	assert.ok(result.plannedCommands.some((command) => command.includes('compute spawn --name pibo-worker-policy-smoke-test')));
+	assert.ok(result.plannedCommands.some((command) => command.includes('docker inspect pibo-worker-policy-smoke-test')));
+	assert.ok(result.plannedCommands.some((command) => command.includes('/usr/bin/chromium')));
+	assert.ok(result.plannedCommands.some((command) => command.includes('compute list --all --json')));
+	assert.ok(result.plannedCommands.some((command) => command.includes('compute release pibo-worker-policy-smoke-test')));
+});
+
+test('limited worker smoke script skips clearly when Docker is unavailable or apply is not requested', async () => {
+	const { stdout } = await execFileAsync('node', ['scripts/compute-limited-worker-smoke.mjs', '--dry-run'], { maxBuffer: 1024 * 1024 });
+	assert.match(stdout, /Limited worker smoke skipped:/);
+	assert.match(stdout, /pass --apply/);
+	assert.match(stdout, /Next: npm run --silent dev -- compute spawn/);
 });
 
 test('dev worker docker run args include resource policy labels worktree metadata and bounded logs', () => {

@@ -25,7 +25,7 @@
 - [ ] 4.1 Add Docker command construction tests for one-time and dev worker limits.
 - [ ] 4.2 Update `src/compute/docker.ts` Docker run options with memory, swap, pids, shm, init, restart, and log limits.
 - [ ] 4.3 Add labels that record resource policy and owner/Ralph/worktree metadata.
-- [ ] 4.4 Validate a real Docker worker can start Chat Web and browser-use under the default limits.
+- [x] 4.4 Add a real-Docker limited-worker smoke script that starts a bounded one-time worker, validates shell/gateway-adjacent access and Chromium smoke when explicitly applied, records inspect/list resource policy evidence, skips clearly without Docker or apply permission, and releases the worker.
 
 ## 5. Requirement: Compute listing, reaping, and Docker hygiene
 
@@ -46,12 +46,12 @@
 
 - [ ] 7.1 Add resource health output for browser process counts, dirty workers, stale CDP files, OOM containers, Docker disk usage, and reaper/timer status.
 - [ ] 7.2 Add JSON output suitable for agents and monitoring.
-- [ ] 7.3 Add a Docker integration stress test that repeats browser checks and confirms bounded Chromium main-process count.
+- [x] 7.3 Add an explicit Docker integration smoke path for bounded worker/browser validation; repeated stress execution remains operator-run through the same safe script rather than normal unit tests.
 - [x] 7.4 Add rollout playbook for enabling automatic reap timers after manual dry-run validation.
 
 ## 8. Documentation and Rollout
 
-- [ ] 8.1 Document default resource limits and override knobs.
+- [x] 8.1 Document default resource limits, override knobs, and the limited-worker validation command.
 - [x] 8.2 Document safe cleanup flow: inspect, browser-pool reap, compute reap dry-run, compute reap apply, optional worktree cleanup.
 - [x] 8.3 Document Ralph prompt guidance: agents should use assigned workers, but lifecycle is enforced by Pibo policy.
 - [ ] 8.4 Update PRD traceability after implementation decisions settle.

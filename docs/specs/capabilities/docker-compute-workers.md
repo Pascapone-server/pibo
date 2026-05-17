@@ -359,13 +359,22 @@ This capability participates in the compute/browser resource lifecycle change. I
 
 - Add built-CLI discovery tests before changing compute help text so the progressive discovery rule remains enforced.
 - Add Docker-command stub tests before changing worker labels, port mappings, or cleanup defaults; these tests should not require a real Docker daemon.
-- Keep real Docker spawn validation as an explicit integration check outside normal unit tests because it requires host Docker privileges and can create containers. Manual smoke command for operators who can create a temporary worker:
+- Keep real Docker spawn validation as an explicit integration check outside normal unit tests because it requires host Docker privileges and can create containers. The checked-in smoke script defaults to a dry run and skips clearly when Docker is unavailable or worker creation is not requested:
+
+  ```bash
+  npm run compute:limited-worker-smoke -- --dry-run
+  npm run compute:limited-worker-smoke -- --apply --json
+  ```
+
+  The apply path creates a temporary one-time worker with the default resource policy, verifies shell access, runs a bounded Chromium smoke command when browser dependencies are present, records Docker inspect values for memory, swap, PID, shm, restart, log, TTL/idle, owner, and resource-policy labels, confirms the worker appears in `pibo compute list --all --json`, and releases the worker in a `finally` cleanup path. Operators who need each primitive command can run the equivalent manual sequence:
 
   ```bash
   worker="pibo-worker-policy-smoke-$(date +%s)"
   npm run dev -- compute spawn --name "$worker" --owner user:smoke --ttl-seconds 600 --idle-seconds 300
-  docker inspect "$worker" --format '{{json .HostConfig.Memory}} {{json .HostConfig.PidsLimit}} {{json .HostConfig.RestartPolicy}} {{json .Config.Labels}}'
-  docker exec "$worker" bash -lc 'node --version && test -x /usr/bin/chromium'
+  docker inspect "$worker" --format '{{json .HostConfig.Memory}} {{json .HostConfig.MemorySwap}} {{json .HostConfig.PidsLimit}} {{json .HostConfig.ShmSize}} {{json .HostConfig.RestartPolicy}} {{json .HostConfig.LogConfig}} {{json .Config.Labels}}'
+  docker exec "$worker" bash -lc 'node --version && test -x /usr/bin/chromium && /usr/bin/chromium --version'
+  docker exec "$worker" bash -lc "export DISPLAY=:99; timeout 20s /usr/bin/chromium --headless --no-sandbox --disable-gpu --dump-dom 'data:text/html,<p>pibo-smoke</p>' | grep pibo-smoke"
+  npm run dev -- compute list --all --json
   npm run dev -- compute release "$worker"
   ```
 

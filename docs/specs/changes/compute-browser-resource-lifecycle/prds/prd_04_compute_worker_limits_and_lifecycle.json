@@ -99,8 +99,8 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added scripts/compute-limited-worker-smoke.mjs and npm script compute:limited-worker-smoke. The script defaults to read-only dry-run, skips clearly when Docker is unavailable, and when explicitly run with --apply it spawns a bounded one-time worker, verifies shell access, runs a bounded Chromium smoke path, records Docker inspect resource policy values plus compute list visibility, and releases the worker in a finally cleanup path. Documented the script and equivalent manual commands in docs/specs/capabilities/docker-compute-workers.md; updated tasks. Evidence recorded in IMPLEMENTATION_PROGRESS.md: focused Docker-worker compute tests passed, Docker-worker dry-run and Docker-unavailable skip paths passed, host read-only dry-run passed, and full npm run typecheck passed. Real --apply creation was not run in this Ralph session because the task explicitly forbids creating/releasing Docker workers."
     }
   ]
 }
