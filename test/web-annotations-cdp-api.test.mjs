@@ -27,15 +27,20 @@ function createRequest(path, body, method = "POST") {
 	});
 }
 
-function createContext(ownerScope = "user:a") {
+function createContext(options = "user:a") {
+	const webOwnerScope = typeof options === "string" ? options : options.webOwnerScope ?? "user:a";
+	const sessions = typeof options === "string"
+		? { ps_a: { ownerScope: options } }
+		: options.sessions ?? { ps_a: { ownerScope: options.sessionOwnerScope ?? webOwnerScope } };
 	return {
 		channelContext: {
 			getSession(id) {
-				return id === "ps_a" ? { id, piSessionId: "pi", channel: "web", kind: "chat", profile: "pibo-agent", ownerScope, createdAt: "now", updatedAt: "now" } : undefined;
+				const session = sessions[id];
+				return session ? { id, piSessionId: "pi", channel: "web", kind: "chat", profile: "pibo-agent", ownerScope: session.ownerScope, createdAt: "now", updatedAt: "now" } : undefined;
 			},
 		},
 		requireSession() {
-			return Promise.resolve({ ownerScope, authSession: { user: { id: "u" } } });
+			return Promise.resolve({ ownerScope: webOwnerScope, authSession: { user: { id: "u" } } });
 		},
 	};
 }
@@ -118,9 +123,29 @@ test("Web Annotation overlay submissions use binding token and derive session sc
 		const json = await response.json();
 		assert.equal(json.annotation.ownerScope, "user:a");
 		assert.equal(json.annotation.piboSessionId, "ps_a");
+		assert.equal(json.annotation.piboRoomId, "room_a");
 		assert.equal(json.annotation.bindingId, "binding-submit");
 		assert.equal(json.annotation.targetId, "target-a");
 		assert.equal(store.listAnnotations({ ownerScope: "user:a", piboSessionId: "ps_a" }).length, 1);
+
+		const spoofed = await app.handleRequest(new Request("http://127.0.0.1/api/web-annotations/submissions", {
+			method: "POST",
+			headers: { "content-type": "application/json", origin: "http://localhost:3000" },
+			body: JSON.stringify({
+				bindingId: binding.id,
+				bindingToken: "submit-token",
+				ownerScope: "user:spoofed",
+				piboSessionId: "ps_spoofed",
+				piboRoomId: "room_spoofed",
+				note: "Spoof attempt",
+				targetKind: "pin",
+				viewport: { width: 1, height: 1 },
+			}),
+		}), noAuthContext);
+		const spoofedJson = await spoofed.json();
+		assert.equal(spoofedJson.annotation.ownerScope, "user:a");
+		assert.equal(spoofedJson.annotation.piboSessionId, "ps_a");
+		assert.equal(spoofedJson.annotation.piboRoomId, "room_a");
 
 		await assert.rejects(
 			() => app.handleRequest(new Request("http://127.0.0.1/api/web-annotations/submissions", {
@@ -129,6 +154,14 @@ test("Web Annotation overlay submissions use binding token and derive session sc
 				body: JSON.stringify({ bindingId: binding.id, bindingToken: "wrong", note: "x", targetKind: "pin", viewport: { width: 1, height: 1 } }),
 			}), noAuthContext),
 			/Invalid Web Annotation binding token/,
+		);
+		await assert.rejects(
+			() => app.handleRequest(new Request("http://127.0.0.1/api/web-annotations/submissions", {
+				method: "POST",
+				headers: { "content-type": "application/json", origin: "http://localhost:3000" },
+				body: JSON.stringify({ bindingId: binding.id, bindingToken: 123, note: "x", targetKind: "pin", viewport: { width: 1, height: 1 } }),
+			}), noAuthContext),
+			/bindingToken must be a string/,
 		);
 	} finally {
 		store.close();
@@ -169,6 +202,66 @@ test("Web Annotation API lists gets and patches authorized session annotations",
 			() => app.handleRequest(new Request("http://127.0.0.1/api/web-annotations/ann_api?piboSessionId=ps_missing"), context),
 			/Pibo session not found/,
 		);
+	} finally {
+		store.close();
+	}
+});
+
+test("Web Annotation API rejects cross-owner cross-session and invalid status updates", async () => {
+	const store = new WebAnnotationStore({ path: ":memory:" });
+	try {
+		store.createAnnotation({
+			id: "ann_api_a",
+			ownerScope: "user:a",
+			piboSessionId: "ps_a",
+			piboRoomId: "room_a",
+			note: "Fix spacing",
+			url: "http://localhost:3000/settings",
+			targetKind: "element",
+			viewport: { width: 100, height: 100 },
+		});
+		store.createAnnotation({
+			id: "ann_api_b",
+			ownerScope: "user:a",
+			piboSessionId: "ps_b",
+			note: "Other session",
+			url: "http://localhost:3000/other",
+			targetKind: "pin",
+			viewport: { width: 100, height: 100 },
+		});
+		store.createAnnotation({
+			id: "ann_resolved",
+			ownerScope: "user:a",
+			piboSessionId: "ps_a",
+			status: "resolved",
+			note: "Done",
+			url: "http://localhost:3000/done",
+			targetKind: "pin",
+			viewport: { width: 100, height: 100 },
+		});
+		const app = createWebAnnotationsWebApp({ store });
+		const sameOwnerContext = createContext({ webOwnerScope: "user:a", sessions: { ps_a: { ownerScope: "user:a" }, ps_b: { ownerScope: "user:a" } } });
+		const otherOwnerContext = createContext({ webOwnerScope: "user:b", sessions: { ps_a: { ownerScope: "user:a" } } });
+
+		await assert.rejects(
+			() => app.handleRequest(new Request("http://127.0.0.1/api/web-annotations?piboSessionId=ps_a"), otherOwnerContext),
+			/Pibo session is not authorized/,
+		);
+		await assert.rejects(
+			() => app.handleRequest(new Request("http://127.0.0.1/api/web-annotations/ann_api_a?piboSessionId=ps_b"), sameOwnerContext),
+			/Web Annotation was not found/,
+		);
+		await assert.rejects(
+			() => app.handleRequest(createRequest("/api/web-annotations/ann_api_a", { piboSessionId: "ps_b", status: "attached" }, "PATCH"), sameOwnerContext),
+			/Web Annotation was not found/,
+		);
+		assert.equal(store.getAnnotation("user:a", "ps_a", "ann_api_a").status, "open");
+
+		await assert.rejects(
+			() => app.handleRequest(createRequest("/api/web-annotations/ann_resolved", { piboSessionId: "ps_a", status: "acknowledged" }, "PATCH"), sameOwnerContext),
+			/resolved annotations cannot transition/,
+		);
+		assert.equal(store.getAnnotation("user:a", "ps_a", "ann_resolved").status, "resolved");
 	} finally {
 		store.close();
 	}

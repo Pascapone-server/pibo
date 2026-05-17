@@ -12,6 +12,7 @@ import {
 	type WebAnnotationAccessibilityHint,
 	type WebAnnotationScreenshotRef,
 	type WebAnnotationSourceHint,
+	type WebAnnotationStatus,
 	type WebAnnotationTarget,
 	type WebAnnotationTargetKind,
 	type WebAnnotationViewport,
@@ -158,6 +159,13 @@ export function normalizeWebAnnotationPatchInput(patch: PatchWebAnnotationInput)
 		summary: patch.summary === null ? null : sanitizeWebAnnotationText(patch.summary, { max: WEB_ANNOTATION_LIMITS.summary, field: "summary" }),
 		metadata: normalizeWebAnnotationJsonObject(patch.metadata, "metadata"),
 	};
+}
+
+export function assertWebAnnotationStatusTransition(current: WebAnnotationStatus, next: WebAnnotationStatus | undefined): void {
+	if (!next || next === current) return;
+	if (current === "resolved") throw new Error("resolved annotations cannot transition to another status");
+	if (current === "dismissed") throw new Error("dismissed annotations cannot transition to another status");
+	if (current === "applying" && next === "dismissed") throw new Error("applying annotations cannot be dismissed");
 }
 
 export function normalizeWebAnnotationThreadMessageInput(input: AddWebAnnotationThreadMessageInput): AddWebAnnotationThreadMessageInput {

@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
 	normalizeWebAnnotationAttachmentIds,
+	prepareWebAnnotationMessageAttachments,
 	renderAttachedWebAnnotations,
 	serializeWebAnnotationAttachment,
 } from "../dist/web-annotations/attachments.js";
+import { WebAnnotationStore } from "../dist/web-annotations/store.js";
 
 function annotation(overrides = {}) {
 	return {
@@ -54,4 +56,39 @@ test("attached web annotation context escapes html and omits screenshots", () =>
 	assert.match(block, /htmlHint: &lt;button/);
 	assert.match(block, /comment: Make &lt;this&gt; wider/);
 	assert.doesNotMatch(block, /screen\.png/);
+});
+
+test("web annotation composer attachments reject stale and terminal annotation ids", () => {
+	const store = new WebAnnotationStore({ path: ":memory:" });
+	try {
+		store.createAnnotation(annotation({ id: "ann_open" }));
+		store.createAnnotation(annotation({ id: "ann_other_session", piboSessionId: "ps_b" }));
+		store.createAnnotation(annotation({ id: "ann_resolved", status: "resolved" }));
+
+		const prepared = prepareWebAnnotationMessageAttachments({
+			store,
+			ownerScope: "user:a",
+			piboSessionId: "ps_a",
+			messageText: "Please fix this",
+			attachmentIds: ["ann_open"],
+		});
+		assert.deepEqual(prepared.ids, ["ann_open"]);
+		assert.equal(prepared.attachments[0].id, "ann_open");
+		assert.match(prepared.messageText, /<attached-web-annotations>/);
+
+		assert.throws(
+			() => prepareWebAnnotationMessageAttachments({ store, ownerScope: "user:a", piboSessionId: "ps_a", messageText: "x", attachmentIds: ["ann_missing"] }),
+			/not available for this session/,
+		);
+		assert.throws(
+			() => prepareWebAnnotationMessageAttachments({ store, ownerScope: "user:a", piboSessionId: "ps_a", messageText: "x", attachmentIds: ["ann_other_session"] }),
+			/not available for this session/,
+		);
+		assert.throws(
+			() => prepareWebAnnotationMessageAttachments({ store, ownerScope: "user:a", piboSessionId: "ps_a", messageText: "x", attachmentIds: ["ann_resolved"] }),
+			/cannot be attached because it is resolved/,
+		);
+	} finally {
+		store.close();
+	}
 });

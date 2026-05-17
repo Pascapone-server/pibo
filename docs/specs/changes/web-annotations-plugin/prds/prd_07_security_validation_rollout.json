@@ -32,8 +32,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Completed in this run: added focused API tests for cross-owner session rejection, cross-session get/patch isolation, malformed binding tokens, overlay spoofed owner/session/room fields, and invalid terminal status transitions; added native-tool tests for owner-scoped explicit session access and invalid applying->dismissed transition; extracted and tested shared composer attachment preparation for stale/terminal attachment ids. Docker worker typecheck and focused build/tests passed."
     },
     {
       "id": "US-003",

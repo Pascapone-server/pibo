@@ -8,7 +8,7 @@ import {
 	type WebAnnotationStatus,
 } from "./types.js";
 import { createDefaultWebAnnotationStore, type WebAnnotationStore } from "./store.js";
-import { sanitizeWebAnnotationText, WEB_ANNOTATION_LIMITS } from "./validation.js";
+import { assertWebAnnotationStatusTransition, sanitizeWebAnnotationText, WEB_ANNOTATION_LIMITS } from "./validation.js";
 
 export const WEB_ANNOTATION_TOOL_NAMES = [
 	"web_annotations_list",
@@ -209,7 +209,8 @@ function getAnnotationForLifecycle(store: WebAnnotationStore, context: RequiredT
 function assertLifecycleTransition(annotation: WebAnnotation, action: "acknowledge" | "resolve" | "dismiss"): void {
 	if (annotation.status === "resolved") throw new Error(`Annotation ${annotation.id} is already resolved`);
 	if (annotation.status === "dismissed") throw new Error(`Annotation ${annotation.id} is already dismissed`);
-	if (action === "dismiss" && annotation.status === "applying") throw new Error(`Annotation ${annotation.id} is applying and cannot be dismissed by this tool`);
+	const nextStatus = action === "acknowledge" ? "acknowledged" : action === "resolve" ? "resolved" : "dismissed";
+	assertWebAnnotationStatusTransition(annotation.status, nextStatus);
 }
 
 function createListTool(store: WebAnnotationStore, context: ToolDefinitionContext): ToolDefinition {

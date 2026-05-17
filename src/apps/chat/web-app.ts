@@ -83,9 +83,8 @@ import { createDefaultPiboCronStore, type PiboCronStore } from "../../cron/store
 import { createDefaultPiboRalphStore, type PiboRalphStore } from "../../ralph/store.js";
 import { handleChatCronApiRequest } from "./cron-api.js";
 import { handleChatRalphApiRequest } from "./ralph-api.js";
-import { normalizeWebAnnotationAttachmentIds, renderAttachedWebAnnotations, serializeWebAnnotationAttachment, type WebAnnotationMessageAttachment } from "../../web-annotations/attachments.js";
+import { prepareWebAnnotationMessageAttachments, type PreparedWebAnnotationAttachments } from "../../web-annotations/attachments.js";
 import { createDefaultWebAnnotationStore, type WebAnnotationStore } from "../../web-annotations/store.js";
-import type { WebAnnotation } from "../../web-annotations/types.js";
 
 export const CHAT_WEB_APP_NAME = "pibo.chat-web";
 export const CHAT_WEB_CHANNEL = "pibo.chat-web";
@@ -2414,46 +2413,25 @@ function getChatWebAnnotationStore(): WebAnnotationStore {
 	return defaultChatWebAnnotationStore;
 }
 
-type PreparedWebAnnotationAttachments = {
-	ids: string[];
-	annotations: WebAnnotation[];
-	attachments: WebAnnotationMessageAttachment[];
-	modelContext: string;
-	messageText: string;
-};
-
 function prepareWebAnnotationAttachments(input: {
 	ownerScope: string;
 	piboSessionId: string;
 	messageText: string;
 	attachmentIds: unknown;
 }): PreparedWebAnnotationAttachments {
-	let ids: string[];
 	try {
-		ids = normalizeWebAnnotationAttachmentIds(input.attachmentIds);
+		return prepareWebAnnotationMessageAttachments({
+			store: getChatWebAnnotationStore(),
+			ownerScope: input.ownerScope,
+			piboSessionId: input.piboSessionId,
+			messageText: input.messageText,
+			attachmentIds: input.attachmentIds,
+		});
 	} catch (error) {
-		throw new PiboWebHttpError(error instanceof Error ? error.message : String(error), 400);
+		const message = error instanceof Error ? error.message : String(error);
+		const status = /not available for this session/.test(message) ? 404 : 400;
+		throw new PiboWebHttpError(message, status);
 	}
-	if (!ids.length) {
-		return { ids: [], annotations: [], attachments: [], modelContext: "", messageText: input.messageText };
-	}
-	const store = getChatWebAnnotationStore();
-	const annotations = ids.map((id) => {
-		const annotation = store.getAnnotation(input.ownerScope, input.piboSessionId, id);
-		if (!annotation) throw new PiboWebHttpError(`Web Annotation ${id} is not available for this session`, 404);
-		if (annotation.status === "resolved" || annotation.status === "dismissed") {
-			throw new PiboWebHttpError(`Web Annotation ${id} cannot be attached because it is ${annotation.status}`, 400);
-		}
-		return annotation;
-	});
-	const modelContext = renderAttachedWebAnnotations(annotations);
-	return {
-		ids,
-		annotations,
-		attachments: annotations.map(serializeWebAnnotationAttachment),
-		modelContext,
-		messageText: modelContext ? `${input.messageText.trimEnd()}\n\n${modelContext}` : input.messageText,
-	};
 }
 
 function markWebAnnotationsAttached(prepared: PreparedWebAnnotationAttachments): void {

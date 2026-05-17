@@ -1,4 +1,5 @@
 import type { WebAnnotation, WebAnnotationSourceHint } from "./types.js";
+import type { WebAnnotationStore } from "./store.js";
 import { sanitizeWebAnnotationText, WEB_ANNOTATION_LIMITS } from "./validation.js";
 
 export const WEB_ANNOTATION_MESSAGE_ATTACHMENT_LIMIT = WEB_ANNOTATION_LIMITS.attachments;
@@ -15,6 +16,14 @@ export type WebAnnotationMessageAttachment = {
 	text?: string;
 	note: string;
 	createdAt: string;
+};
+
+export type PreparedWebAnnotationAttachments = {
+	ids: string[];
+	annotations: WebAnnotation[];
+	attachments: WebAnnotationMessageAttachment[];
+	modelContext: string;
+	messageText: string;
 };
 
 export function normalizeWebAnnotationAttachmentIds(value: unknown): string[] {
@@ -56,6 +65,35 @@ export function serializeWebAnnotationAttachment(annotation: WebAnnotation): Web
 	if (position) attachment.position = position;
 	if (text) attachment.text = text;
 	return attachment;
+}
+
+export function prepareWebAnnotationMessageAttachments(input: {
+	store: WebAnnotationStore;
+	ownerScope: string;
+	piboSessionId: string;
+	messageText: string;
+	attachmentIds: unknown;
+}): PreparedWebAnnotationAttachments {
+	const ids = normalizeWebAnnotationAttachmentIds(input.attachmentIds);
+	if (!ids.length) {
+		return { ids: [], annotations: [], attachments: [], modelContext: "", messageText: input.messageText };
+	}
+	const annotations = ids.map((id) => {
+		const annotation = input.store.getAnnotation(input.ownerScope, input.piboSessionId, id);
+		if (!annotation) throw new Error(`Web Annotation ${id} is not available for this session`);
+		if (annotation.status === "resolved" || annotation.status === "dismissed") {
+			throw new Error(`Web Annotation ${id} cannot be attached because it is ${annotation.status}`);
+		}
+		return annotation;
+	});
+	const modelContext = renderAttachedWebAnnotations(annotations);
+	return {
+		ids,
+		annotations,
+		attachments: annotations.map(serializeWebAnnotationAttachment),
+		modelContext,
+		messageText: modelContext ? `${input.messageText.trimEnd()}\n\n${modelContext}` : input.messageText,
+	};
 }
 
 export function renderAttachedWebAnnotations(annotations: readonly WebAnnotation[]): string {

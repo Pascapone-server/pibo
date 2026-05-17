@@ -5,6 +5,7 @@ import { serializeWebAnnotationAttachment } from "./attachments.js";
 import { createDefaultWebAnnotationStore, type WebAnnotationStore } from "./store.js";
 import { isWebAnnotationStatus, isWebAnnotationTargetKind, type WebAnnotationScreenshotRef, type WebAnnotationTarget, type WebAnnotationViewport } from "./types.js";
 import {
+	assertWebAnnotationStatusTransition,
 	normalizeWebAnnotationLimit,
 	normalizeWebAnnotationScreenshotRef,
 	normalizeWebAnnotationTarget,
@@ -139,6 +140,13 @@ export function createWebAnnotationsWebApp(options: WebAnnotationsWebAppOptions 
 						const body = await readJsonBody<AnnotationPatchBody>(request);
 						const bindingContext = resolveBindingContext(context, webSession, body);
 						const status = optionalStatus(body.status);
+						const existing = store.getAnnotation(bindingContext.ownerScope, bindingContext.piboSessionId, annotationResource.id);
+						if (!existing) throw new PiboWebHttpError("Web Annotation was not found", 404);
+						try {
+							assertWebAnnotationStatusTransition(existing.status, status);
+						} catch (error) {
+							throw new PiboWebHttpError(error instanceof Error ? error.message : String(error), 400);
+						}
 						const annotation = store.patchAnnotation(bindingContext.ownerScope, bindingContext.piboSessionId, annotationResource.id, {
 							...(status ? { status } : {}),
 							...(body.summary !== undefined ? { summary: body.summary } : {}),
