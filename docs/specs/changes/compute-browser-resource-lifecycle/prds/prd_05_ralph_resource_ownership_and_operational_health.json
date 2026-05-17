@@ -49,8 +49,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented Ralph service browser-lease cleanup after run completion and terminal outcomes: run/job resource metadata is marked released after successful browser-pool release, dirty with a reason when release fails, and retained worker metadata without browser leases is preserved. Focused service tests cover ok completion, promise-complete, max-iteration, stop-after-run, cleanup failure, and retained worker state. Evidence recorded in IMPLEMENTATION_PROGRESS.md; focused Ralph tests, real local CDP release fixture, and full npm run typecheck passed."
     },
     {
       "id": "US-004",
