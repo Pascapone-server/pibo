@@ -15,8 +15,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented in overlay runtime/source-hints batch; validated with typecheck, focused tests, and worker CDP browser verification."
     },
     {
       "id": "US-002",
@@ -31,8 +31,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented in overlay runtime/source-hints batch; validated with typecheck, focused tests, and worker CDP browser verification."
     },
     {
       "id": "US-003",
@@ -47,8 +47,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented in overlay runtime/source-hints batch; validated with typecheck, focused tests, and worker CDP browser verification."
     },
     {
       "id": "US-004",
@@ -64,8 +64,8 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented in overlay runtime/source-hints batch; validated with typecheck, focused tests, and worker CDP browser verification."
     },
     {
       "id": "US-005",
@@ -79,8 +79,8 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented in overlay runtime/source-hints batch; validated with typecheck, focused tests, and worker CDP browser verification."
     },
     {
       "id": "US-006",
@@ -95,8 +95,8 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented in overlay runtime/source-hints batch; validated with typecheck, focused tests, and worker CDP browser verification."
     }
   ]
 }

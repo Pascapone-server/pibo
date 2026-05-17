@@ -7,6 +7,7 @@ import type { PiboJsonObject } from "../core/events.js";
 import {
 	isWebAnnotationBindingState,
 	isWebAnnotationStatus,
+	isWebAnnotationTargetKind,
 	type AddWebAnnotationThreadMessageInput,
 	type CreateWebAnnotationBindingInput,
 	type CreateWebAnnotationInput,
@@ -120,6 +121,7 @@ function validateAnnotationInput(input: CreateWebAnnotationInput): void {
 	requireNonEmpty(input.note, "note");
 	requireNonEmpty(input.url, "url");
 	if (input.status !== undefined && !isWebAnnotationStatus(input.status)) throw new Error(`Invalid annotation status: ${input.status}`);
+	if (!isWebAnnotationTargetKind(input.targetKind)) throw new Error(`Invalid annotation target kind: ${input.targetKind}`);
 	if (!input.viewport || typeof input.viewport.width !== "number" || typeof input.viewport.height !== "number") {
 		throw new Error("viewport width and height are required");
 	}
@@ -255,6 +257,14 @@ export class WebAnnotationStore {
 			SELECT * FROM web_annotation_bindings
 			WHERE id = ? AND owner_scope = ? AND pibo_session_id = ?
 		`).get(id, ownerScope, piboSessionId) as WebAnnotationBindingRow | undefined;
+		return row ? bindingFromRow(row) : undefined;
+	}
+
+	getBindingById(id: string): WebAnnotationBinding | undefined {
+		const row = this.db.prepare(`
+			SELECT * FROM web_annotation_bindings
+			WHERE id = ? AND state != 'removed'
+		`).get(id) as WebAnnotationBindingRow | undefined;
 		return row ? bindingFromRow(row) : undefined;
 	}
 

@@ -85,6 +85,56 @@ test("Web Annotation CDP service creates selected bindings and marks missing tar
 	}
 });
 
+test("Web Annotation overlay submissions use binding token and derive session scope", async () => {
+	const store = new WebAnnotationStore({ path: ":memory:" });
+	try {
+		const binding = store.createBinding({
+			id: "binding-submit",
+			ownerScope: "user:a",
+			piboSessionId: "ps_a",
+			piboRoomId: "room_a",
+			url: "http://localhost:3000/page",
+			targetId: "target-a",
+			metadata: { overlaySubmissionToken: "submit-token" },
+		});
+		const app = createWebAnnotationsWebApp({ store });
+		const noAuthContext = { requireSession() { throw new Error("auth should not be required for token submission"); } };
+		const response = await app.handleRequest(new Request("http://127.0.0.1/api/web-annotations/submissions", {
+			method: "POST",
+			headers: { "content-type": "application/json", origin: "http://localhost:3000" },
+			body: JSON.stringify({
+				bindingId: binding.id,
+				bindingToken: "submit-token",
+				note: "Make this primary",
+				url: "http://localhost:3000/page#section",
+				title: "Demo",
+				targetKind: "element",
+				viewport: { width: 1280, height: 720, devicePixelRatio: 1 },
+				target: { kind: "element", selector: "[data-testid=save]", sourceHints: [{ kind: "test-id", confidence: "high", id: "save" }] },
+			}),
+		}), noAuthContext);
+		assert.equal(response.status, 201);
+		assert.equal(response.headers.get("access-control-allow-origin"), "*");
+		const json = await response.json();
+		assert.equal(json.annotation.ownerScope, "user:a");
+		assert.equal(json.annotation.piboSessionId, "ps_a");
+		assert.equal(json.annotation.bindingId, "binding-submit");
+		assert.equal(json.annotation.targetId, "target-a");
+		assert.equal(store.listAnnotations({ ownerScope: "user:a", piboSessionId: "ps_a" }).length, 1);
+
+		await assert.rejects(
+			() => app.handleRequest(new Request("http://127.0.0.1/api/web-annotations/submissions", {
+				method: "POST",
+				headers: { "content-type": "application/json", origin: "http://localhost:3000" },
+				body: JSON.stringify({ bindingId: binding.id, bindingToken: "wrong", note: "x", targetKind: "pin", viewport: { width: 1, height: 1 } }),
+			}), noAuthContext),
+			/Invalid Web Annotation binding token/,
+		);
+	} finally {
+		store.close();
+	}
+});
+
 test("Web Annotation API enforces same-origin session authorization and routes binding operations", async () => {
 	const calls = [];
 	const fakeService = {

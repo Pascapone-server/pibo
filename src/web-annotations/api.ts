@@ -2,6 +2,7 @@ import { PiboWebHttpError, readJsonBody, responseJson } from "../web/http.js";
 import type { PiboWebApp, PiboWebAppContext, PiboWebSession } from "../web/types.js";
 import { createWebAnnotationCdpService, type WebAnnotationCdpService, type WebAnnotationBindingContext } from "./cdp.js";
 import { createDefaultWebAnnotationStore, type WebAnnotationStore } from "./store.js";
+import { isWebAnnotationTargetKind, type WebAnnotationTarget, type WebAnnotationViewport } from "./types.js";
 
 export const WEB_ANNOTATIONS_API_PREFIX = "/api/web-annotations";
 export const WEB_ANNOTATIONS_APP_MOUNT = "/apps/web-annotations";
@@ -23,6 +24,18 @@ type InjectBody = {
 	piboSessionId?: string;
 	piboRoomId?: string;
 	cdpUrl?: string;
+};
+
+type OverlaySubmissionBody = {
+	bindingId?: string;
+	bindingToken?: string;
+	note?: string;
+	url?: string;
+	title?: string;
+	targetKind?: string;
+	viewport?: WebAnnotationViewport;
+	target?: WebAnnotationTarget;
+	screenshotRef?: object;
 };
 
 let defaultStore: WebAnnotationStore | undefined;
@@ -48,10 +61,18 @@ export function createWebAnnotationsWebApp(options: WebAnnotationsWebAppOptions 
 			if (!url.pathname.startsWith(WEB_ANNOTATIONS_API_PREFIX)) return undefined;
 
 			try {
+				if (url.pathname === `${WEB_ANNOTATIONS_API_PREFIX}/submissions` && request.method === "OPTIONS") {
+					return corsResponse(null, { status: 204 });
+				}
+				if (url.pathname === `${WEB_ANNOTATIONS_API_PREFIX}/submissions` && request.method === "POST") {
+					const annotation = await handleOverlaySubmission(store, request);
+					return corsJson({ ok: true, annotation }, { status: 201 });
+				}
+
 				const webSession = await context.requireSession({ request });
 
 				if (url.pathname === `${WEB_ANNOTATIONS_API_PREFIX}/targets` && request.method === "GET") {
-					const service = serviceForRequest(baseService, url.searchParams.get("cdpUrl") ?? undefined, store, options);
+					const service = serviceForRequest(baseService, url.searchParams.get("cdpUrl") ?? undefined, request, store, options);
 					const targets = await service.listTargets();
 					return responseJson({ ok: true, targets });
 				}
@@ -67,7 +88,7 @@ export function createWebAnnotationsWebApp(options: WebAnnotationsWebAppOptions 
 					requireSameOriginJsonRequest(request);
 					const body = await readJsonBody<BindingBody>(request);
 					const bindingContext = resolveBindingContext(context, webSession, body);
-					const service = serviceForRequest(baseService, body.cdpUrl, store, options);
+					const service = serviceForRequest(baseService, body.cdpUrl, request, store, options);
 					if (body.url) {
 						const result = await service.createUrlBinding({ ...bindingContext, url: body.url });
 						return responseJson({ ok: true, ...result }, { status: 201 });
@@ -85,7 +106,7 @@ export function createWebAnnotationsWebApp(options: WebAnnotationsWebAppOptions 
 						requireSameOriginJsonRequest(request);
 						const body = await readJsonBody<InjectBody>(request);
 						const bindingContext = resolveBindingContext(context, webSession, body);
-						const service = serviceForRequest(baseService, body.cdpUrl, store, options);
+						const service = serviceForRequest(baseService, body.cdpUrl, request, store, options);
 						const result = await service.injectBinding(bindingContext, bindingResource.id);
 						return responseJson({ ok: true, ...result });
 					}
@@ -93,7 +114,7 @@ export function createWebAnnotationsWebApp(options: WebAnnotationsWebAppOptions 
 						requireSameOriginJsonRequest(request);
 						const body = await readJsonBody<InjectBody>(request);
 						const bindingContext = resolveBindingContext(context, webSession, body);
-						const service = serviceForRequest(baseService, body.cdpUrl, store, options);
+						const service = serviceForRequest(baseService, body.cdpUrl, request, store, options);
 						const result = await service.stopBinding(bindingContext, bindingResource.id);
 						return responseJson({ ok: true, ...result });
 					}
@@ -114,6 +135,96 @@ export function createWebAnnotationsWebApp(options: WebAnnotationsWebAppOptions 
 	};
 }
 
+async function handleOverlaySubmission(store: WebAnnotationStore, request: Request) {
+	const contentType = request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
+	if (contentType !== "application/json") throw new PiboWebHttpError("Content-Type must be application/json", 415);
+	const body = await readJsonBody<OverlaySubmissionBody>(request);
+	const bindingId = requireBodyString(body.bindingId, "bindingId", 120);
+	const bindingToken = requireBodyString(body.bindingToken, "bindingToken", 200);
+	const binding = store.getBindingById(bindingId);
+	if (!binding) throw new PiboWebHttpError("Web Annotation binding was not found", 404);
+	if (binding.state === "removed") throw new PiboWebHttpError("Web Annotation binding was removed", 404);
+	if (binding.metadata?.overlaySubmissionToken !== bindingToken) throw new PiboWebHttpError("Invalid Web Annotation binding token", 403);
+	const note = requireBodyString(body.note, "note", 2_000);
+	const targetKind = requireTargetKind(body.targetKind);
+	const viewport = normalizeViewport(body.viewport);
+	return store.createAnnotation({
+		ownerScope: binding.ownerScope,
+		piboSessionId: binding.piboSessionId,
+		piboRoomId: binding.piboRoomId,
+		bindingId: binding.id,
+		note,
+		url: optionalBodyString(body.url, 2_000) ?? binding.url,
+		title: optionalBodyString(body.title, 200) ?? binding.title,
+		targetId: binding.targetId,
+		targetKind,
+		viewport,
+		target: normalizeTarget(body.target, targetKind),
+		screenshotRef: normalizeJsonObject(body.screenshotRef),
+	});
+}
+
+function requireBodyString(value: string | undefined, field: string, max: number): string {
+	const text = optionalBodyString(value, max)?.trim() ?? "";
+	if (!text) throw new PiboWebHttpError(`${field} is required`, 400);
+	return text;
+}
+
+function optionalBodyString(value: string | undefined, max: number): string | undefined {
+	if (value === undefined) return undefined;
+	if (typeof value !== "string") throw new PiboWebHttpError("Invalid string field", 400);
+	const sanitized = value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "");
+	return sanitized.length > max ? sanitized.slice(0, max) : sanitized;
+}
+
+function requireTargetKind(value: string | undefined) {
+	if (!value || !isWebAnnotationTargetKind(value)) throw new PiboWebHttpError("Invalid annotation target kind", 400);
+	return value;
+}
+
+function normalizeViewport(value: WebAnnotationViewport | undefined): WebAnnotationViewport {
+	if (!value || typeof value.width !== "number" || typeof value.height !== "number") throw new PiboWebHttpError("viewport width and height are required", 400);
+	return {
+		width: boundedNumber(value.width, 0, 20_000),
+		height: boundedNumber(value.height, 0, 20_000),
+		devicePixelRatio: value.devicePixelRatio === undefined ? undefined : boundedNumber(value.devicePixelRatio, 0.1, 10),
+	};
+}
+
+function normalizeTarget(value: WebAnnotationTarget | undefined, targetKind: ReturnType<typeof requireTargetKind>): WebAnnotationTarget | undefined {
+	if (value === undefined) return { kind: targetKind };
+	if (!value || typeof value !== "object" || Array.isArray(value)) throw new PiboWebHttpError("target must be an object", 400);
+	return normalizeJsonObject({ ...value, kind: targetKind }) as WebAnnotationTarget;
+}
+
+function normalizeJsonObject<T extends object>(value: T | undefined): T | undefined {
+	if (value === undefined) return undefined;
+	if (!value || typeof value !== "object" || Array.isArray(value)) throw new PiboWebHttpError("Invalid object field", 400);
+	return value;
+}
+
+function boundedNumber(value: number, min: number, max: number): number {
+	if (!Number.isFinite(value)) throw new PiboWebHttpError("Invalid numeric field", 400);
+	return Math.max(min, Math.min(max, value));
+}
+
+function corsJson(payload: unknown, init: ResponseInit = {}): Response {
+	return responseJson(payload, { ...init, headers: corsHeaders(init.headers) });
+}
+
+function corsResponse(body: string | null, init: ResponseInit = {}): Response {
+	return new Response(body, { ...init, headers: corsHeaders(init.headers) });
+}
+
+function corsHeaders(existing: ResponseInit["headers"]): Record<string, string> {
+	return {
+		"access-control-allow-origin": "*",
+		"access-control-allow-methods": "POST, OPTIONS",
+		"access-control-allow-headers": "content-type",
+		...Object.fromEntries(new Headers(existing).entries()),
+	};
+}
+
 function requireSameOriginJsonRequest(request: Request): void {
 	const contentType = request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
 	if (contentType !== "application/json") throw new PiboWebHttpError("Content-Type must be application/json", 415);
@@ -126,9 +237,9 @@ function requireSameOriginRequest(request: Request): void {
 	if (origin !== new URL(request.url).origin) throw new PiboWebHttpError("Origin is not allowed", 403);
 }
 
-function serviceForRequest(baseService: WebAnnotationCdpService, cdpUrl: string | undefined, store: WebAnnotationStore, options: WebAnnotationsWebAppOptions): WebAnnotationCdpService {
-	if (!cdpUrl || options.cdpService) return baseService;
-	return createWebAnnotationCdpService({ store, cdpUrl });
+function serviceForRequest(baseService: WebAnnotationCdpService, cdpUrl: string | undefined, request: Request, store: WebAnnotationStore, options: WebAnnotationsWebAppOptions): WebAnnotationCdpService {
+	if (options.cdpService) return baseService;
+	return createWebAnnotationCdpService({ store, cdpUrl, apiBaseUrl: new URL(request.url).origin });
 }
 
 function resolveBindingContext(context: PiboWebAppContext, webSession: PiboWebSession, input: { piboSessionId?: string; piboRoomId?: string }): WebAnnotationBindingContext {
