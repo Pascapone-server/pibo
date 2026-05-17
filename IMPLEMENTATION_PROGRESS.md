@@ -506,3 +506,27 @@ Intended validation plan:
 - Run at least one constrained-column/no-color `pibo debug pty` scenario with raw/clean artifacts and assertions.
 - Run the reusable PTY smoke script in a quick deterministic mode and record generated artifact paths.
 - Run `npm run typecheck`; run broader tests if these changes affect shared behavior beyond the focused CLI/validation paths.
+
+Validation and results for narrow/no-color fallback and reusable PTY smoke scripts batch:
+
+- Added a narrow-terminal Ink header fallback: constrained widths render separate bounded lines for source/mode, Owner, Session, and Agent/Model so owner/session state remains readable instead of being hidden in one truncated status line.
+- Existing row/card rendering remains bounded by `maxLineChars`, `maxRows`, and explicit truncation; no-color output relies on visible text markers (`›`, `▣`, `↳`, `✕`) rather than color alone.
+- Added reusable PTY smoke runner `scripts/ink-cli-v2-pty-smoke.mjs` with `--list`, `--dry-run`, `--scenario`, and `--artifact-root`. It runs bounded `pibo debug pty run` commands and writes raw/clean/screen/metadata/input/assertion artifacts.
+- Added `docs/reports/ink-cli-v2-pty-smoke-scenarios.md` documenting scenarios and Ralph evidence requirements.
+- Added `test/ink-cli-v2-pty-smoke.test.mjs` for scenario discovery, dry-run command construction, timeout/artifact flags, and documentation evidence rules.
+- Validation commands:
+  - `docker exec pibo-dev-ink-cli-v2-web-parity bash -lc 'cd /workspace && npm run build >/tmp/pibo-build.log && node --test test/cli-ui-ink-renderer.test.mjs test/ink-cli-v2-pty-smoke.test.mjs test/debug-pty.test.mjs'` — passed 15/15 focused tests.
+  - `docker exec pibo-dev-ink-cli-v2-web-parity bash -lc 'cd /workspace && rm -rf .tmp/pty-narrow-no-color .tmp/pty-narrow-no-color-home && mkdir -p .tmp/pty-narrow-no-color-home && npm run dev -- debug pty run --artifact --artifact-dir /workspace/.tmp/pty-narrow-no-color --timeout-ms 70000 --idle-timeout-ms 15000 --cols 44 --rows 26 --env NO_COLOR=1 --wait-for "Select room for Web user nar" --press Enter --wait-for "New session in Personal" --press Enter --wait-for "Created session" --type "/status" --press Enter --wait-for "Status: source=local/direct" --expect "Owner: Web user narrow" --expect "Session: New CLI session" --expect "Context:" --type "/th" --wait-for "Slash commands" --expect "/thinking" --expect "› /th" --press CtrlC -- env PIBO_HOME=/workspace/.tmp/pty-narrow-no-color-home PIBO_DEBUG_PTY_CLI_SESSIONS_MOCKED=1 PIBO_DEBUG_PTY_CLI_SESSIONS_OWNERS=user:narrow node dist/bin/pibo.js tui:sessions --owner-scope user:narrow'` — passed.
+  - Narrow/no-color PTY classification: real PTY-backed `pibo tui:sessions` path with `LocalCliSessionSource`, temp `PIBO_HOME`, deterministic mocked local router/source, constrained columns, and `NO_COLOR=1`; no live provider credentials.
+  - Narrow/no-color PTY artifacts: raw `/root/code/pibo/.worktrees/ink-cli-v2-web-parity/.tmp/pty-narrow-no-color/raw.ansi.log`; clean `/root/code/pibo/.worktrees/ink-cli-v2-web-parity/.tmp/pty-narrow-no-color/clean.txt`.
+  - Observed narrow/no-color result: clean output shows split narrow header lines with `Owner: Web user narrow`, `Session: New CLI session`, rich `/status` owner/session/context fields, slash suggestions with `/thinking`, and active input `› /th`.
+  - `docker exec pibo-dev-ink-cli-v2-web-parity bash -lc 'cd /workspace && node scripts/ink-cli-v2-pty-smoke.mjs --scenario slash-suggestions-status-thinking --artifact-root .tmp/ink-cli-v2-pty-smoke-validation'` — passed.
+  - Smoke script classification: reusable deterministic real PTY-backed `pibo tui:sessions` path with `LocalCliSessionSource`, temp `PIBO_HOME`, and mocked local router/source; not live provider.
+  - Smoke script artifacts: raw `/root/code/pibo/.worktrees/ink-cli-v2-web-parity/.tmp/ink-cli-v2-pty-smoke-validation/slash-suggestions-status-thinking/raw.ansi.log`; clean `/root/code/pibo/.worktrees/ink-cli-v2-web-parity/.tmp/ink-cli-v2-pty-smoke-validation/slash-suggestions-status-thinking/clean.txt`.
+  - Observed smoke script result: clean output shows room/session creation, slash suggestions while typing `/status` and `/th`, `/status` rich card with owner/context fields, `/thinking` picker with `xhigh`, and `Thinking level set to high`.
+  - `docker exec pibo-dev-ink-cli-v2-web-parity bash -lc 'cd /workspace && node --test test/cli-ui-ink-renderer.test.mjs test/ink-cli-v2-pty-smoke.test.mjs test/debug-pty.test.mjs && npm run typecheck'` — passed focused tests and full typecheck.
+  - `docker exec pibo-dev-ink-cli-v2-web-parity bash -lc 'cd /workspace && npm test'` — ran 520 tests; 519 passed and only the pre-existing unrelated `test/telemetry-store.test.mjs` stale/prune assertion failed.
+- Path classification: Ink renderer/unit path plus real PTY-backed CLI/TUI checks with deterministic mocked local router/source. No Web DOM behavior changed, so browser checks were not required for this batch.
+- Completed stories marked `passes: true`: PRD 07 `US-003`, `US-004`.
+- Implementation commit: `dd6b70433e48a080cc2229dab378611c836e4990` (`Add Ink PTY fallback smoke scripts`).
+- Next recommended group: PRD 03 `US-005` Web Compact Terminal shared descriptor consumption, then PRD 07 `US-005` final installed CLI/Web parity validation.
