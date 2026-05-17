@@ -16,8 +16,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented src/tools/browser-pool.ts with worker-scoped state types, path helpers, safe missing/malformed state loading, atomic write/read round trips, bounded file lock acquisition, and acquire/release/reap mutation wrapper. Added test/browser-pool-state.test.mjs. Evidence recorded in IMPLEMENTATION_PROGRESS.md: focused browser-pool tests passed in Docker worker; npm run typecheck passed."
     },
     {
       "id": "US-002",
