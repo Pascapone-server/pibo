@@ -6,7 +6,7 @@
     "baseCommit": "bdf219f906eb331a2f5343dd16e8124c2734878b",
     "mainRef": "main",
     "createdAt": "2026-05-17T00:17:50Z",
-    "lastUpdatedAt": "2026-05-17T01:15:54Z",
+    "lastUpdatedAt": "2026-05-17T01:17:03Z",
     "notes": [
       "This ledger is the durable resume state for the Ralph source-spec refresh loop.",
       "Current code in this worktree is the source of truth for source-backed specs.",
@@ -937,6 +937,15 @@
         "q-gateway-channel-cli"
       ],
       "message": "docs: refresh gateway cli pty specs"
+    },
+    {
+      "hash": "27be75b6576ca380c12fc22ce7a21eb451931068",
+      "shortHash": "27be75b",
+      "committedAt": "2026-05-17T01:17:03Z",
+      "queueIds": [
+        "q-store-data-boundaries"
+      ],
+      "message": "docs: refresh store data boundary specs"
     }
   ],
   "runNotes": [
@@ -979,6 +988,10 @@
     {
       "at": "2026-05-17T01:15:54Z",
       "note": "Audited q-store-data-boundaries. Updated local store, data store, session store, and bootstrap/navigation specs for default pibo.sqlite session backing, schema v2 telemetry, focused project/Ralph/workflow stores, /api/chat/catalog, defaultRoomId, and bootstrap catalog cache traceability. Opened a decision request for owner-scoped bootstrap catalog cache behavior."
+    },
+    {
+      "at": "2026-05-17T01:17:03Z",
+      "note": "Recorded commit 27be75b for q-store-data-boundaries source-spec refresh; queue remains blocked on bootstrap catalog owner-cache decision."
     }
   ]
 }
