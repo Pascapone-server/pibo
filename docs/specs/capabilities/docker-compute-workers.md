@@ -275,7 +275,7 @@ The compute build workflow MUST avoid copying local worktrees, browser profiles,
 
 #### Current
 
-The Docker build context excludes some large paths but does not explicitly exclude `.worktrees`. BuildKit cache and old image layers require manual Docker inspection.
+The Docker build context excludes generated dependencies and now explicitly excludes local worktrees, Pibo state, browser-use/profile state, logs, screenshots, and browser/debug artifacts. BuildKit cache and old image layers are visible through read-only compute diagnostics.
 
 #### Target
 
@@ -284,7 +284,8 @@ Build context excludes local state, and Pibo exposes image/container/cache usage
 #### Acceptance
 
 - `.dockerignore` excludes `.worktrees`, browser-use local profiles, screenshots, logs, and Pibo local state that should not enter images.
-- Compute diagnostics report Docker image size, container size, build-cache size, volume size, and reclaimable bytes.
+- `pibo compute diagnostics` (alias `pibo compute disk`) is read-only and reports Docker image size, container size, build-cache size, volume size, and reclaimable bytes.
+- `pibo compute diagnostics --json` exposes stable rows, byte counts, totals, Docker availability, and cleanup suggestions for agents.
 - Cleanup suggestions distinguish container cleanup, image cleanup, build-cache prune, and worktree cleanup.
 
 #### Scenario: Build cache exceeds budget
@@ -329,7 +330,7 @@ This capability participates in the compute/browser resource lifecycle change. I
 - [ ] SC-006: A built-CLI discovery test verifies `pibo compute --help` and `pibo compute dev --help` expose only immediate next-step commands without starting Docker.
 - [ ] SC-007: Worker Docker run command tests verify resource limits and labels for one-time and dev workers.
 - [ ] SC-008: `pibo compute list --all` and reap dry-run tests cover stopped/OOM containers, dirty workers, and worktree-preserving cleanup.
-- [ ] SC-009: Docker hygiene diagnostics report image, container, build-cache, volume, and reclaimable byte counts.
+- [x] SC-009: Docker hygiene diagnostics report image, container, build-cache, volume, and reclaimable byte counts.
 
 ## Verification Coverage
 
@@ -395,4 +396,4 @@ This capability participates in the compute/browser resource lifecycle change. I
 | REQ-007 Worker cleanup is explicit and bounded | Reap old one-time worker | `src/compute/cli.ts`, `src/compute/docker.ts` | Source-inspected; add cleanup selection tests | Source-inspected |
 | REQ-008 Worker containers enforce resource budgets | Browser leak remains contained | `src/compute/docker.ts` | Add Docker command construction tests | Draft |
 | REQ-009 Worker listing and reaping cover stopped and dirty resources | Stopped OOM worker remains inspectable | `src/compute/cli.ts`, `src/compute/docker.ts` | Add all-state list/reap tests | Draft |
-| REQ-010 Docker build context and cache stay bounded | Build cache exceeds budget | `.dockerignore`, compute diagnostics | Add Docker hygiene diagnostics tests | Draft |
+| REQ-010 Docker build context and cache stay bounded | Build cache exceeds budget | `.dockerignore`, `src/compute/cli.ts`, `src/compute/docker.ts` | `test/compute-resource-policy.test.mjs`; real read-only `pibo compute diagnostics --json` validation | Implemented |

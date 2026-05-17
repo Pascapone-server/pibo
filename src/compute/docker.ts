@@ -546,6 +546,40 @@ export interface WorkerInfo {
 	cleanupEligibility: ComputeWorkerCleanupEligibility;
 }
 
+export type DockerDiskUsageKind = "images" | "containers" | "localVolumes" | "buildCache" | "unknown";
+
+export interface DockerDiskUsageRow {
+	kind: DockerDiskUsageKind;
+	label: string;
+	totalCount?: number;
+	active?: number;
+	size: string;
+	sizeBytes?: number;
+	reclaimable: string;
+	reclaimableBytes?: number;
+	raw: Record<string, string>;
+}
+
+export interface ComputeDiskCleanupSuggestion {
+	kind: "container-cleanup" | "image-cleanup" | "build-cache-prune" | "worktree-cleanup";
+	reason: string;
+	nextCommands: string[];
+}
+
+export interface ComputeDiskDiagnostics {
+	generatedAt: string;
+	readOnly: true;
+	dockerAvailable: boolean;
+	dockerError?: string;
+	usage: Record<DockerDiskUsageKind, DockerDiskUsageRow | undefined>;
+	rows: DockerDiskUsageRow[];
+	totals: {
+		sizeBytes?: number;
+		reclaimableBytes?: number;
+	};
+	suggestions: ComputeDiskCleanupSuggestion[];
+}
+
 interface DockerInspectContainer {
 	Id?: string;
 	Name?: string;
@@ -870,4 +904,128 @@ export async function planReapWorkers(options: ComputeWorkerReapPlanOptions = {}
 export async function reapWorkers(maxAgeMinutes: number, options: { includeDev?: boolean; includeStopped?: boolean; includeDirty?: boolean } = {}): Promise<string[]> {
 	const plan = await planReapWorkers({ ...options, maxAgeMinutes });
 	return applyComputeWorkerReapPlan(plan);
+}
+
+function normalizeDockerSystemDfKind(type: string | undefined): DockerDiskUsageKind {
+	const normalized = (type ?? "").trim().toLowerCase();
+	if (normalized === "images") return "images";
+	if (normalized === "containers") return "containers";
+	if (normalized === "local volumes" || normalized === "volumes") return "localVolumes";
+	if (normalized === "build cache" || normalized === "buildkit cache") return "buildCache";
+	return "unknown";
+}
+
+function parseOptionalNumber(value: string | undefined): number | undefined {
+	if (value === undefined || value.trim() === "") return undefined;
+	const parsed = Number(value);
+	return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+export function parseDockerSizeBytes(value: string | undefined): number | undefined {
+	const match = (value ?? "").trim().match(/^([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z]+)?/);
+	if (!match) return undefined;
+	const amount = Number(match[1]);
+	if (!Number.isFinite(amount)) return undefined;
+	const unit = (match[2] ?? "B").toLowerCase();
+	const multipliers: Record<string, number> = {
+		b: 1,
+		kb: 1000,
+		mb: 1000 ** 2,
+		gb: 1000 ** 3,
+		tb: 1000 ** 4,
+		kib: 1024,
+		mib: 1024 ** 2,
+		gib: 1024 ** 3,
+		tib: 1024 ** 4,
+	};
+	const multiplier = multipliers[unit];
+	if (!multiplier) return undefined;
+	return Math.round(amount * multiplier);
+}
+
+export function parseDockerSystemDfLines(output: string): DockerDiskUsageRow[] {
+	const rows: DockerDiskUsageRow[] = [];
+	for (const line of output.trim().split("\n")) {
+		if (!line.trim()) continue;
+		let raw: Record<string, string>;
+		try {
+			const parsed = JSON.parse(line) as Record<string, unknown>;
+			raw = Object.fromEntries(Object.entries(parsed).map(([key, value]) => [key, String(value ?? "")]));
+		} catch {
+			continue;
+		}
+		const label = raw.Type ?? raw.type ?? "unknown";
+		const size = raw.Size ?? raw.size ?? "";
+		const reclaimable = raw.Reclaimable ?? raw.reclaimable ?? "";
+		rows.push({
+			kind: normalizeDockerSystemDfKind(label),
+			label,
+			totalCount: parseOptionalNumber(raw.TotalCount ?? raw.totalCount),
+			active: parseOptionalNumber(raw.Active ?? raw.active),
+			size,
+			sizeBytes: parseDockerSizeBytes(size),
+			reclaimable,
+			reclaimableBytes: parseDockerSizeBytes(reclaimable),
+			raw,
+		});
+	}
+	return rows;
+}
+
+export function buildComputeDiskDiagnostics(rows: DockerDiskUsageRow[], options: { now?: Date; dockerAvailable?: boolean; dockerError?: string } = {}): ComputeDiskDiagnostics {
+	const usage: Record<DockerDiskUsageKind, DockerDiskUsageRow | undefined> = {
+		images: undefined,
+		containers: undefined,
+		localVolumes: undefined,
+		buildCache: undefined,
+		unknown: undefined,
+	};
+	for (const row of rows) {
+		usage[row.kind] = row;
+	}
+	const sizeBytes = rows.reduce((sum, row) => row.sizeBytes === undefined ? sum : sum + row.sizeBytes, 0);
+	const reclaimableBytes = rows.reduce((sum, row) => row.reclaimableBytes === undefined ? sum : sum + row.reclaimableBytes, 0);
+	return {
+		generatedAt: (options.now ?? new Date()).toISOString(),
+		readOnly: true,
+		dockerAvailable: options.dockerAvailable !== false,
+		dockerError: options.dockerError,
+		usage,
+		rows,
+		totals: {
+			sizeBytes: rows.some((row) => row.sizeBytes !== undefined) ? sizeBytes : undefined,
+			reclaimableBytes: rows.some((row) => row.reclaimableBytes !== undefined) ? reclaimableBytes : undefined,
+		},
+		suggestions: [
+			{
+				kind: "container-cleanup",
+				reason: "Remove stopped, dirty, or old Pibo compute containers without deleting Git worktrees.",
+				nextCommands: ["pibo compute reap --dry-run --json", "pibo compute reap --apply --max-age-minutes <n>"],
+			},
+			{
+				kind: "image-cleanup",
+				reason: "Review unused Docker images separately from Pibo compute containers.",
+				nextCommands: ["docker image ls", "docker image prune"],
+			},
+			{
+				kind: "build-cache-prune",
+				reason: "Review BuildKit cache before pruning retained build layers.",
+				nextCommands: ["docker builder du", "docker builder prune"],
+			},
+			{
+				kind: "worktree-cleanup",
+				reason: "Clean Git worktrees explicitly; compute container cleanup does not remove them.",
+				nextCommands: ["git worktree list", "git worktree prune"],
+			},
+		],
+	};
+}
+
+export async function getComputeDiskDiagnostics(options: { now?: Date } = {}): Promise<ComputeDiskDiagnostics> {
+	try {
+		const { stdout } = await execFileAsync("docker", ["system", "df", "--format", "{{json .}}"], { maxBuffer: 10 * 1024 * 1024 });
+		return buildComputeDiskDiagnostics(parseDockerSystemDfLines(stdout), { now: options.now, dockerAvailable: true });
+	} catch (error: any) {
+		return buildComputeDiskDiagnostics([], { now: options.now, dockerAvailable: false, dockerError: String(error?.message ?? error) });
+	}
 }

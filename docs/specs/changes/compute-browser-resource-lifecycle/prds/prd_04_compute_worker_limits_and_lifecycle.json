@@ -83,8 +83,8 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Implemented Docker build context hygiene and read-only compute disk diagnostics. .dockerignore now excludes .worktrees, Pibo local state, browser-use/profile state, screenshots, logs, and browser/debug artifacts without excluding source UI assets. Added pibo compute diagnostics (alias disk) with text/JSON output for Docker image, container, local volume, BuildKit cache, byte/reclaimable counts, Docker-unavailable handling, and cleanup suggestions separated across container cleanup, image cleanup, build-cache prune, and worktree cleanup. Added parsing/rendering fixtures in test/compute-resource-policy.test.mjs. Evidence recorded in IMPLEMENTATION_PROGRESS.md: focused Docker-worker tests passed, Docker-worker unavailable-path CLI validation passed, read-only real host Docker diagnostics returned images/containers/localVolumes/buildCache rows and suggestions, and full npm run typecheck passed."
     },
     {
       "id": "US-006",

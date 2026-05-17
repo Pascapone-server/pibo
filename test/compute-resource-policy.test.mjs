@@ -21,14 +21,17 @@ import {
 	LABEL_WORKTREE,
 	LABEL_WORKTREE_PATH,
 	applyComputeWorkerReapPlan,
+	buildComputeDiskDiagnostics,
 	buildComputeWorkerReapPlan,
 	buildDevWorkerDockerRunArgs,
 	buildWorkerDockerRunArgs,
+	parseDockerSizeBytes,
+	parseDockerSystemDfLines,
 	parseDockerWorkerInspect,
 	parseDockerWorkerListLine,
 	resolveComputeWorkerLifecycle,
 } from '../dist/compute/docker.js';
-import { renderComputeReapPlanText, renderComputeWorkerListText } from '../dist/compute/cli.js';
+import { renderComputeDiskDiagnosticsText, renderComputeReapPlanText, renderComputeWorkerListText } from '../dist/compute/cli.js';
 
 const customPolicy = Object.freeze({
 	memory: '3g',
@@ -324,6 +327,52 @@ test('compute reap apply removes only selected containers and never deletes work
 	const applied = renderComputeReapPlanText(plan, { applied: true, removed });
 	assert.match(applied, /Removed: pibo-worker-stopped/);
 	assert.match(applied, /Worktrees are preserved/);
+});
+
+test('docker disk diagnostics parse system df JSON rows and render safe cleanup suggestions', () => {
+	const rows = parseDockerSystemDfLines([
+		JSON.stringify({ Type: 'Images', TotalCount: '2', Active: '1', Size: '1.5GB', Reclaimable: '500MB (33%)' }),
+		JSON.stringify({ Type: 'Containers', TotalCount: '4', Active: '2', Size: '20kB', Reclaimable: '10kB (50%)' }),
+		JSON.stringify({ Type: 'Local Volumes', TotalCount: '1', Active: '0', Size: '2MB', Reclaimable: '2MB (100%)' }),
+		JSON.stringify({ Type: 'Build Cache', TotalCount: '12', Active: '0', Size: '3.25GB', Reclaimable: '3.25GB' }),
+	].join('\n'));
+
+	assert.equal(parseDockerSizeBytes('1.5GB'), 1_500_000_000);
+	assert.equal(rows.length, 4);
+	assert.equal(rows[0].kind, 'images');
+	assert.equal(rows[1].kind, 'containers');
+	assert.equal(rows[2].kind, 'localVolumes');
+	assert.equal(rows[3].kind, 'buildCache');
+	assert.equal(rows[3].reclaimableBytes, 3_250_000_000);
+
+	const diagnostics = buildComputeDiskDiagnostics(rows, { now: new Date('2026-05-17T00:00:00.000Z') });
+	assert.equal(diagnostics.readOnly, true);
+	assert.equal(diagnostics.dockerAvailable, true);
+	assert.equal(diagnostics.usage.images.sizeBytes, 1_500_000_000);
+	assert.equal(diagnostics.usage.containers.reclaimableBytes, 10_000);
+	assert.equal(diagnostics.usage.localVolumes.sizeBytes, 2_000_000);
+	assert.equal(diagnostics.usage.buildCache.sizeBytes, 3_250_000_000);
+	assert.equal(diagnostics.totals.reclaimableBytes, 3_752_010_000);
+	assert.deepEqual(diagnostics.suggestions.map((suggestion) => suggestion.kind), ['container-cleanup', 'image-cleanup', 'build-cache-prune', 'worktree-cleanup']);
+
+	const text = renderComputeDiskDiagnosticsText(diagnostics);
+	assert.match(text, /Compute disk diagnostics \(read-only\)/);
+	assert.match(text, /Images\t2\t1\t1.5GB\t1500000000\t500MB \(33%\)\t500000000/);
+	assert.match(text, /container-cleanup/);
+	assert.match(text, /pibo compute reap --dry-run --json/);
+	assert.match(text, /image-cleanup/);
+	assert.match(text, /docker image prune/);
+	assert.match(text, /build-cache-prune/);
+	assert.match(text, /docker builder prune/);
+	assert.match(text, /worktree-cleanup/);
+	assert.match(text, /git worktree prune/);
+});
+
+test('docker disk diagnostics render Docker unavailable guidance without cleanup actions', () => {
+	const diagnostics = buildComputeDiskDiagnostics([], { dockerAvailable: false, dockerError: 'spawn docker ENOENT', now: new Date('2026-05-17T00:00:00.000Z') });
+	const text = renderComputeDiskDiagnosticsText(diagnostics);
+	assert.match(text, /Docker unavailable: spawn docker ENOENT/);
+	assert.match(text, /pibo compute diagnostics --json/);
 });
 
 test('dev worker docker run args include resource policy labels worktree metadata and bounded logs', () => {

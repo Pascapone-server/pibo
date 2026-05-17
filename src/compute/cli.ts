@@ -14,6 +14,8 @@ import {
 	planReapWorkers,
 	applyComputeWorkerReapPlan,
 	getSourceHash,
+	getComputeDiskDiagnostics,
+	type ComputeDiskDiagnostics,
 	type ComputeWorkerReapPlan,
 	type WorkerInfo,
 } from "./docker.js";
@@ -82,6 +84,35 @@ export function renderComputeReapPlanText(plan: ComputeWorkerReapPlan, options: 
 	else lines.push("Dry-run only. Apply with: pibo compute reap --apply");
 	lines.push("Worktrees are preserved; remove Git worktrees only with an explicit worktree cleanup command.");
 	lines.push(...plan.nextCommands.map((command) => `Next: ${command}`));
+	return lines.join("\n");
+}
+
+function formatMaybeBytes(bytes: number | undefined): string {
+	return bytes === undefined ? "-" : String(bytes);
+}
+
+export function renderComputeDiskDiagnosticsText(diagnostics: ComputeDiskDiagnostics): string {
+	const lines = ["Compute disk diagnostics (read-only)"];
+	if (!diagnostics.dockerAvailable) {
+		lines.push(`Docker unavailable: ${diagnostics.dockerError ?? "unknown error"}`);
+		lines.push("Next: ensure Docker is installed and the daemon is reachable, then run pibo compute diagnostics --json");
+		return lines.join("\n");
+	}
+	if (diagnostics.rows.length === 0) {
+		lines.push("Docker reported no disk usage rows.");
+	} else {
+		lines.push("TYPE\tCOUNT\tACTIVE\tSIZE\tSIZE_BYTES\tRECLAIMABLE\tRECLAIMABLE_BYTES");
+		for (const row of diagnostics.rows) {
+			lines.push(`${row.label}\t${row.totalCount ?? "-"}\t${row.active ?? "-"}\t${row.size || "-"}\t${formatMaybeBytes(row.sizeBytes)}\t${row.reclaimable || "-"}\t${formatMaybeBytes(row.reclaimableBytes)}`);
+		}
+	}
+	lines.push(`Total bytes: ${formatMaybeBytes(diagnostics.totals.sizeBytes)}`);
+	lines.push(`Reclaimable bytes: ${formatMaybeBytes(diagnostics.totals.reclaimableBytes)}`);
+	lines.push("Cleanup suggestions:");
+	for (const suggestion of diagnostics.suggestions) {
+		lines.push(`- ${suggestion.kind}: ${suggestion.reason}`);
+		for (const command of suggestion.nextCommands) lines.push(`  Next: ${command}`);
+	}
 	return lines.join("\n");
 }
 
@@ -254,6 +285,31 @@ Next:
 				return;
 			}
 			console.log(renderComputeWorkerListText(workers, { all: options.all === true }));
+		});
+
+	program
+		.command("diagnostics")
+		.alias("disk")
+		.description("Show read-only Docker disk and build-cache diagnostics")
+		.option("--json", "Print machine-readable disk diagnostics")
+		.addHelpText(
+			"after",
+			`
+Reports Docker image, container, local volume, and build-cache usage without pruning anything.
+Cleanup suggestions distinguish compute containers, images, build cache, and Git worktrees.
+
+Next:
+  $ pibo compute diagnostics --json
+  $ pibo compute reap --dry-run --json
+`,
+		)
+		.action(async (options: { json?: boolean }) => {
+			const diagnostics = await getComputeDiskDiagnostics();
+			if (options.json) {
+				printJson(diagnostics);
+				return;
+			}
+			console.log(renderComputeDiskDiagnosticsText(diagnostics));
 		});
 
 	program
