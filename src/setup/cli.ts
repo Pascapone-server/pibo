@@ -483,7 +483,7 @@ async function createDoctorStatus(options: { piboHome?: string; domain?: string;
 	addCommandCheck(checks, "caddy", false);
 	addCommandCheck(checks, "docker", options.requireDocker === true);
 	if (commandExists("docker")) {
-		const dockerInfo = commandOutput("docker", ["info", "--format", "{{.ServerVersion}"]);
+		const dockerInfo = commandOutput("docker", ["info", "--format", "{{.ServerVersion}}"]);
 		checks.push({ name: "docker.daemon", status: dockerInfo ? "ok" : options.requireDocker ? "fail" : "warn", detail: dockerInfo ? `Docker daemon ${dockerInfo}` : "Docker daemon is not reachable" });
 	}
 	checks.push(...authConfigChecks(piboHome));
