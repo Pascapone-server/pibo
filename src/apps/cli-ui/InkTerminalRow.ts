@@ -2,8 +2,8 @@ import React from "react";
 import { Box, Text } from "ink";
 import { buildTerminalCardDescriptor, progressBarText, redactTerminalSecret, type CompactTerminalDetailItem, type CompactTerminalLine, type CompactTerminalRow, type TerminalCardDescriptor, type TerminalCardTone } from "../../session-ui/index.js";
 import { colorForRowKind, colorForStatus, colorForTone, markerForStatus, type InkTerminalColor } from "./inkColors.js";
-import { formatInkJson } from "./inkJson.js";
-import { renderInkMarkdownLines } from "./inkMarkdown.js";
+import { formatDetailJsonWellLines, formatInkJson } from "./inkJson.js";
+import { renderInkMarkdownTerminalLines } from "./inkMarkdown.js";
 import { InkTerminalLine } from "./InkTerminalLine.js";
 
 export type InkTerminalRowProps = {
@@ -289,6 +289,8 @@ function sectionLabel(source: NonNullable<CompactTerminalDetailItem["previewOmis
 }
 
 function detailValueLines(value: unknown, maxLineChars: number): string[] {
+	const jsonWell = formatDetailJsonWellLines(value, { maxChars: Math.min(1600, Math.max(420, maxLineChars * 8)), maxDepth: 2, maxArrayItems: 12, maxObjectKeys: 20 });
+	if (jsonWell) return jsonWell;
 	const text = typeof value === "string"
 		? value
 		: formatInkJson(value, { maxChars: Math.min(1600, Math.max(420, maxLineChars * 8)), maxDepth: 4, maxArrayItems: 12, maxObjectKeys: 20 });
@@ -305,10 +307,7 @@ function rowLines(row: CompactTerminalRow, maxMarkdownLines: number): CompactTer
 	if (row.lines.length > 0) return row.lines;
 	if (row.markdown || typeof row.output === "string") {
 		const markdown = row.markdown ?? String(row.output ?? "");
-		return renderInkMarkdownLines(markdown, { maxLines: maxMarkdownLines }).map((text) => ({
-			prefix: "none",
-			tokens: [{ text, tone: row.kind === "reasoning" ? "amber" : undefined }],
-		}));
+		return renderInkMarkdownTerminalLines(markdown, { maxLines: maxMarkdownLines, reasoning: row.kind === "reasoning" });
 	}
 	if (row.error) return [{ prefix: "none", tokens: [{ text: row.error, tone: "red", weight: "semibold" }] }];
 	if (row.output !== undefined) return jsonLines(row.output);

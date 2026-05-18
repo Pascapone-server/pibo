@@ -82,11 +82,11 @@
 
 ## 11. Requirement: Ink JSON and Markdown Semantic Parity
 
-- [ ] 11.1 Add an Ink JSON renderer for inline function-call JSON with key/string/literal/punctuation token roles and collapsed collection markers.
-- [ ] 11.2 Add detail JSON well rendering for parsed object/array values and JSON-looking text output.
-- [ ] 11.3 Add color and `NO_COLOR` snapshot coverage for JSON rendering.
-- [ ] 11.4 Improve Ink markdown approximation for headings, lists, blockquotes, inline code, fenced code, tables, and reasoning tone.
-- [ ] 11.5 Add shared JSON/markdown fixtures used by Web semantic-hook tests and Ink snapshots.
+- [x] 11.1 Add an Ink JSON renderer for inline function-call JSON with key/string/literal/punctuation token roles and collapsed collection markers.
+- [x] 11.2 Add detail JSON well rendering for parsed object/array values and JSON-looking text output.
+- [x] 11.3 Add color and `NO_COLOR` snapshot coverage for JSON rendering.
+- [x] 11.4 Improve Ink markdown approximation for headings, lists, blockquotes, inline code, fenced code, tables, and reasoning tone.
+- [x] 11.5 Add shared JSON/markdown fixtures used by Web semantic-hook tests and Ink snapshots.
 
 ## 12. Final Web-Derived Validation
 
