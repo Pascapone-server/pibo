@@ -5,8 +5,8 @@ import React from "react";
 import test from "node:test";
 import { renderToString } from "ink";
 import { buildCompactTerminalRows } from "../dist/session-ui/index.js";
-import { formatInkJson, formatStatusHeaderLines, InkSessionAppView, InkTerminalView, renderInkMarkdownLines, rowWindow } from "../dist/apps/cli-ui/index.js";
-import { buildCanonicalTerminalRows, buildExpandableDetailFixtureRow, buildWebDerivedLongOutputRows, disposedStatusPayload, fullStatusPayload, highUsageStatusPayload, partialStatusPayload, unavailableStatusPayload } from "./fixtures/terminal-parity-fixtures.mjs";
+import { formatDetailJsonWellLines, formatFunctionCallTokens, formatInkJson, formatInlineJsonTokens, formatStatusHeaderLines, InkSessionAppView, InkTerminalView, renderInkMarkdownLines, renderInkMarkdownTerminalLines, rowWindow, tokenizeInkBashCommand } from "../dist/apps/cli-ui/index.js";
+import { buildCanonicalTerminalRows, buildExpandableDetailFixtureRow, buildWebDerivedLongOutputRows, disposedStatusPayload, fullStatusPayload, highUsageStatusPayload, markdownSyntaxFixture, nestedJsonSyntaxFixture, partialStatusPayload, unavailableStatusPayload } from "./fixtures/terminal-parity-fixtures.mjs";
 
 const sessionId = "pibo:ink-renderer-test";
 
@@ -60,7 +60,7 @@ test("InkTerminalView renders representative compact rows to terminal text", () 
 
 	assert.match(output, /› Investigate issue/);
 	assert.match(output, /I will check\./);
-	assert.match(output, /- first/);
+	assert.match(output, /• first/);
 	assert.match(output, /• Called read/);
 	assert.match(output, /src\/index\.ts/);
 	assert.match(output, /• Waiting on runs typecheck/);
@@ -320,9 +320,75 @@ test("InkTerminalView bounds large row lists to a tail window", () => {
 	assert.match(output, /message 5/);
 });
 
-test("terminal markdown helper renders plain lists, links, and code fences", () => {
-	const lines = renderInkMarkdownLines("# Title\n\nSee [docs](https://example.test).\n\n- item\n\n```ts\nconst ok = true;\n```", { maxLines: 20 });
-	assert.deepEqual(lines, ["Title", "", "See docs (https://example.test).", "", "- item", "", "    const ok = true;"]);
+test("terminal markdown helper preserves structure, links, and code fences", () => {
+	const lines = renderInkMarkdownLines("# Title\n\nSee [docs](https://example.test) and `code`.\n\n- item\n  - nested\n\n```ts\nconst ok = true;\n```", { maxLines: 20 });
+	assert.deepEqual(lines, ["# Title", "", "See docs (https://example.test) and `code`.", "", "• item", "  • nested", "", "┌ code ts", "  const ok = true;", "└ code"]);
+});
+
+test("terminal inline JSON helper emits Web-derived token roles and disclosure markers", () => {
+	const fixture = nestedJsonSyntaxFixture();
+	const tokens = formatInlineJsonTokens(fixture.input);
+	const text = tokens.map((token) => token.text).join("");
+	assert.match(text, /^▾\{/);
+	assert.match(text, /"query": "terminal parity"/);
+	assert.match(text, /"paths": ▸\[\.\.\.\]/);
+	assert.match(text, /"filters": ▸\{\.\.\.\}/);
+	assert.match(text, /\.\.\. \(\+\d+ chars\)/);
+	assert.doesNotMatch(text, /fixture-secret-value|json-inline-secret/);
+	assert.equal(tokens.find((token) => token.text === "search_files"), undefined);
+	assert.equal(tokens.some((token) => token.tone === "default" && token.text.includes("query")), true);
+	assert.equal(tokens.some((token) => token.tone === "yellow" && token.text.includes("terminal parity")), true);
+	assert.equal(formatInlineJsonTokens({ ok: true, count: 3, missing: null, nested: { hidden: false } }).some((token) => token.tone === "blue"), true);
+	assert.equal(tokens.some((token) => token.tone === "dim" && token.text.includes("▸")), true);
+
+	const callTokens = formatFunctionCallTokens(fixture.functionName, fixture.input);
+	assert.match(callTokens.map((token) => token.text).join(""), /^search_files\(▾\{/);
+	assert.equal(callTokens[0].tone, "yellow");
+});
+
+test("terminal detail JSON helper renders metadata and bounded JSON wells", () => {
+	const fixture = nestedJsonSyntaxFixture();
+	const lines = formatDetailJsonWellLines(fixture.detailText);
+	assert.ok(lines);
+	const text = lines.join("\n");
+	assert.match(text, /Meta: metadata before json/);
+	assert.match(text, /┌ JSON/);
+	assert.match(text, /"ok": true/);
+	assert.match(text, /"nested":/);
+	assert.match(text, /▸\[\.\.\.\]/);
+	assert.match(text, /└ JSON/);
+	assert.doesNotMatch(text, /fixture-secret-value/);
+});
+
+test("terminal markdown helper tokenizes markdown, bash, JSON, and reasoning roles", () => {
+	const lines = renderInkMarkdownTerminalLines(markdownSyntaxFixture(), { maxLines: 40, reasoning: true });
+	const text = lines.map((line) => line.tokens.map((token) => token.text).join("")).join("\n");
+	assert.match(text, /# Web-derived terminal markdown/);
+	assert.match(text, /> quoted operator note/);
+	assert.match(text, /1\. first numbered item/);
+	assert.match(text, /   • nested bullet/);
+	assert.match(text, /\| command \| result \|/);
+	assert.match(text, /┌ code bash/);
+	assert.match(text, /OPENAI_API_KEY=\[redacted\] pibo tui:sessions --room room_named_fixture \| tee \/tmp\/out/);
+	assert.match(text, /┌ code json/);
+	assert.equal(lines.some((line) => line.tokens.some((token) => token.tone === "amber")), true);
+	assert.equal(lines.some((line) => line.tokens.some((token) => token.tone === "cyan" && token.text.includes("`inline code`"))), true);
+	assert.equal(lines.some((line) => line.tokens.some((token) => token.tone === "red" && token.text === "|")), true);
+	assert.equal(lines.some((line) => line.tokens.some((token) => token.tone === "blue" && /true|3|false/.test(token.text))), true);
+});
+
+test("terminal bash tokenizer follows Web-derived syntax roles", () => {
+	const tokens = tokenizeInkBashCommand("OPENAI_API_KEY=[redacted] pibo tui:sessions --room room_named_fixture | tee /tmp/out");
+	assert.deepEqual(tokens.filter((token) => token.text.trim()).map((token) => [token.text, token.tone, token.weight]), [
+		["OPENAI_API_KEY=[redacted]", "yellow", undefined],
+		["pibo", "green", "semibold"],
+		["tui:sessions", "default", undefined],
+		["--room", "magenta", undefined],
+		["room_named_fixture", "default", undefined],
+		["|", "red", "semibold"],
+		["tee", "default", undefined],
+		["/tmp/out", "cyan", undefined],
+	]);
 });
 
 test("terminal JSON helper pretty-prints and marks bounded truncation", () => {

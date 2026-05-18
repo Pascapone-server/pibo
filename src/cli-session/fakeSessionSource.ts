@@ -473,13 +473,37 @@ function defaultSessions(): CliSessionSummary[] {
 
 function defaultTraceViews(): Record<string, PiboSessionTraceView> {
 	const longOutput = Array.from({ length: 12 }, (_, index) => `web-derived output line ${String(index + 1).padStart(2, "0")} -- ${"x".repeat(90)}`).join("\n");
+	const markdownOutput = [
+		"# Web-derived terminal markdown",
+		"",
+		"Paragraph with `inline code` and a [link](https://example.invalid).",
+		"",
+		"> quoted operator note",
+		"",
+		"1. first numbered item",
+		"2. second numbered item",
+		"   - nested bullet",
+		"",
+		"| command | result |",
+		"| --- | --- |",
+		"| `/status` | compact row |",
+		"",
+		"```bash",
+		"OPENAI_API_KEY=[redacted] pibo tui:sessions --room room_fake_main | tee /tmp/out",
+		"```",
+		"",
+		"```json",
+		JSON.stringify({ ok: true, count: 3, nested: { ready: false } }),
+		"```",
+	].join("\n");
+	const jsonDetailOutput = `metadata before json\n${JSON.stringify({ ok: true, nested: { array: [1, false, null, { key: "value" }] }, secret: "TOKEN=json-demo-secret" }, null, 2)}`;
 	return {
 		ps_fake_existing: {
 			piboSessionId: "ps_fake_existing",
 			piSessionId: "pi_fake_existing",
 			title: "Existing fake session",
 			version: "fake-v1",
-			eventCount: 5,
+			eventCount: 7,
 			nodes: [
 				{
 					id: "node_fake_user_1",
@@ -499,6 +523,33 @@ function defaultTraceViews(): Record<string, PiboSessionTraceView> {
 					status: "done",
 					startedAt: "2026-05-16T12:00:01.000Z",
 					output: "Fake assistant response",
+					children: [],
+				},
+				{
+					id: "node_fake_markdown_1",
+					piboSessionId: "ps_fake_existing",
+					type: "assistant.message",
+					title: "Agent Message",
+					status: "done",
+					startedAt: "2026-05-16T12:00:01.500Z",
+					output: markdownOutput,
+					children: [],
+				},
+				{
+					id: "node_fake_json_tool_1",
+					piboSessionId: "ps_fake_existing",
+					type: "tool.call",
+					title: "search_files",
+					status: "done",
+					startedAt: "2026-05-16T12:00:01.750Z",
+					input: {
+						query: "terminal parity",
+						paths: ["src/session-ui/terminalRows.ts", "src/apps/cli-ui/InkTerminalRow.ts"],
+						filters: { language: "typescript", includeTests: true, archived: false, maxResults: 25 },
+						longString: `This value is intentionally longer than one hundred and forty characters so inline JSON renderers must disclose it safely without deleting structure. ${"z".repeat(32)}`,
+						secret: "TOKEN=json-inline-secret",
+					},
+					output: jsonDetailOutput,
 					children: [],
 				},
 				{
