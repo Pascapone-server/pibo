@@ -532,14 +532,33 @@ function createErrorRow(node: PiboTraceNode): CompactTerminalRow {
 		lines: [
 			{
 				prefix: "bullet",
-				tokens: [token("Error", "red", "bold"), token(node.error ? ` ${node.error}` : "", "red")],
+				tokens: [token(node.title || "Error", "red", "bold"), token(node.error ? ` ${node.error}` : "", "red")],
 			},
+			...sessionErrorDetailLines(node.input),
 		],
 		sourceNodeIds: [node.id],
+		input: node.input,
 		error: node.error,
 		output: node.output,
-		expandable: node.output !== undefined || Boolean(node.error),
+		expandable: node.input !== undefined || node.output !== undefined || Boolean(node.error),
 	};
+}
+
+function sessionErrorDetailLines(details: unknown): CompactTerminalLine[] {
+	if (!isRecord(details)) return [];
+	const fields = [
+		["Class", stringValue(details.errorClass) ?? stringValue(details.category)],
+		["Code", stringValue(details.code) ?? stringValue(details.providerCode)],
+		["Origin", stringValue(details.origin)],
+		["Provider", [stringValue(details.api), stringValue(details.provider), stringValue(details.model)].filter(Boolean).join(" / ") || undefined],
+		["Retryable", typeof details.retryable === "boolean" ? (details.retryable ? "yes" : "no") : undefined],
+	];
+	return fields
+		.filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].length > 0)
+		.map(([label, value], index) => ({
+			prefix: index === 0 ? "detail" : "continuation",
+			tokens: [token(`${label}: `, "dim"), token(value, "red")],
+		}));
 }
 
 function groupExploringCandidates(candidates: readonly RowCandidate[]): RowCandidate[] {
