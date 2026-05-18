@@ -129,7 +129,7 @@ test("execution commands after an errored turn remain chronological root nodes",
 		createEvent({ seq: 3, type: "execution_result", createdAt: "2026-04-29T08:00:02.000Z", payload: { type: "execution_result", eventId: "cmd-thinking", action: "thinking", result: { level: "high" } } }),
 	], "idle");
 
-	assert.deepEqual(view.nodes.map((node) => node.title), ["Agent Turn", "Error", "thinking"]);
+	assert.deepEqual(view.nodes.map((node) => node.title), ["Agent Turn", "Session Error", "thinking"]);
 	assert.equal(view.nodes.find((node) => node.title === "thinking")?.parentId, "event:message:cmd-thinking");
 });
 
