@@ -37,6 +37,14 @@ export type CompactTerminalLine = {
 	};
 };
 
+export type CompactTerminalPreviewOmission = {
+	source: "input" | "output" | "error" | "details";
+	visibleLineCount: number;
+	omittedLineCount: number;
+	totalLineCount: number;
+	maxVisibleLineCount: number;
+};
+
 export type CompactTerminalDetailItem = {
 	id: string;
 	label: string;
@@ -45,6 +53,7 @@ export type CompactTerminalDetailItem = {
 	output?: unknown;
 	error?: string;
 	linkedPiboSessionId?: string;
+	previewOmission?: CompactTerminalPreviewOmission;
 };
 
 export type CompactTerminalRow = {
@@ -66,6 +75,7 @@ export type CompactTerminalRow = {
 	error?: string;
 	markdown?: string;
 	expandable?: boolean;
+	previewOmission?: CompactTerminalPreviewOmission;
 	detailItems?: readonly CompactTerminalDetailItem[];
 };
 
@@ -84,7 +94,8 @@ type RowCandidate = {
 	exploring?: CompactTerminalDetailItem;
 };
 
-const TOOL_OUTPUT_PREVIEW_LINES = 5;
+export const COMPACT_TERMINAL_OUTPUT_PREVIEW_LINES = 5;
+export const COMPACT_TERMINAL_EXPLORING_PREVIEW_LINES = 6;
 
 export function buildCompactTerminalRows(
 	traceView: PiboSessionTraceView | null,
@@ -220,7 +231,7 @@ function createToolRowCandidate(node: PiboTraceNode, turnId?: string): RowCandid
 		const row = createCommandToolRow(node, command);
 		return { row, turnId, exploring: undefined };
 	}
-	const preview = previewLines(node.error ?? node.output, TOOL_OUTPUT_PREVIEW_LINES, node.error ? "red" : "dim");
+	const preview = previewLines(node.error ?? node.output, COMPACT_TERMINAL_OUTPUT_PREVIEW_LINES, node.error ? "red" : "dim");
 	const row: CompactTerminalRow = {
 		id: node.id,
 		kind: "tool.call",
@@ -242,13 +253,14 @@ function createToolRowCandidate(node: PiboTraceNode, turnId?: string): RowCandid
 		output: node.output,
 		error: node.error,
 		expandable: node.input !== undefined || node.output !== undefined || Boolean(node.error),
+		previewOmission: previewOmission(preview, node.error ? "error" : "output"),
 	};
 	const exploring = classifyExploringTool(node);
 	return { row, turnId, exploring };
 }
 
 function createToolResultRow(node: PiboTraceNode): CompactTerminalRow {
-	const preview = previewLines(node.error ?? node.output, TOOL_OUTPUT_PREVIEW_LINES, node.error ? "red" : "dim");
+	const preview = previewLines(node.error ?? node.output, COMPACT_TERMINAL_OUTPUT_PREVIEW_LINES, node.error ? "red" : "dim");
 	return {
 		id: node.id,
 		kind: "tool.call",
@@ -265,6 +277,7 @@ function createToolResultRow(node: PiboTraceNode): CompactTerminalRow {
 		output: node.output,
 		error: node.error,
 		expandable: node.output !== undefined || Boolean(node.error),
+		previewOmission: previewOmission(preview, node.error ? "error" : "output"),
 	};
 }
 
@@ -296,7 +309,7 @@ function createDelegationRow(node: PiboTraceNode): CompactTerminalRow {
 }
 
 function createAsyncAgentRow(node: PiboTraceNode): CompactTerminalRow {
-	const preview = previewLines(node.error ?? node.output, TOOL_OUTPUT_PREVIEW_LINES, node.error ? "red" : "dim");
+	const preview = previewLines(node.error ?? node.output, COMPACT_TERMINAL_OUTPUT_PREVIEW_LINES, node.error ? "red" : "dim");
 	return {
 		id: node.id,
 		kind: "agent.async",
@@ -314,11 +327,12 @@ function createAsyncAgentRow(node: PiboTraceNode): CompactTerminalRow {
 		output: node.output,
 		error: node.error,
 		expandable: node.input !== undefined || node.output !== undefined || Boolean(node.error),
+		previewOmission: previewOmission(preview, node.error ? "error" : "output"),
 	};
 }
 
 function createYieldedRunRow(node: PiboTraceNode): CompactTerminalRow {
-	const preview = previewLines(node.output, TOOL_OUTPUT_PREVIEW_LINES);
+	const preview = previewLines(node.output, COMPACT_TERMINAL_OUTPUT_PREVIEW_LINES);
 	return {
 		id: node.id,
 		kind: "yielded.run",
@@ -338,6 +352,7 @@ function createYieldedRunRow(node: PiboTraceNode): CompactTerminalRow {
 		output: node.output,
 		error: node.error,
 		expandable: node.output !== undefined || Boolean(node.error),
+		previewOmission: previewOmission(preview, "output"),
 	};
 }
 
@@ -382,7 +397,7 @@ function createExecutionCommandRow(node: PiboTraceNode): CompactTerminalRow {
 		return createModelToolRow(node);
 	}
 	const command = shellCommandValue(node.output) ?? shellCommandValue(node.input) ?? node.title;
-	const preview = previewLines(node.error ?? node.output, TOOL_OUTPUT_PREVIEW_LINES, node.error ? "red" : "dim", 180);
+	const preview = previewLines(node.error ?? node.output, COMPACT_TERMINAL_OUTPUT_PREVIEW_LINES, node.error ? "red" : "dim", 180);
 	return {
 		id: node.id,
 		kind: "execution.command",
@@ -399,6 +414,7 @@ function createExecutionCommandRow(node: PiboTraceNode): CompactTerminalRow {
 		output: node.output,
 		error: node.error,
 		expandable: node.input !== undefined || node.output !== undefined || Boolean(node.error),
+		previewOmission: previewOmission(preview, node.error ? "error" : "output"),
 	};
 }
 
@@ -502,7 +518,7 @@ function isModelMenuOutput(value: unknown): boolean {
 }
 
 function createCommandToolRow(node: PiboTraceNode, command: string): CompactTerminalRow {
-	const preview = previewLines(node.error ?? node.output, TOOL_OUTPUT_PREVIEW_LINES, node.error ? "red" : "dim", 180);
+	const preview = previewLines(node.error ?? node.output, COMPACT_TERMINAL_OUTPUT_PREVIEW_LINES, node.error ? "red" : "dim", 180);
 	return {
 		id: node.id,
 		kind: "execution.command",
@@ -520,6 +536,7 @@ function createCommandToolRow(node: PiboTraceNode, command: string): CompactTerm
 		output: node.output,
 		error: node.error,
 		expandable: node.input !== undefined || node.output !== undefined || Boolean(node.error),
+		previewOmission: previewOmission(preview, node.error ? "error" : "output"),
 	};
 }
 
@@ -532,14 +549,33 @@ function createErrorRow(node: PiboTraceNode): CompactTerminalRow {
 		lines: [
 			{
 				prefix: "bullet",
-				tokens: [token("Error", "red", "bold"), token(node.error ? ` ${node.error}` : "", "red")],
+				tokens: [token(node.title || "Error", "red", "bold"), token(node.error ? ` ${node.error}` : "", "red")],
 			},
+			...sessionErrorDetailLines(node.input),
 		],
 		sourceNodeIds: [node.id],
+		input: node.input,
 		error: node.error,
 		output: node.output,
-		expandable: node.output !== undefined || Boolean(node.error),
+		expandable: node.input !== undefined || node.output !== undefined || Boolean(node.error),
 	};
+}
+
+function sessionErrorDetailLines(details: unknown): CompactTerminalLine[] {
+	if (!isRecord(details)) return [];
+	const fields = [
+		["Class", stringValue(details.errorClass) ?? stringValue(details.category)],
+		["Code", stringValue(details.code) ?? stringValue(details.providerCode)],
+		["Origin", stringValue(details.origin)],
+		["Provider", [stringValue(details.api), stringValue(details.provider), stringValue(details.model)].filter(Boolean).join(" / ") || undefined],
+		["Retryable", typeof details.retryable === "boolean" ? (details.retryable ? "yes" : "no") : undefined],
+	];
+	return fields
+		.filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].length > 0)
+		.map(([label, value], index) => ({
+			prefix: index === 0 ? "detail" : "continuation",
+			tokens: [token(`${label}: `, "dim"), token(value, "red")],
+		}));
 }
 
 function groupExploringCandidates(candidates: readonly RowCandidate[]): RowCandidate[] {
@@ -575,8 +611,12 @@ function createExploringGroup(candidates: readonly RowCandidate[]): CompactTermi
 		output: candidate.row.output,
 		error: candidate.row.error,
 		linkedPiboSessionId: candidate.row.linkedPiboSessionId,
+		previewOmission: candidate.row.previewOmission,
 	}));
-	const firstId = candidates[0]?.row.id ?? "exploring";
+	const visibleDetailItems = detailItems.slice(0, COMPACT_TERMINAL_EXPLORING_PREVIEW_LINES);
+	const omittedDetailCount = Math.max(0, detailItems.length - visibleDetailItems.length);
+	const firstRow = candidates[0]?.row;
+	const firstId = firstRow?.id ?? "exploring";
 	const lastId = candidates[candidates.length - 1]?.row.id ?? firstId;
 	const status = candidates.some((candidate) => candidate.row.status === "running")
 		? "running"
@@ -594,14 +634,30 @@ function createExploringGroup(candidates: readonly RowCandidate[]): CompactTermi
 				prefix: "bullet",
 				tokens: [token(status === "running" ? "Exploring" : status === "error" ? "Exploring failed" : "Explored", toneForStatus(status), "semibold")],
 			},
-			...detailItems.map((item, index): CompactTerminalLine => ({
+			...visibleDetailItems.map((item, index): CompactTerminalLine => ({
 				prefix: index === 0 ? "detail" : "continuation",
 				tokens: [token(item.label, item.status === "error" ? "red" : "dim")],
 			})),
+			...(omittedDetailCount > 0 ? [{
+				prefix: "continuation" as const,
+				tokens: [token(`+${omittedDetailCount} more explorations`, "dim", "normal", true)],
+			}] : []),
 		],
 		sourceNodeIds: candidates.flatMap((candidate) => candidate.row.sourceNodeIds),
+		eventId: firstRow?.eventId,
+		runId: firstRow?.runId,
+		orderSource: firstRow?.orderSource,
+		orderStreamId: firstRow?.orderStreamId,
+		orderStreamFrameIndex: firstRow?.orderStreamFrameIndex,
 		detailItems,
 		expandable: detailItems.some((item) => item.input !== undefined || item.output !== undefined || Boolean(item.error)),
+		previewOmission: omittedDetailCount > 0 ? {
+			source: "details",
+			visibleLineCount: visibleDetailItems.length,
+			omittedLineCount: omittedDetailCount,
+			totalLineCount: detailItems.length,
+			maxVisibleLineCount: COMPACT_TERMINAL_EXPLORING_PREVIEW_LINES,
+		} : undefined,
 	};
 }
 
@@ -651,7 +707,7 @@ function previewPath(value?: Record<string, unknown>): string | undefined {
 	if (!value) return undefined;
 	for (const key of ["path", "file", "filePath", "filepath", "url", "uri", "cwd", "pattern", "glob"]) {
 		const candidate = stringValue(value[key]);
-		if (candidate) return truncate(candidate, 80);
+		if (candidate) return candidate;
 	}
 	return undefined;
 }
@@ -660,36 +716,63 @@ function previewQuery(value?: Record<string, unknown>): string | undefined {
 	if (!value) return undefined;
 	for (const key of ["query", "pattern", "text", "name", "q", "regex"]) {
 		const candidate = stringValue(value[key]);
-		if (candidate) return truncate(candidate, 80);
+		if (candidate) return candidate;
 	}
 	return undefined;
 }
+
+type PreviewLinesResult = {
+	lines: CompactTerminalLine[];
+	visibleLineCount: number;
+	omittedLineCount: number;
+	totalLineCount: number;
+	maxVisibleLineCount: number;
+};
 
 function previewLines(
 	value: unknown,
 	maxVisibleLines: number,
 	tone: TerminalInlineToken["tone"] = "dim",
-	maxLineLength = 160,
-): { lines: CompactTerminalLine[]; truncated: boolean } {
+	_maxLineLength = 160,
+): PreviewLinesResult {
+	const empty = { lines: [], visibleLineCount: 0, omittedLineCount: 0, totalLineCount: 0, maxVisibleLineCount: maxVisibleLines };
 	const text = previewText(value);
-	if (!text) return { lines: [], truncated: false };
+	if (!text) return empty;
 	const allLines = text
 		.split(/\r?\n/)
 		.map((line) => line.trimEnd())
 		.filter((line, index, lines) => line.length > 0 || lines.length === 1);
-	if (!allLines.length) return { lines: [], truncated: false };
+	if (!allLines.length) return empty;
 	const visible = allLines.slice(0, maxVisibleLines);
+	const omittedLineCount = Math.max(0, allLines.length - visible.length);
 	const lines: CompactTerminalLine[] = visible.map((line, index) => ({
 		prefix: index === 0 ? "detail" : "continuation",
-		tokens: [token(truncate(line, maxLineLength), tone)],
+		tokens: [token(line, tone)],
 	}));
-	if (allLines.length > maxVisibleLines) {
+	if (omittedLineCount > 0) {
 		lines.push({
 			prefix: "continuation",
-			tokens: [token(`+${allLines.length - maxVisibleLines} more lines`, "dim", "normal", true)],
+			tokens: [token(`+${omittedLineCount} more lines`, "dim", "normal", true)],
 		});
 	}
-	return { lines, truncated: allLines.length > maxVisibleLines };
+	return {
+		lines,
+		visibleLineCount: visible.length,
+		omittedLineCount,
+		totalLineCount: allLines.length,
+		maxVisibleLineCount: maxVisibleLines,
+	};
+}
+
+function previewOmission(result: PreviewLinesResult, source: CompactTerminalPreviewOmission["source"]): CompactTerminalPreviewOmission | undefined {
+	if (result.omittedLineCount <= 0) return undefined;
+	return {
+		source,
+		visibleLineCount: result.visibleLineCount,
+		omittedLineCount: result.omittedLineCount,
+		totalLineCount: result.totalLineCount,
+		maxVisibleLineCount: result.maxVisibleLineCount,
+	};
 }
 
 function previewText(value: unknown): string {
@@ -706,7 +789,7 @@ function previewText(value: unknown): string {
 
 function compactInlinePreview(value: unknown): string {
 	const text = typeof value === "string" ? value : previewText(value);
-	return truncate(text.replace(/\s+/g, " ").trim(), 96);
+	return text.replace(/\s+/g, " ").trim();
 }
 
 function isShellToolName(name: string | undefined): boolean {
@@ -745,10 +828,6 @@ function bashTokens(command: string): TerminalInlineToken[] {
 	});
 }
 
-function truncate(value: string, maxLength: number): string {
-	if (value.length <= maxLength) return value;
-	return `${value.slice(0, Math.max(0, maxLength - 1))}…`;
-}
 
 function toolVerb(status: PiboTraceNode["status"]): string {
 	if (status === "running") return "Calling";

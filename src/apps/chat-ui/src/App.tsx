@@ -6,6 +6,7 @@ import {
 	Archive,
 	ArchiveRestore,
 	AlertTriangle,
+	BookA,
 	BookOpenText,
 	Brain,
 	Bug,
@@ -22,6 +23,7 @@ import {
 	ExternalLink,
 	FolderPlus,
 	Key,
+	Keyboard,
 	Layers,
 	Loader2,
 	Lock,
@@ -33,6 +35,7 @@ import {
 	Power,
 	PowerOff,
 	RefreshCw,
+	Rows3,
 	Save,
 	Server,
 	Settings,
@@ -43,7 +46,7 @@ import {
 	Wrench,
 	X,
 } from "lucide-react";
-import { createUserSkill, createWebAnnotationBinding, deleteCustomAgent, deletePiPackage, deleteProject, deleteRoom, deleteSession, deleteUserSkill, fetchSignalTree, downloadChatFile, getBootstrap, getNavigation, getProjectsBootstrap, getSessionPage, getTrace, getTraceSummary, getUserSettings, getUserSkill, getWorkflowVersionPicker, injectWebAnnotationBinding, installUserSkill, listUserSkills, listWebAnnotations, listWebAnnotationTargets, markRoomRead, markSessionRead, patchCustomAgent, patchModelDefaults, patchPiPackage, patchProject, patchProjectSession, patchRoom, patchSession, patchUserSettings, postAction, postContextFile, postCustomAgent, postMessage, postPiPackage, postProject, postProjectMessage, postProjectSession, postProjectWorkflowSession, postProjectWorkflowSessionStart, postRoom, postSession, signInWithGoogle, signOut, subscribeSignalTree, updateUserSkill, uploadChatFiles, type SaveCustomAgentInput, type UserSettings, type WebAnnotationBindingResponse, type WebAnnotationMessageAttachment, type WebAnnotationTargetSummary, type WorkflowVersionPickerOption } from "./api";
+import { createUserSkill, createWebAnnotationBinding, deleteCustomAgent, deletePiPackage, deleteProject, deleteRoom, deleteSession, deleteUserSkill, fetchSignalTree, downloadChatFile, getBootstrap, getNavigation, getProjectsBootstrap, getSessionPage, getTrace, getTraceSummary, getUserSettings, getUserSkill, getWorkflowVersionPicker, injectWebAnnotationBinding, installUserSkill, listUserSkills, listWebAnnotations, listWebAnnotationTargets, markRoomRead, markSessionRead, patchCustomAgent, patchModelDefaults, patchPiPackage, patchProject, patchProjectSession, patchRoom, patchSession, patchUserSettings, patchWebAnnotation, postAction, postContextFile, postCustomAgent, postMessage, postPiPackage, postProject, postProjectMessage, postProjectSession, postProjectWorkflowSession, postProjectWorkflowSessionStart, postRoom, postSession, signInWithGoogle, signOut, subscribeSignalTree, updateUserSkill, uploadChatFiles, type ChatUploadedFile, type SaveCustomAgentInput, type WebAnnotationBindingResponse, type WebAnnotationMessageAttachment, type WebAnnotationOverlayConfig, type WebAnnotationTargetSummary, type WorkflowVersionPickerOption } from "./api";
 import { THINKING_LEVELS } from "./types";
 import type { AgentCatalog, BootstrapData, CustomAgent, CustomAgentSubagent, ModelCatalog, ModelDefaults, ModelProfile, NavigationData, PiboProject, PiboProjectSession, ProjectsBootstrapData, PiboRoom, PiboSession, PiboSessionTraceSummary, PiboSessionTraceView, PiboSignalPatch, PiboSignalSnapshot, PiboTraceNode, PiboTraceOrderKey, PiboWebSessionNode, PiboWebSessionStatus, ThinkingLevel, UserSkill, WorkflowLifecycleEventRecord } from "./types";
 import type { ChatWebStoredEvent } from "../../../shared/trace-types.js";
@@ -81,7 +84,7 @@ import {
 
 type Area = "sessions" | "projects" | "workflows" | "cron" | "ralph" | "agents" | "context" | "settings";
 type ContextPanel = "context-files" | "base-prompt" | "compaction-prompt" | "pibo-tools" | "mcp-tools" | "build-context";
-type SettingsPanel = "general" | "pi-packages" | "skills" | "providers";
+type SettingsPanel = "general" | "shortcuts" | "pi-packages" | "skills" | "providers";
 
 export type ChatAppRoute =
 	| { area: "sessions"; roomId?: string; piboSessionId?: string; sessionViewId?: ChatSessionViewId }
@@ -107,6 +110,10 @@ type SlashCommand = {
 	description: string;
 };
 
+type UploadedChatAttachment = ChatUploadedFile & {
+	id: string;
+};
+
 type LoadBootstrapOptions = {
 	selectSession?: boolean;
 	force?: boolean;
@@ -121,6 +128,10 @@ const SESSION_VIEW_STORAGE_KEY = "pibo.chat.sessionView";
 const COMPOSER_DRAFT_STORAGE_PREFIX = "pibo.chat.composerDraft.";
 const COMPOSER_HISTORY_STORAGE_KEY = "pibo.chat.composerHistory";
 const WEB_ANNOTATIONS_CDP_URL_STORAGE_KEY = "pibo.chat.webAnnotations.cdpUrl";
+const WEB_ANNOTATIONS_SELECTED_STORAGE_PREFIX = "pibo.chat.webAnnotations.selected.";
+const WEB_ANNOTATIONS_PANEL_COLLAPSED_STORAGE_KEY = "pibo.chat.webAnnotations.panelCollapsed";
+const WEB_ANNOTATIONS_TOGGLE_SHORTCUT_STORAGE_KEY = "pibo.chat.shortcuts.webAnnotationsToggle";
+const DEFAULT_WEB_ANNOTATIONS_TOGGLE_SHORTCUT = "Alt+Shift+A";
 const COMPOSER_HISTORY_LIMIT = 100;
 const SESSION_DELETE_CONFIRM_TEXT = "Delete this session";
 const RECENT_SESSION_ACTIVITY_SIGNAL_MS = 3_000;
@@ -489,7 +500,9 @@ export function App({ route }: { route: ChatAppRoute }) {
 				return;
 			}
 			if (target.area === "settings") {
-				if (target.panel === "pi-packages") {
+				if (target.panel === "shortcuts") {
+					void navigate({ to: "/settings/shortcuts", replace });
+				} else if (target.panel === "pi-packages") {
 					void navigate({ to: "/settings/pi-packages", replace });
 				} else if (target.panel === "skills") {
 					void navigate({ to: "/settings/skills", replace });
@@ -841,6 +854,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 	useEffect(() => {
 		if (area !== "sessions" || !activeRoomId) return;
 		const params = new URLSearchParams({ roomId: activeRoomId });
+		params.set("mode", "summary");
 		params.set("since", `${latestRoomStreamId ?? 0}:999999`);
 		const events = new EventSource(`/api/chat/events?${params.toString()}`);
 		let bootstrapTimer: ReturnType<typeof setTimeout> | undefined;
@@ -925,8 +939,8 @@ export function App({ route }: { route: ChatAppRoute }) {
 	});
 
 	const sendMessageMutation = useMutation({
-		mutationFn: ({ piboSessionId, text, clientTxnId, roomId, webAnnotationIds }: { piboSessionId: string; text: string; clientTxnId: string; roomId?: string; webAnnotationIds?: readonly string[] }) =>
-			postMessage(piboSessionId, text, clientTxnId, roomId, webAnnotationIds),
+		mutationFn: ({ piboSessionId, text, clientTxnId, roomId, webAnnotationIds, fileAttachmentPaths }: { piboSessionId: string; text: string; clientTxnId: string; roomId?: string; webAnnotationIds?: readonly string[]; fileAttachmentPaths?: readonly string[] }) =>
+			postMessage(piboSessionId, text, clientTxnId, roomId, webAnnotationIds, fileAttachmentPaths),
 		onMutate: async ({ piboSessionId }) => {
 			await queryClient.cancelQueries({ queryKey: tracePageQueriesForSession(piboSessionId) });
 			updateBootstrapCache((data) => updateSessionNodeInBootstrap(data, piboSessionId, (node) => ({ ...node, status: "running", lastActivityAt: new Date().toISOString() })));
@@ -1573,7 +1587,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 					data-pibo-room-id={selectedRoomId ?? bootstrap.selectedRoomId ?? undefined}
 					data-pibo-selected-session-id={selectedPiboSessionId ?? undefined}
 					data-pibo-state={mobileSidebarOpen ? "open" : "closed"}
-					className={`min-h-0 overflow-auto bg-[#1a262b] border-r border-slate-800 max-[980px]:fixed max-[980px]:left-0 max-[980px]:top-0 max-[980px]:bottom-0 max-[980px]:z-40 max-[980px]:w-[280px] max-[980px]:transition-transform max-[980px]:duration-200 ${
+					className={`min-h-0 overflow-hidden flex flex-col bg-[#1a262b] border-r border-slate-800 max-[980px]:fixed max-[980px]:left-0 max-[980px]:top-0 max-[980px]:bottom-0 max-[980px]:z-40 max-[980px]:w-[280px] max-[980px]:transition-transform max-[980px]:duration-200 ${
 						mobileSidebarOpen ? "max-[980px]:translate-x-0" : "max-[980px]:-translate-x-full"
 					}`}
 				>
@@ -1613,12 +1627,12 @@ export function App({ route }: { route: ChatAppRoute }) {
 							data-pibo-room-id={selectedRoomId ?? bootstrap.selectedRoomId ?? undefined}
 							data-pibo-selected-session-id={selectedPiboSessionId ?? undefined}
 							data-pibo-state={showArchived ? "archived-visible" : "active-only"}
-							className="p-2 space-y-3"
+							className="min-h-0 flex-1 overflow-hidden p-2 flex flex-col gap-3"
 						>
-								{roomsSupported ? (
-									<div>
-										{personalRoom ? (
-											<div className="mb-3">
+							{roomsSupported ? (
+								<>
+									{personalRoom ? (
+											<div className="shrink-0">
 												<div className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">Personal Chat</div>
 												<RoomNode
 													room={personalRoom}
@@ -1630,8 +1644,9 @@ export function App({ route }: { route: ChatAppRoute }) {
 													onDelete={requestRoomDelete}
 												/>
 											</div>
-										) : null}
-										<div className="flex items-center justify-between gap-2 px-1 pb-1">
+									) : null}
+									<div className="min-h-0 flex-1 basis-0 overflow-hidden flex flex-col">
+										<div className="shrink-0 flex items-center justify-between gap-2 px-1 pb-1">
 											<div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Rooms</div>
 											<div className="flex items-center gap-1">
 												<button
@@ -1659,6 +1674,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 												</button>
 											</div>
 										</div>
+										<div className="min-h-0 flex-1 overflow-y-auto pr-1">
 										{roomGroups.active.map((room) => (
 											<RoomNode
 												key={room.id}
@@ -1688,10 +1704,12 @@ export function App({ route }: { route: ChatAppRoute }) {
 												) : <div className="px-2 py-3 text-xs text-slate-500 border border-dashed border-slate-700 rounded-sm">No archived rooms</div>}
 											</div>
 										) : null}
+										</div>
 									</div>
-								) : null}
-							<div>
-								<div className="flex items-center justify-between gap-2 px-1 pb-1">
+								</>
+							) : null}
+							<div className="min-h-0 flex-1 basis-0 overflow-hidden flex flex-col border-t border-slate-700/80 pt-3">
+								<div className="shrink-0 flex items-center justify-between gap-2 px-1 pb-1">
 									<div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Sessions</div>
 									<div className="flex items-center gap-1">
 										<select
@@ -1735,6 +1753,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 										</button>
 									</div>
 								</div>
+								<div className="min-h-0 flex-1 overflow-y-auto pr-1">
 								{visibleActiveSessions.map((session) => (
 									<SessionNode
 										key={session.piboSessionId}
@@ -1763,9 +1782,8 @@ export function App({ route }: { route: ChatAppRoute }) {
 										{loadingActiveSessions ? "Loading active sessions…" : `Load more active sessions (${visibleActiveSessions.length} of ${sessionGroups.active.length})`}
 									</button>
 								) : null}
-							</div>
 							{showArchived ? (
-								<div>
+								<div className="mt-3">
 									<div className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
 										<span>Archived Sessions</span>
 										{loadingArchivedSessions ? <Loader2 size={12} className="text-[#11a4d4] animate-spin" aria-label="Loading archived sessions" /> : null}
@@ -1804,6 +1822,8 @@ export function App({ route }: { route: ChatAppRoute }) {
 									) : <div className="px-2 py-3 text-xs text-slate-500 border border-dashed border-slate-700 rounded-sm">No archived sessions</div>}
 								</div>
 							) : null}
+								</div>
+							</div>
 						</div>
 					) : area === "context" ? (
 						<ContextSidebar
@@ -1867,7 +1887,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 						onThinkingLevelChange={(level) => void runCommand(`/thinking ${level}`)}
 						onRefreshTrace={refreshSelectedTrace}
 						onRefreshBootstrap={refreshSelectedBootstrap}
-						onSend={async (text, webAnnotationIds) => {
+						onSend={async (text, webAnnotationIds, fileAttachmentPaths) => {
 							if (!selectedPiboSessionId || selectedRoomArchived) return;
 							try {
 								await sendMessageMutation.mutateAsync({
@@ -1876,6 +1896,7 @@ export function App({ route }: { route: ChatAppRoute }) {
 									clientTxnId: createClientTxnId(),
 									roomId: selectedRoomId ?? undefined,
 									webAnnotationIds,
+									fileAttachmentPaths,
 								});
 								await loadBootstrap(selectedPiboSessionId, showArchivedRef.current, selectedRoomId ?? undefined, { force: true });
 								setError(null);
@@ -3081,7 +3102,7 @@ function SessionTracePane({
 	onThinkingLevelChange: (level: ThinkingLevel) => void;
 	onRefreshTrace: () => Promise<void>;
 	onRefreshBootstrap: () => Promise<unknown>;
-	onSend: (text: string, webAnnotationIds?: readonly string[]) => Promise<void>;
+	onSend: (text: string, webAnnotationIds?: readonly string[], fileAttachmentPaths?: readonly string[]) => Promise<void>;
 	onError: (message: string | null) => void;
 }) {
 	const queryClient = useQueryClient();
@@ -3093,6 +3114,10 @@ function SessionTracePane({
 	const [rawEventLimit, setRawEventLimit] = useState(DEFAULT_RAW_EVENTS_LIMIT);
 	const [baseTraceView, setBaseTraceView] = useState<PiboSessionTraceView | null>(null);
 	const [selectedWebAnnotationIds, setSelectedWebAnnotationIds] = useState<string[]>([]);
+	const [selectedUploadAttachmentsBySession, setSelectedUploadAttachmentsBySession] = useState<Record<string, UploadedChatAttachment[]>>({});
+	const [webAnnotationsPanelVisible, setWebAnnotationsPanelVisible] = useState(false);
+	const [webAnnotationsPanelCollapsed, setWebAnnotationsPanelCollapsed] = useState(() => readStoredWebAnnotationsPanelCollapsed());
+	const [clearingWebAnnotations, setClearingWebAnnotations] = useState(false);
 	const [copiedHeaderPiboSessionId, setCopiedHeaderPiboSessionId] = useState<string | null>(null);
 	const copyHeaderPiboSessionTimeout = useRef<number | undefined>(undefined);
 	const traceSummaryQueryKey = useMemo(
@@ -3144,14 +3169,15 @@ function SessionTracePane({
 		retry: 1,
 	});
 	const webAnnotationsQuery = useQuery({
-		queryKey: ["web-annotations", selectedPiboSessionId],
+		queryKey: ["web-annotations", "owner", selectedPiboSessionId],
 		queryFn: async () => {
 			if (!selectedPiboSessionId) throw new Error("Session is required");
-			return listWebAnnotations(selectedPiboSessionId, { limit: 50 });
+			return listWebAnnotations(selectedPiboSessionId, { limit: 100, scope: "owner" });
 		},
-		enabled: Boolean(selectedPiboSessionId),
-		staleTime: 3_000,
-		refetchOnWindowFocus: false,
+		enabled: Boolean(selectedPiboSessionId) && (webAnnotationsPanelVisible || selectedWebAnnotationIds.length > 0),
+		staleTime: 1_000,
+		refetchOnWindowFocus: webAnnotationsPanelVisible,
+		refetchInterval: webAnnotationsPanelVisible ? 5_000 : false,
 		retry: 1,
 	});
 	const visibleWebAnnotations = useMemo(
@@ -3164,26 +3190,35 @@ function SessionTracePane({
 			.filter((annotation): annotation is WebAnnotationMessageAttachment => Boolean(annotation)),
 		[selectedWebAnnotationIds, visibleWebAnnotations],
 	);
+	const selectedUploadAttachments = useMemo(
+		() => selectedPiboSessionId ? selectedUploadAttachmentsBySession[selectedPiboSessionId] ?? [] : [],
+		[selectedPiboSessionId, selectedUploadAttachmentsBySession],
+	);
 
 	useEffect(() => {
 		setTraceEventLimit(DEFAULT_TRACE_EVENTS_PAGE_SIZE);
 		setRawEventLimit(DEFAULT_RAW_EVENTS_LIMIT);
 		setBaseTraceView(null);
 		setLiveTraceOverlay(null);
-		setSelectedWebAnnotationIds([]);
+		setSelectedWebAnnotationIds(selectedPiboSessionId ? readStoredSelectedWebAnnotationIds(selectedPiboSessionId) : []);
 	}, [selectedPiboSessionId]);
 
 	useEffect(() => {
+		if (!webAnnotationsQuery.data) return;
 		if (!visibleWebAnnotations.length) {
-			setSelectedWebAnnotationIds((current) => current.length ? [] : current);
+			setSelectedWebAnnotationIds((current) => {
+				if (current.length && selectedPiboSessionId) writeStoredSelectedWebAnnotationIds(selectedPiboSessionId, []);
+				return current.length ? [] : current;
+			});
 			return;
 		}
 		const visibleIds = new Set(visibleWebAnnotations.map((annotation) => annotation.id));
 		setSelectedWebAnnotationIds((current) => {
 			const next = current.filter((id) => visibleIds.has(id));
+			if (next.length !== current.length && selectedPiboSessionId) writeStoredSelectedWebAnnotationIds(selectedPiboSessionId, next);
 			return next.length === current.length ? current : next;
 		});
-	}, [visibleWebAnnotations]);
+	}, [selectedPiboSessionId, visibleWebAnnotations, webAnnotationsQuery.data]);
 
 	// TanStack Query caches only bounded trace pages and summaries. The render path
 	// reads from local state so a synchronous cache hit cannot rehydrate a trace in
@@ -3296,6 +3331,7 @@ function SessionTracePane({
 		if (!selectedPiboSessionId || !tracePageQueryKey) return;
 		if (!currentTraceView || currentTraceView.piboSessionId !== selectedPiboSessionId) return;
 		const params = new URLSearchParams({ piboSessionId: selectedPiboSessionId });
+		params.set("mode", "live");
 		if (currentTraceView?.latestStreamId !== undefined) {
 			params.set("since", `${currentTraceView.latestStreamId}:999999`);
 		}
@@ -3423,6 +3459,15 @@ function SessionTracePane({
 		};
 	}, []);
 
+	useEffect(() => {
+		const handleSaved = () => {
+			setWebAnnotationsPanelVisible(true);
+			void webAnnotationsQuery.refetch();
+		};
+		window.addEventListener("pibo:web-annotation-saved", handleSaved);
+		return () => window.removeEventListener("pibo:web-annotation-saved", handleSaved);
+	}, [webAnnotationsQuery]);
+
 	const headerPiboSessionId = currentTraceView?.piboSessionId ?? selectedPiboSessionId ?? "";
 	const headerPiboSessionCopied = copiedHeaderPiboSessionId === headerPiboSessionId;
 	const workflowHeader = workflowProjectSession && isWorkflowBackedProjectSession(workflowProjectSession)
@@ -3437,15 +3482,83 @@ function SessionTracePane({
 		copyHeaderPiboSessionTimeout.current = window.setTimeout(() => setCopiedHeaderPiboSessionId(null), 900);
 	};
 
+	const updateSelectedWebAnnotationIds = useCallback((updater: (current: string[]) => string[]) => {
+		setSelectedWebAnnotationIds((current) => {
+			const next = updater(current);
+			if (selectedPiboSessionId) writeStoredSelectedWebAnnotationIds(selectedPiboSessionId, next);
+			return next;
+		});
+	}, [selectedPiboSessionId]);
+
 	const toggleWebAnnotationAttachment = (annotationId: string) => {
-		setSelectedWebAnnotationIds((current) => current.includes(annotationId)
+		updateSelectedWebAnnotationIds((current) => current.includes(annotationId)
 			? current.filter((id) => id !== annotationId)
 			: [...current, annotationId].slice(0, 5));
+	};
+
+	const clearSelectedWebAnnotationAttachments = () => updateSelectedWebAnnotationIds(() => []);
+
+	const attachUploadedFiles = useCallback((files: readonly ChatUploadedFile[]) => {
+		if (!selectedPiboSessionId || !files.length) return;
+		setSelectedUploadAttachmentsBySession((current) => {
+			const existing = current[selectedPiboSessionId] ?? [];
+			const existingPaths = new Set(existing.map((file) => file.path));
+			const additions = files
+				.filter((file) => file.path && !existingPaths.has(file.path))
+				.map((file): UploadedChatAttachment => ({ ...file, id: `upload-${createClientTxnId()}` }));
+			if (!additions.length) return current;
+			return {
+				...current,
+				[selectedPiboSessionId]: [...existing, ...additions].slice(0, 10),
+			};
+		});
+	}, [selectedPiboSessionId]);
+
+	const detachUploadAttachment = (attachmentId: string) => {
+		if (!selectedPiboSessionId) return;
+		setSelectedUploadAttachmentsBySession((current) => {
+			const existing = current[selectedPiboSessionId] ?? [];
+			const next = existing.filter((attachment) => attachment.id !== attachmentId);
+			if (next.length === existing.length) return current;
+			return { ...current, [selectedPiboSessionId]: next };
+		});
+	};
+
+	const clearSelectedUploadAttachments = () => {
+		if (!selectedPiboSessionId) return;
+		setSelectedUploadAttachmentsBySession((current) => {
+			if (!(current[selectedPiboSessionId]?.length)) return current;
+			return { ...current, [selectedPiboSessionId]: [] };
+		});
+	};
+
+	const toggleWebAnnotationsPanelCollapsed = () => {
+		setWebAnnotationsPanelCollapsed((current) => {
+			const next = !current;
+			writeStoredWebAnnotationsPanelCollapsed(next);
+			return next;
+		});
+	};
+
+	const clearVisibleWebAnnotations = async () => {
+		if (!visibleWebAnnotations.length || clearingWebAnnotations) return;
+		if (!window.confirm(`Dismiss ${visibleWebAnnotations.length} visible web annotations? This keeps sent messages but clears the annotation list.`)) return;
+		setClearingWebAnnotations(true);
+		try {
+			await Promise.all(visibleWebAnnotations.map((annotation) => patchWebAnnotation(annotation.id, { piboSessionId: annotation.piboSessionId, status: "dismissed", summary: "Cleared from Chat Web UI" })));
+			clearSelectedWebAnnotationAttachments();
+			await webAnnotationsQuery.refetch();
+		} catch (caught) {
+			onError(compactWebAnnotationError(caught, "Could not clear web annotations"));
+		} finally {
+			setClearingWebAnnotations(false);
+		}
 	};
 
 	const handleComposerSend = async (text: string) => {
 		if (!selectedPiboSessionId) return;
 		const webAnnotationIds = selectedWebAnnotations.map((annotation) => annotation.id);
+		const fileAttachmentPaths = selectedUploadAttachments.map((attachment) => attachment.path);
 		const now = new Date().toISOString();
 		const eventId = `optimistic:user-message:${createClientTxnId()}`;
 		const optimisticEvent: ChatWebStoredEvent = {
@@ -3461,6 +3574,7 @@ function SessionTracePane({
 				eventId,
 				queuedMessages: 1,
 				text,
+				...(fileAttachmentPaths.length ? { fileAttachmentPaths } : {}),
 				source: "user",
 			},
 		};
@@ -3468,8 +3582,9 @@ function SessionTracePane({
 			piboSessionId: selectedPiboSessionId,
 			events: [...(current?.piboSessionId === selectedPiboSessionId ? current.events : []), optimisticEvent],
 		}));
-		await onSend(text, webAnnotationIds);
-		setSelectedWebAnnotationIds([]);
+		await onSend(text, webAnnotationIds, fileAttachmentPaths);
+		clearSelectedWebAnnotationAttachments();
+		clearSelectedUploadAttachments();
 		await Promise.all([tracePageQuery.refetch(), webAnnotationsQuery.refetch()]);
 	};
 
@@ -3513,6 +3628,9 @@ function SessionTracePane({
 							piboSessionId={selectedPiboSessionId}
 							piboRoomId={selectedRoomId ?? bootstrap.selectedRoomId ?? undefined}
 							disabled={!selectedPiboSessionId || selectedRoomArchived}
+							panelVisible={webAnnotationsPanelVisible}
+							onShowPanel={() => setWebAnnotationsPanelVisible(true)}
+							onHidePanel={() => setWebAnnotationsPanelVisible(false)}
 							onError={onError}
 						/>
 						<div className="flex items-center rounded-sm border border-slate-700 bg-[#0e1116] p-0.5">
@@ -3620,15 +3738,21 @@ function SessionTracePane({
 						onError,
 					})
 				)}
-				<WebAnnotationsSessionPanel
-					piboSessionId={selectedPiboSessionId}
-					annotations={visibleWebAnnotations}
-					selectedIds={selectedWebAnnotationIds}
-					loading={webAnnotationsQuery.isLoading || webAnnotationsQuery.isFetching}
-					error={webAnnotationsQuery.error ? errorMessage(webAnnotationsQuery.error) : null}
-					onRefresh={() => void webAnnotationsQuery.refetch()}
-					onToggle={toggleWebAnnotationAttachment}
-				/>
+				{webAnnotationsPanelVisible ? (
+					<WebAnnotationsSessionPanel
+						piboSessionId={selectedPiboSessionId}
+						annotations={visibleWebAnnotations}
+						selectedIds={selectedWebAnnotationIds}
+						loading={webAnnotationsQuery.isLoading || webAnnotationsQuery.isFetching || clearingWebAnnotations}
+						error={webAnnotationsQuery.error ? errorMessage(webAnnotationsQuery.error) : null}
+						collapsed={webAnnotationsPanelCollapsed}
+						onRefresh={() => void webAnnotationsQuery.refetch()}
+						onToggle={toggleWebAnnotationAttachment}
+						onClear={() => void clearVisibleWebAnnotations()}
+						onCollapse={toggleWebAnnotationsPanelCollapsed}
+						onClose={() => setWebAnnotationsPanelVisible(false)}
+					/>
+				) : null}
 				<Composer
 					sessionId={selectedPiboSessionId}
 					disabled={!selectedPiboSessionId || selectedRoomArchived}
@@ -3637,10 +3761,14 @@ function SessionTracePane({
 					value={composerText}
 					focusSignal={composerFocusSignal}
 					selectedWebAnnotations={selectedWebAnnotations}
+					selectedUploadAttachments={selectedUploadAttachments}
 					onValueChange={onComposerTextChange}
 					onCommand={onCommand}
-					onDetachWebAnnotation={(id) => setSelectedWebAnnotationIds((current) => current.filter((candidate) => candidate !== id))}
-					onClearWebAnnotations={() => setSelectedWebAnnotationIds([])}
+					onDetachWebAnnotation={(id) => updateSelectedWebAnnotationIds((current) => current.filter((candidate) => candidate !== id))}
+					onClearWebAnnotations={clearSelectedWebAnnotationAttachments}
+					onAttachUploadedFiles={attachUploadedFiles}
+					onDetachUploadAttachment={detachUploadAttachment}
+					onClearUploadAttachments={clearSelectedUploadAttachments}
 					onSend={handleComposerSend}
 				/>
 			</main>
@@ -4354,6 +4482,7 @@ function RoomNode({
 	const archived = isArchivedRoom(room);
 	const [menuOpen, setMenuOpen] = useState(false);
 	const menuRef = useRef<HTMLDivElement>(null);
+	const roomTooltip = roomNodeTooltip(room);
 
 	const copyRoomId = () => {
 		void copyTextToClipboard(room.id).catch(() => undefined);
@@ -4398,7 +4527,7 @@ function RoomNode({
 								: "border-transparent"
 				}`}
 				style={{ marginLeft: depth * 12 }}
-				title={room.id}
+				title={roomTooltip}
 			>
 				{editing && !personal ? (
 					<form
@@ -4461,151 +4590,77 @@ function RoomNode({
 									<Lock size={24} className="w-3.5 h-3.5 max-[980px]:w-5 max-[980px]:h-5" />
 								</span>
 							) : (
-								<>
-									<div className="hidden min-[981px]:flex items-center gap-1">
-										{archived ? (
-											<>
-												<button
-													type="button"
-													onClick={copyRoomId}
-													title="Copy Room Id"
-													aria-label="Copy Room Id"
-													className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]"
-												>
-													<Copy size={13} />
-												</button>
-												<button
-													type="button"
-													onClick={() => onArchive(room.id, false)}
-													title="Restore Room"
-													aria-label="Restore Room"
-													className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]"
-												>
-													<ArchiveRestore size={13} />
-												</button>
-												<button
-													type="button"
-													onClick={() => onDelete(room)}
-													title="Delete Room"
-													aria-label="Delete Room"
-													className="h-7 w-7 inline-flex items-center justify-center border border-red-500/70 rounded-sm text-red-300 hover:bg-red-500/10"
-												>
-													<Trash2 size={13} />
-												</button>
-											</>
-										) : (
-											<>
-												<button
-													type="button"
-													onClick={copyRoomId}
-													title="Copy Room Id"
-													aria-label="Copy Room Id"
-													className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]"
-												>
-													<Copy size={13} />
-												</button>
-												<button
-													type="button"
-													onClick={() => setEditing(true)}
-													title="Edit Room"
-													aria-label="Edit Room"
-													className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]"
-												>
-													<Edit3 size={13} />
-												</button>
-												<button
-													type="button"
-													onClick={() => onReadAll(room.id)}
-													title="Read All"
-													aria-label="Read All"
-													className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]"
-												>
-													<CheckCheck size={13} />
-												</button>
-												<button
-													type="button"
-													onClick={() => onArchive(room.id, true)}
-													title="Archive Room"
-													aria-label="Archive Room"
-													className="h-7 w-7 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]"
-												>
-													<Archive size={13} />
-												</button>
-											</>
-										)}
-									</div>
-									<div className="min-[981px]:hidden relative" ref={menuRef}>
-										<button
-											type="button"
-											onClick={() => setMenuOpen((v) => !v)}
-											title="Room actions"
-											aria-label="Room actions"
-											className="h-7 w-7 max-[980px]:h-9 max-[980px]:w-9 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]"
-										>
-											<MoreVertical size={24} className="w-3.5 h-3.5 max-[980px]:w-5 max-[980px]:h-5" />
-										</button>
-										{menuOpen && (
-											<div className="absolute right-0 top-full z-50 mt-1 w-48 bg-[#1a262b] border border-slate-700 rounded-sm shadow-lg py-1">
-												{archived ? (
-													<>
-														<button
-															type="button"
-															onClick={() => { copyRoomId(); setMenuOpen(false); }}
-															className="w-full text-left px-3 py-2.5 text-sm text-slate-300 hover:bg-[#11a4d4]/10 hover:text-[#11a4d4] flex items-center gap-2"
-														>
-															<Copy size={16} /> Copy Room Id
-														</button>
-														<button
-															type="button"
-															onClick={() => { setMenuOpen(false); onArchive(room.id, false); }}
-															className="w-full text-left px-3 py-2.5 text-sm text-slate-300 hover:bg-[#11a4d4]/10 hover:text-[#11a4d4] flex items-center gap-2"
-														>
-															<ArchiveRestore size={16} /> Restore Room
-														</button>
-														<button
-															type="button"
-															onClick={() => { setMenuOpen(false); onDelete(room); }}
-															className="w-full text-left px-3 py-2.5 text-sm text-red-300 hover:bg-red-500/10 flex items-center gap-2"
-														>
-															<Trash2 size={16} /> Delete Room
-														</button>
-													</>
-												) : (
-													<>
-														<button
-															type="button"
-															onClick={() => { copyRoomId(); setMenuOpen(false); }}
-															className="w-full text-left px-3 py-2.5 text-sm text-slate-300 hover:bg-[#11a4d4]/10 hover:text-[#11a4d4] flex items-center gap-2"
-														>
-															<Copy size={16} /> Copy Room Id
-														</button>
-														<button
-															type="button"
-															onClick={() => { setMenuOpen(false); setEditing(true); }}
-															className="w-full text-left px-3 py-2.5 text-sm text-slate-300 hover:bg-[#11a4d4]/10 hover:text-[#11a4d4] flex items-center gap-2"
-														>
-															<Edit3 size={16} /> Edit Room
-														</button>
-														<button
-															type="button"
-															onClick={() => { setMenuOpen(false); onReadAll(room.id); }}
-															className="w-full text-left px-3 py-2.5 text-sm text-slate-300 hover:bg-[#11a4d4]/10 hover:text-[#11a4d4] flex items-center gap-2"
-														>
-															<CheckCheck size={16} /> Read All
-														</button>
-														<button
-															type="button"
-															onClick={() => { setMenuOpen(false); onArchive(room.id, true); }}
-															className="w-full text-left px-3 py-2.5 text-sm text-slate-300 hover:bg-[#11a4d4]/10 hover:text-[#11a4d4] flex items-center gap-2"
-														>
-															<Archive size={16} /> Archive Room
-														</button>
-													</>
-												)}
-											</div>
-										)}
-									</div>
-								</>
+								<div className="relative" ref={menuRef}>
+									<button
+										type="button"
+										onClick={() => setMenuOpen((v) => !v)}
+										title="Room actions"
+										aria-label="Room actions"
+										className="h-7 w-7 max-[980px]:h-9 max-[980px]:w-9 inline-flex items-center justify-center border border-slate-700 rounded-sm text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4]"
+									>
+										<MoreVertical size={24} className="w-3.5 h-3.5 max-[980px]:w-5 max-[980px]:h-5" />
+									</button>
+									{menuOpen && (
+										<div className="absolute right-0 top-full z-50 mt-1 w-48 bg-[#1a262b] border border-slate-700 rounded-sm shadow-lg py-1">
+											{archived ? (
+												<>
+													<button
+														type="button"
+														onClick={() => { copyRoomId(); setMenuOpen(false); }}
+														className="w-full text-left px-3 py-2.5 text-sm text-slate-300 hover:bg-[#11a4d4]/10 hover:text-[#11a4d4] flex items-center gap-2"
+													>
+														<Copy size={16} /> Copy Room ID
+													</button>
+													<button
+														type="button"
+														onClick={() => { setMenuOpen(false); onArchive(room.id, false); }}
+														className="w-full text-left px-3 py-2.5 text-sm text-slate-300 hover:bg-[#11a4d4]/10 hover:text-[#11a4d4] flex items-center gap-2"
+													>
+														<ArchiveRestore size={16} /> Restore Room
+													</button>
+													<button
+														type="button"
+														onClick={() => { setMenuOpen(false); onDelete(room); }}
+														className="w-full text-left px-3 py-2.5 text-sm text-red-300 hover:bg-red-500/10 flex items-center gap-2"
+													>
+														<Trash2 size={16} /> Delete Room
+													</button>
+												</>
+											) : (
+												<>
+													<button
+														type="button"
+														onClick={() => { copyRoomId(); setMenuOpen(false); }}
+														className="w-full text-left px-3 py-2.5 text-sm text-slate-300 hover:bg-[#11a4d4]/10 hover:text-[#11a4d4] flex items-center gap-2"
+													>
+														<Copy size={16} /> Copy Room ID
+													</button>
+													<button
+														type="button"
+														onClick={() => { setMenuOpen(false); setEditing(true); }}
+														className="w-full text-left px-3 py-2.5 text-sm text-slate-300 hover:bg-[#11a4d4]/10 hover:text-[#11a4d4] flex items-center gap-2"
+													>
+														<Edit3 size={16} /> Edit Room
+													</button>
+													<button
+														type="button"
+														onClick={() => { setMenuOpen(false); onReadAll(room.id); }}
+														className="w-full text-left px-3 py-2.5 text-sm text-slate-300 hover:bg-[#11a4d4]/10 hover:text-[#11a4d4] flex items-center gap-2"
+													>
+														<CheckCheck size={16} /> Read All
+													</button>
+													<button
+														type="button"
+														onClick={() => { setMenuOpen(false); onArchive(room.id, true); }}
+														className="w-full text-left px-3 py-2.5 text-sm text-slate-300 hover:bg-[#11a4d4]/10 hover:text-[#11a4d4] flex items-center gap-2"
+													>
+														<Archive size={16} /> Archive Room
+													</button>
+												</>
+											)}
+										</div>
+									)}
+								</div>
 							)}
 						</div>
 					</div>
@@ -4660,6 +4715,7 @@ function SessionNode({
 	showWorkflowSessionKindMarkers?: boolean;
 }) {
 	const safeTitle = sessionNodeTitle(node);
+	const sessionTooltip = sessionNodeTooltip(node);
 	const [editing, setEditing] = useState(false);
 	const [draftTitle, setDraftTitle] = useState(safeTitle);
 	const titleInputRef = useRef<HTMLInputElement>(null);
@@ -4712,6 +4768,7 @@ function SessionNode({
 	return (
 		<div>
 			<div
+				data-pibo-component="SessionNode"
 				data-pibo-debug="session-row"
 				data-pibo-session-id={node.piboSessionId}
 				data-pibo-title={safeTitle}
@@ -4723,7 +4780,7 @@ function SessionNode({
 					node.piboSessionId === selectedPiboSessionId ? "border-[#11a4d4] bg-[#11a4d4]/10" : "border-transparent"
 				}`}
 				style={{ paddingLeft: 8 + depth * 14 }}
-				title={node.piboSessionId}
+				title={sessionTooltip}
 			>
 				{editing ? (
 					<form
@@ -4910,6 +4967,14 @@ function SessionNode({
 			)) : null}
 		</div>
 	);
+}
+
+function roomNodeTooltip(room: Pick<PiboRoom, "id" | "name">): string {
+	return `${room.name || "Untitled Room"}\n${room.id}`;
+}
+
+function sessionNodeTooltip(node: PiboWebSessionNode): string {
+	return `${sessionNodeTitle(node)}\n${node.piboSessionId}`;
 }
 
 function sessionNodeTitle(node: PiboWebSessionNode): string {
@@ -5221,48 +5286,72 @@ function WebAnnotationsSessionPanel({
 	selectedIds,
 	loading,
 	error,
+	collapsed,
 	onRefresh,
 	onToggle,
+	onClear,
+	onCollapse,
+	onClose,
 }: {
 	piboSessionId: string | null;
 	annotations: WebAnnotationMessageAttachment[];
 	selectedIds: readonly string[];
 	loading: boolean;
 	error: string | null;
+	collapsed: boolean;
 	onRefresh: () => void;
 	onToggle: (annotationId: string) => void;
+	onClear: () => void;
+	onCollapse: () => void;
+	onClose: () => void;
 }) {
 	if (!piboSessionId) return null;
 	return (
 		<section className="border-t border-slate-800 bg-[#101d22] px-4 py-2" data-pibo-debug="web-annotations-session-panel" data-pibo-session-id={piboSessionId}>
-			<div className="mb-2 flex items-center justify-between gap-2">
-				<div>
-					<div className="text-[11px] font-bold uppercase tracking-wider text-[#11a4d4]">Web annotations</div>
-					<div className="text-[11px] text-slate-500">Attach selected annotations to your next message.</div>
+			<div className="flex items-center justify-between gap-2">
+				<div className="min-w-0">
+					<div className="flex items-center gap-2">
+						<div className="text-[11px] font-bold uppercase tracking-wider text-[#11a4d4]">Web annotations</div>
+						<span className="rounded-sm border border-slate-700 px-1.5 py-0.5 text-[10px] text-slate-400">{annotations.length}</span>
+						{selectedIds.length ? <span className="rounded-sm border border-[#11a4d4]/50 px-1.5 py-0.5 text-[10px] text-[#11a4d4]">{selectedIds.length} attached</span> : null}
+					</div>
+					{collapsed ? null : <div className="text-[11px] text-slate-500">Global annotation list. Selected attachments are remembered per session.</div>}
 				</div>
-				<button type="button" onClick={onRefresh} disabled={loading} className="inline-flex h-7 items-center gap-1 rounded-sm border border-slate-700 px-2 text-[11px] text-slate-300 hover:border-[#11a4d4] hover:text-[#11a4d4] disabled:opacity-50" data-pibo-debug="web-annotations-refresh">
-					<RefreshCw size={12} className={loading ? "animate-spin" : undefined} /> Refresh
-				</button>
+				<div className="flex shrink-0 items-center gap-1">
+					<button type="button" onClick={onRefresh} disabled={loading} title="Refresh annotations" aria-label="Refresh annotations" className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-slate-700 text-slate-300 hover:border-[#11a4d4] hover:text-[#11a4d4] disabled:opacity-50" data-pibo-debug="web-annotations-refresh">
+						<RefreshCw size={12} className={loading ? "animate-spin" : undefined} />
+					</button>
+					<button type="button" onClick={onClear} disabled={loading || !annotations.length} title="Clear visible annotations" aria-label="Clear visible annotations" className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-slate-700 text-slate-300 hover:border-red-500 hover:text-red-300 disabled:opacity-50">
+						<Trash2 size={12} />
+					</button>
+					<button type="button" onClick={onCollapse} title={collapsed ? "Expand annotations panel" : "Collapse annotations panel"} aria-label={collapsed ? "Expand annotations panel" : "Collapse annotations panel"} className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-slate-700 text-slate-300 hover:border-[#11a4d4] hover:text-[#11a4d4]">
+						{collapsed ? <ChevronsUp size={12} /> : <ChevronsDown size={12} />}
+					</button>
+					<button type="button" onClick={onClose} title="Hide annotations panel" aria-label="Hide annotations panel" className="inline-flex h-7 w-7 items-center justify-center rounded-sm border border-slate-700 text-slate-300 hover:border-[#11a4d4] hover:text-[#11a4d4]">
+						<X size={12} />
+					</button>
+				</div>
 			</div>
-			{error ? (
+			{collapsed ? null : error ? (
 				<div className="rounded-sm border border-red-900 bg-red-950/40 px-3 py-2 text-xs text-red-200" data-pibo-debug="web-annotations-error">{boundedUiText(error, 220)}</div>
 			) : loading && !annotations.length ? (
 				<div className="rounded-sm border border-slate-800 bg-[#0e1116] px-3 py-2 text-xs text-slate-400" data-pibo-debug="web-annotations-loading">Loading annotations…</div>
 			) : !annotations.length ? (
 				<div className="rounded-sm border border-slate-800 bg-[#0e1116] px-3 py-2 text-xs text-slate-500" data-pibo-debug="web-annotations-empty">No open annotations for this session.</div>
 			) : (
-				<div className="flex gap-2 overflow-x-auto pb-1" data-pibo-debug="web-annotations-list">
+				<div className="mt-2 grid max-h-56 grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-2 overflow-y-auto pr-1" data-pibo-debug="web-annotations-list">
 					{annotations.map((annotation) => {
 						const selected = selectedIds.includes(annotation.id);
 						return (
-							<div key={annotation.id} data-pibo-debug="web-annotation-chip" data-web-annotation-id={annotation.id} data-web-annotation-selected={selected ? "true" : "false"} className={`min-w-64 max-w-80 rounded-sm border px-3 py-2 text-xs ${selected ? "border-[#11a4d4] bg-[#11a4d4]/10" : "border-slate-800 bg-[#0e1116]"}`}>
+							<div key={annotation.id} data-pibo-debug="web-annotation-chip" data-web-annotation-id={annotation.id} data-web-annotation-session-id={annotation.piboSessionId} data-web-annotation-selected={selected ? "true" : "false"} className={`min-w-0 rounded-sm border px-3 py-2 text-xs ${selected ? "border-[#11a4d4] bg-[#11a4d4]/10" : "border-slate-800 bg-[#0e1116]"}`}>
 								<div className="mb-1 flex items-center justify-between gap-2">
 									<span className="min-w-0 truncate font-mono text-[11px] text-slate-500">{annotation.status} · {annotation.targetKind}</span>
 									<button type="button" onClick={() => onToggle(annotation.id)} className={`inline-flex h-6 shrink-0 items-center gap-1 rounded-sm border px-1.5 text-[11px] ${selected ? "border-[#11a4d4] text-[#11a4d4]" : "border-slate-700 text-slate-300 hover:border-[#11a4d4] hover:text-[#11a4d4]"}`}>
 										{selected ? <X size={11} /> : <Plus size={11} />} {selected ? "Detach" : "Attach"}
 									</button>
 								</div>
-								<div className="truncate text-slate-200" title={annotation.label || annotation.selector || annotation.id}>{boundedUiText(annotation.label || annotation.selector || annotation.id, 120)}</div>
+								<div className="truncate text-slate-200" title={annotation.primaryTarget || annotation.label || annotation.selector || annotation.id}>{boundedUiText(annotation.primaryTarget || annotation.label || annotation.selector || annotation.id, 120)}</div>
+								{annotation.piboContext ? <div className="truncate font-mono text-[11px] text-[#11a4d4]" title={annotation.piboContext}>{boundedUiText(annotation.piboContext, 140)}</div> : null}
 								<div className="truncate font-mono text-[11px] text-slate-500" title={annotation.url}>{webAnnotationUrlLabel(annotation.url)}</div>
 								<div className="mt-1 line-clamp-2 text-slate-400" title={annotation.note}>{boundedUiText(annotation.note, 180)}</div>
 								<div className="mt-1 text-[11px] text-slate-600">{shortWorkflowTimestamp(annotation.createdAt)}</div>
@@ -5279,11 +5368,17 @@ function WebAnnotationsEntryPoints({
 	piboSessionId,
 	piboRoomId,
 	disabled,
+	panelVisible,
+	onShowPanel,
+	onHidePanel,
 	onError,
 }: {
 	piboSessionId: string | null;
 	piboRoomId?: string;
 	disabled: boolean;
+	panelVisible: boolean;
+	onShowPanel: () => void;
+	onHidePanel: () => void;
 	onError: (message: string | null) => void;
 }) {
 	const [open, setOpen] = useState(false);
@@ -5321,14 +5416,48 @@ function WebAnnotationsEntryPoints({
 
 	const injectCreatedBinding = async (result: WebAnnotationBindingResponse) => {
 		if (!piboSessionId) throw new Error("No active session context");
-		return injectWebAnnotationBinding(result.binding.id, compactWebAnnotationRequest({ piboSessionId, piboRoomId, cdpUrl }));
+		return injectWebAnnotationBinding(result.binding.id, compactWebAnnotationRequest({ piboSessionId, piboRoomId, cdpUrl, annotationShortcut: readStoredWebAnnotationToggleShortcut() }));
+	};
+
+	const startCurrentPageAnnotation = async () => {
+		if (!piboSessionId || busy) return;
+		onShowPanel();
+		setBusy(true);
+		setStatus({ kind: "info", message: "Injecting annotation overlay into this Pibo page…" });
+		try {
+			const binding = await createWebAnnotationBinding({
+				piboSessionId,
+				piboRoomId,
+				url: window.location.href,
+				title: document.title,
+				sameOrigin: true,
+				annotationShortcut: readStoredWebAnnotationToggleShortcut(),
+			});
+			if (!binding.overlay) throw new Error("Overlay config missing from same-origin binding response");
+			await installSameOriginWebAnnotationOverlay(binding.overlay);
+			setStatus({ kind: "success", message: "Annotation overlay is ready on this Pibo page. Use the overlay button to enable annotation mode." });
+			onError(null);
+		} catch (caught) {
+			const message = compactWebAnnotationError(caught, "Current-page annotation failed");
+			setStatus({ kind: "error", message });
+			onError(message);
+		} finally {
+			setBusy(false);
+		}
 	};
 
 	const startUrlAnnotation = async () => {
 		if (!piboSessionId || busy) return;
+		onShowPanel();
 		const targetUrl = url.trim();
 		if (!targetUrl) {
 			setStatus({ kind: "error", message: "URL is required" });
+			return;
+		}
+		if (isLikelyWebAnnotationCdpUrl(targetUrl)) {
+			const message = "That looks like a CDP endpoint. Put it in CDP URL, and put the page you want to annotate in Annotate URL.";
+			setStatus({ kind: "error", message });
+			onError(message);
 			return;
 		}
 		setBusy(true);
@@ -5350,6 +5479,7 @@ function WebAnnotationsEntryPoints({
 
 	const attachTarget = async (target: WebAnnotationTargetSummary) => {
 		if (!piboSessionId || busy) return;
+		onShowPanel();
 		setBusy(true);
 		setStatus({ kind: "info", message: "Binding selected target and injecting overlay…" });
 		try {
@@ -5369,25 +5499,37 @@ function WebAnnotationsEntryPoints({
 	return (
 		<div className="relative" data-pibo-debug="web-annotations-entry" data-pibo-session-id={piboSessionId ?? undefined}>
 			<HeaderIconButton
-				onClick={() => { if (!disabled) setOpen((current) => !current); }}
-				title={disabled ? "Select an active session to annotate a web page" : "Web Annotations"}
+				onClick={() => {
+					if (disabled) return;
+					setOpen((current) => !current);
+					if (!panelVisible) onShowPanel();
+				}}
+				title={disabled ? "Select an active session to annotate a web page" : panelVisible ? "Web Annotations" : "Show Web Annotations"}
 				ariaLabel="Web Annotations"
-				active={open}
+				active={open || panelVisible}
 			>
-				<Bug size={14} />
+				<BookA size={14} />
 			</HeaderIconButton>
 			{open && !disabled ? (
 				<div className="absolute right-0 top-full z-40 mt-2 w-[min(420px,calc(100vw-24px))] rounded-sm border border-slate-700 bg-[#0e1116] p-3 text-sm shadow-xl" role="dialog" aria-label="Web Annotations">
 					<div className="mb-2 flex items-start justify-between gap-3">
 						<div>
 							<div className="text-xs font-bold uppercase tracking-wider text-[#11a4d4]">Web Annotations</div>
-							<div className="mt-1 text-xs text-slate-500">Bind an explicit URL or selected CDP target to this session.</div>
+							<div className="mt-1 text-xs text-slate-500">Start an inactive overlay for this Pibo page, or bind a CDP target for external pages.</div>
 						</div>
-						<button type="button" onClick={() => setOpen(false)} className="rounded-sm p-1 text-slate-500 hover:bg-slate-800 hover:text-slate-200" aria-label="Close Web Annotations panel">
-							<X size={14} />
-						</button>
+						<div className="flex items-center gap-1">
+							<button type="button" onClick={panelVisible ? onHidePanel : onShowPanel} className="rounded-sm p-1 text-slate-500 hover:bg-slate-800 hover:text-slate-200" aria-label={panelVisible ? "Hide annotation list" : "Show annotation list"} title={panelVisible ? "Hide annotation list" : "Show annotation list"}>
+								<Rows3 size={14} />
+							</button>
+							<button type="button" onClick={() => setOpen(false)} className="rounded-sm p-1 text-slate-500 hover:bg-slate-800 hover:text-slate-200" aria-label="Close Web Annotations panel">
+								<X size={14} />
+							</button>
+						</div>
 					</div>
-					<label className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="web-annotation-url">Annotate URL</label>
+					<button type="button" onClick={() => void startCurrentPageAnnotation()} disabled={busy} className="mb-3 h-9 w-full rounded-sm bg-emerald-600 px-3 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50" data-pibo-debug="web-annotations-current-page">
+						Annotate this Pibo page
+					</button>
+					<label className="mb-2 block text-[11px] font-bold uppercase tracking-wider text-slate-500" htmlFor="web-annotation-url">Annotate URL via CDP</label>
 					<div className="grid grid-cols-[1fr_auto] gap-2">
 						<input
 							id="web-annotation-url"
@@ -5448,6 +5590,36 @@ function compactWebAnnotationRequest<T extends Record<string, string | undefined
 	return Object.fromEntries(Object.entries(input).filter(([, value]) => value && value.trim())) as T;
 }
 
+function isLikelyWebAnnotationCdpUrl(value: string): boolean {
+	try {
+		const parsed = new URL(value);
+		return parsed.port === "56663" || parsed.pathname.startsWith("/json/");
+	} catch {
+		return false;
+	}
+}
+
+function installSameOriginWebAnnotationOverlay(config: WebAnnotationOverlayConfig): Promise<void> {
+	return new Promise((resolve, reject) => {
+		const targetWindow = window as typeof window & {
+			__piboWebAnnotationConfig?: WebAnnotationOverlayConfig;
+			__piboWebAnnotations?: { remove?: () => void };
+		};
+		try {
+			targetWindow.__piboWebAnnotations?.remove?.();
+			targetWindow.__piboWebAnnotationConfig = config;
+			const script = document.createElement("script");
+			script.src = `/apps/web-annotations/overlay.js?ts=${Date.now()}`;
+			script.async = true;
+			script.onload = () => resolve();
+			script.onerror = () => reject(new Error("Could not load Web Annotation overlay script"));
+			document.head.appendChild(script);
+		} catch (error) {
+			reject(error);
+		}
+	});
+}
+
 function readStoredWebAnnotationsCdpUrl(): string {
 	try {
 		return localStorage.getItem(WEB_ANNOTATIONS_CDP_URL_STORAGE_KEY) ?? "";
@@ -5460,6 +5632,76 @@ function writeStoredWebAnnotationsCdpUrl(value: string): void {
 	try {
 		if (value.trim()) localStorage.setItem(WEB_ANNOTATIONS_CDP_URL_STORAGE_KEY, value.trim());
 		else localStorage.removeItem(WEB_ANNOTATIONS_CDP_URL_STORAGE_KEY);
+	} catch {
+		// Ignore storage errors in private windows or locked-down browser contexts.
+	}
+}
+
+function readStoredWebAnnotationToggleShortcut(): string {
+	try {
+		return localStorage.getItem(WEB_ANNOTATIONS_TOGGLE_SHORTCUT_STORAGE_KEY) || DEFAULT_WEB_ANNOTATIONS_TOGGLE_SHORTCUT;
+	} catch {
+		return DEFAULT_WEB_ANNOTATIONS_TOGGLE_SHORTCUT;
+	}
+}
+
+function writeStoredWebAnnotationToggleShortcut(value: string): void {
+	const shortcut = normalizeShortcutLabel(value) || DEFAULT_WEB_ANNOTATIONS_TOGGLE_SHORTCUT;
+	try {
+		localStorage.setItem(WEB_ANNOTATIONS_TOGGLE_SHORTCUT_STORAGE_KEY, shortcut);
+	} catch {
+		// Ignore storage errors in private windows or locked-down browser contexts.
+	}
+}
+
+function notifyWebAnnotationShortcutChanged(shortcut: string): void {
+	const targetWindow = window as typeof window & {
+		__piboWebAnnotations?: { setShortcut?: (value: string) => void };
+	};
+	targetWindow.__piboWebAnnotations?.setShortcut?.(shortcut);
+	try {
+		window.dispatchEvent(new CustomEvent("pibo:web-annotation-shortcut-changed", { detail: { shortcut } }));
+	} catch {
+		// CustomEvent can be unavailable in very old embedded browser contexts.
+	}
+}
+
+function normalizeShortcutLabel(value: string): string {
+	return value.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 80);
+}
+function readStoredSelectedWebAnnotationIds(piboSessionId: string): string[] {
+	try {
+		const raw = localStorage.getItem(WEB_ANNOTATIONS_SELECTED_STORAGE_PREFIX + piboSessionId);
+		if (!raw) return [];
+		const parsed = JSON.parse(raw);
+		return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string" && Boolean(id.trim())).slice(0, 5) : [];
+	} catch {
+		return [];
+	}
+}
+
+function writeStoredSelectedWebAnnotationIds(piboSessionId: string, ids: readonly string[]): void {
+	try {
+		const key = WEB_ANNOTATIONS_SELECTED_STORAGE_PREFIX + piboSessionId;
+		const unique = [...new Set(ids.filter((id) => id.trim()))].slice(0, 5);
+		if (unique.length) localStorage.setItem(key, JSON.stringify(unique));
+		else localStorage.removeItem(key);
+	} catch {
+		// Ignore storage errors in private windows or locked-down browser contexts.
+	}
+}
+
+function readStoredWebAnnotationsPanelCollapsed(): boolean {
+	try {
+		return localStorage.getItem(WEB_ANNOTATIONS_PANEL_COLLAPSED_STORAGE_KEY) === "true";
+	} catch {
+		return false;
+	}
+}
+
+function writeStoredWebAnnotationsPanelCollapsed(value: boolean): void {
+	try {
+		localStorage.setItem(WEB_ANNOTATIONS_PANEL_COLLAPSED_STORAGE_KEY, String(value));
 	} catch {
 		// Ignore storage errors in private windows or locked-down browser contexts.
 	}
@@ -5502,10 +5744,14 @@ function Composer({
 	value,
 	focusSignal,
 	selectedWebAnnotations,
+	selectedUploadAttachments,
 	onValueChange,
 	onCommand,
 	onDetachWebAnnotation,
 	onClearWebAnnotations,
+	onAttachUploadedFiles,
+	onDetachUploadAttachment,
+	onClearUploadAttachments,
 	onSend,
 }: {
 	sessionId: string | null;
@@ -5515,10 +5761,14 @@ function Composer({
 	value: string;
 	focusSignal: number;
 	selectedWebAnnotations: WebAnnotationMessageAttachment[];
+	selectedUploadAttachments: UploadedChatAttachment[];
 	onValueChange: (value: string) => void;
 	onCommand: (text: string) => Promise<boolean>;
 	onDetachWebAnnotation: (annotationId: string) => void;
 	onClearWebAnnotations: () => void;
+	onAttachUploadedFiles: (files: readonly ChatUploadedFile[]) => void;
+	onDetachUploadAttachment: (attachmentId: string) => void;
+	onClearUploadAttachments: () => void;
 	onSend: (text: string) => Promise<void>;
 }) {
 	const composerRootRef = useRef<HTMLDivElement>(null);
@@ -5744,12 +5994,8 @@ function Composer({
 		setUploadStatus({ message: `Uploading ${selectedFiles.length} file${selectedFiles.length === 1 ? "" : "s"}...`, error: false });
 		try {
 			const result = await uploadChatFiles(selectedFiles);
-			const paths = result.files.map((file) => file.path);
-			setUploadStatus({
-				message: `Uploaded ${result.files.length} file${result.files.length === 1 ? "" : "s"} successfully`,
-				copyText: paths.join("\n"),
-				error: false,
-			});
+			onAttachUploadedFiles(result.files);
+			setUploadStatus(null);
 		} catch (caught) {
 			setUploadStatus({ message: caught instanceof Error ? caught.message : String(caught), error: true });
 		} finally {
@@ -5876,6 +6122,27 @@ function Composer({
 					))}
 				</div>
 			) : null}
+			{selectedUploadAttachments.length ? (
+				<div className="mb-2 rounded-sm border border-slate-800 bg-[#0e1116] px-2.5 py-1.5" data-pibo-debug="composer-upload-attachments" data-upload-attachment-count={selectedUploadAttachments.length}>
+					<div className="mb-1.5 flex items-center justify-between gap-2">
+						<div className="text-[11px] font-bold uppercase tracking-wider text-[#11a4d4]">Attached uploads</div>
+						<button type="button" onClick={onClearUploadAttachments} className="text-[11px] text-slate-500 hover:text-[#11a4d4]">Clear</button>
+					</div>
+					<div className="flex flex-wrap gap-1.5">
+						{selectedUploadAttachments.map((attachment) => (
+							<div key={attachment.id} title={attachment.path} className="inline-flex max-w-80 items-center gap-1 rounded-sm border border-emerald-500/45 bg-emerald-500/10 px-2 py-1 text-left text-[11px] text-slate-200" data-pibo-debug="composer-upload-attachment-chip" data-upload-path={attachment.path}>
+								<span className="min-w-0 truncate">{boundedUiText(attachment.name || attachment.path, 100)}</span>
+								<button type="button" onClick={() => void copyTextToClipboard(attachment.path)} title="Copy uploaded file path" aria-label="Copy uploaded file path" className="shrink-0 rounded-sm p-0.5 text-emerald-300 hover:bg-slate-800 hover:text-[#11a4d4]">
+									<Copy size={11} />
+								</button>
+								<button type="button" onClick={() => onDetachUploadAttachment(attachment.id)} title={`Detach ${attachment.name || attachment.path}`} aria-label={`Detach ${attachment.name || attachment.path}`} className="shrink-0 rounded-sm p-0.5 text-emerald-300 hover:bg-slate-800 hover:text-slate-100">
+									<X size={11} />
+								</button>
+							</div>
+						))}
+					</div>
+				</div>
+			) : null}
 			{selectedWebAnnotations.length ? (
 				<div className="mb-2 rounded-sm border border-slate-800 bg-[#0e1116] px-3 py-2" data-pibo-debug="composer-web-annotations" data-web-annotation-count={selectedWebAnnotations.length}>
 					<div className="mb-2 flex items-center justify-between gap-2">
@@ -5885,7 +6152,7 @@ function Composer({
 					<div className="flex flex-wrap gap-1.5">
 						{selectedWebAnnotations.map((annotation) => (
 							<button key={annotation.id} type="button" onClick={() => onDetachWebAnnotation(annotation.id)} title={`Detach ${annotation.id}`} className="inline-flex max-w-72 items-center gap-1 rounded-sm border border-[#11a4d4]/50 bg-[#11a4d4]/10 px-2 py-1 text-left text-[11px] text-slate-200" data-pibo-debug="composer-web-annotation-chip" data-web-annotation-id={annotation.id}>
-								<span className="min-w-0 truncate">{boundedUiText(annotation.label || annotation.note || annotation.id, 100)}</span>
+								<span className="min-w-0 truncate">{boundedUiText(annotation.primaryTarget || annotation.label || annotation.note || annotation.id, 100)}</span>
 								<X size={11} className="shrink-0 text-[#11a4d4]" />
 							</button>
 						))}
@@ -6949,6 +7216,21 @@ function SettingsSidebar({
 				</button>
 				<button
 					type="button"
+					onClick={() => onSelect("shortcuts")}
+					className={`mb-1 flex w-full items-center gap-2 border p-2 text-left ${
+						activePanel === "shortcuts"
+							? "border-[#11a4d4] bg-[#11a4d4]/10"
+							: "border-slate-800 bg-[#151f24] hover:border-slate-700"
+					}`}
+				>
+					<Keyboard size={13} className="text-[#11a4d4]" />
+					<div className="min-w-0">
+						<span className="block truncate text-sm text-slate-200">Shortcuts</span>
+						<span className="block truncate font-mono text-[10px] text-slate-500">keyboard</span>
+					</div>
+				</button>
+				<button
+					type="button"
 					onClick={() => onSelect("pi-packages")}
 					className={`mb-1 flex w-full items-center gap-2 border p-2 text-left ${
 						activePanel === "pi-packages"
@@ -7783,6 +8065,18 @@ function SettingsView({
 		);
 	}
 
+	if (activePanel === "shortcuts") {
+		return (
+			<div className="p-6 overflow-auto">
+				<h1 className="text-sm font-bold uppercase tracking-wider mb-4 flex items-center gap-2">
+					<Keyboard size={16} />
+					Shortcuts
+				</h1>
+				<ShortcutsSettings />
+			</div>
+		);
+	}
+
 	return (
 		<div className="p-6 overflow-auto">
 			<h1 className="text-sm font-bold uppercase tracking-wider mb-4 flex items-center gap-2">
@@ -7868,7 +8162,7 @@ function UserTimezoneSettings() {
 		setSaving(true);
 		setError(null);
 		try {
-			const saved = await patchUserSettings({ timezone } satisfies UserSettings);
+			const saved = await patchUserSettings({ timezone });
 			setDraft(saved.timezone);
 			queryClient.setQueryData(["user-settings"], saved);
 		} catch (err) {
@@ -7902,6 +8196,91 @@ function UserTimezoneSettings() {
 			{error ? <div className="mt-2 text-xs text-red-300">{error}</div> : null}
 		</div>
 	);
+}
+
+function ShortcutsSettings() {
+	const queryClient = useQueryClient();
+	const { data, isLoading } = useQuery({ queryKey: ["user-settings"], queryFn: getUserSettings });
+	const [draft, setDraft] = useState(DEFAULT_WEB_ANNOTATIONS_TOGGLE_SHORTCUT);
+	const [recording, setRecording] = useState(false);
+	const [saving, setSaving] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+
+	useEffect(() => {
+		const shortcut = data?.shortcuts?.webAnnotationsToggle || readStoredWebAnnotationToggleShortcut();
+		setDraft(shortcut);
+		writeStoredWebAnnotationToggleShortcut(shortcut);
+		notifyWebAnnotationShortcutChanged(shortcut);
+	}, [data?.shortcuts?.webAnnotationsToggle]);
+
+	const save = async (shortcut: string) => {
+		const normalized = normalizeShortcutLabel(shortcut) || DEFAULT_WEB_ANNOTATIONS_TOGGLE_SHORTCUT;
+		setDraft(normalized);
+		setSaving(true);
+		setError(null);
+		try {
+			const saved = await patchUserSettings({ shortcuts: { webAnnotationsToggle: normalized } });
+			queryClient.setQueryData(["user-settings"], saved);
+			writeStoredWebAnnotationToggleShortcut(saved.shortcuts.webAnnotationsToggle);
+			notifyWebAnnotationShortcutChanged(saved.shortcuts.webAnnotationsToggle);
+		} catch (err) {
+			setError(err instanceof Error ? err.message : String(err));
+		} finally {
+			setSaving(false);
+		}
+	};
+
+	return (
+		<DesignerPanel title="Shortcuts">
+			<div className="grid max-w-2xl gap-3 rounded-sm border border-slate-800 bg-[#151f24] p-3">
+				<div className="flex flex-wrap items-center justify-between gap-3">
+					<div>
+						<div className="flex items-center gap-2 text-sm font-semibold text-slate-200"><BookA size={15} /> Toggle annotation mode</div>
+						<div className="mt-1 text-xs text-slate-500">Toggles the Web Annotation element mode with the pencil button.</div>
+					</div>
+					<kbd className="rounded-sm border border-slate-700 bg-[#0e1116] px-2 py-1 font-mono text-xs text-[#7dd3fc]">{draft}</kbd>
+				</div>
+				<div className="flex flex-wrap items-center gap-2">
+					<button
+						type="button"
+						disabled={isLoading || saving}
+						aria-pressed={recording}
+						onClick={() => setRecording((current) => !current)}
+						onKeyDown={(event) => {
+							if (!recording) return;
+							const shortcut = shortcutFromKeyboardEvent(event);
+							if (!shortcut) return;
+							event.preventDefault();
+							event.stopPropagation();
+							setRecording(false);
+							void save(shortcut);
+						}}
+						className={`rounded-sm border px-3 py-2 text-xs font-medium ${recording ? "border-[#11a4d4] bg-[#11a4d4]/10 text-sky-100" : "border-slate-700 text-slate-300 hover:border-[#11a4d4] hover:text-[#7dd3fc]"} disabled:opacity-50`}
+					>
+						{recording ? "Press shortcut…" : "Record shortcut"}
+					</button>
+					<button type="button" disabled={saving || draft === DEFAULT_WEB_ANNOTATIONS_TOGGLE_SHORTCUT} onClick={() => void save(DEFAULT_WEB_ANNOTATIONS_TOGGLE_SHORTCUT)} className="rounded-sm border border-slate-700 px-3 py-2 text-xs text-slate-300 hover:border-[#11a4d4] hover:text-[#7dd3fc] disabled:opacity-50">
+						Reset
+					</button>
+					{saving ? <span className="text-xs text-slate-400">Saving…</span> : null}
+				</div>
+				<div className="text-[11px] text-slate-500">Default: {DEFAULT_WEB_ANNOTATIONS_TOGGLE_SHORTCUT}. Use a modifier combination to avoid conflicts with normal typing.</div>
+				{error ? <div className="text-xs text-red-300">{error}</div> : null}
+			</div>
+		</DesignerPanel>
+	);
+}
+
+function shortcutFromKeyboardEvent(event: { key: string; code?: string; altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }): string | null {
+	if (["Alt", "Control", "Meta", "Shift"].includes(event.key)) return null;
+	const key = event.code?.match(/^Key[A-Z]$/) ? event.code.slice(3) : event.key === " " ? "Space" : event.key.length === 1 ? event.key.toUpperCase() : event.key;
+	const parts = [];
+	if (event.ctrlKey) parts.push("Ctrl");
+	if (event.altKey) parts.push("Alt");
+	if (event.shiftKey) parts.push("Shift");
+	if (event.metaKey) parts.push("Meta");
+	parts.push(key);
+	return parts.join("+");
 }
 
 function buildTimezoneOptions(currentTimezone: string | undefined): Array<{ value: string; label: string }> {
@@ -8737,7 +9116,7 @@ type ChatStreamEvent = ChatStreamEventMeta & (
 	| { type: "ready"; piboSessionId: string }
 	| { type: "RUN_STARTED"; runId: string; input?: { text?: string; source?: string } }
 	| { type: "RUN_FINISHED"; runId: string }
-	| { type: "RUN_ERROR"; runId?: string; message: string }
+	| { type: "RUN_ERROR"; runId?: string; message: string; errorDetails?: unknown }
 	| { type: "TEXT_MESSAGE_START"; messageId: string; runId?: string; role: "assistant" }
 	| { type: "TEXT_MESSAGE_CONTENT"; messageId: string; runId?: string; delta: string }
 	| { type: "TEXT_MESSAGE_END"; messageId: string; runId?: string; finalText?: string }

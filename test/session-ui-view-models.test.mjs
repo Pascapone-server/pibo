@@ -6,15 +6,21 @@ import {
 	buildOwnerPickerDescriptor,
 	buildRoomPickerDescriptor,
 	buildSessionPickerDescriptor,
+	buildSlashCommandBehaviorMatrix,
 	buildSlashCommandCatalog,
 	buildTerminalCardDescriptor,
+	buildTerminalCardDescriptors,
+	CLI_ONLY_SLASH_COMMANDS,
+	commandSupportLabel,
 	groupSlashCommandsForHelp,
 	buildTerminalStatusViewModel,
 	filterSlashCommands,
 	normalizeCommandErrorDescriptor,
 	normalizeCommandResultDescriptor,
 	progressBarText,
+	WEB_PARITY_SLASH_COMMANDS,
 } from "../dist/session-ui/index.js";
+import { buildCanonicalTerminalRows } from "./fixtures/terminal-parity-fixtures.mjs";
 
 function row(kind, overrides = {}) {
 	return {
@@ -76,6 +82,46 @@ test("shared status view model preserves unavailable usage and redacts secrets",
 	assert.equal(progressBarText(context, 8), "░░░░░░░░ 0.0%");
 });
 
+test("shared terminal card descriptors cover required rich rows and redact before renderers", () => {
+	const rows = [
+		row("tool.status", { id: "status", output: { message: "OPENAI_API_KEY=sk_live_secret123456", contextUsage: { percent: 10 } } }),
+		row("tool.thinking", { id: "thinking", output: { level: "high", availableLevels: ["low", "high"] } }),
+		row("tool.model", { id: "model", output: { providers: [{ id: "openai", label: "OpenAI", models: [{ id: "gpt-test", label: "GPT Test" }] }] } }),
+		row("tool.login", { id: "login", output: { providers: [{ id: "openai", name: "OpenAI", authMethods: ["api_key"] }] } }),
+		row("tool.call", { id: "tool", lines: [{ tokens: [{ text: "Called TOKEN=secret-value" }] }] }),
+		row("error", { id: "error", status: "error", error: "Authorization bearer_token=secret-value failed", lines: [] }),
+	];
+	const descriptors = buildTerminalCardDescriptors(rows);
+
+	assert.deepEqual(descriptors.map((descriptor) => descriptor.kind), ["status", "thinking", "model", "login", "tool", "error"]);
+	const serialized = JSON.stringify(descriptors);
+	assert.match(serialized, /\[redacted\]/);
+	assert.doesNotMatch(serialized, /sk_live_secret|secret-value/);
+});
+
+test("shared slash-command behavior matrix covers static and dynamic commands", () => {
+	const catalog = buildSlashCommandCatalog([
+		{ name: "custom.action", slashCommands: ["custom-action"], description: "Run custom action" },
+		{ slash: "/browser-only", description: "Browser only", browserOnly: true, unsupportedReason: "Needs window.document" },
+	]);
+	const matrix = buildSlashCommandBehaviorMatrix(catalog);
+	for (const command of catalog) {
+		const entry = matrix.find((candidate) => candidate.slash === command.slash);
+		assert.ok(entry, `matrix covers ${command.slash}`);
+		assert.equal(entry.supportLabel, commandSupportLabel(command));
+		assert.equal(entry.group, command.group);
+		assert.equal(entry.palette, "shown");
+		assert.ok(entry.enterBehavior.length > 0);
+		assert.ok(entry.errorBehavior.length > 0);
+	}
+	for (const command of [...CLI_ONLY_SLASH_COMMANDS, ...WEB_PARITY_SLASH_COMMANDS]) {
+		assert.ok(matrix.some((entry) => entry.id === command.id && entry.slash === command.slash), `matrix covers static ${command.slash}`);
+	}
+	assert.equal(matrix.find((entry) => entry.slash === "/room")?.resultPlacement, "overlay");
+	assert.equal(matrix.find((entry) => entry.slash === "/session-current")?.contextRequirement, "active session when available; named room context preferred");
+	assert.equal(matrix.find((entry) => entry.slash === "/browser-only")?.errorBehavior, "render compact unsupported result");
+});
+
 test("shared command catalog merges gateway capabilities and filters prefixes", () => {
 	const catalog = buildSlashCommandCatalog([
 		{ name: "custom.action", slashCommands: ["custom-action"], description: "Run TOKEN=secret_value action" },
@@ -107,7 +153,9 @@ test("shared command result descriptors normalize menus status links unsupported
 	assert.equal(forkMenu.kind, "menu");
 	assert.equal(forkMenu.items[0].id, "entry_one");
 	assert.match(forkMenu.items[0].label, /Fork from this user message/);
-	assert.equal(normalizeCommandResultDescriptor("clone", { piboSessionId: "ps_clone", roomId: "room_a", title: "Clone" }).kind, "session-link");
+	const cloneLink = normalizeCommandResultDescriptor("clone", { piboSessionId: "ps_clone", roomId: "room_a", roomTitle: "Named Web Room", title: "Clone" });
+	assert.equal(cloneLink.kind, "session-link");
+	assert.equal(cloneLink.roomLabel, "Named Web Room");
 	const unsupported = normalizeCommandResultDescriptor("download", { supported: false, unsupportedReason: "Browser API only" });
 	assert.equal(unsupported.kind, "unsupported");
 	assert.match(unsupported.reason, /Browser API only/);
@@ -154,17 +202,27 @@ test("shared owner room session picker descriptors include defaults empty rooms 
 	assert.ok(sessions.items[1].markers.includes("current"));
 });
 
-test("Web compact terminal status card consumes shared descriptors without crossing renderer boundaries", () => {
+test("Web and Ink rich terminal renderers consume shared descriptors without crossing boundaries", () => {
 	const statusCardSource = fs.readFileSync(path.resolve("src/apps/chat-ui/src/session-views/compact-terminal/TerminalStatusCard.tsx"), "utf8");
 	assert.match(statusCardSource, /buildTerminalCardDescriptor/, "Web status card should consume shared terminal card descriptors");
 	assert.match(statusCardSource, /statusView/, "Web status card should render from the shared status view model");
 	assert.match(statusCardSource, /data-shared-terminal-card/, "Web status card should expose a stable shared-descriptor hook for regression checks");
+	assert.match(statusCardSource, /data-shared-status-field/, "Web status card should expose shared status field hooks");
+	assert.match(statusCardSource, /data-shared-progress-state/, "Web status card should expose shared progress availability hooks");
+	assert.match(statusCardSource, /data-shared-status-warning/, "Web status card should expose warning hooks");
+	assert.match(statusCardSource, /data-shared-status-error/, "Web status card should expose error hooks");
+	assert.doesNotMatch(statusCardSource, /OpenAI Codex quota/, "Web status card should use provider labels from descriptors instead of hardcoding OpenAI");
+
+	const inkRowSource = fs.readFileSync(path.resolve("src/apps/cli-ui/InkTerminalRow.ts"), "utf8");
+	assert.match(inkRowSource, /buildTerminalCardDescriptor\(row\)/, "Ink structured exceptions must pass through shared terminal card descriptors");
+	assert.match(inkRowSource, /InkTerminalCard/, "Ink should render shared structured exceptions with terminal-native card primitives");
+	assert.match(inkRowSource, /isStructuredCardException/, "Ink should explicitly limit card rendering to Web-equivalent structured exceptions");
 
 	const cliSourceDir = path.resolve("src/apps/cli-ui");
 	const cliFiles = listSourceFiles(cliSourceDir);
 	for (const file of cliFiles) {
 		const source = fs.readFileSync(file, "utf8");
-		assert.doesNotMatch(source, /src\/apps\/chat-ui|session-views\/compact-terminal|react-dom|\.module\.css|window\.|document\./, `${path.relative(process.cwd(), file)} must not import Web DOM components or browser APIs`);
+		assert.doesNotMatch(source, /src\/apps\/chat-ui|session-views\/compact-terminal|react-dom|lucide-react|\.module\.css|window\.|document\.|HTMLElement|Tailwind|className=/, `${path.relative(process.cwd(), file)} must not import Web DOM components or browser APIs`);
 	}
 });
 
@@ -177,6 +235,8 @@ function listSourceFiles(dir) {
 }
 
 test("Web Compact Terminal source preserves shared flow ordering hooks and streaming semantics", () => {
+	const fixtureRows = buildCanonicalTerminalRows();
+	assert.ok(fixtureRows.some((row) => row.kind === "tool.status" && row.orderSource), "canonical shared fixture exercises Web row/card hooks");
 	const compactSource = fs.readFileSync(path.resolve("src/apps/chat-ui/src/session-views/compact-terminal/CompactTerminalSessionView.tsx"), "utf8");
 	assert.match(compactSource, /buildCompactTerminalRows\(traceView, \{ showThinking \}\)/, "Web terminal must derive rows from shared row builder");
 	assert.match(compactSource, /computeItemKey=\{\(_, row\) => row\.id\}/, "Web terminal should use shared row ids as stable render keys");
@@ -195,8 +255,8 @@ test("all shared session-ui view-model modules stay renderer-neutral", () => {
 	const sourceDir = path.resolve("src/session-ui");
 	for (const file of fs.readdirSync(sourceDir).filter((name) => name.endsWith(".ts"))) {
 		const source = fs.readFileSync(path.join(sourceDir, file), "utf8");
-		assert.doesNotMatch(source, /from ["'](?:react|react-dom|react-virtuoso|lucide-react|ink)["']/i, `${file} must not import renderer dependencies`);
+		assert.doesNotMatch(source, /from ["'](?:react|react-dom|react-virtuoso|lucide-react|ink|@uiw\/react-json-view|react-markdown|prismjs)["']/i, `${file} must not import renderer dependencies`);
 		assert.doesNotMatch(source, /\.(?:css|scss|sass)["']/i, `${file} must not import stylesheets`);
-		assert.doesNotMatch(source, /window\.|document\.|HTMLElement|Tailwind/i, `${file} must not use browser or styling APIs`);
+		assert.doesNotMatch(source, /window\.|document\.|HTMLElement|localStorage|navigator\.|Tailwind|className=/i, `${file} must not use browser or styling APIs`);
 	}
 });

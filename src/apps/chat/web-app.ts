@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { basename, extname, isAbsolute, resolve } from "node:path";
+import { basename, extname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 import os from "node:os";
@@ -10,7 +10,7 @@ import { PiboWebHttpError, readJsonBody, responseHtml, responseJson } from "../.
 import type { PiboWebApp, PiboWebAppContext, PiboWebSession } from "../../web/types.js";
 import type { PiboSession, UpdatePiboSessionInput } from "../../sessions/store.js";
 import { OutputCompactor } from "./output-compactor.js";
-import { isPersistableOutputEvent } from "./output-event-policy.js";
+import { isLiveOnlyOutputEvent, isPersistableOutputEvent } from "./output-event-policy.js";
 import type { ChatEventAppendInput, ChatEventListInput, StoredChatEvent } from "./types/event-store.js";
 import type { ChatWebSessionBootstrapIndexResult, ChatWebSessionIndexItem, ChatWebStoredPiboEvent } from "./types/read-model.js";
 import {
@@ -47,7 +47,7 @@ import {
 	type PiboModelDefaults,
 } from "../../core/model-defaults.js";
 import { inspectPiboContextBuild } from "../../core/context-build.js";
-import { loadPiboUserSettings, sanitizeTimezone, updatePiboUserSettings } from "../../core/user-settings.js";
+import { loadPiboUserSettings, sanitizeShortcutSettings, sanitizeTimezone, updatePiboUserSettings } from "../../core/user-settings.js";
 import { loadModelCatalog } from "./model-catalog.js";
 import type { ModelProfile } from "../../core/profiles.js";
 import { isPiboThinkingLevel, type PiboThinkingLevel } from "../../core/thinking.js";
@@ -85,6 +85,7 @@ import { handleChatCronApiRequest } from "./cron-api.js";
 import { handleChatRalphApiRequest } from "./ralph-api.js";
 import { prepareWebAnnotationMessageAttachments, type PreparedWebAnnotationAttachments } from "../../web-annotations/attachments.js";
 import { createDefaultWebAnnotationStore, type WebAnnotationStore } from "../../web-annotations/store.js";
+import { completeLogin, getLoginStatus, removeLogin, setApiKey, startLogin } from "../../auth/login-actions.js";
 
 export const CHAT_WEB_APP_NAME = "pibo.chat-web";
 export const CHAT_WEB_CHANNEL = "pibo.chat-web";
@@ -1707,6 +1708,7 @@ type ChatModelDefaultsBody = {
 
 type ChatUserSettingsBody = {
 	timezone?: unknown;
+	shortcuts?: unknown;
 };
 
 type ChatMessageBody = {
@@ -1715,6 +1717,7 @@ type ChatMessageBody = {
 	text?: unknown;
 	clientTxnId?: unknown;
 	webAnnotationIds?: unknown;
+	fileAttachmentPaths?: unknown;
 };
 
 type ChatProjectsBootstrap = ChatBootstrapCatalog & {
@@ -1734,6 +1737,8 @@ type ChatEventCursor = {
 	streamId: number;
 	frameIndex: number;
 };
+
+type ChatEventStreamMode = "live" | "summary";
 
 type TransientChatEvent = {
 	roomId?: string;
@@ -1783,6 +1788,39 @@ function requireSameOriginJsonRequest(request: Request): void {
 
 function requireSameOriginMultipartRequest(request: Request): void {
 	requireSameOriginRequest(request, "multipart/form-data");
+}
+
+function isProviderAuthAction(action: string): boolean {
+	return action === "login.status" || action === "login.start" || action === "login.complete" || action === "login.apikey" || action === "logout";
+}
+
+async function executeProviderAuthAction(action: string, params: unknown): Promise<unknown> {
+	const input = isJsonObject(params) ? params : {};
+	const provider = typeof input.provider === "string" ? input.provider : undefined;
+	if (action === "login.status") return { providers: getLoginStatus(provider) };
+	if (!provider) throw new PiboWebHttpError(`${action} requires params.provider`, 400);
+	if (action === "login.start") return await startLogin(provider);
+	if (action === "login.complete") {
+		if (input.code !== undefined && typeof input.code !== "string") throw new PiboWebHttpError("login.complete params.code must be a string when provided", 400);
+		if (typeof input.state !== "string" || input.state.length === 0) throw new PiboWebHttpError("login.complete requires params.state", 400);
+		return await completeLogin(provider, input.code, input.state);
+	}
+	if (action === "login.apikey") {
+		if (typeof input.apiKey !== "string" || input.apiKey.length === 0) throw new PiboWebHttpError("login.apikey requires params.apiKey", 400);
+		return setApiKey(provider, input.apiKey);
+	}
+	if (action === "logout") return removeLogin(provider);
+	throw new PiboWebHttpError(`Unsupported provider auth action ${action}`, 400);
+}
+
+function providerAuthActionResponse(input: { piboSessionId?: string; action: string; result: unknown }): Response {
+	return responseJson({
+		type: "execution_result",
+		piboSessionId: input.piboSessionId ?? "",
+		eventId: randomUUID(),
+		action: input.action,
+		result: input.result,
+	});
 }
 
 function requireSameOriginRequest(request: Request, expectedContentType: string): void {
@@ -2444,6 +2482,86 @@ function markWebAnnotationsAttached(prepared: PreparedWebAnnotationAttachments):
 	}
 }
 
+const CHAT_FILE_ATTACHMENT_LIMIT = 10;
+
+type ChatFileMessageAttachment = {
+	name: string;
+	path: string;
+	bytes: number;
+};
+
+type PreparedChatFileAttachments = {
+	paths: string[];
+	attachments: ChatFileMessageAttachment[];
+	modelContext: string;
+	messageText: string;
+};
+
+function prepareChatFileAttachments(input: {
+	messageText: string;
+	attachmentPaths: unknown;
+}): PreparedChatFileAttachments {
+	const paths = normalizeChatFileAttachmentPaths(input.attachmentPaths);
+	if (!paths.length) return { paths: [], attachments: [], modelContext: "", messageText: input.messageText };
+	const attachments = paths.map(chatFileAttachmentForPath);
+	const modelContext = renderAttachedChatFiles(attachments);
+	return {
+		paths,
+		attachments,
+		modelContext,
+		messageText: modelContext ? `${input.messageText.trimEnd()}\n\n${modelContext}` : input.messageText,
+	};
+}
+
+function normalizeChatFileAttachmentPaths(value: unknown): string[] {
+	if (value === undefined || value === null) return [];
+	if (!Array.isArray(value)) throw new PiboWebHttpError("fileAttachmentPaths must be an array", 400);
+	if (value.length > CHAT_FILE_ATTACHMENT_LIMIT) throw new PiboWebHttpError(`At most ${CHAT_FILE_ATTACHMENT_LIMIT} uploaded files can be attached`, 400);
+	const paths: string[] = [];
+	const seen = new Set<string>();
+	for (const item of value) {
+		if (typeof item !== "string") throw new PiboWebHttpError("fileAttachmentPaths entries must be strings", 400);
+		const absolutePath = resolve(item.trim());
+		if (!item.trim()) throw new PiboWebHttpError("fileAttachmentPaths entries must be non-empty strings", 400);
+		if (absolutePath.length > 4096) throw new PiboWebHttpError("uploaded file path is too long", 400);
+		if (!isPathInsideUploadDir(absolutePath)) throw new PiboWebHttpError("Attached uploads must be under ~/.pibo/uploads", 400);
+		if (!seen.has(absolutePath)) {
+			seen.add(absolutePath);
+			paths.push(absolutePath);
+		}
+	}
+	return paths;
+}
+
+function chatFileAttachmentForPath(path: string): ChatFileMessageAttachment {
+	if (!existsSync(path)) throw new PiboWebHttpError(`Uploaded file was not found: ${path}`, 404);
+	const stats = statSync(path);
+	if (!stats.isFile()) throw new PiboWebHttpError(`Uploaded attachment is not a file: ${path}`, 400);
+	return { name: basename(path), path, bytes: stats.size };
+}
+
+function isPathInsideUploadDir(path: string): boolean {
+	const uploadRelative = relative(CHAT_UPLOAD_DIR, path);
+	return uploadRelative !== "" && !uploadRelative.startsWith("..") && !isAbsolute(uploadRelative);
+}
+
+function renderAttachedChatFiles(attachments: readonly ChatFileMessageAttachment[]): string {
+	const bounded = attachments.slice(0, CHAT_FILE_ATTACHMENT_LIMIT);
+	if (!bounded.length) return "";
+	const lines = ["<attached-uploaded-files>"];
+	bounded.forEach((attachment, index) => {
+		lines.push(`${index + 1}. ${escapeChatFileBlockValue(attachment.name)}`);
+		lines.push(`path: ${escapeChatFileBlockValue(attachment.path)}`);
+		lines.push(`bytes: ${attachment.bytes}`);
+	});
+	lines.push("</attached-uploaded-files>");
+	return lines.join("\n");
+}
+
+function escapeChatFileBlockValue(value: string): string {
+	return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+}
+
 function accessDenied(error: unknown): never {
 	if (error instanceof Error) throw new PiboWebHttpError(error.message, 404);
 	throw new PiboWebHttpError("Room is not available for this user", 404);
@@ -2516,6 +2634,7 @@ function ensureEventIndexing(state: ChatWebAppState, context: PiboWebAppContext)
 			for (const liveEvent of result.liveEvents) {
 				if (isPersistableOutputEvent(liveEvent)) continue;
 				state.sessionQuery.recordEvent(liveEvent, session);
+				if (isLiveOnlyOutputEvent(liveEvent) && !hasLiveObserver(state, liveEvent.piboSessionId)) continue;
 				for (const listener of state.liveListeners) {
 					listener({ roomId: room?.id, piboSessionId: liveEvent.piboSessionId, eventType: liveEvent.type, payload: liveEvent });
 				}
@@ -2617,6 +2736,16 @@ function markEventStreamDisconnected(input: {
 	appendEventStreamDisconnectEvent(input.state, input.piboSessionId, "event_stream_disconnected", {
 		activeStreams: input.state.activeEventStreams.get(input.piboSessionId)?.size ?? 0,
 	});
+}
+
+function hasLiveObserver(state: ChatWebAppState, piboSessionId: string): boolean {
+	return (state.activeEventStreams.get(piboSessionId)?.size ?? 0) > 0;
+}
+
+function listLiveObservers(state: ChatWebAppState): Array<{ piboSessionId: string; count: number }> {
+	return Array.from(state.activeEventStreams.entries())
+		.map(([piboSessionId, streams]) => ({ piboSessionId, count: streams.size }))
+		.filter((observer) => observer.count > 0);
 }
 
 function markActiveSessionRead(state: ChatWebAppState, piboSessionId: string, streamId: number): void {
@@ -7098,6 +7227,17 @@ function parseSseCursor(value: string | null): ChatEventCursor | undefined {
 	return { streamId, frameIndex };
 }
 
+function defaultEventStreamMode(input: { requestedRoomId?: string; requestedPiboSessionId?: string }): ChatEventStreamMode {
+	if (input.requestedPiboSessionId) return "live";
+	if (input.requestedRoomId) return "summary";
+	return "live";
+}
+
+function parseEventStreamMode(value: string | null, fallback: ChatEventStreamMode): ChatEventStreamMode {
+	if (value === "live" || value === "summary") return value;
+	return fallback;
+}
+
 function isPiboOutputEvent(value: unknown): value is PiboOutputEvent {
 	return !!value && typeof value === "object" && !Array.isArray(value) && typeof (value as { type?: unknown }).type === "string";
 }
@@ -7113,8 +7253,10 @@ function writeChatEventFrames(
 	event: ChatLiveEvent,
 	state: ReturnType<typeof createChatStreamState>,
 	cursor?: ChatEventCursor,
+	options: { mode: ChatEventStreamMode } = { mode: "live" },
 ): void {
 	if (!isPiboOutputEvent(event.payload)) return;
+	if (options.mode === "summary" && isLiveOnlyOutputEvent(event.payload)) return;
 	const piboSessionId = event.piboSessionId ?? event.payload.piboSessionId;
 	const streamId = "streamId" in event ? event.streamId : undefined;
 	const frames = chatStreamFramesFromOutputEvent(event.payload, state, {
@@ -7130,6 +7272,7 @@ function createEventStream(input: {
 	roomId?: string;
 	piboSessionId?: string;
 	activePiboSessionId?: string;
+	mode: ChatEventStreamMode;
 	principalId: string;
 	context: PiboWebAppContext;
 	state: ChatWebAppState;
@@ -7137,10 +7280,14 @@ function createEventStream(input: {
 }): Response {
 	let unsubscribe: (() => void) | undefined;
 	let heartbeat: ReturnType<typeof setInterval> | undefined;
+	let registeredLiveObserver = false;
 	const streamId = randomUUID();
 	const stream = new ReadableStream<Uint8Array>({
 		start(controller) {
-			if (input.activePiboSessionId) markEventStreamConnected(input.state, input.activePiboSessionId, streamId, input.principalId);
+			if (input.mode === "live" && input.activePiboSessionId) {
+				markEventStreamConnected(input.state, input.activePiboSessionId, streamId, input.principalId);
+				registeredLiveObserver = true;
+			}
 			const streamState = createChatStreamState();
 			writeSse(controller, "pibo", {
 				type: "ready",
@@ -7152,20 +7299,22 @@ function createEventStream(input: {
 				afterStreamId: input.cursor ? Math.max(0, input.cursor.streamId - 1) : undefined,
 				limit: 1000,
 			})) {
-				writeChatEventFrames(controller, stored, streamState, input.cursor);
+				writeChatEventFrames(controller, stored, streamState, input.cursor, { mode: input.mode });
 			}
-			if (input.piboSessionId) {
+			if (input.mode === "live" && input.piboSessionId) {
 				for (const snapshot of input.state.outputCompactor.snapshotsForSession(input.piboSessionId)) {
 					writeChatEventFrames(
 						controller,
 						{ piboSessionId: snapshot.piboSessionId, eventType: snapshot.type, payload: snapshot },
 						streamState,
+						undefined,
+						{ mode: input.mode },
 					);
 				}
 			}
 			const listener = (event: ChatLiveEvent) => {
 				if (!liveEventMatches(event, input)) return;
-				writeChatEventFrames(controller, event, streamState);
+				writeChatEventFrames(controller, event, streamState, undefined, { mode: input.mode });
 			};
 			input.state.liveListeners.add(listener);
 			unsubscribe = () => {
@@ -7178,12 +7327,13 @@ function createEventStream(input: {
 			unsubscribe = undefined;
 			if (heartbeat) clearInterval(heartbeat);
 			heartbeat = undefined;
-			if (input.activePiboSessionId) {
+			if (registeredLiveObserver && input.activePiboSessionId) {
 				markEventStreamDisconnected({
 					state: input.state,
 					piboSessionId: input.activePiboSessionId,
 					streamId,
 				});
+				registeredLiveObserver = false;
 			}
 		},
 	});
@@ -7852,6 +8002,10 @@ async function sendChatMessage(input: {
 		messageText: text,
 		attachmentIds: input.body.webAnnotationIds,
 	});
+	const fileAttachmentContext = prepareChatFileAttachments({
+		messageText: webAnnotationContext.messageText,
+		attachmentPaths: input.body.fileAttachmentPaths,
+	});
 	const accepted = input.state.eventCommands.appendEvent({
 		roomId: room.id,
 		piboSessionId: selectedSession.id,
@@ -7864,11 +8018,16 @@ async function sendChatMessage(input: {
 			type: "user.message.accepted",
 			piboSessionId: selectedSession.id,
 			roomId: room.id,
-			text: webAnnotationContext.messageText,
+			text: fileAttachmentContext.messageText,
 			...(webAnnotationContext.attachments.length ? {
 				webAnnotationIds: webAnnotationContext.ids,
 				webAnnotationAttachments: webAnnotationContext.attachments,
 				webAnnotationContext: webAnnotationContext.modelContext,
+			} : {}),
+			...(fileAttachmentContext.attachments.length ? {
+				fileAttachmentPaths: fileAttachmentContext.paths,
+				fileAttachments: fileAttachmentContext.attachments,
+				fileAttachmentContext: fileAttachmentContext.modelContext,
 			} : {}),
 			...(clientTxnId ? { clientTxnId } : {}),
 		},
@@ -7878,7 +8037,7 @@ async function sendChatMessage(input: {
 			session: selectedSession,
 			roomId: room.id,
 			actorId,
-			text: webAnnotationContext.messageText,
+			text: fileAttachmentContext.messageText,
 			clientTxnId,
 			legacyEvent: accepted,
 		});
@@ -7893,7 +8052,7 @@ async function sendChatMessage(input: {
 			type: "message",
 			piboSessionId: selectedSession.id,
 			id: messageId,
-			text: webAnnotationContext.messageText,
+			text: fileAttachmentContext.messageText,
 			source: "user",
 		});
 	} catch (error) {
@@ -8520,7 +8679,7 @@ function createChatHtml(): string {
 			const row = document.createElement("div");
 			row.className = "session-row" + (node.piboSessionId === selectedPiboSessionId ? " active" : "");
 			row.style.paddingLeft = 8 + depth * 14 + "px";
-			row.title = node.piboSessionId;
+			row.title = (node.title || "Untitled Session") + "\n" + node.piboSessionId;
 			if (hasChildren) {
 				const toggle = document.createElement("button");
 				toggle.type = "button";
@@ -9728,9 +9887,14 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				requireSameOriginJsonRequest(request);
 				const webSession = await requireSession(request, context);
 				const body = await readJsonBody<ChatUserSettingsBody>(request);
-				const timezone = sanitizeTimezone(body.timezone);
-				if (!timezone) throw new PiboWebHttpError("Invalid timezone", 400);
-				return responseJson({ userSettings: updatePiboUserSettings(webSession.ownerScope, { timezone }) });
+				const patch: Parameters<typeof updatePiboUserSettings>[1] = {};
+				if (body.timezone !== undefined) {
+					const timezone = sanitizeTimezone(body.timezone);
+					if (!timezone) throw new PiboWebHttpError("Invalid timezone", 400);
+					patch.timezone = timezone;
+				}
+				if (body.shortcuts !== undefined) patch.shortcuts = sanitizeShortcutSettings(body.shortcuts);
+				return responseJson({ userSettings: updatePiboUserSettings(webSession.ownerScope, patch) });
 			}
 
 			if (url.pathname === `${CHAT_WEB_API_PREFIX}/pi-packages` && request.method === "GET") {
@@ -10409,7 +10573,10 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 
 			if (url.pathname === `${CHAT_WEB_API_PREFIX}/debug/persistence` && request.method === "GET") {
 				await requireSession(request, context);
-				return responseJson({ persistence: serializePersistenceMetrics(state.persistenceMetrics) });
+				return responseJson({
+					persistence: serializePersistenceMetrics(state.persistenceMetrics),
+					liveObservers: listLiveObservers(state),
+				});
 			}
 
 			if (url.pathname === `${CHAT_WEB_API_PREFIX}/debug/trace-at-sequence` && request.method === "POST") {
@@ -10451,12 +10618,16 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				if (body.params !== undefined && !isJsonValue(body.params)) {
 					return responseJson({ error: "Params must be JSON serializable" }, { status: 400 });
 				}
+				const piboSessionId = typeof body.piboSessionId === "string" ? body.piboSessionId : undefined;
+				if (isProviderAuthAction(body.action)) {
+					return providerAuthActionResponse({ piboSessionId, action: body.action, result: await executeProviderAuthAction(body.action, body.params) });
+				}
 				const selectedSession = resolveRequestedSession(
 					state,
 					context,
 					webSession,
 					defaultProfile,
-					typeof body.piboSessionId === "string" ? body.piboSessionId : undefined,
+					piboSessionId,
 				);
 				const room = ensureSessionRoom(state, context, selectedSession, webSession);
 				if (isPiboRoomArchived(room)) {
@@ -10477,6 +10648,10 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 				const webSession = await requireSession(request, context);
 				const requestedRoomId = url.searchParams.get("roomId") || undefined;
 				const requestedPiboSessionId = url.searchParams.get("piboSessionId") || undefined;
+				const streamMode = parseEventStreamMode(
+					url.searchParams.get("mode"),
+					defaultEventStreamMode({ requestedRoomId, requestedPiboSessionId }),
+				);
 				const selectedSession = resolveRequestedSession(
 					state,
 					context,
@@ -10490,6 +10665,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 					return createEventStream({
 						piboSessionId: selectedSession.id,
 						activePiboSessionId: selectedSession.id,
+						mode: streamMode,
 						principalId: principalIdFor(webSession),
 						context,
 						state,
@@ -10503,6 +10679,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 					roomId: streamPiboSessionId ? undefined : roomId,
 					piboSessionId: streamPiboSessionId,
 					activePiboSessionId: streamPiboSessionId ? selectedSession.id : undefined,
+					mode: streamMode,
 					principalId: principalIdFor(webSession),
 					context,
 					state,

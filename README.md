@@ -58,6 +58,34 @@ A fresh server install usually needs only three decisions:
 2. Install Node.js 24+ for that user or system-wide.
 3. Install Pibo through npm.
 
+Use the setup planner to keep the first run simple:
+
+```bash
+pibo setup doctor --domain pibo.example.com --expected-ip <server-ip>
+pibo setup user-host --domain pibo.example.com --print-files
+pibo setup user-host --domain pibo.example.com --write-to /tmp/pibo-setup
+```
+
+This is the normal user path: one gateway, one `PIBO_HOME`, no required Docker, no dev gateway, and no GitHub App setup. After reviewing staged files, use `--apply --yes` to write the generated systemd/Caddy files.
+
+Developer hosts are opt-in and add production/dev separation plus Docker compute workers:
+
+```bash
+pibo setup developer-host \
+  --origin git@github.com:<your-fork>/pibo.git \
+  --prod-domain pibo.example.com \
+  --dev-domain dev.pibo.example.com \
+  --print-files
+
+pibo setup developer-host \
+  --origin git@github.com:<your-fork>/pibo.git \
+  --prod-domain pibo.example.com \
+  --dev-domain dev.pibo.example.com \
+  --write-to /tmp/pibo-setup
+```
+
+See `docs/ops/install-user-host.md`, `docs/ops/install-developer-host.md`, and `docs/ops/upgrade-user-to-developer-host.md`. Developer-host services are source-pinned so production and dev do not fight over one global `pibo` symlink. Docker and swap are developer-host prerequisites only; verify them with `pibo setup doctor --require-docker --min-swap-gb 8`.
+
 If the agent should be able to perform server administration, give that Linux user the required sudo or Docker permissions explicitly. Pibo does not need a special onboarding user to work correctly; normal Unix ownership is enough.
 
 ## Docker notes
@@ -78,7 +106,7 @@ PIBO_HOME=/home/pibo/.pibo
 
 ## Web gateway auth
 
-`pibo gateway:web` starts the authenticated web runtime. It requires Better Auth configuration before production use:
+`pibo gateway:web` starts the authenticated web runtime. It requires Better Auth configuration before production use. This step is intentionally not automated because you must create/select the Google OAuth client and allowed user list:
 
 ```bash
 pibo config set auth.baseURL https://your-host.example
@@ -122,6 +150,7 @@ pibo mcp          # discover and call configured MCP servers
 pibo tools        # install and inspect curated external CLI tools
 pibo pi-packages  # register Pi Coding Agent packages
 pibo debug        # inspect local Pibo data stores
+pibo setup        # plan user-host installs and developer-host upgrades
 pibo profile      # inspect runtime profiles
 pibo tui          # start the direct Pi TUI
 pibo tui:routed   # start the routed Pibo TUI

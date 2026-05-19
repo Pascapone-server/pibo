@@ -36,10 +36,18 @@ export type WebAnnotationBindingSummary = {
 	error?: string;
 };
 
+export type WebAnnotationOverlayConfig = {
+	bindingId: string;
+	bindingToken: string;
+	apiBaseUrl?: string;
+	annotationShortcut?: string;
+};
+
 export type WebAnnotationBindingResponse = {
 	ok: true;
 	binding: WebAnnotationBindingSummary;
 	target?: WebAnnotationTargetSummary;
+	overlay?: WebAnnotationOverlayConfig;
 	injected?: boolean;
 	stopped?: boolean;
 };
@@ -50,10 +58,15 @@ export type WebAnnotationMessageAttachment = {
 	id: string;
 	status: WebAnnotationStatus;
 	targetKind: string;
+	piboSessionId: string;
+	piboRoomId?: string;
 	url: string;
 	label?: string;
 	selector?: string;
+	primaryTarget?: string;
+	piboContext?: string;
 	sourceHint?: string;
+	sourceHints?: string[];
 	position?: string;
 	text?: string;
 	note: string;
@@ -62,6 +75,7 @@ export type WebAnnotationMessageAttachment = {
 
 export type WebAnnotationListResponse = {
 	ok: true;
+	scope?: "session" | "owner";
 	annotations: WebAnnotationMessageAttachment[];
 };
 
@@ -146,6 +160,9 @@ export type CompactionPromptMode = "library" | "custom";
 
 export type UserSettings = {
 	timezone: string;
+	shortcuts: {
+		webAnnotationsToggle: string;
+	};
 };
 
 export type CompactionPromptSnapshot = {
@@ -1258,7 +1275,7 @@ export async function getUserSettings(): Promise<UserSettings> {
 	return (await requestJson<{ userSettings: UserSettings }>("/api/chat/user-settings")).userSettings;
 }
 
-export async function patchUserSettings(input: UserSettings): Promise<UserSettings> {
+export async function patchUserSettings(input: Partial<UserSettings>): Promise<UserSettings> {
 	return (await requestJson<{ userSettings: UserSettings }>("/api/chat/user-settings", {
 		method: "PATCH",
 		headers: { "content-type": "application/json" },
@@ -1400,18 +1417,33 @@ export async function deleteSession(
 	});
 }
 
-export async function postMessage(piboSessionId: string, text: string, clientTxnId: string, roomId?: string, webAnnotationIds: readonly string[] = []): Promise<unknown> {
+export async function postMessage(
+	piboSessionId: string,
+	text: string,
+	clientTxnId: string,
+	roomId?: string,
+	webAnnotationIds: readonly string[] = [],
+	fileAttachmentPaths: readonly string[] = [],
+): Promise<unknown> {
 	return requestJson("/api/chat/message", {
 		method: "POST",
 		headers: { "content-type": "application/json" },
-		body: JSON.stringify({ piboSessionId, text, clientTxnId, ...(roomId ? { roomId } : {}), ...(webAnnotationIds.length ? { webAnnotationIds } : {}) }),
+		body: JSON.stringify({
+			piboSessionId,
+			text,
+			clientTxnId,
+			...(roomId ? { roomId } : {}),
+			...(webAnnotationIds.length ? { webAnnotationIds } : {}),
+			...(fileAttachmentPaths.length ? { fileAttachmentPaths } : {}),
+		}),
 	});
 }
 
-export async function listWebAnnotations(piboSessionId: string, input: { status?: WebAnnotationStatus; limit?: number } = {}): Promise<WebAnnotationListResponse> {
+export async function listWebAnnotations(piboSessionId: string, input: { status?: WebAnnotationStatus; limit?: number; scope?: "session" | "owner" } = {}): Promise<WebAnnotationListResponse> {
 	const params = new URLSearchParams({ piboSessionId });
 	if (input.status) params.set("status", input.status);
 	if (input.limit) params.set("limit", String(input.limit));
+	if (input.scope) params.set("scope", input.scope);
 	return requestJson<WebAnnotationListResponse>(`/api/web-annotations?${params.toString()}`);
 }
 
@@ -1434,8 +1466,11 @@ export async function createWebAnnotationBinding(input: {
 	piboSessionId: string;
 	piboRoomId?: string;
 	url?: string;
+	title?: string;
 	targetId?: string;
 	cdpUrl?: string;
+	sameOrigin?: boolean;
+	annotationShortcut?: string;
 }): Promise<WebAnnotationBindingResponse> {
 	return requestJson<WebAnnotationBindingResponse>("/api/web-annotations/bindings", {
 		method: "POST",
@@ -1448,6 +1483,7 @@ export async function injectWebAnnotationBinding(bindingId: string, input: {
 	piboSessionId: string;
 	piboRoomId?: string;
 	cdpUrl?: string;
+	annotationShortcut?: string;
 }): Promise<WebAnnotationBindingResponse> {
 	return requestJson<WebAnnotationBindingResponse>(`/api/web-annotations/bindings/${encodeURIComponent(bindingId)}/inject`, {
 		method: "POST",

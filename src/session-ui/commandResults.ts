@@ -5,7 +5,7 @@ export type CommandResultDescriptor =
 	| { kind: "json"; title?: string; value: unknown }
 	| { kind: "menu"; title: string; items: readonly CommandResultMenuItem[] }
 	| { kind: "status"; title: string; status: unknown }
-	| { kind: "session-link"; title: string; sessionId: string; roomId?: string; label?: string }
+	| { kind: "session-link"; title: string; sessionId: string; roomId?: string; roomLabel?: string; label?: string }
 	| { kind: "unsupported"; command: string; reason: string }
 	| { kind: "error"; title?: string; message: string };
 
@@ -28,20 +28,21 @@ export function normalizeCommandResultDescriptor(command: string, value: unknown
 	if (record.supported === false || typeof record.unsupportedReason === "string") {
 		return { kind: "unsupported", command, reason: redactTerminalSecret(typeof record.unsupportedReason === "string" ? record.unsupportedReason : "This command is not supported in the terminal.") };
 	}
+	if (command === "status" || record.contextUsage || record.providerUsage || record.queuedMessages !== undefined) {
+		return { kind: "status", title: "Status", status: record };
+	}
 	if (typeof record.piboSessionId === "string" || typeof record.sessionId === "string") {
 		return {
 			kind: "session-link",
 			title: command,
 			sessionId: String(record.piboSessionId ?? record.sessionId),
 			roomId: typeof record.roomId === "string" ? record.roomId : undefined,
-			label: typeof record.title === "string" ? redactTerminalSecret(record.title) : undefined,
+			roomLabel: typeof record.roomTitle === "string" ? redactTerminalSecret(record.roomTitle) : typeof record.roomLabel === "string" ? redactTerminalSecret(record.roomLabel) : undefined,
+			label: typeof record.title === "string" ? redactTerminalSecret(record.title) : typeof record.sessionTitle === "string" ? redactTerminalSecret(record.sessionTitle) : undefined,
 		};
 	}
 	if (record.action === "show_login_menu" || record.action === "show_model_menu" || record.action === "show_fork_candidates" || Array.isArray(record.items) || Array.isArray(record.providers) || Array.isArray(record.messages)) {
 		return { kind: "menu", title: menuTitle(command, record), items: menuItems(record) };
-	}
-	if (command === "status" || record.contextUsage || record.providerUsage || record.queuedMessages !== undefined) {
-		return { kind: "status", title: "Status", status: record };
 	}
 	if (typeof record.message === "string") return { kind: "text", title: command, text: redactTerminalSecret(record.message), tone: record.ok === false ? "red" : "green" };
 	return { kind: "json", title: command, value: record };
@@ -105,6 +106,5 @@ function stringField(record: Record<string, unknown>, key: string): string | und
 }
 
 function trimLabel(value: string | undefined): string | undefined {
-	if (!value) return undefined;
-	return value.length <= 64 ? value : `${value.slice(0, 61)}…`;
+	return value;
 }

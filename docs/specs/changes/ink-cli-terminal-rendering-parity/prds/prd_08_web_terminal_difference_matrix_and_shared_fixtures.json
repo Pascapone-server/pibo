@@ -1,0 +1,102 @@
+{
+  "project": "Ink CLI Terminal Rendering Parity — Web-Derived Completion",
+  "branchName": "ralph/ink-cli-web-terminal-diff-fixtures",
+  "description": "Complete the Web Compact Terminal reference matrix and add shared fixtures that expose every known layout, behavior, command, JSON, markdown, details, status, and room/session naming difference before implementation continues.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Create Web-vs-Ink terminal difference matrix",
+      "description": "As a reviewer, I want a complete Web-vs-Ink matrix so that parity gaps are explicit and owned.",
+      "acceptanceCriteria": [
+        "Add a matrix document under the change docs that lists Web law, current Ink behavior, target Ink behavior, source files, fixture coverage, and owning PRD/story for every required area",
+        "Matrix includes layout/header, rows, spacing, preview/details, JSON, markdown, status, streaming, slash commands, pickers, room/session naming, no-color, and narrow terminal behavior",
+        "Matrix references `web-terminal-reference-audit.md` and `TERMINAL_DESIGN.md` for every major rule",
+        "Web UI preservation gate passes: Web Compact Terminal visual/behavioral render logic remains unchanged unless the story explicitly documents user-approved Web behavior changes; shared `src/session-ui/**` changes include Web regression evidence.",
+        "Implementation does not import Web DOM/Tailwind/lucide components into CLI modules",
+        "Secrets are redacted in previews, details, fixtures, snapshots, and PTY artifacts",
+        "Focused tests pass",
+        "Typecheck passes",
+        "When marking passes true, notes include commands run, evidence tier, artifact paths where applicable, and fake/demo/mocked/real classification"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Passed 2026-05-17. Added docs/specs/changes/ink-cli-terminal-rendering-parity/web-terminal-difference-matrix.md with Web law, current Ink gap, target behavior, fixture coverage, owner PRD/story, and validation gate rows for header, row grammar, spacing, preview/details, JSON, markdown/code, status, streaming, slash commands, pickers, room/session naming, no-color/narrow, and redaction. Evidence tier: docs/source plus focused fixture tests; no PTY artifact required for this matrix-only story. Web UI preservation: no Web Compact Terminal visual/behavioral files changed; no src/session-ui production changes. Validation: docker worker npm run build; node --test test/terminal-parity-fixtures.test.mjs; npm run typecheck."
+    },
+    {
+      "id": "US-002",
+      "title": "Add renderer-neutral long-output and detail fixtures",
+      "description": "As an implementer, I want long-output fixtures so preview and expansion rules can be tested without live provider calls.",
+      "acceptanceCriteria": [
+        "Add shared fixtures with at least 12 output lines for tool.call, tool.result-like rows, yielded.run, async agent, shell command, and execution.command",
+        "Fixtures retain full input/output/error payloads while marking the collapsed preview expectation as five lines",
+        "Fixture tests assert no per-line character truncation in visible preview lines",
+        "Web UI preservation gate passes: Web Compact Terminal visual/behavioral render logic remains unchanged unless the story explicitly documents user-approved Web behavior changes; shared `src/session-ui/**` changes include Web regression evidence.",
+        "Implementation does not import Web DOM/Tailwind/lucide components into CLI modules",
+        "Secrets are redacted in previews, details, fixtures, snapshots, and PTY artifacts",
+        "Focused tests pass",
+        "Typecheck passes",
+        "When marking passes true, notes include commands run, evidence tier, artifact paths where applicable, and fake/demo/mocked/real classification"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Passed 2026-05-17. Added renderer-neutral web-derived long-output fixture helpers in test/fixtures/terminal-parity-fixtures.mjs with 12-line outputs for tool.call, tool.result-like rows, agent.async, yielded.run, shell-command tool, and execution.command. Focused tests assert first five preview lines, +7 more-lines affordance, no character truncation marker, bounded collapsed text, expandable rows, and full line 12 retained in output for details. Evidence tier: shared fixture/source/unit, fake deterministic fixture (not live provider); no PTY required in PRD08. Validation: npm run build; node --test test/terminal-parity-fixtures.test.mjs; npm run typecheck."
+    },
+    {
+      "id": "US-003",
+      "title": "Add JSON, markdown, and syntax fixtures",
+      "description": "As an implementer, I want JSON and markdown fixtures so syntax/render semantics are not inferred ad hoc.",
+      "acceptanceCriteria": [
+        "Add nested JSON fixture with object keys, arrays, string, number, boolean, null, long string, circular-safe or prepared equivalent, and secret-like values",
+        "Add markdown fixture with headings, paragraphs, nested lists, blockquote, inline code, fenced bash/json code, table, and links",
+        "Fixture tests assert renderer-neutral token roles or expected semantic markers for JSON and markdown outputs",
+        "Web UI preservation gate passes: Web Compact Terminal visual/behavioral render logic remains unchanged unless the story explicitly documents user-approved Web behavior changes; shared `src/session-ui/**` changes include Web regression evidence.",
+        "Implementation does not import Web DOM/Tailwind/lucide components into CLI modules",
+        "Secrets are redacted in previews, details, fixtures, snapshots, and PTY artifacts",
+        "Focused tests pass",
+        "Typecheck passes",
+        "When marking passes true, notes include commands run, evidence tier, artifact paths where applicable, and fake/demo/mocked/real classification"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Passed 2026-05-17. Added nestedJsonSyntaxFixture and markdownSyntaxFixture covering function-call JSON roles, nested objects/arrays, strings/numbers/booleans/null, >140-char string, JSON-looking detail text, secret-bearing source value for future redaction assertions, headings, paragraph, quote, nested list, table, inline code, fenced bash, and fenced JSON. Evidence tier: shared fixture/source/unit; fixture includes source secret only for redaction-path tests and no renderer snapshot/log exposes it. Validation: npm run build; node --test test/terminal-parity-fixtures.test.mjs; npm run typecheck."
+    },
+    {
+      "id": "US-004",
+      "title": "Add room/session naming and slash-command fixtures",
+      "description": "As an SSH operator, I want fixtures that prove the TUI shows Web room names and command behavior, not only IDs.",
+      "acceptanceCriteria": [
+        "Add fixtures for default room, renamed room, archived room, missing room fallback, session with title, and session with only ID",
+        "Add slash command fixture cases for every command in `CLI_ONLY_SLASH_COMMANDS` and `WEB_PARITY_SLASH_COMMANDS`",
+        "Tests assert command catalog grouping, command labels, room labels, session labels, and fallback behavior are stable",
+        "Web UI preservation gate passes: Web Compact Terminal visual/behavioral render logic remains unchanged unless the story explicitly documents user-approved Web behavior changes; shared `src/session-ui/**` changes include Web regression evidence.",
+        "Implementation does not import Web DOM/Tailwind/lucide components into CLI modules",
+        "Secrets are redacted in previews, details, fixtures, snapshots, and PTY artifacts",
+        "Focused tests pass",
+        "Typecheck passes",
+        "When marking passes true, notes include commands run, evidence tier, artifact paths where applicable, and fake/demo/mocked/real classification"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "Passed 2026-05-17. Added roomSessionNamingFixture with named/default/archived/missing-title rooms and titled/missing-room sessions, plus slashCommandBehaviorFixture derived from CLI_ONLY_SLASH_COMMANDS and WEB_PARITY_SLASH_COMMANDS with dynamic/browser-only fixture cases. Tests assert all catalog commands are represented and room/session primary labels prefer Web names with IDs as secondary/fallback metadata. Evidence tier: shared fixture/source/unit, deterministic fixture not live store. Validation: npm run build; node --test test/terminal-parity-fixtures.test.mjs; npm run typecheck."
+    },
+    {
+      "id": "US-005",
+      "title": "Wire matrix rows to validation ownership",
+      "description": "As a Ralph runner, I want every discovered gap to map to a future story so work can be executed in order.",
+      "acceptanceCriteria": [
+        "Every matrix row has owner PRD/story and validation type: shared test, Web render test, Ink snapshot, PTY, or manual review",
+        "README and task docs link the matrix and explain how new differences must be added",
+        "No uncovered matrix row may be marked complete without a validation owner",
+        "Web UI preservation gate passes: Web Compact Terminal visual/behavioral render logic remains unchanged unless the story explicitly documents user-approved Web behavior changes; shared `src/session-ui/**` changes include Web regression evidence.",
+        "Implementation does not import Web DOM/Tailwind/lucide components into CLI modules",
+        "Secrets are redacted in previews, details, fixtures, snapshots, and PTY artifacts",
+        "Focused tests pass",
+        "Typecheck passes",
+        "When marking passes true, notes include commands run, evidence tier, artifact paths where applicable, and fake/demo/mocked/real classification"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Passed 2026-05-17. Wired each matrix row to fixture id, owner PRD/story, and validation gate; README and tasks now link the matrix and require newly discovered differences to be added with fixture coverage and owner before completion. Evidence tier: docs/source plus WEB_DERIVED_TERMINAL_MATRIX_COVERAGE unit assertions. Web UI preservation: no direct Web behavior changes and no shared production model changes. Validation: npm run build; node --test test/terminal-parity-fixtures.test.mjs; npm run typecheck."
+    }
+  ]
+}
