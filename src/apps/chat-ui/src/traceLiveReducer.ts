@@ -141,10 +141,10 @@ function makeStored(
 	const streamFrame = typeof streamEvent.streamFrameId === "string" ? streamEvent.streamFrameId : undefined;
 	const sequence = nextSequence();
 	return {
-		id: typeof streamEvent.streamId === "number"
-			? `stream:${streamEvent.streamId}:raw:${type}`
-			: streamFrame
-				? `stream:${streamFrame}:${type}`
+		id: streamFrame
+			? `stream:${streamFrame}:${type}`
+			: typeof streamEvent.streamId === "number"
+				? `stream:${streamEvent.streamId}:raw:${type}`
 				: `live:${sequence}:${type}`,
 		piboSessionId,
 		eventSequence: sequence,
@@ -166,7 +166,11 @@ function dedupeByIdentity(events: ChatWebStoredEvent[]): ChatWebStoredEvent[] {
 	const seen = new Set<string>();
 	const deduped: ChatWebStoredEvent[] = [];
 	for (const event of events) {
-		const key = event.streamId !== undefined ? `stream:${event.streamId}:${event.type}` : `${event.id}:${event.type}`;
+		const key = event.streamId !== undefined && event.streamFrameIndex !== undefined
+			? `stream:${event.streamId}:${event.streamFrameIndex}:${event.type}`
+			: event.streamId !== undefined
+				? `stream:${event.streamId}:${event.type}`
+				: `${event.id}:${event.type}`;
 		if (seen.has(key)) continue;
 		seen.add(key);
 		deduped.push(event);
