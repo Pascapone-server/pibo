@@ -42,3 +42,4 @@ This file is the shared memory for the Streaming Ralph loop. Keep it concise and
 - Add `?debugStreaming=1` counters for enqueue, flush, overlay update, trace refresh, last durable cursor, and last transient live id.
 - Add a deterministic streaming fixture: fixed number of deltas, fixed cadence, optional jitter, optional reconnect.
 - Add browser-level regression checks for DOM update cadence against the deterministic fixture.
+- `?debugStreaming=1` now exposes `window.__piboStreamingDebug` counters for browser-side streaming probes. Keep hot-path debug helpers cheap when disabled; guard expensive trace-output calculations with `isStreamingDebugEnabled()`.
