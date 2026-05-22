@@ -6,6 +6,7 @@
 - Owner scope: `user:ueR3mwuqBMPNTber3xuTwLmODbUlF4Sa`
 - Target room: `room_d911aa81-7cfb-4152-857c-77112fb4c165`
 - Profile: `pibo-agent`
+- Ralph job: `ralph_17107d46-8939-4c74-b3f9-285913cca5fa`
 - Worktree: `/root/code/pibo/.worktrees/streaming-ralph-loop`
 - Branch: `streaming-ralph-loop`
 - Base: `upstream/dev` at setup time
@@ -38,4 +39,4 @@ Continuously improve Chat Web streaming smoothness and performance from Pi Codin
 
 ## Progress log
 
-- 2026-05-22: Loop worktree and Docker worker created. Seeded progress file, insights file, and streaming instrumentation reports. First Ralph run should read the recent git history and the reports before editing.
+- 2026-05-22: Loop worktree and Docker worker created. Seeded progress file, insights file, and streaming instrumentation reports. Setup commit: `d4c4cf6`. Ralph job created stopped as `ralph_17107d46-8939-4c74-b3f9-285913cca5fa` with max iterations `50` and max-iterations-only stop policy. First Ralph run should read the recent git history and the reports before editing.
