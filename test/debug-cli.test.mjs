@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { PiboDataStore } from "../dist/data/pibo-store.js";
 import { PiboReliabilityStore } from "../dist/reliability/store.js";
-import { collectStreamingProviderTelemetryFromSelectedBrowserSession, collectStreamingProviderTelemetryFromSession, collectStreamingProviderTelemetryFromTurn, evaluateStreamingBenchmarkAssertion, evaluateStreamingBenchmarkUrlComparisonRegressions, evaluateStreamingProviderRegressions, formatWatch, inferWatchFlickers, resolveStreamingBenchmarkHostedCompareUrlFromValues, summarizeStreamingProviderPreservation, summarizeStreamingProviderTelemetry } from "../dist/debug/web.js";
+import { attachStreamingProviderTelemetryToBenchmark, collectStreamingProviderTelemetryFromSelectedBrowserSession, collectStreamingProviderTelemetryFromSession, collectStreamingProviderTelemetryFromTurn, evaluateStreamingBenchmarkAssertion, evaluateStreamingBenchmarkUrlComparisonRegressions, evaluateStreamingProviderRegressions, formatWatch, inferWatchFlickers, resolveStreamingBenchmarkHostedCompareUrlFromValues, summarizeStreamingProviderPreservation, summarizeStreamingProviderTelemetry } from "../dist/debug/web.js";
 
 const execFileAsyncRaw = promisify(execFile);
 const cliPath = resolve("dist/bin/pibo.js");
@@ -50,7 +50,7 @@ test("pibo debug web streaming benchmark help advertises the deterministic fixtu
 	assert.match(help.stdout, /--compare-hosted uses PIBO_DEV_PUBLIC_URL or PIBO_DEV_BASE_URL/);
 	assert.match(help.stdout, /--compare-hosted-if-configured runs the hosted comparison when a dev URL is configured/);
 	assert.match(help.stdout, /--provider-request-id attaches provider\/Pi telemetry delta counts/);
-	assert.match(help.stdout, /--provider-session-id, --provider-turn-id, or --provider-selected-session discovers the latest provider request/);
+	assert.match(help.stdout, /--provider-session-id, --provider-turn-id, or --provider-selected-session discovers the latest provider request.*after the benchmark window/);
 	assert.match(help.stdout, /--assert exits non-zero when fixture\/debug\/DOM\/provider preservation gates fail/);
 	assert.match(help.stdout, /--expect-regression marks a required regression substring/);
 	assert.match(help.stdout, /--negative-profile batch expands to the backend batch reasoning\/text fixture/);
@@ -114,6 +114,36 @@ test("streaming provider preservation summary computes provider-to-transport rat
 	assert.equal(summary.domPositiveToProviderTextRatio, 0.8);
 	assert.equal(summary.sseReasoningToProviderRatio, 0.75);
 	assert.equal(summary.selectedLiveReasoningToProviderRatio, 1);
+});
+
+test("streaming provider telemetry can be attached after a benchmark window", () => {
+	const updated = attachStreamingProviderTelemetryToBenchmark({
+		regressions: ["fixture did not start", "provider stale regression"],
+		sse: { requested: true, textEventCount: 9, reasoningEventCount: 4 },
+		eventSource: { requested: true, streams: [{ role: "selected-live", textEventCountAfterStart: 10, reasoningEventCountAfterStart: 4 }] },
+		dom: { positiveUpdateCount: 8 },
+	}, {
+		requested: true,
+		available: true,
+		providerRequestId: "pr_after_window",
+		textDeltaCount: 10,
+		reasoningDeltaCount: 4,
+		textDeltaBytes: { count: 10 },
+		reasoningDeltaBytes: { count: 4 },
+		textDeltaGapsMs: { count: 9 },
+		reasoningDeltaGapsMs: { count: 3 },
+		parseErrorCount: 0,
+		unknownEventCount: 0,
+		eventPageCount: 1,
+		truncated: false,
+	});
+	assert.equal(updated.provider.providerRequestId, "pr_after_window");
+	assert.equal(updated.providerPreservation.sseTextToProviderRatio, 0.9);
+	assert.equal(updated.providerPreservation.selectedLiveTextToProviderRatio, 1);
+	assert.deepEqual(updated.regressions, [
+		"fixture did not start",
+		"provider SSE text preservation ratio 0.9 < 0.95",
+	]);
 });
 
 test("streaming provider regressions gate telemetry health and preservation ratios", () => {

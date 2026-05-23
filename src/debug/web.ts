@@ -591,7 +591,7 @@ Defaults:
   streaming-benchmark --compare-hosted uses PIBO_DEV_PUBLIC_URL or PIBO_DEV_BASE_URL from the environment or .env.developer-host as the compare URL.
   streaming-benchmark --compare-hosted-if-configured runs the hosted comparison when a dev URL is configured; otherwise it records a warning and keeps the primary benchmark.
   streaming-benchmark --provider-request-id attaches provider/Pi telemetry delta counts, byte stats, gap stats, parse errors, first-text latency, and provider-to-transport preservation ratios from pibo debug telemetry.
-  streaming-benchmark --provider-session-id, --provider-turn-id, or --provider-selected-session discovers the latest provider request from telemetry session/turn metadata before attaching provider metrics.
+  streaming-benchmark --provider-session-id, --provider-turn-id, or --provider-selected-session discovers the latest provider request from telemetry session/turn metadata after the benchmark window before attaching provider metrics.
   streaming-benchmark --assert exits non-zero when fixture/debug/DOM/provider preservation gates fail.
   streaming-benchmark --expect-regression marks a required regression substring for controlled negative benchmarks; unexpected or missing expected regressions still fail with --assert.
   streaming-benchmark --negative-profile batch expands to the backend batch reasoning/text fixture with required controlled regression assertions.
@@ -753,10 +753,12 @@ async function runScenario(options: WebOptions): Promise<void> {
 	try {
 		if (scenario === "streaming-benchmark") {
 			const baseline = streamingOptions.from ? await readStreamingBenchmarkRuns(streamingOptions.from) : undefined;
-			const providerTelemetry = await collectStreamingProviderTelemetryForOptions(streamingOptions, client);
-			const runOptions = { startFixture: streamingOptions.fixture, startBackendFixture: streamingOptions.backendFixture, fixtureProfile, fixtureMix, simulateReconnect: streamingOptions.simulateReconnect, simulateTraceCatchup: streamingOptions.simulateTraceCatchup, providerTelemetry };
+			const providerTelemetryRequested = providerTelemetryModes.length > 0;
+			const runOptions = { startFixture: streamingOptions.fixture, startBackendFixture: streamingOptions.backendFixture, fixtureProfile, fixtureMix, simulateReconnect: streamingOptions.simulateReconnect, simulateTraceCatchup: streamingOptions.simulateTraceCatchup };
 			const primaryUrl = await currentBrowserUrl(client);
-			const benchmarks = await runStreamingBenchmarkSeries(client, runs, durationMs, runOptions);
+			const rawBenchmarks = await runStreamingBenchmarkSeries(client, runs, durationMs, runOptions);
+			const primaryProviderTelemetry = providerTelemetryRequested ? await collectStreamingProviderTelemetryForOptions(streamingOptions, client) : undefined;
+			const benchmarks = attachStreamingProviderTelemetryToBenchmarks(rawBenchmarks, primaryProviderTelemetry);
 			let benchmark: StreamingBenchmark | StreamingBenchmarkGroup | StreamingBenchmarkUrlComparison = runs === 1
 				? benchmarks[0]
 				: summarizeStreamingBenchmarkGroup(benchmarks, baseline);
@@ -765,7 +767,9 @@ async function runScenario(options: WebOptions): Promise<void> {
 			if (rawCompareUrl) {
 				const compareUrl = resolveStreamingBenchmarkCompareUrl(rawCompareUrl, primaryUrl);
 				await navigateStreamingBenchmarkTarget(client, compareUrl);
-				const compareRuns = await runStreamingBenchmarkSeries(client, runs, durationMs, runOptions);
+				const rawCompareRuns = await runStreamingBenchmarkSeries(client, runs, durationMs, runOptions);
+				const compareProviderTelemetry = providerTelemetryRequested ? await collectStreamingProviderTelemetryForOptions(streamingOptions, client) : undefined;
+				const compareRuns = attachStreamingProviderTelemetryToBenchmarks(rawCompareRuns, compareProviderTelemetry);
 				const primaryGroup = summarizeStreamingBenchmarkGroup(benchmarks, baseline);
 				const compareGroup = summarizeStreamingBenchmarkGroup(compareRuns, benchmarks);
 				benchmark = summarizeStreamingBenchmarkUrlComparison(primaryUrl, compareUrl, primaryGroup, compareGroup);
@@ -867,6 +871,22 @@ async function runStreamingBenchmark(client: CdpClient, durationMs: number, opti
 	const scored = { ...withProvider, score: scoreStreamingBenchmark(withProvider), providerPreservation: summarizeStreamingProviderPreservation(withProvider) };
 	const withCadence = { ...scored, cadence: summarizeStreamingCadence(scored) };
 	return { ...withCadence, regressions: [...withCadence.regressions, ...evaluateStreamingProviderRegressions(withCadence)] };
+}
+
+export function attachStreamingProviderTelemetryToBenchmark(benchmark: StreamingBenchmark, providerTelemetry: StreamingBenchmarkProviderTelemetry | undefined): StreamingBenchmark {
+	if (!providerTelemetry) return benchmark;
+	const baseRegressions = benchmark.regressions.filter((regression) => !regression.startsWith("provider "));
+	const withProvider = { ...benchmark, provider: providerTelemetry };
+	const providerPreservation = summarizeStreamingProviderPreservation(withProvider);
+	const withProviderMetrics = { ...withProvider, providerPreservation };
+	return {
+		...withProviderMetrics,
+		regressions: [...baseRegressions, ...evaluateStreamingProviderRegressions(withProviderMetrics)],
+	};
+}
+
+function attachStreamingProviderTelemetryToBenchmarks(benchmarks: StreamingBenchmark[], providerTelemetry: StreamingBenchmarkProviderTelemetry | undefined): StreamingBenchmark[] {
+	return providerTelemetry ? benchmarks.map((benchmark) => attachStreamingProviderTelemetryToBenchmark(benchmark, providerTelemetry)) : benchmarks;
 }
 
 async function currentBrowserUrl(client: CdpClient): Promise<string> {
