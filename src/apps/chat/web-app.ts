@@ -2533,8 +2533,8 @@ function normalizeMessageText(value: unknown): string {
 function defaultStreamingFixtureDeltas(mix: ChatStreamingFixtureMix): string[] {
 	if (mix === "markdown") return [" **a**", " **b**", " **c**", " **d**", " **e**", " **f**", " **g**", " **h**", " **i**", " **j**", " **k**", " **l**"];
 	if (mix === "gfm-markdown") return [" ~~a~~", " ~~b~~", " ~~c~~", " ~~d~~", " ~~e~~", " ~~f~~", " ~~g~~", " ~~h~~", " ~~i~~", " ~~j~~", " ~~k~~", " ~~l~~"];
-	if (mix === "gfm-task-markdown") return ["- [ ] **a**", " `b`", " **c**", " `d`", " **e**", " `f`", " **g**", " `h`", " **i**", " `j`", " **k**", " `l`"];
-	if (mix === "gfm-full-markdown") return ["- [ ] [a](https://e.co/a)", " [b](https://e.co/b)", " [c](https://e.co/c)", " [d](https://e.co/d)", " [e](https://e.co/e)", " [f](https://e.co/f)", " [g](https://e.co/g)", " [h](https://e.co/h)", " [i](https://e.co/i)", " [j](https://e.co/j)", " [k](https://e.co/k)", " [l](https://e.co/l)"];
+	if (mix === "gfm-task-markdown") return ["- [ ] [a](https://e.co/a)", " [b](https://e.co/b)", " [c](https://e.co/c)", " [d](https://e.co/d)", " [e](https://e.co/e)", " [f](https://e.co/f)", " [g](https://e.co/g)", " [h](https://e.co/h)", " [i](https://e.co/i)", " [j](https://e.co/j)", " [k](https://e.co/k)", " [l](https://e.co/l)"];
+	if (mix === "gfm-full-markdown") return ["- [ ] [**a**](https://e.co/a)", " [**b**](https://e.co/b)", " [**c**](https://e.co/c)", " [**d**](https://e.co/d)", " [**e**](https://e.co/e)", " [**f**](https://e.co/f)", " [**g**](https://e.co/g)", " [**h**](https://e.co/h)", " [**i**](https://e.co/i)", " [**j**](https://e.co/j)", " [**k**](https://e.co/k)", " [**l**](https://e.co/l)"];
 	return [" a", " b", " c", " d", " e", " f", " g", " h", " i", " j", " k", " l"];
 }
 

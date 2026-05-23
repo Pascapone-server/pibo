@@ -73,7 +73,9 @@ export function requiresGfmMarkdown(markdown: string): boolean {
 
 const simpleGfmStrikethroughForbiddenPattern = /[\n\r\\`*_\[\]<>]/;
 const simpleGfmTaskListPattern = /^\s*[-+*]\s+\[([ xX])\]\s+(.+?)\s*$/;
-const simpleGfmTaskListTextForbiddenPattern = /[\n\r\\_\[\]<>|~]/;
+const simpleGfmTaskListTextForbiddenPattern = /[\n\r\\_<>|~]/;
+const simpleGfmTaskListLinkTextForbiddenPattern = /[\n\r\\`*_\[\]<>|~]/;
+const simpleGfmTaskListLinkHrefForbiddenPattern = /[\s\[\]()`<>]/;
 
 function renderSimpleGfmStrikethrough(markdown: string): ReactElement | undefined {
 	if (!markdown.includes("~~")) return undefined;
@@ -106,43 +108,70 @@ function renderSimpleGfmStrikethrough(markdown: string): ReactElement | undefine
 	return delCount > 0 ? <p data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="p">{parts}</p> : undefined;
 }
 
+function normalizeSimpleMarkdownLinkHref(href: string): string | undefined {
+	if (!href || simpleGfmTaskListLinkHrefForbiddenPattern.test(href)) return undefined;
+	const transformed = defaultUrlTransform(href);
+	if (!transformed) return undefined;
+	if (transformed.startsWith("/") || transformed.startsWith("#")) return transformed;
+	try {
+		const parsed = new URL(transformed);
+		return parsed.protocol === "http:" || parsed.protocol === "https:" || parsed.protocol === "mailto:" ? transformed : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 function renderSimpleTaskListText(text: string): Array<string | ReactElement> | undefined {
 	const parts: Array<string | ReactElement> = [];
 	let cursor = 0;
 	let strongCount = 0;
 	let codeCount = 0;
+	let linkCount = 0;
 	while (cursor < text.length) {
 		const strongStart = text.indexOf("**", cursor);
 		const codeStart = text.indexOf("`", cursor);
+		const linkStart = text.indexOf("[", cursor);
 		const nextStrong = strongStart === -1 ? Number.POSITIVE_INFINITY : strongStart;
 		const nextCode = codeStart === -1 ? Number.POSITIVE_INFINITY : codeStart;
-		const start = Math.min(nextStrong, nextCode);
+		const nextLink = linkStart === -1 ? Number.POSITIVE_INFINITY : linkStart;
+		const start = Math.min(nextStrong, nextCode, nextLink);
 		if (start === Number.POSITIVE_INFINITY) {
 			const suffix = text.slice(cursor);
-			if (suffix.includes("*") || suffix.includes("`")) return undefined;
+			if (suffix.includes("*") || suffix.includes("`") || suffix.includes("[") || suffix.includes("]") || (hasAutolinkCandidate(suffix) && markdownAutolinkPattern.test(suffix))) return undefined;
 			if (suffix) parts.push(suffix);
 			break;
 		}
 		const plainPrefix = text.slice(cursor, start);
-		if (plainPrefix.includes("*") || plainPrefix.includes("`")) return undefined;
+		if (plainPrefix.includes("*") || plainPrefix.includes("`") || plainPrefix.includes("[") || plainPrefix.includes("]") || (hasAutolinkCandidate(plainPrefix) && markdownAutolinkPattern.test(plainPrefix))) return undefined;
 		if (plainPrefix) parts.push(plainPrefix);
 		if (start === nextStrong) {
 			const end = text.indexOf("**", start + 2);
 			if (end === -1 || end === start + 2) return undefined;
 			const strongText = text.slice(start + 2, end);
-			if (strongText.includes("*") || strongText.includes("`")) return undefined;
+			if (strongText.includes("*") || strongText.includes("`") || strongText.includes("[") || strongText.includes("]")) return undefined;
 			parts.push(<strong key={`strong-${strongCount}`} data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="strong">{strongText}</strong>);
 			strongCount += 1;
 			cursor = end + 2;
-		} else {
+		} else if (start === nextCode) {
 			if (text[start + 1] === "`") return undefined;
 			const end = text.indexOf("`", start + 1);
 			if (end === -1 || end === start + 1) return undefined;
 			const codeText = text.slice(start + 1, end);
-			if (codeText.includes("`") || codeText.startsWith(" ") || codeText.endsWith(" ")) return undefined;
+			if (codeText.includes("`") || codeText.includes("[") || codeText.includes("]") || codeText.startsWith(" ") || codeText.endsWith(" ")) return undefined;
 			parts.push(<code key={`code-${codeCount}`} data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="code">{codeText}</code>);
 			codeCount += 1;
 			cursor = end + 1;
+		} else {
+			const labelEnd = text.indexOf("](", start + 1);
+			if (labelEnd === -1 || labelEnd === start + 1) return undefined;
+			const hrefEnd = text.indexOf(")", labelEnd + 2);
+			if (hrefEnd === -1 || hrefEnd === labelEnd + 2) return undefined;
+			const label = text.slice(start + 1, labelEnd);
+			const href = normalizeSimpleMarkdownLinkHref(text.slice(labelEnd + 2, hrefEnd));
+			if (!href || simpleGfmTaskListLinkTextForbiddenPattern.test(label)) return undefined;
+			parts.push(<a key={`link-${linkCount}`} href={href} target="_blank" rel="noreferrer" data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="a">{label}</a>);
+			linkCount += 1;
+			cursor = hrefEnd + 1;
 		}
 	}
 	return parts.length > 0 ? parts : undefined;
@@ -152,7 +181,7 @@ function renderSimpleGfmTaskList(markdown: string): ReactElement | undefined {
 	const match = simpleGfmTaskListPattern.exec(markdown);
 	if (!match) return undefined;
 	const text = match[2];
-	if (!text || simpleGfmTaskListTextForbiddenPattern.test(text) || (hasAutolinkCandidate(text) && markdownAutolinkPattern.test(text))) return undefined;
+	if (!text || simpleGfmTaskListTextForbiddenPattern.test(text)) return undefined;
 	const renderedText = renderSimpleTaskListText(text);
 	if (!renderedText) return undefined;
 	const checked = match[1].toLowerCase() === "x";
