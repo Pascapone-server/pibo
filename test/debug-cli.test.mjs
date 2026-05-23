@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -34,6 +34,52 @@ test("pibo debug web watch rejects action flags", async () => {
 			return true;
 		},
 	);
+});
+
+test("pibo debug web report renders saved streaming benchmark artifacts without CDP", async () => {
+	const cwd = await makeEmptyCwd();
+	try {
+		const artifact = join(cwd, "streaming-benchmark.json");
+		await writeFile(artifact, JSON.stringify({
+			kind: "streaming-benchmark",
+			createdAt: "2026-05-23T00:00:00.000Z",
+			url: "http://example.test/apps/chat/rooms/room_test/sessions/ps_test",
+			title: "Chat",
+			durationMs: 1800,
+			debug: {
+				enabledRequested: true,
+				available: true,
+				reset: true,
+				delta: { textDeltaCount: 12, textDeltaBytes: 24, reasoningDeltaCount: 4, enqueueCount: 22, flushCount: 20, overlayUpdateCount: 20 },
+				after: { overlayEventCount: 16, currentOutputLength: 24, traceBaseOutputLength: 0 },
+			},
+			dom: {
+				selector: "[data-pibo-component=MarkdownRendererHost]",
+				targetCountStart: 1,
+				targetCountEnd: 1,
+				lengthStart: 0,
+				lengthEnd: 24,
+				lengthMax: 24,
+				updateCount: 12,
+				positiveUpdateCount: 12,
+				firstPositiveUpdateMs: 145,
+				gapsMs: { count: 11, p50: 100, p90: 101, p99: 103, max: 103, avg: 100.4 },
+				positiveCharJumps: { count: 12, p50: 2, p90: 2, p99: 2, max: 2, avg: 2 },
+			},
+			raf: { count: 100, gapsMs: { count: 99, p50: 16.7, p90: 16.8, p99: 17, max: 17, avg: 16.7 } },
+			longTasks: { count: 0, totalMs: 0, maxMs: 0 },
+			score: { smoothness: 58, textDeltaCount: 12, domPositiveUpdateCount: 12 },
+			regressions: [],
+			warnings: [],
+		}, null, 2));
+		const report = await execFileAsync("node", [cliPath, "debug", "web", "report", "streaming-benchmark", "--from", artifact], { cwd });
+		assert.match(report.stdout, /# Web Streaming Benchmark, 1\.8s/);
+		assert.match(report.stdout, /# target: artifact http:\/\/example\.test\/apps\/chat/);
+		assert.match(report.stdout, /events: text=12 \(24 bytes\), reasoning=4/);
+		assert.match(report.stdout, /dom gaps: count=11, p50=100, p90=101/);
+	} finally {
+		await rm(cwd, { recursive: true, force: true });
+	}
 });
 
 test("pibo debug web streaming benchmark help advertises the deterministic fixture", async () => {

@@ -623,6 +623,10 @@ export async function runDebugWeb(args: string[]): Promise<void> {
 		await runScenario(options);
 		return;
 	}
+	if (command === "report") {
+		await runReport(options);
+		return;
+	}
 	throw new Error(`Unknown pibo debug web command "${command}". Run pibo debug web --help.`);
 }
 
@@ -636,11 +640,13 @@ Commands:
   diff         Compare current scoped snapshot against previous or artifact
   watch        Record a bounded scoped DOM/focus/route timeline
   scenario     Run guided Chat Web debug workflows
+  report       Render saved debug artifacts as reviewer-friendly Markdown
 
 Next:
   pibo debug web targets
   pibo debug web snapshot --preset session-list
   pibo debug web watch --preset chat-shell --duration 5000
+  pibo debug web report streaming-benchmark --from artifact.json
 `);
 }
 
@@ -703,6 +709,20 @@ Defaults:
   streaming-benchmark --expect-regression marks a required regression substring for controlled negative benchmarks; unexpected or missing expected regressions still fail with --assert.
   streaming-benchmark --negative-profile batch expands to the backend batch reasoning/text fixture with required controlled regression assertions.
   streaming-benchmark --negative-profile overlay-drop preserves SSE/EventSource input but drops live-overlay text/reasoning enqueue for a controlled pipeline-preservation failure.
+`);
+}
+
+function printReportHelp(): void {
+	console.log(`pibo debug web report - render saved debug artifacts
+
+Usage:
+  pibo debug web report streaming-benchmark --from artifact.json [--json] [--artifact]
+
+Reports:
+  streaming-benchmark  Summarize saved pibo debug web scenario streaming-benchmark JSON as Markdown.
+
+Next:
+  pibo debug web scenario streaming-benchmark --backend-fixture --assert --artifact
 `);
 }
 
@@ -904,6 +924,30 @@ async function runScenario(options: WebOptions): Promise<void> {
 		if (!options.json) console.log(`Artifact: ${artifact}`);
 	} finally {
 		client.close();
+	}
+}
+
+async function runReport(options: WebOptions): Promise<void> {
+	const report = options.positionals[0];
+	if (!report || report === "--help" || report === "-h") {
+		printReportHelp();
+		return;
+	}
+	if (options.positionals.length > 1) {
+		throw new Error(`Unexpected pibo debug web report argument "${options.positionals[1]}". Run pibo debug web report --help.`);
+	}
+	if (report !== "streaming-benchmark") {
+		throw new Error(`Unknown pibo debug web report "${report}". Run pibo debug web report --help.`);
+	}
+	if (!options.from) throw new Error("pibo debug web report streaming-benchmark requires --from artifact.json");
+	const benchmark = await readStreamingBenchmarkArtifact(options.from);
+	const target = streamingBenchmarkReportTarget(benchmark);
+	const markdown = formatStreamingBenchmarkResult(benchmark, target);
+	if (options.json) console.log(JSON.stringify({ report, source: options.from, markdown }, null, 2));
+	else console.log(markdown);
+	if (options.artifact) {
+		const artifact = await writeTextArtifact("report-streaming-benchmark", "md", markdown);
+		if (!options.json) console.log(`Artifact: ${artifact}`);
 	}
 }
 
@@ -3386,20 +3430,52 @@ function traceDurableEventDelta(trace: StreamingBenchmarkTraceProbe | undefined)
 	return trace.durableEventCountEnd - trace.durableEventCountStart;
 }
 
-async function readStreamingBenchmarkRuns(file: string): Promise<StreamingBenchmark[]> {
+async function readStreamingBenchmarkArtifact(file: string): Promise<StreamingBenchmark | StreamingBenchmarkGroup | StreamingBenchmarkUrlComparison> {
 	const parsed = JSON.parse(await readFile(file, "utf8"));
 	const value = parsed.benchmark ?? parsed;
+	if (value?.kind === "streaming-benchmark") return normalizeStreamingBenchmarkRun(value as StreamingBenchmark);
+	if (value?.kind === "streaming-benchmark-runs") {
+		const runs = Array.isArray(value.runs) ? value.runs.map((run: StreamingBenchmark) => normalizeStreamingBenchmarkRun(run)) : [];
+		return {
+			...(value as StreamingBenchmarkGroup),
+			runs,
+			summary: value.summary ?? summarizeStreamingBenchmarks(runs),
+		};
+	}
+	if (value?.kind === "streaming-benchmark-url-comparison") {
+		const primaryRuns = Array.isArray(value.primary?.runs) ? value.primary.runs.map((run: StreamingBenchmark) => normalizeStreamingBenchmarkRun(run)) : [];
+		const compareRuns = Array.isArray(value.compare?.runs) ? value.compare.runs.map((run: StreamingBenchmark) => normalizeStreamingBenchmarkRun(run)) : [];
+		const primary = { ...(value.primary as StreamingBenchmarkGroup), runs: primaryRuns, summary: value.primary?.summary ?? summarizeStreamingBenchmarks(primaryRuns) };
+		const compare = { ...(value.compare as StreamingBenchmarkGroup), runs: compareRuns, summary: value.compare?.summary ?? summarizeStreamingBenchmarks(compareRuns) };
+		return { ...(value as StreamingBenchmarkUrlComparison), primary, compare };
+	}
+	throw new Error(`File is not a streaming benchmark artifact: ${file}`);
+}
+
+function normalizeStreamingBenchmarkRun(run: StreamingBenchmark): StreamingBenchmark {
+	const scored = { ...run, score: run.score ?? scoreStreamingBenchmark(run) };
+	const withProviderPreservation = { ...scored, providerPreservation: run.providerPreservation ?? summarizeStreamingProviderPreservation(scored) };
+	const withLivePipeline = { ...withProviderPreservation, livePipeline: run.livePipeline ?? summarizeStreamingLivePipeline(withProviderPreservation) };
+	return { ...withLivePipeline, cadence: run.cadence ?? summarizeStreamingCadence(withLivePipeline) };
+}
+
+function streamingBenchmarkReportTarget(benchmark: StreamingBenchmark | StreamingBenchmarkGroup | StreamingBenchmarkUrlComparison): { id: string; url: string; title: string } {
+	const url = benchmark.kind === "streaming-benchmark-url-comparison"
+		? benchmark.primaryUrl
+		: benchmark.kind === "streaming-benchmark-runs"
+			? benchmark.runs[0]?.url ?? ""
+			: benchmark.url;
+	return { id: "artifact", url, title: "streaming benchmark artifact" };
+}
+
+async function readStreamingBenchmarkRuns(file: string): Promise<StreamingBenchmark[]> {
+	const value = await readStreamingBenchmarkArtifact(file);
 	const runs = value.kind === "streaming-benchmark-runs"
 		? value.runs
 		: value.kind === "streaming-benchmark-url-comparison"
-			? [...(value.primary?.runs ?? []), ...(value.compare?.runs ?? [])]
+			? [...value.primary.runs, ...value.compare.runs]
 			: [value];
-	return runs.filter((run: Partial<StreamingBenchmark>) => run.kind === "streaming-benchmark").map((run: StreamingBenchmark) => {
-		const scored = { ...run, score: run.score ?? scoreStreamingBenchmark(run) };
-		const withProviderPreservation = { ...scored, providerPreservation: run.providerPreservation ?? summarizeStreamingProviderPreservation(scored) };
-		const withLivePipeline = { ...withProviderPreservation, livePipeline: run.livePipeline ?? summarizeStreamingLivePipeline(withProviderPreservation) };
-		return { ...withLivePipeline, cadence: run.cadence ?? summarizeStreamingCadence(withLivePipeline) };
-	});
+	return runs.filter((run): run is StreamingBenchmark => run.kind === "streaming-benchmark");
 }
 
 function numericStats(values: readonly unknown[]): NumberStats {
@@ -3768,11 +3844,15 @@ async function readBaselineSnapshot(file?: string): Promise<WebSnapshot> {
 }
 
 async function writeArtifact(kind: string, payload: unknown): Promise<string> {
+	return writeTextArtifact(kind, "json", JSON.stringify(payload, null, 2));
+}
+
+async function writeTextArtifact(kind: string, extension: string, content: string): Promise<string> {
 	const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 	const dir = path.join(getPiboHome(), "debug", "web-render", stamp);
 	await mkdir(dir, { recursive: true });
-	const file = path.join(dir, `${kind}.json`);
-	await writeFile(file, JSON.stringify(payload, null, 2), "utf-8");
+	const file = path.join(dir, `${kind}.${extension}`);
+	await writeFile(file, content, "utf-8");
 	return file;
 }
 
