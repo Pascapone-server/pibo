@@ -139,7 +139,7 @@ Collected by an in-page EventSource wrapper:
 - transient id count;
 - reconnect/open/error observations;
 - first event/text/reasoning latency;
-- `liveSince` transient replay cursor use, replayed transient frame count from the stream `ready` replay status, and bounded replay-buffer miss indicators during selected-live reconnects.
+- `liveSince` transient replay cursor use, replayed transient frame count from the stream `ready` replay status, replay cursor lag (`newestAvailable - requestedAfter`), and bounded replay-buffer miss indicators during selected-live reconnects.
 
 ### Live pipeline
 
@@ -207,7 +207,7 @@ Compact single/group reports include rows for:
 - Provider ratios;
 - SSE transport;
 - Cadence lag;
-- EventSource selected-live; compact single-run reports include reconnect replay cursor/frame counts when used;
+- EventSource selected-live; compact single-run reports include reconnect replay cursor/frame counts and replay cursor lag when used;
 - Live overlay preservation and first live latencies;
 - Live trace compute count/total/max duration when debug instrumentation is available;
 - DOM;
