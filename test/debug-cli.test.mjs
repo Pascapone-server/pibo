@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -82,6 +82,12 @@ test("pibo debug web report renders saved streaming benchmark artifacts without 
 		assert.match(compactReport.stdout, /\| Layer \| Preservation \| Cadence \/ latency \|/);
 		assert.match(compactReport.stdout, /\| SSE transport \| n\/a \| n\/a \|/);
 		assert.match(compactReport.stdout, /\| DOM \| positive 12, max jump 2 chars \| p90 gap 101ms, first visible 145ms \|/);
+		const output = join(cwd, "reports", "streaming-compact.md");
+		const outputReport = await execFileAsync("node", [cliPath, "debug", "web", "report", "streaming-benchmark", "--from", artifact, "--compact", "--output", output], { cwd });
+		assert.match(outputReport.stdout, /Wrote report: .*streaming-compact\.md/);
+		const writtenReport = await readFile(output, "utf-8");
+		assert.match(writtenReport, /# Web Streaming Benchmark Compact Report/);
+		assert.match(writtenReport, /\| DOM \| positive 12, max jump 2 chars \| p90 gap 101ms, first visible 145ms \|/);
 	} finally {
 		await rm(cwd, { recursive: true, force: true });
 	}

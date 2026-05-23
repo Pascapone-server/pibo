@@ -60,6 +60,7 @@ type WebOptions = {
 	includeText: boolean;
 	includeLayout: boolean;
 	compact: boolean;
+	output?: string;
 };
 
 type SnapshotNode = {
@@ -717,11 +718,12 @@ function printReportHelp(): void {
 	console.log(`pibo debug web report - render saved debug artifacts
 
 Usage:
-  pibo debug web report streaming-benchmark --from artifact.json [--compact] [--json] [--artifact]
+  pibo debug web report streaming-benchmark --from artifact.json [--compact] [--output report.md] [--json] [--artifact]
 
 Reports:
   streaming-benchmark  Summarize saved pibo debug web scenario streaming-benchmark JSON as Markdown.
   --compact            Render reviewer-friendly Markdown tables instead of the detailed line report.
+  --output             Write the Markdown report to a specific file path.
 
 Next:
   pibo debug web scenario streaming-benchmark --backend-fixture --assert --artifact
@@ -946,7 +948,9 @@ async function runReport(options: WebOptions): Promise<void> {
 	const target = streamingBenchmarkReportTarget(benchmark);
 	const markdown = options.compact ? formatStreamingBenchmarkCompactReport(benchmark, target) : formatStreamingBenchmarkResult(benchmark, target);
 	const format = options.compact ? "compact" : "detailed";
-	if (options.json) console.log(JSON.stringify({ report, source: options.from, format, markdown }, null, 2));
+	const output = options.output ? await writeReportOutput(options.output, markdown) : undefined;
+	if (options.json) console.log(JSON.stringify({ report, source: options.from, format, output, markdown }, null, 2));
+	else if (output) console.log(`Wrote report: ${output}`);
 	else console.log(markdown);
 	if (options.artifact) {
 		const artifact = await writeTextArtifact(options.compact ? "report-streaming-benchmark-compact" : "report-streaming-benchmark", "md", markdown);
@@ -2666,6 +2670,8 @@ function parseOptions(args: string[]): WebOptions {
 		else if (arg === "--include-text") options.includeText = true;
 		else if (arg === "--include-layout") options.includeLayout = true;
 		else if (arg === "--compact") options.compact = true;
+		else if (arg === "--output") options.output = requireValue(args, ++index, arg);
+		else if (arg.startsWith("--output=")) options.output = arg.slice("--output=".length);
 		else if (arg === "--cdp-url") options.cdpUrl = requireValue(args, ++index, arg);
 		else if (arg.startsWith("--cdp-url=")) options.cdpUrl = arg.slice("--cdp-url=".length);
 		else if (arg === "--target") options.target = requireValue(args, ++index, arg);
@@ -3972,6 +3978,13 @@ async function writeTextArtifact(kind: string, extension: string, content: strin
 	const dir = path.join(getPiboHome(), "debug", "web-render", stamp);
 	await mkdir(dir, { recursive: true });
 	const file = path.join(dir, `${kind}.${extension}`);
+	await writeFile(file, content, "utf-8");
+	return file;
+}
+
+async function writeReportOutput(outputPath: string, content: string): Promise<string> {
+	const file = path.resolve(outputPath);
+	await mkdir(path.dirname(file), { recursive: true });
 	await writeFile(file, content, "utf-8");
 	return file;
 }
