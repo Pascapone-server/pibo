@@ -3586,10 +3586,14 @@ function SessionTracePane({
 		if (!currentTraceView || currentTraceView.piboSessionId !== selectedPiboSessionId) return;
 		const params = new URLSearchParams({ piboSessionId: selectedPiboSessionId });
 		params.set("mode", "live");
-		const latestCursor = latestLiveCursorBySession.current.get(selectedPiboSessionId)?.cursor
+		const latestLiveCursor = latestLiveCursorBySession.current.get(selectedPiboSessionId);
+		const latestCursor = latestLiveCursor?.cursor
 			?? (currentTraceView.latestStreamId !== undefined ? traceStreamCursorAfterStream(currentTraceView.latestStreamId) : undefined);
 		if (latestCursor !== undefined) {
 			params.set("since", latestCursor);
+		}
+		if (latestLiveCursor?.liveReplayId !== undefined) {
+			params.set("liveSince", String(latestLiveCursor.liveReplayId));
 		}
 		const events = new EventSource(`/api/chat/events?${params.toString()}`);
 		const openedAt = Date.now();
@@ -9581,10 +9585,11 @@ type SelectedLiveEventStream = {
 };
 
 type LiveStreamCursor = {
-	streamId: number;
-	frameIndex: number;
-	cursor: string;
+	streamId?: number;
+	frameIndex?: number;
+	cursor?: string;
 	exact: boolean;
+	liveReplayId?: number;
 };
 
 type ChatStreamEventMeta = {
@@ -9592,6 +9597,7 @@ type ChatStreamEventMeta = {
 	streamFrameId?: string;
 	streamId?: number;
 	streamFrameIndex?: number;
+	liveReplayId?: number;
 };
 
 type ChatStreamEvent = ChatStreamEventMeta & (
@@ -9630,25 +9636,33 @@ function chatStreamEvent(message: MessageEvent): ChatStreamEvent | undefined {
 
 function recordTraceLiveCursor(cursors: Map<string, LiveStreamCursor>, piboSessionId: string, streamId: number): void {
 	const current = cursors.get(piboSessionId);
-	if (current && current.streamId >= streamId) return;
+	if (current?.streamId !== undefined && current.streamId >= streamId) return;
 	cursors.set(piboSessionId, {
 		streamId,
 		frameIndex: Number.MAX_SAFE_INTEGER,
 		cursor: traceStreamCursorAfterStream(streamId),
 		exact: false,
+		...(current?.liveReplayId !== undefined ? { liveReplayId: current.liveReplayId } : {}),
 	});
 }
 
 function recordEventLiveCursor(cursors: Map<string, LiveStreamCursor>, piboSessionId: string, event: ChatStreamEvent): void {
-	if (event.streamId === undefined || event.streamFrameIndex === undefined) return;
 	const current = cursors.get(piboSessionId);
+	const liveReplayId = typeof event.liveReplayId === "number" && Number.isFinite(event.liveReplayId)
+		? Math.max(current?.liveReplayId ?? 0, event.liveReplayId)
+		: current?.liveReplayId;
+	if (event.streamId === undefined || event.streamFrameIndex === undefined) {
+		if (liveReplayId !== undefined && liveReplayId !== current?.liveReplayId) cursors.set(piboSessionId, { ...(current ?? { exact: false }), liveReplayId });
+		return;
+	}
 	if (
 		current
 		&& (
-			current.streamId > event.streamId
-			|| (current.streamId === event.streamId && current.exact && current.frameIndex >= event.streamFrameIndex)
+			(current.streamId !== undefined && current.streamId > event.streamId)
+			|| (current.streamId === event.streamId && current.exact && current.frameIndex !== undefined && current.frameIndex >= event.streamFrameIndex)
 		)
 	) {
+		if (liveReplayId !== undefined && liveReplayId !== current.liveReplayId) cursors.set(piboSessionId, { ...current, liveReplayId });
 		return;
 	}
 	cursors.set(piboSessionId, {
@@ -9656,6 +9670,7 @@ function recordEventLiveCursor(cursors: Map<string, LiveStreamCursor>, piboSessi
 		frameIndex: event.streamFrameIndex,
 		cursor: event.streamFrameId ?? `${event.streamId}:${event.streamFrameIndex}`,
 		exact: true,
+		...(liveReplayId !== undefined ? { liveReplayId } : {}),
 	});
 }
 
