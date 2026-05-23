@@ -3431,20 +3431,19 @@ function SessionTracePane({
 	);
 
 	const currentTraceComputation = useMemo((): { traceView: PiboSessionTraceView | null; liveTraceComputeDurationMs?: number } => {
-		if (!selectedPiboSessionId || !bootstrap) return { traceView: null };
+		if (!selectedPiboSessionId) return { traceView: null };
 		if (reconciledBaseTraceView?.piboSessionId !== selectedPiboSessionId) return { traceView: null };
-		const sessionStatus = findSessionNode(bootstrap.sessions, selectedPiboSessionId)?.status ?? "idle";
 		const overlayEvents = liveTraceOverlay?.piboSessionId === selectedPiboSessionId
 			? liveTraceOverlay.events
 			: [];
 		if (!overlayEvents.length) return { traceView: reconciledBaseTraceView };
 		const measureCompute = isStreamingDebugEnabled();
 		const startedAt = measureCompute ? performance.now() : 0;
-		const liveTrace = patchTraceViewWithEvents(reconciledBaseTraceView, overlayEvents, sessionStatus);
+		const liveTrace = patchTraceViewWithEvents(reconciledBaseTraceView, overlayEvents, selectedSessionStatus ?? "idle");
 		annotateLiveTraceForkEntryIds(liveTrace.nodes, persistedUserMessageIndexForBaseTrace);
 		const traceView = overlayIncludesOptimisticUserMessage(overlayEvents) ? reconcileOptimisticUserMessages(liveTrace) : liveTrace;
 		return { traceView, liveTraceComputeDurationMs: measureCompute ? performance.now() - startedAt : undefined };
-	}, [liveTraceOverlay, selectedPiboSessionId, bootstrap, reconciledBaseTraceView, persistedUserMessageIndexForBaseTrace]);
+	}, [liveTraceOverlay, selectedPiboSessionId, selectedSessionStatus, reconciledBaseTraceView, persistedUserMessageIndexForBaseTrace]);
 	const currentTraceView = currentTraceComputation.traceView;
 
 	useEffect(() => {
