@@ -40,7 +40,17 @@ function compareOptionalIsoTime(left?: string, right?: string): number {
 }
 
 export function flattenTraceNodes(nodes: PiboTraceNode[]): PiboTraceNode[] {
-	return nodes.flatMap((node) => [node, ...flattenTraceNodes(node.children)]);
+	const flattened: PiboTraceNode[] = [];
+	const stack = [...nodes].reverse();
+	while (stack.length) {
+		const node = stack.pop();
+		if (!node) continue;
+		flattened.push(node);
+		for (let index = node.children.length - 1; index >= 0; index -= 1) {
+			stack.push(node.children[index]);
+		}
+	}
+	return flattened;
 }
 
 export function nestTraceNodes(nodes: PiboTraceNode[]): PiboTraceNode[] {
@@ -345,7 +355,8 @@ export function patchTraceViewWithEvents(
 	}
 	if (!candidateEvents.length) return view;
 
-	const allNodes = flattenTraceNodes(view.nodes).map((node) => ({ ...node, children: [] }));
+	const previousFlatNodes = flattenTraceNodes(view.nodes);
+	const allNodes = previousFlatNodes.map((node) => ({ ...node, children: [] }));
 	const byId = mapFlatTraceNodesById(allNodes);
 	const childByParent = new Map<string, Array<{ id: string; metadata?: Record<string, unknown> }>>();
 	const linkedChildByToolCallId = new Map<string, string>();
@@ -375,7 +386,7 @@ export function patchTraceViewWithEvents(
 	if (eventsCanAffectAsyncAgentRunStatus(appliedEvents)) {
 		reconcileAsyncAgentRunStatuses(nestedNodes);
 	}
-	const sharedNodes = shareUnchangedTraceNodes(view.nodes, nestedNodes);
+	const sharedNodes = shareUnchangedTraceNodes(previousFlatNodes, nestedNodes);
 
 	return {
 		...view,
@@ -417,10 +428,10 @@ function traceNodeText(node: PiboTraceNode): string | undefined {
 }
 
 function shareUnchangedTraceNodes(
-	previousNodes: readonly PiboTraceNode[],
+	previousFlatNodes: readonly PiboTraceNode[],
 	nextNodes: readonly PiboTraceNode[],
 ): PiboTraceNode[] {
-	const previousById = mapTraceNodesById(previousNodes as PiboTraceNode[]);
+	const previousById = mapFlatTraceNodesById(previousFlatNodes);
 	return nextNodes.map((node) => shareUnchangedTraceNode(previousById, node));
 }
 
