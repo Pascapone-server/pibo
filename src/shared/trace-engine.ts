@@ -19,9 +19,21 @@ import type {
 // ── existing utilities ───────────────────────────────────────────
 
 export function sortTraceNodes(nodes: PiboTraceNode[]): PiboTraceNode[] {
-	return [...nodes]
-		.sort(compareTraceNodes)
-		.map((node) => (node.children.length ? { ...node, children: sortTraceNodes(node.children) } : node));
+	let hasSortedChildren = false;
+	const nodesWithSortedChildren = nodes.map((node) => {
+		if (!node.children.length) return node;
+		hasSortedChildren = true;
+		return { ...node, children: sortTraceNodes(node.children) };
+	});
+	if (areTraceNodesSorted(nodesWithSortedChildren)) return hasSortedChildren ? nodesWithSortedChildren : [...nodes];
+	return [...nodesWithSortedChildren].sort(compareTraceNodes);
+}
+
+function areTraceNodesSorted(nodes: readonly PiboTraceNode[]): boolean {
+	for (let index = 1; index < nodes.length; index += 1) {
+		if (compareTraceNodes(nodes[index - 1], nodes[index]) > 0) return false;
+	}
+	return true;
 }
 
 export function compareTraceNodes(left: PiboTraceNode, right: PiboTraceNode): number {
