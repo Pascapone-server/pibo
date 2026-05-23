@@ -59,6 +59,7 @@ type WebOptions = {
 	manual: boolean;
 	includeText: boolean;
 	includeLayout: boolean;
+	compact: boolean;
 };
 
 type SnapshotNode = {
@@ -716,10 +717,11 @@ function printReportHelp(): void {
 	console.log(`pibo debug web report - render saved debug artifacts
 
 Usage:
-  pibo debug web report streaming-benchmark --from artifact.json [--json] [--artifact]
+  pibo debug web report streaming-benchmark --from artifact.json [--compact] [--json] [--artifact]
 
 Reports:
   streaming-benchmark  Summarize saved pibo debug web scenario streaming-benchmark JSON as Markdown.
+  --compact            Render reviewer-friendly Markdown tables instead of the detailed line report.
 
 Next:
   pibo debug web scenario streaming-benchmark --backend-fixture --assert --artifact
@@ -942,11 +944,12 @@ async function runReport(options: WebOptions): Promise<void> {
 	if (!options.from) throw new Error("pibo debug web report streaming-benchmark requires --from artifact.json");
 	const benchmark = await readStreamingBenchmarkArtifact(options.from);
 	const target = streamingBenchmarkReportTarget(benchmark);
-	const markdown = formatStreamingBenchmarkResult(benchmark, target);
-	if (options.json) console.log(JSON.stringify({ report, source: options.from, markdown }, null, 2));
+	const markdown = options.compact ? formatStreamingBenchmarkCompactReport(benchmark, target) : formatStreamingBenchmarkResult(benchmark, target);
+	const format = options.compact ? "compact" : "detailed";
+	if (options.json) console.log(JSON.stringify({ report, source: options.from, format, markdown }, null, 2));
 	else console.log(markdown);
 	if (options.artifact) {
-		const artifact = await writeTextArtifact("report-streaming-benchmark", "md", markdown);
+		const artifact = await writeTextArtifact(options.compact ? "report-streaming-benchmark-compact" : "report-streaming-benchmark", "md", markdown);
 		if (!options.json) console.log(`Artifact: ${artifact}`);
 	}
 }
@@ -2645,6 +2648,7 @@ function parseOptions(args: string[]): WebOptions {
 		manual: false,
 		includeText: false,
 		includeLayout: false,
+		compact: false,
 	};
 	for (let index = 0; index < args.length; index++) {
 		const arg = args[index];
@@ -2661,6 +2665,7 @@ function parseOptions(args: string[]): WebOptions {
 		else if (arg === "--manual") options.manual = true;
 		else if (arg === "--include-text") options.includeText = true;
 		else if (arg === "--include-layout") options.includeLayout = true;
+		else if (arg === "--compact") options.compact = true;
 		else if (arg === "--cdp-url") options.cdpUrl = requireValue(args, ++index, arg);
 		else if (arg.startsWith("--cdp-url=")) options.cdpUrl = arg.slice("--cdp-url=".length);
 		else if (arg === "--target") options.target = requireValue(args, ++index, arg);
@@ -3522,6 +3527,97 @@ function round3(value: number): number {
 function formatStreamingBenchmarkResult(benchmark: StreamingBenchmark | StreamingBenchmarkGroup | StreamingBenchmarkUrlComparison, target: BrowserUseCdpTarget | { id: string; url: string; title: string }): string {
 	if (benchmark.kind === "streaming-benchmark-url-comparison") return formatStreamingBenchmarkUrlComparison(benchmark, target);
 	return benchmark.kind === "streaming-benchmark-runs" ? formatStreamingBenchmarkGroup(benchmark, target) : formatStreamingBenchmark(benchmark, target);
+}
+
+function formatStreamingBenchmarkCompactReport(benchmark: StreamingBenchmark | StreamingBenchmarkGroup | StreamingBenchmarkUrlComparison, target: BrowserUseCdpTarget | { id: string; url: string; title: string }): string {
+	if (benchmark.kind === "streaming-benchmark-url-comparison") return formatStreamingBenchmarkCompactUrlComparison(benchmark, target);
+	if (benchmark.kind === "streaming-benchmark-runs") return formatStreamingBenchmarkCompactGroup(benchmark, target);
+	return formatStreamingBenchmarkCompactRun(benchmark, target);
+}
+
+function formatStreamingBenchmarkCompactRun(benchmark: StreamingBenchmark, target: BrowserUseCdpTarget | { id: string; url: string; title: string }): string {
+	const selectedLive = selectedLiveStream(benchmark);
+	const lines = [
+		`# Web Streaming Benchmark Compact Report`,
+		`Target: ${target.url || benchmark.url}`,
+		markdownTable(["Layer", "Preservation", "Cadence / latency"], [
+			["Provider/Pi", benchmark.provider ? `text ${jsonShort(benchmark.provider.textDeltaCount)}, reasoning ${jsonShort(benchmark.provider.reasoningDeltaCount)}, parseErrors ${jsonShort(benchmark.provider.parseErrorCount)}, unknown ${jsonShort(benchmark.provider.unknownEventCount)}` : "n/a", benchmark.provider ? `text gap p90 ${statP90(benchmark.provider.textDeltaGapsMs, "ms")}, first text ${jsonShort(benchmark.provider.firstTextLatencyMs)}ms` : "n/a"],
+			["SSE transport", benchmark.sse ? `text ${benchmark.sse.textEventCount}, reasoning ${benchmark.sse.reasoningEventCount}, transient ${benchmark.sse.transientIdCount}` : "n/a", benchmark.sse ? `text gap p90 ${statP90(benchmark.sse.textEventGapsMs, "ms")}, text/chunk p90 ${statP90(benchmark.sse.textEventsPerChunk)}, first text ${jsonShort(benchmark.sse.firstTextEventMs)}ms` : "n/a"],
+			["EventSource selected-live", selectedLive ? `text ${selectedLive.textEventCountAfterStart}, reasoning ${selectedLive.reasoningEventCountAfterStart}, events ${selectedLive.eventCount}` : "n/a", selectedLive ? `first text ${jsonShort(selectedLive.firstTextEventMsAfterStart)}ms, transient ${selectedLive.uniqueTransientIdCountAfterStart}/${selectedLive.transientIdCountAfterStart}` : "n/a"],
+			["Live overlay", benchmark.livePipeline ? `flushed/expected ${jsonShort(benchmark.livePipeline.flushedEventsToExpectedRatio)}, overlayEvents/expected ${jsonShort(benchmark.livePipeline.overlayEventsToExpectedRatio)}, currentText/expected ${jsonShort(benchmark.livePipeline.currentOutputToExpectedTextBytesRatio)}` : "n/a", benchmark.livePipeline ? `first text ${jsonShort(benchmark.livePipeline.firstTextDeltaMs)}ms, first flush ${jsonShort(benchmark.livePipeline.firstFlushMs)}ms` : "n/a"],
+			["DOM", `positive ${benchmark.dom.positiveUpdateCount}, max jump ${jsonShort(benchmark.dom.positiveCharJumps.max)} chars`, `p90 gap ${statP90(benchmark.dom.gapsMs, "ms")}, first visible ${jsonShort(benchmark.dom.firstPositiveUpdateMs)}ms`],
+			["Score", `smoothness ${benchmark.score.smoothness}`, `regressions ${benchmark.regressions.length}, warnings ${benchmark.warnings.length}`],
+		]),
+	];
+	appendCompactBenchmarkNotes(lines, benchmark.negativeProfile, benchmark.regressions, benchmark.warnings);
+	return lines.join("\n");
+}
+
+function formatStreamingBenchmarkCompactGroup(group: StreamingBenchmarkGroup, target: BrowserUseCdpTarget | { id: string; url: string; title: string }): string {
+	const lines = [
+		`# Web Streaming Benchmark Compact Report`,
+		`Target: ${target.url || group.runs[0]?.url || ""}`,
+		`Runs: ${group.runs.length} x ${(group.durationMs / 1000).toFixed(1)}s`,
+		markdownTable(["Layer", "Median preservation", "Median cadence / latency"], [
+			["Provider/Pi", `text ${statP50(group.summary.providerTextDeltaCount)}, reasoning ${statP50(group.summary.providerReasoningDeltaCount)}, parseErrors ${statP50(group.summary.providerParseErrorCount)}`, `text gap p90 ${statP50(group.summary.providerTextDeltaGapP90Ms, "ms")}, first text ${statP50(group.summary.providerFirstTextLatencyMs, "ms")}`],
+			["SSE transport", `text ${statP50(group.summary.sseTextEventCount)}, reasoning ${statP50(group.summary.sseReasoningEventCount)}`, `text gap p90 ${statP50(group.summary.sseTextEventGapP90Ms, "ms")}, text/chunk p90 ${statP50(group.summary.sseTextEventsPerChunkP90)}, first text ${statP50(group.summary.sseFirstTextEventMs, "ms")}`],
+			["EventSource selected-live", `text ${statP50(group.summary.selectedLiveTextEventCountAfterStart)}, reasoning ${statP50(group.summary.selectedLiveReasoningEventCountAfterStart)}, events ${statP50(group.summary.selectedLiveEventCountAfterStart)}`, `first text ${statP50(group.summary.selectedLiveFirstTextEventMsAfterStart, "ms")}, transient ${statP50(group.summary.selectedLiveTransientIdCountAfterStart)}`],
+			["Live overlay", `flushed/expected ${statP50(group.summary.liveFlushedEventsToExpectedRatio)}, overlayEvents/expected ${statP50(group.summary.liveOverlayEventsToExpectedRatio)}, currentText/expected ${statP50(group.summary.liveCurrentOutputToExpectedTextBytesRatio)}`, `first text ${statP50(group.summary.liveFirstTextDeltaMs, "ms")}, first flush ${statP50(group.summary.liveFirstFlushMs, "ms")}`],
+			["DOM", `positive ${statP50(group.summary.domPositiveUpdateCount)}, max jump ${statP50(group.summary.domJumpMaxChars, " chars")}`, `p90 gap ${statP50(group.summary.domGapP90Ms, "ms")}, first visible ${statP50(group.summary.firstVisibleMs, "ms")}`],
+			["Score", `smoothness ${statP50(group.summary.smoothness)}`, `regressions ${statP50(group.summary.regressionCount)}, warnings ${group.warnings.length}`],
+		]),
+	];
+	if (group.comparison) lines.push("", `Comparison vs baseline: smoothness ${signed(group.comparison.smoothnessDelta)}, DOM p90 ${signedMs(group.comparison.domGapP90DeltaMs)}, SSE text ${signed(group.comparison.sseTextEventDelta)}, selected-live text ${signed(group.comparison.selectedLiveTextEventDelta)}`);
+	appendCompactBenchmarkNotes(lines, group.negativeProfile, group.regressions, group.warnings);
+	return lines.join("\n");
+}
+
+function formatStreamingBenchmarkCompactUrlComparison(comparison: StreamingBenchmarkUrlComparison, target: BrowserUseCdpTarget | { id: string; url: string; title: string }): string {
+	const lines = [
+		`# Web Streaming Benchmark URL Comparison Compact Report`,
+		`Target: ${target.url || comparison.primaryUrl}`,
+		`Primary: ${comparison.primaryUrl}`,
+		`Compare: ${comparison.compareUrl}`,
+		markdownTable(["Metric", "Primary p50", "Compare p50", "Delta"], [
+			["Smoothness", statP50(comparison.primary.summary.smoothness), statP50(comparison.compare.summary.smoothness), signed(comparison.comparison.smoothnessDelta)],
+			["DOM p90 gap", statP50(comparison.primary.summary.domGapP90Ms, "ms"), statP50(comparison.compare.summary.domGapP90Ms, "ms"), signedMs(comparison.comparison.domGapP90DeltaMs)],
+			["SSE chunk p90 gap", statP50(comparison.primary.summary.sseChunkGapP90Ms, "ms"), statP50(comparison.compare.summary.sseChunkGapP90Ms, "ms"), signedMs(comparison.comparison.sseChunkGapP90DeltaMs)],
+			["SSE text events", statP50(comparison.primary.summary.sseTextEventCount), statP50(comparison.compare.summary.sseTextEventCount), signed(comparison.comparison.sseTextEventDelta)],
+			["Selected-live text", statP50(comparison.primary.summary.selectedLiveTextEventCountAfterStart), statP50(comparison.compare.summary.selectedLiveTextEventCountAfterStart), signed(comparison.comparison.selectedLiveTextEventDelta)],
+			["Selected-live reasoning", statP50(comparison.primary.summary.selectedLiveReasoningEventCountAfterStart), statP50(comparison.compare.summary.selectedLiveReasoningEventCountAfterStart), signed(comparison.comparison.selectedLiveReasoningEventDelta)],
+			["Live flush/enqueue", statP50(comparison.primary.summary.liveFlushToEnqueueRatio), statP50(comparison.compare.summary.liveFlushToEnqueueRatio), signed(comparison.comparison.liveFlushToEnqueueRatioDelta)],
+			["First selected-live text", statP50(comparison.primary.summary.selectedLiveFirstTextEventMsAfterStart, "ms"), statP50(comparison.compare.summary.selectedLiveFirstTextEventMsAfterStart, "ms"), signedMs(comparison.comparison.selectedLiveFirstTextEventDeltaMs)],
+			["First visible DOM", statP50(comparison.primary.summary.firstVisibleMs, "ms"), statP50(comparison.compare.summary.firstVisibleMs, "ms"), signedMs(comparison.comparison.firstVisibleDeltaMs)],
+		]),
+	];
+	appendCompactBenchmarkNotes(lines, comparison.negativeProfile, comparison.regressions, comparison.warnings);
+	return lines.join("\n");
+}
+
+function appendCompactBenchmarkNotes(lines: string[], negativeProfile: string | undefined, regressions: readonly string[], warnings: readonly string[]): void {
+	if (negativeProfile) lines.push("", `Negative profile: ${negativeProfile}`);
+	if (regressions.length) lines.push("", "Regressions:", ...regressions.map((regression) => `- ${regression}`));
+	if (warnings.length) lines.push("", "Warnings:", ...warnings.map((warning) => `- ${warning}`));
+}
+
+function markdownTable(headers: readonly string[], rows: readonly (readonly string[])[]): string {
+	return [
+		`| ${headers.map(markdownCell).join(" | ")} |`,
+		`| ${headers.map(() => "---").join(" | ")} |`,
+		...rows.map((row) => `| ${row.map(markdownCell).join(" | ")} |`),
+	].join("\n");
+}
+
+function markdownCell(value: unknown): string {
+	return String(value ?? "n/a").replace(/\|/g, "\\|").replace(/\n/g, " ");
+}
+
+function statP50(stats: NumberStats, unit = ""): string {
+	return stats.count && stats.p50 !== undefined ? `${stats.p50}${unit}` : "n/a";
+}
+
+function statP90(stats: NumberStats, unit = ""): string {
+	return stats.count && stats.p90 !== undefined ? `${stats.p90}${unit}` : "n/a";
 }
 
 function formatStreamingBenchmark(benchmark: StreamingBenchmark, target: BrowserUseCdpTarget | { id: string; url: string; title: string }): string {

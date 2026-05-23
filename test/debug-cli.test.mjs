@@ -77,6 +77,11 @@ test("pibo debug web report renders saved streaming benchmark artifacts without 
 		assert.match(report.stdout, /# target: artifact http:\/\/example\.test\/apps\/chat/);
 		assert.match(report.stdout, /events: text=12 \(24 bytes\), reasoning=4/);
 		assert.match(report.stdout, /dom gaps: count=11, p50=100, p90=101/);
+		const compactReport = await execFileAsync("node", [cliPath, "debug", "web", "report", "streaming-benchmark", "--from", artifact, "--compact"], { cwd });
+		assert.match(compactReport.stdout, /# Web Streaming Benchmark Compact Report/);
+		assert.match(compactReport.stdout, /\| Layer \| Preservation \| Cadence \/ latency \|/);
+		assert.match(compactReport.stdout, /\| SSE transport \| n\/a \| n\/a \|/);
+		assert.match(compactReport.stdout, /\| DOM \| positive 12, max jump 2 chars \| p90 gap 101ms, first visible 145ms \|/);
 	} finally {
 		await rm(cwd, { recursive: true, force: true });
 	}
