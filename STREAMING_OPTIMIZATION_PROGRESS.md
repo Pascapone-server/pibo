@@ -18,6 +18,7 @@
 - Docker Context Files port: `4814`
 - Progress file: `/root/code/pibo/.worktrees/streaming-optimization-ralph/STREAMING_OPTIMIZATION_PROGRESS.md`
 - Insights file: `/root/code/pibo/.worktrees/streaming-optimization-ralph/STREAMING_OPTIMIZATION_INSIGHTS.md`
+- Ralph job: `ralph_a0065691-affd-445b-b8d5-f6419cfd074b`
 - Hard iteration limit: `50`
 
 ## Scope
@@ -62,3 +63,5 @@ Before planning or editing, read:
 ## Progress log
 
 - 2026-05-23: Created dedicated worktree and Docker worker for follow-up streaming optimization loop.
+- 2026-05-23: Created room `room_08dcad21-db11-4602-b671-cd3466220fb7` with workspace `/root/code/pibo/.worktrees/streaming-optimization-ralph`.
+- 2026-05-23: Created Ralph job `ralph_a0065691-affd-445b-b8d5-f6419cfd074b` with profile `pibo-agent`, max iterations `50`, and max-iterations-only stop policy.
