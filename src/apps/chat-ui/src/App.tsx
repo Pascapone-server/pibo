@@ -56,7 +56,7 @@ import { type SessionBreadcrumbItem, type SessionDerivationLink, type SessionOri
 import { JsonRenderer } from "./tracing/JsonRenderer";
 import { countRender } from "./renderMetrics";
 import { parseTraceStreamFrameId } from "../../../shared/trace-order.js";
-import { patchTraceViewWithEvent } from "../../../shared/trace-engine.js";
+import { patchTraceViewWithEvents } from "../../../shared/trace-engine.js";
 import { applyTraceLiveEvents } from "./traceLiveReducer";
 import { ContextFilesView } from "./context/ContextFilesView";
 import { BasePromptView } from "./context/BasePromptView";
@@ -4109,14 +4109,6 @@ function SessionTracePane({
 			) : null}
 		</>
 	);
-}
-
-function patchTraceViewWithEvents(
-	view: PiboSessionTraceView,
-	events: ChatWebStoredEvent[],
-	sessionStatus: PiboWebSessionNode["status"],
-): PiboSessionTraceView {
-	return events.reduce((current, event) => patchTraceViewWithEvent(current, event, sessionStatus), view);
 }
 
 type BootstrapMutationSnapshot = {

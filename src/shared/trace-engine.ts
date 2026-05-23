@@ -325,27 +325,51 @@ export function patchTraceViewWithEvent(
 	event: ChatWebStoredEvent,
 	sessionStatus: PiboWebSessionStatus,
 ): PiboSessionTraceView {
-	if (view.rawEvents.some((re) => traceEventDedupeKey(re) === traceEventDedupeKey(event))) {
-		return view;
+	return patchTraceViewWithEvents(view, [event], sessionStatus);
+}
+
+export function patchTraceViewWithEvents(
+	view: PiboSessionTraceView,
+	events: readonly ChatWebStoredEvent[],
+	sessionStatus: PiboWebSessionStatus,
+): PiboSessionTraceView {
+	if (!events.length) return view;
+
+	const seenEventKeys = new Set(view.rawEvents.map((event) => traceEventDedupeKey(event)));
+	const candidateEvents: ChatWebStoredEvent[] = [];
+	for (const event of events) {
+		const eventKey = traceEventDedupeKey(event);
+		if (seenEventKeys.has(eventKey)) continue;
+		seenEventKeys.add(eventKey);
+		candidateEvents.push(event);
 	}
-	if (isConfirmedUserMessageEcho(view.nodes, event)) {
-		return view;
-	}
+	if (!candidateEvents.length) return view;
 
 	const allNodes = flattenTraceNodes(view.nodes).map((node) => ({ ...node, children: [] }));
 	const byId = mapTraceNodesById(allNodes);
+	const childByParent = new Map<string, Array<{ id: string; metadata?: Record<string, unknown> }>>();
+	const linkedChildByToolCallId = new Map<string, string>();
+	const openTranscriptEventIds = new Set<string>();
+	const appliedEvents: ChatWebStoredEvent[] = [];
 
-	applySingleEventToNodes(
-		allNodes,
-		byId,
-		view.piboSessionId,
-		event,
-		new Map(),
-		new Map(),
-		false,
-		new Set(),
-		sessionStatus,
-	);
+	for (const event of candidateEvents) {
+		if (isConfirmedUserMessageEcho(allNodes, event)) continue;
+
+		appliedEvents.push(event);
+		applySingleEventToNodes(
+			allNodes,
+			byId,
+			view.piboSessionId,
+			event,
+			childByParent,
+			linkedChildByToolCallId,
+			false,
+			openTranscriptEventIds,
+			sessionStatus,
+		);
+	}
+
+	if (!appliedEvents.length) return view;
 
 	const nestedNodes = nestTraceNodes(allNodes);
 	reconcileAsyncAgentRunStatuses(nestedNodes);
@@ -353,9 +377,9 @@ export function patchTraceViewWithEvent(
 
 	return {
 		...view,
-		rawEvents: [...view.rawEvents, event],
+		rawEvents: [...view.rawEvents, ...appliedEvents],
 		nodes: sharedNodes,
-		latestStreamId: latestTraceStreamId([event], view.latestStreamId),
+		latestStreamId: latestTraceStreamId(appliedEvents, view.latestStreamId),
 	};
 }
 
