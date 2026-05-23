@@ -3,7 +3,7 @@ import path from "node:path";
 import { getPiboHome } from "../core/pibo-home.js";
 import { listBrowserUseCdpTargets, selectBestChatTarget, formatBrowserUseTargets, type BrowserUseCdpTarget } from "../tools/browser-use-cdp.js";
 import { resolveDebugStore } from "./stores.js";
-import { inspectTelemetryProvider, inspectTelemetryProviderEvents } from "./telemetry.js";
+import { inspectTelemetryProvider, inspectTelemetryProviderEvents, inspectTelemetrySession, inspectTelemetryTurn } from "./telemetry.js";
 import { CdpClient } from "../tools/cdp-client.js";
 
 const DEFAULT_WATCH_DURATION_MS = 5_000;
@@ -34,6 +34,8 @@ type WebOptions = {
 	negativeProfile?: string;
 	compareUrl?: string;
 	providerRequestId?: string;
+	providerSessionId?: string;
+	providerTurnId?: string;
 	compareHosted: boolean;
 	compareHostedIfConfigured: boolean;
 	json: boolean;
@@ -144,7 +146,7 @@ type StreamingSmoothnessScore = {
 	firstVisibleMs?: number;
 };
 
-type StreamingBenchmarkProviderTelemetry = {
+export type StreamingBenchmarkProviderTelemetry = {
 	requested: boolean;
 	available: boolean;
 	providerRequestId: string;
@@ -571,7 +573,7 @@ function printScenarioHelp(): void {
 
 Usage:
   pibo debug web scenario new-session [--manual|--act] [--duration ms] [--json] [--artifact]
-  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--fixture-profile steady|jitter|burst|batch] [--fixture-mix text|reasoning-text] [--simulate-reconnect|--simulate-trace-catchup] [--duration ms] [--runs n] [--from artifact.json] [--provider-request-id pr_...] [--compare-url url|--compare-hosted|--compare-hosted-if-configured] [--assert] [--expect-regression text] [--negative-profile batch] [--json] [--artifact]
+  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--fixture-profile steady|jitter|burst|batch] [--fixture-mix text|reasoning-text] [--simulate-reconnect|--simulate-trace-catchup] [--duration ms] [--runs n] [--from artifact.json] [--provider-request-id pr_...|--provider-session-id ps_...|--provider-turn-id turn_...] [--compare-url url|--compare-hosted|--compare-hosted-if-configured] [--assert] [--expect-regression text] [--negative-profile batch] [--json] [--artifact]
 
 Defaults:
   new-session --manual waits while you click New Session yourself.
@@ -588,6 +590,7 @@ Defaults:
   streaming-benchmark --compare-hosted uses PIBO_DEV_PUBLIC_URL or PIBO_DEV_BASE_URL from the environment or .env.developer-host as the compare URL.
   streaming-benchmark --compare-hosted-if-configured runs the hosted comparison when a dev URL is configured; otherwise it records a warning and keeps the primary benchmark.
   streaming-benchmark --provider-request-id attaches provider/Pi telemetry delta counts, byte stats, gap stats, parse errors, first-text latency, and provider-to-transport preservation ratios from pibo debug telemetry.
+  streaming-benchmark --provider-session-id or --provider-turn-id discovers the latest provider request from telemetry session/turn metadata before attaching provider metrics.
   streaming-benchmark --assert exits non-zero when fixture/debug/DOM/provider preservation gates fail.
   streaming-benchmark --expect-regression marks a required regression substring for controlled negative benchmarks; unexpected or missing expected regressions still fail with --assert.
   streaming-benchmark --negative-profile batch expands to the backend batch reasoning/text fixture with required controlled regression assertions.
@@ -732,6 +735,8 @@ async function runScenario(options: WebOptions): Promise<void> {
 	if (scenario === "streaming-benchmark" && streamingOptions.simulateReconnect && !streamingOptions.backendFixture) throw new Error("--simulate-reconnect requires --backend-fixture.");
 	if (scenario === "streaming-benchmark" && streamingOptions.simulateTraceCatchup && !streamingOptions.backendFixture) throw new Error("--simulate-trace-catchup requires --backend-fixture.");
 	if (scenario === "streaming-benchmark" && streamingOptions.simulateReconnect && streamingOptions.simulateTraceCatchup) throw new Error("Use either --simulate-reconnect or --simulate-trace-catchup, not both.");
+	const providerTelemetryModes = [streamingOptions.providerRequestId ? "--provider-request-id" : undefined, streamingOptions.providerSessionId ? "--provider-session-id" : undefined, streamingOptions.providerTurnId ? "--provider-turn-id" : undefined].filter(Boolean);
+	if (scenario === "streaming-benchmark" && providerTelemetryModes.length > 1) throw new Error(`Use only one provider telemetry source flag: ${providerTelemetryModes.join(", ")}.`);
 	const hostedCompareModes = [streamingOptions.compareUrl ? "--compare-url" : undefined, streamingOptions.compareHosted ? "--compare-hosted" : undefined, streamingOptions.compareHostedIfConfigured ? "--compare-hosted-if-configured" : undefined].filter(Boolean);
 	if (scenario === "streaming-benchmark" && hostedCompareModes.length > 1) throw new Error(`Use only one compare target flag: ${hostedCompareModes.join(", ")}.`);
 	if (scenario === "streaming-benchmark" && streamingOptions.compareUrl && !streamingOptions.backendFixture) throw new Error("--compare-url requires --backend-fixture so the benchmark can replay a deterministic stream at both URLs.");
@@ -747,7 +752,7 @@ async function runScenario(options: WebOptions): Promise<void> {
 	try {
 		if (scenario === "streaming-benchmark") {
 			const baseline = streamingOptions.from ? await readStreamingBenchmarkRuns(streamingOptions.from) : undefined;
-			const providerTelemetry = streamingOptions.providerRequestId ? collectStreamingProviderTelemetry(streamingOptions.providerRequestId) : undefined;
+			const providerTelemetry = collectStreamingProviderTelemetryForOptions(streamingOptions);
 			const runOptions = { startFixture: streamingOptions.fixture, startBackendFixture: streamingOptions.backendFixture, fixtureProfile, fixtureMix, simulateReconnect: streamingOptions.simulateReconnect, simulateTraceCatchup: streamingOptions.simulateTraceCatchup, providerTelemetry };
 			const primaryUrl = await currentBrowserUrl(client);
 			const benchmarks = await runStreamingBenchmarkSeries(client, runs, durationMs, runOptions);
@@ -909,8 +914,14 @@ export function summarizeStreamingProviderTelemetry(input: { request: Record<str
 	};
 }
 
-function collectStreamingProviderTelemetry(providerRequestId: string): StreamingBenchmarkProviderTelemetry {
-	const store = resolveDebugStore("pibo-data");
+function collectStreamingProviderTelemetryForOptions(options: WebOptions): StreamingBenchmarkProviderTelemetry | undefined {
+	if (options.providerRequestId) return collectStreamingProviderTelemetry(options.providerRequestId);
+	if (options.providerSessionId) return collectStreamingProviderTelemetryFromSession(options.providerSessionId);
+	if (options.providerTurnId) return collectStreamingProviderTelemetryFromTurn(options.providerTurnId);
+	return undefined;
+}
+
+function collectStreamingProviderTelemetry(providerRequestId: string, store = resolveDebugStore("pibo-data")): StreamingBenchmarkProviderTelemetry {
 	const provider = inspectTelemetryProvider(store, providerRequestId);
 	if (!provider.available) return unavailableStreamingProviderTelemetry(providerRequestId, provider.message);
 	const events: Array<Record<string, unknown>> = [];
@@ -930,6 +941,38 @@ function collectStreamingProviderTelemetry(providerRequestId: string): Streaming
 		after = String(page.page.nextAfterSequence);
 	}
 	return summarizeStreamingProviderTelemetry({ request: provider.request as unknown as Record<string, unknown>, events, providerRequestId, truncated, eventPageCount: pageCount });
+}
+
+export function collectStreamingProviderTelemetryFromSession(piboSessionId: string): StreamingBenchmarkProviderTelemetry {
+	const store = resolveDebugStore("pibo-data");
+	const session = inspectTelemetrySession(store, piboSessionId, { limit: "20" });
+	if (!session.available) return unavailableStreamingProviderTelemetry(`session:${piboSessionId}`, session.message);
+	const directProviderRequestId = latestProviderRequestId(session.detail.providerRequests);
+	if (directProviderRequestId) return collectStreamingProviderTelemetry(directProviderRequestId, store);
+	for (const turn of session.detail.recentTurns) {
+		const timeline = inspectTelemetryTurn(store, turn.turnId, { limit: "20" });
+		if (!timeline.available) continue;
+		const providerRequestId = latestProviderRequestId(timeline.timeline.providerRequests);
+		if (providerRequestId) return collectStreamingProviderTelemetry(providerRequestId, store);
+	}
+	return unavailableStreamingProviderTelemetry(`session:${piboSessionId}`, `No provider request found for Pibo Session ${piboSessionId}.`);
+}
+
+export function collectStreamingProviderTelemetryFromTurn(turnIdOrEventId: string): StreamingBenchmarkProviderTelemetry {
+	const store = resolveDebugStore("pibo-data");
+	const timeline = inspectTelemetryTurn(store, turnIdOrEventId, { limit: "20" });
+	if (!timeline.available) return unavailableStreamingProviderTelemetry(`turn:${turnIdOrEventId}`, timeline.message);
+	const providerRequestId = latestProviderRequestId(timeline.timeline.providerRequests);
+	if (providerRequestId) return collectStreamingProviderTelemetry(providerRequestId, store);
+	return unavailableStreamingProviderTelemetry(`turn:${turnIdOrEventId}`, `No provider request found for turn or event ${turnIdOrEventId}.`);
+}
+
+function latestProviderRequestId(providerRequests: readonly { providerRequestId?: string }[]): string | undefined {
+	for (let index = providerRequests.length - 1; index >= 0; index--) {
+		const providerRequestId = providerRequests[index]?.providerRequestId;
+		if (providerRequestId) return providerRequestId;
+	}
+	return undefined;
 }
 
 function unavailableStreamingProviderTelemetry(providerRequestId: string, message: string): StreamingBenchmarkProviderTelemetry {
@@ -2377,6 +2420,10 @@ function parseOptions(args: string[]): WebOptions {
 		else if (arg.startsWith("--compare-url=")) options.compareUrl = arg.slice("--compare-url=".length);
 		else if (arg === "--provider-request-id") options.providerRequestId = requireValue(args, ++index, arg);
 		else if (arg.startsWith("--provider-request-id=")) options.providerRequestId = arg.slice("--provider-request-id=".length);
+		else if (arg === "--provider-session-id") options.providerSessionId = requireValue(args, ++index, arg);
+		else if (arg.startsWith("--provider-session-id=")) options.providerSessionId = arg.slice("--provider-session-id=".length);
+		else if (arg === "--provider-turn-id") options.providerTurnId = requireValue(args, ++index, arg);
+		else if (arg.startsWith("--provider-turn-id=")) options.providerTurnId = arg.slice("--provider-turn-id=".length);
 		else if (arg === "--compare-hosted") options.compareHosted = true;
 		else if (arg === "--compare-hosted-if-configured") options.compareHostedIfConfigured = true;
 		else if (arg === "--from") options.from = requireValue(args, ++index, arg);
