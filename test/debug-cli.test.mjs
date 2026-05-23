@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { PiboDataStore } from "../dist/data/pibo-store.js";
 import { PiboReliabilityStore } from "../dist/reliability/store.js";
-import { formatWatch, inferWatchFlickers } from "../dist/debug/web.js";
+import { evaluateStreamingBenchmarkAssertion, formatWatch, inferWatchFlickers } from "../dist/debug/web.js";
 
 const execFileAsyncRaw = promisify(execFile);
 const cliPath = resolve("dist/bin/pibo.js");
@@ -38,7 +38,7 @@ test("pibo debug web watch rejects action flags", async () => {
 
 test("pibo debug web streaming benchmark help advertises the deterministic fixture", async () => {
 	const help = await execFileAsync("node", [cliPath, "debug", "web", "scenario", "--help"]);
-	assert.match(help.stdout, /streaming-benchmark \[--fixture\|--backend-fixture\].*\[--fixture-profile steady\|jitter\|burst\|batch\].*\[--fixture-mix text\|reasoning-text\].*\[--simulate-reconnect\|--simulate-trace-catchup\].*\[--assert\]/);
+	assert.match(help.stdout, /streaming-benchmark \[--fixture\|--backend-fixture\].*\[--fixture-profile steady\|jitter\|burst\|batch\].*\[--fixture-mix text\|reasoning-text\].*\[--simulate-reconnect\|--simulate-trace-catchup\].*\[--assert\].*\[--expect-regression text\]/);
 	assert.match(help.stdout, /deterministic in-browser stream fixture/);
 	assert.match(help.stdout, /real app consumes deterministic \/api\/chat\/events frames/);
 	assert.match(help.stdout, /--fixture-profile selects steady cadence, deterministic jitter, bursty timing, or intentional batch stress/);
@@ -47,6 +47,44 @@ test("pibo debug web streaming benchmark help advertises the deterministic fixtu
 	assert.match(help.stdout, /--simulate-trace-catchup suppresses backend live text deltas/);
 	assert.match(help.stdout, /--runs repeats the same scenario and reports medians/);
 	assert.match(help.stdout, /--assert exits non-zero/);
+	assert.match(help.stdout, /--expect-regression marks a required regression substring/);
+});
+
+test("streaming benchmark assertion matches expected controlled regressions", () => {
+	const assertion = evaluateStreamingBenchmarkAssertion(
+		[
+			"positive DOM updates 3 < 10",
+			"DOM max jump 8 chars exceeds gate",
+		],
+		["positive DOM updates", "DOM max jump"],
+	);
+	assert.equal(assertion.passed, true);
+	assert.deepEqual(assertion.unexpectedRegressions, []);
+	assert.deepEqual(assertion.missingExpectedRegressionPatterns, []);
+});
+
+test("streaming benchmark assertion fails on unexpected or missing expected regressions", () => {
+	const assertion = evaluateStreamingBenchmarkAssertion(
+		[
+			"positive DOM updates 3 < 10",
+			"fixture did not start",
+		],
+		["positive DOM updates", "DOM max jump"],
+	);
+	assert.equal(assertion.passed, false);
+	assert.deepEqual(assertion.unexpectedRegressions, ["fixture did not start"]);
+	assert.deepEqual(assertion.missingExpectedRegressionPatterns, ["DOM max jump"]);
+});
+
+test("pibo debug web streaming benchmark rejects missing expected regression value before target discovery", async () => {
+	await assert.rejects(
+		execFileAsync("node", [cliPath, "debug", "web", "scenario", "streaming-benchmark", "--expect-regression"]),
+		(error) => {
+			assert.match(error.stderr, /--expect-regression requires a value/);
+			assert.doesNotMatch(error.stderr, /No attachable CDP target/);
+			return true;
+		},
+	);
 });
 
 test("pibo debug web streaming benchmark rejects mutually exclusive fixtures before target discovery", async () => {

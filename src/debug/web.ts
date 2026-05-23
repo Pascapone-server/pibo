@@ -29,6 +29,7 @@ type WebOptions = {
 	simulateReconnect: boolean;
 	simulateTraceCatchup: boolean;
 	assertHealthy: boolean;
+	expectedRegressionPatterns: string[];
 	from?: string;
 	act: boolean;
 	manual: boolean;
@@ -278,6 +279,7 @@ type StreamingBenchmark = {
 	score: StreamingSmoothnessScore;
 	regressions: string[];
 	warnings: string[];
+	assertion?: StreamingBenchmarkAssertion;
 };
 
 type StreamingBenchmarkSummary = {
@@ -342,6 +344,14 @@ type StreamingBenchmarkComparison = {
 	selectedLiveEventDelta?: number;
 };
 
+type StreamingBenchmarkAssertion = {
+	expectedRegressionPatterns: string[];
+	expectedRegressions: string[];
+	unexpectedRegressions: string[];
+	missingExpectedRegressionPatterns: string[];
+	passed: boolean;
+};
+
 type StreamingBenchmarkGroup = {
 	kind: "streaming-benchmark-runs";
 	createdAt: string;
@@ -351,6 +361,7 @@ type StreamingBenchmarkGroup = {
 	comparison?: StreamingBenchmarkComparison;
 	regressions: string[];
 	warnings: string[];
+	assertion?: StreamingBenchmarkAssertion;
 };
 
 export async function runDebugWeb(args: string[]): Promise<void> {
@@ -443,7 +454,7 @@ function printScenarioHelp(): void {
 
 Usage:
   pibo debug web scenario new-session [--manual|--act] [--duration ms] [--json] [--artifact]
-  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--fixture-profile steady|jitter|burst|batch] [--fixture-mix text|reasoning-text] [--simulate-reconnect|--simulate-trace-catchup] [--duration ms] [--runs n] [--from artifact.json] [--assert] [--json] [--artifact]
+  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--fixture-profile steady|jitter|burst|batch] [--fixture-mix text|reasoning-text] [--simulate-reconnect|--simulate-trace-catchup] [--duration ms] [--runs n] [--from artifact.json] [--assert] [--expect-regression text] [--json] [--artifact]
 
 Defaults:
   new-session --manual waits while you click New Session yourself.
@@ -457,6 +468,7 @@ Defaults:
   streaming-benchmark --simulate-trace-catchup suppresses backend live text deltas and verifies trace snapshot recovery.
   streaming-benchmark --runs repeats the same scenario and reports medians; --from compares against a prior benchmark artifact.
   streaming-benchmark --assert exits non-zero when fixture/debug/DOM smoothness gates fail.
+  streaming-benchmark --expect-regression marks a required regression substring for controlled negative benchmarks; unexpected or missing expected regressions still fail with --assert.
 `);
 }
 
@@ -613,12 +625,12 @@ async function runScenario(options: WebOptions): Promise<void> {
 			const benchmark: StreamingBenchmark | StreamingBenchmarkGroup = runs === 1
 				? benchmarks[0]
 				: summarizeStreamingBenchmarkGroup(benchmarks, baseline);
+			const assertion = applyExpectedStreamingRegressions(benchmark, options.expectedRegressionPatterns);
 			if (options.json) console.log(JSON.stringify({ target: compactTarget(target), scenario, benchmark }, null, 2));
 			else console.log(limitStdout(formatStreamingBenchmarkResult(benchmark, target)));
 			const artifact = await writeArtifact(`scenario-${scenario}`, benchmark);
 			if (!options.json) console.log(`Artifact: ${artifact}`);
-			const regressions = benchmark.kind === "streaming-benchmark-runs" ? benchmark.regressions : benchmark.regressions;
-			if (options.assertHealthy && regressions.length) throw new Error(`streaming benchmark assertions failed: ${regressions.join("; ")}`);
+			if (options.assertHealthy && !assertion.passed) throw new Error(formatStreamingBenchmarkAssertionError(assertion));
 			return;
 		}
 
@@ -2016,6 +2028,7 @@ function parseOptions(args: string[]): WebOptions {
 		simulateReconnect: false,
 		simulateTraceCatchup: false,
 		assertHealthy: false,
+		expectedRegressionPatterns: [],
 		act: false,
 		manual: false,
 		includeText: false,
@@ -2030,6 +2043,8 @@ function parseOptions(args: string[]): WebOptions {
 		else if (arg === "--simulate-reconnect") options.simulateReconnect = true;
 		else if (arg === "--simulate-trace-catchup") options.simulateTraceCatchup = true;
 		else if (arg === "--assert") options.assertHealthy = true;
+		else if (arg === "--expect-regression") options.expectedRegressionPatterns.push(requireValue(args, ++index, arg));
+		else if (arg.startsWith("--expect-regression=")) options.expectedRegressionPatterns.push(arg.slice("--expect-regression=".length));
 		else if (arg === "--act") options.act = true;
 		else if (arg === "--manual") options.manual = true;
 		else if (arg === "--include-text") options.includeText = true;
@@ -2292,6 +2307,43 @@ function summarizeStreamingBenchmarkGroup(runs: StreamingBenchmark[], baselineRu
 	};
 }
 
+function applyExpectedStreamingRegressions(benchmark: StreamingBenchmark | StreamingBenchmarkGroup, expectedPatterns: readonly string[]): StreamingBenchmarkAssertion {
+	const assertion = evaluateStreamingBenchmarkAssertion(benchmark.regressions, expectedPatterns);
+	if (expectedPatterns.length > 0) benchmark.assertion = assertion;
+	return assertion;
+}
+
+export function evaluateStreamingBenchmarkAssertion(regressions: readonly string[], expectedPatterns: readonly string[]): StreamingBenchmarkAssertion {
+	const expectedRegressionPatterns = expectedPatterns.filter((pattern) => pattern.length > 0);
+	const expectedRegressions: string[] = [];
+	const unexpectedRegressions: string[] = [];
+	const matchedPatterns = new Set<string>();
+	for (const regression of regressions) {
+		const matches = expectedRegressionPatterns.filter((pattern) => regression.includes(pattern));
+		if (matches.length > 0) {
+			expectedRegressions.push(regression);
+			for (const pattern of matches) matchedPatterns.add(pattern);
+		} else {
+			unexpectedRegressions.push(regression);
+		}
+	}
+	const missingExpectedRegressionPatterns = expectedRegressionPatterns.filter((pattern) => !matchedPatterns.has(pattern));
+	return {
+		expectedRegressionPatterns,
+		expectedRegressions,
+		unexpectedRegressions,
+		missingExpectedRegressionPatterns,
+		passed: unexpectedRegressions.length === 0 && missingExpectedRegressionPatterns.length === 0,
+	};
+}
+
+function formatStreamingBenchmarkAssertionError(assertion: StreamingBenchmarkAssertion): string {
+	const parts: string[] = [];
+	if (assertion.unexpectedRegressions.length > 0) parts.push(`unexpected regressions: ${assertion.unexpectedRegressions.join("; ")}`);
+	if (assertion.missingExpectedRegressionPatterns.length > 0) parts.push(`missing expected regressions: ${assertion.missingExpectedRegressionPatterns.join("; ")}`);
+	return `streaming benchmark assertions failed: ${parts.join("; ") || "unknown assertion failure"}`;
+}
+
 function summarizeStreamingBenchmarks(runs: StreamingBenchmark[]): StreamingBenchmarkSummary {
 	return {
 		runs: runs.length,
@@ -2447,6 +2499,10 @@ function formatStreamingBenchmark(benchmark: StreamingBenchmark, target: Browser
 		lines.push("", "Regressions:");
 		for (const regression of benchmark.regressions) lines.push(`- ${regression}`);
 	}
+	if (benchmark.assertion) {
+		lines.push("", `Expected regression assertion: passed=${benchmark.assertion.passed} expected=${benchmark.assertion.expectedRegressions.length} unexpected=${benchmark.assertion.unexpectedRegressions.length} missing=${benchmark.assertion.missingExpectedRegressionPatterns.length}`);
+		for (const pattern of benchmark.assertion.missingExpectedRegressionPatterns) lines.push(`- missing expected: ${pattern}`);
+	}
 	if (benchmark.warnings.length) {
 		lines.push("", "Warnings:");
 		for (const warning of benchmark.warnings) lines.push(`- ${warning}`);
@@ -2478,6 +2534,10 @@ function formatStreamingBenchmarkGroup(group: StreamingBenchmarkGroup, target: B
 	if (group.regressions.length) {
 		lines.push("", "Regressions:");
 		for (const regression of group.regressions) lines.push(`- ${regression}`);
+	}
+	if (group.assertion) {
+		lines.push("", `Expected regression assertion: passed=${group.assertion.passed} expected=${group.assertion.expectedRegressions.length} unexpected=${group.assertion.unexpectedRegressions.length} missing=${group.assertion.missingExpectedRegressionPatterns.length}`);
+		for (const pattern of group.assertion.missingExpectedRegressionPatterns) lines.push(`- missing expected: ${pattern}`);
 	}
 	if (group.warnings.length) {
 		lines.push("", "Warnings:");
