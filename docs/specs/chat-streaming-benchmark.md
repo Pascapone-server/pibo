@@ -207,7 +207,7 @@ Compact single/group reports include rows for:
 - Provider ratios;
 - SSE transport;
 - Cadence lag;
-- EventSource selected-live; compact single-run reports include reconnect replay cursor/frame counts, replay cursor lag, and duplicate replay counts when used;
+- EventSource selected-live; compact single-run and group reports include reconnect replay cursor/frame counts, replay cursor lag, and duplicate replay counts when used;
 - Live overlay preservation and first live latencies;
 - Live trace compute count/total/max duration when debug instrumentation is available;
 - DOM;

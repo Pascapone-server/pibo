@@ -46,3 +46,4 @@ Append concise, reusable findings here. Do not paste raw logs.
 - Selected-live reconnect replay should expose cursor lag from the `ready.liveReplay` status (`newestAvailable - requestedAfter`) separately from replayed frame count. The lag reveals how far the reconnect cursor trailed the transient buffer even when dedupe preserves text/reasoning output.
 
 - Selected-live replay lag is healthy only when replayed ids were not already observed before reconnect. Track duplicate replay counts separately from lag/replayed counts so cursor safety does not hide redundant overlay work.
+- Reconnect replay status must be summarized for grouped `--runs N` artifacts, not only single-run reports; repeated reconnect benchmarks need p50 replay/liveSince/lag/duplicate/miss stats to spot flakiness across runs.

@@ -390,7 +390,7 @@ test("streaming benchmark summaries aggregate selected-live reconnect streams", 
 		eventSource: {
 			streams: [
 				{ role: "selected-live", url: "/api/chat/events?piboSessionId=ps_test&mode=live", sinceValues: [], liveSinceValues: [], eventCount: 12, eventCountAfterStart: 12, textEventCount: 7, textEventCountAfterStart: 7, reasoningEventCount: 2, reasoningEventCountAfterStart: 2, openCountAfterStart: 1, errorCountAfterStart: 0, closeCountAfterStart: 1, forcedCloseCountAfterStart: 1, transientIdCount: 12, uniqueTransientIdCount: 12, transientIdCountAfterStart: 12, uniqueTransientIdCountAfterStart: 12, durableIdCount: 0, otherIdCount: 0, firstTextEventMsAfterStart: 105 },
-				{ role: "selected-live", url: "/api/chat/events?piboSessionId=ps_test&mode=live", sinceValues: [], liveSinceValues: ["42"], eventCount: 8, eventCountAfterStart: 8, textEventCount: 5, textEventCountAfterStart: 5, reasoningEventCount: 2, reasoningEventCountAfterStart: 2, openCountAfterStart: 1, errorCountAfterStart: 0, closeCountAfterStart: 0, forcedCloseCountAfterStart: 0, transientIdCount: 8, uniqueTransientIdCount: 8, transientIdCountAfterStart: 8, uniqueTransientIdCountAfterStart: 8, durableIdCount: 0, otherIdCount: 0, liveReplayEventCount: 4, liveReplayEventCountAfterStart: 4, firstTextEventMsAfterStart: 212 },
+				{ role: "selected-live", url: "/api/chat/events?piboSessionId=ps_test&mode=live", sinceValues: [], liveSinceValues: ["42"], eventCount: 8, eventCountAfterStart: 8, textEventCount: 5, textEventCountAfterStart: 5, reasoningEventCount: 2, reasoningEventCountAfterStart: 2, openCountAfterStart: 1, errorCountAfterStart: 0, closeCountAfterStart: 0, forcedCloseCountAfterStart: 0, transientIdCount: 8, uniqueTransientIdCount: 8, transientIdCountAfterStart: 8, uniqueTransientIdCountAfterStart: 8, durableIdCount: 0, otherIdCount: 0, liveReplayEventCount: 4, liveReplayEventCountAfterStart: 4, liveReplayMissedCount: 1, liveReplayMissedCountAfterStart: 1, liveReplayDuplicateCount: 2, liveReplayDuplicateCountAfterStart: 2, liveReplayCursorLagMax: 6, liveReplayCursorLagMaxAfterStart: 6, firstTextEventMsAfterStart: 212 },
 			],
 		},
 		dom: { gapsMs: { count: 0 }, positiveCharJumps: { count: 0 }, positiveUpdateCount: 12 },
@@ -404,6 +404,11 @@ test("streaming benchmark summaries aggregate selected-live reconnect streams", 
 	assert.equal(summary.selectedLiveForcedCloseCountAfterStart.p50, 1);
 	assert.equal(summary.selectedLiveReconnectOpenCountAfterStart.p50, 2);
 	assert.equal(summary.selectedLiveTransientIdCountAfterStart.p50, 20);
+	assert.equal(summary.selectedLiveLiveSinceCount.p50, 1);
+	assert.equal(summary.selectedLiveReplayEventCountAfterStart.p50, 4);
+	assert.equal(summary.selectedLiveReplayCursorLagMaxAfterStart.p50, 6);
+	assert.equal(summary.selectedLiveReplayDuplicateCountAfterStart.p50, 2);
+	assert.equal(summary.selectedLiveReplayMissedCountAfterStart.p50, 1);
 	assert.equal(summary.selectedLiveFirstTextEventMsAfterStart.p50, 105);
 });
 
