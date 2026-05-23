@@ -144,6 +144,8 @@ type StreamingBenchmarkEventSourceStreamProbe = {
 	eventCountAfterStart: number;
 	textEventCount: number;
 	textEventCountAfterStart: number;
+	reasoningEventCount: number;
+	reasoningEventCountAfterStart: number;
 	transientIdCount: number;
 	uniqueTransientIdCount: number;
 	durableIdCount: number;
@@ -166,6 +168,8 @@ type StreamingBenchmarkEventSourceProbe = {
 	eventCountAfterStart: number;
 	textEventCount: number;
 	textEventCountAfterStart: number;
+	reasoningEventCount: number;
+	reasoningEventCountAfterStart: number;
 	transientIdCount: number;
 	uniqueTransientIdCount: number;
 	durableIdCount: number;
@@ -1052,6 +1056,8 @@ function summarizeEventSourceProbe(startedAt, requested, forcedReconnectAtMs, te
       eventCountAfterStart: 0,
       textEventCount: 0,
       textEventCountAfterStart: 0,
+      reasoningEventCount: 0,
+      reasoningEventCountAfterStart: 0,
       transientIdCount: 0,
       uniqueTransientIdCount: 0,
       durableIdCount: 0,
@@ -1090,6 +1096,8 @@ function summarizeEventSourceProbe(startedAt, requested, forcedReconnectAtMs, te
     eventCountAfterStart: afterStartStreamEvents.length,
     textEventCount: streamEvents.filter((event) => event.type === 'TEXT_MESSAGE_CONTENT').length,
     textEventCountAfterStart: afterStartStreamEvents.filter((event) => event.type === 'TEXT_MESSAGE_CONTENT').length,
+    reasoningEventCount: streamEvents.filter((event) => event.type === 'REASONING_MESSAGE_CONTENT').length,
+    reasoningEventCountAfterStart: afterStartStreamEvents.filter((event) => event.type === 'REASONING_MESSAGE_CONTENT').length,
     transientIdCount: transientIds.length,
     uniqueTransientIdCount: new Set(transientIds).size,
     durableIdCount: durableIds.length,
@@ -1163,6 +1171,8 @@ function summarizeEventSourceStreams(streamEvents, afterStartConnections, starte
       eventCountAfterStart: afterStartEvents.length,
       textEventCount: events.filter((event) => event.type === 'TEXT_MESSAGE_CONTENT').length,
       textEventCountAfterStart: afterStartEvents.filter((event) => event.type === 'TEXT_MESSAGE_CONTENT').length,
+      reasoningEventCount: events.filter((event) => event.type === 'REASONING_MESSAGE_CONTENT').length,
+      reasoningEventCountAfterStart: afterStartEvents.filter((event) => event.type === 'REASONING_MESSAGE_CONTENT').length,
       transientIdCount: transientIds.length,
       uniqueTransientIdCount: new Set(transientIds).size,
       durableIdCount: durableIds.length,
@@ -1239,6 +1249,7 @@ function streamingBenchmarkRegressions(result) {
     const selectedLive = Array.isArray(result.eventSource.streams) ? result.eventSource.streams.find((stream) => stream.role === 'selected-live') : undefined;
     if (!selectedLive) failures.push('EventSource selected-live stream was not observed');
     if (!traceCatchupRequested && selectedLive && expectedDeltas !== undefined && selectedLive.textEventCountAfterStart < expectedDeltas) failures.push('selected-live text events after start ' + selectedLive.textEventCountAfterStart + ' < fixture deltas ' + expectedDeltas);
+    if (!traceCatchupRequested && selectedLive && expectedReasoningDeltas !== undefined && selectedLive.reasoningEventCountAfterStart < expectedReasoningDeltas) failures.push('selected-live reasoning events after start ' + selectedLive.reasoningEventCountAfterStart + ' < fixture reasoning deltas ' + expectedReasoningDeltas);
     if (traceCatchupRequested) {
       if (selectedLive && selectedLive.textEventCountAfterStart > Math.max(1, (expectedDeltas || 0) - 2)) failures.push('trace catch-up selected-live text was not suppressed');
     } else {
@@ -2163,9 +2174,9 @@ function formatStreamingBenchmark(benchmark: StreamingBenchmark, target: Browser
 	];
 	if (benchmark.fixture) lines.push(`fixture: mode=${benchmark.fixture.mode} profile=${jsonShort(benchmark.fixture.profile)} mix=${jsonShort(benchmark.fixture.mix)} simulation=${jsonShort(benchmark.fixture.simulation)} available=${benchmark.fixture.available} started=${benchmark.fixture.started} deltas=${jsonShort(benchmark.fixture.deltaCount)} reasoningDeltas=${jsonShort(benchmark.fixture.reasoningDeltaCount)} cadence=${jsonShort(benchmark.fixture.cadenceMs)}ms session=${jsonShort(benchmark.fixture.piboSessionId)}${benchmark.fixture.error ? ` error=${benchmark.fixture.error}` : ""}`);
 	if (benchmark.eventSource) {
-		lines.push(`eventSource: requested=${benchmark.eventSource.requested} installed=${benchmark.eventSource.installed} forcedClose=${benchmark.eventSource.forcedCloseCountAfterStart} reconnectOpen=${benchmark.eventSource.openCountAfterStart} text=${benchmark.eventSource.textEventCount} afterStart=${benchmark.eventSource.textEventCountAfterStart} transient=${benchmark.eventSource.uniqueTransientIdCount}/${benchmark.eventSource.transientIdCount} reset=${benchmark.eventSource.transientIdResetObserved} droppedText=${benchmark.eventSource.textDropTextEventCount} last=${jsonShort(benchmark.eventSource.lastEventId)} reconnectObserved=${benchmark.eventSource.reconnectObserved}`);
+		lines.push(`eventSource: requested=${benchmark.eventSource.requested} installed=${benchmark.eventSource.installed} forcedClose=${benchmark.eventSource.forcedCloseCountAfterStart} reconnectOpen=${benchmark.eventSource.openCountAfterStart} text=${benchmark.eventSource.textEventCount} afterStart=${benchmark.eventSource.textEventCountAfterStart} reasoning=${benchmark.eventSource.reasoningEventCount} reasoningAfterStart=${benchmark.eventSource.reasoningEventCountAfterStart} transient=${benchmark.eventSource.uniqueTransientIdCount}/${benchmark.eventSource.transientIdCount} reset=${benchmark.eventSource.transientIdResetObserved} droppedText=${benchmark.eventSource.textDropTextEventCount} last=${jsonShort(benchmark.eventSource.lastEventId)} reconnectObserved=${benchmark.eventSource.reconnectObserved}`);
 		for (const stream of benchmark.eventSource.streams ?? []) {
-			lines.push(`eventSource stream: role=${stream.role} mode=${jsonShort(stream.mode)} session=${jsonShort(stream.piboSessionId)} room=${jsonShort(stream.roomId)} text=${stream.textEventCount} afterStart=${stream.textEventCountAfterStart} events=${stream.eventCount} opens=${stream.openCountAfterStart} forcedClose=${stream.forcedCloseCountAfterStart} transient=${stream.uniqueTransientIdCount}/${stream.transientIdCount} since=${jsonShort(stream.sinceValues.join(","))} url=${stream.url}`);
+			lines.push(`eventSource stream: role=${stream.role} mode=${jsonShort(stream.mode)} session=${jsonShort(stream.piboSessionId)} room=${jsonShort(stream.roomId)} text=${stream.textEventCount} afterStart=${stream.textEventCountAfterStart} reasoning=${stream.reasoningEventCount} reasoningAfterStart=${stream.reasoningEventCountAfterStart} events=${stream.eventCount} opens=${stream.openCountAfterStart} forcedClose=${stream.forcedCloseCountAfterStart} transient=${stream.uniqueTransientIdCount}/${stream.transientIdCount} since=${jsonShort(stream.sinceValues.join(","))} url=${stream.url}`);
 		}
 	}
 	if (benchmark.trace) lines.push(`trace: requested=${benchmark.trace.requested} samples=${benchmark.trace.sampleCount} fetches=${benchmark.trace.fetchCount} failed=${benchmark.trace.failedFetchCount} liveVersions=${benchmark.trace.liveVersionCount} firstLive=${jsonShort(benchmark.trace.firstLiveVersionMs)}ms assistantMax=${benchmark.trace.maxAssistantOutputLength} assistantFinal=${jsonShort(benchmark.trace.finalAssistantOutputLength)} durableEvents=${jsonShort(benchmark.trace.durableEventCountStart)}->${jsonShort(benchmark.trace.durableEventCountEnd)} session=${jsonShort(benchmark.trace.piboSessionId)}`);
