@@ -542,6 +542,7 @@ type StreamingBenchmarkUrlComparison = {
 	compareUrl: string;
 	primary: StreamingBenchmarkGroup;
 	compare: StreamingBenchmarkGroup;
+	negativeProfile?: StreamingNegativeProfile;
 	comparison: StreamingBenchmarkComparison;
 	regressions: string[];
 	warnings: string[];
@@ -2962,8 +2963,9 @@ function summarizeStreamingBenchmarkGroup(runs: StreamingBenchmark[], baselineRu
 	};
 }
 
-function summarizeStreamingBenchmarkUrlComparison(primaryUrl: string, compareUrl: string, primary: StreamingBenchmarkGroup, compare: StreamingBenchmarkGroup): StreamingBenchmarkUrlComparison {
+export function summarizeStreamingBenchmarkUrlComparison(primaryUrl: string, compareUrl: string, primary: StreamingBenchmarkGroup, compare: StreamingBenchmarkGroup): StreamingBenchmarkUrlComparison {
 	const summaryComparison = compareStreamingBenchmarkSummaries(primary.summary, compare.summary);
+	const negativeProfile = primary.negativeProfile && primary.negativeProfile === compare.negativeProfile ? primary.negativeProfile : undefined;
 	return {
 		kind: "streaming-benchmark-url-comparison",
 		createdAt: new Date().toISOString(),
@@ -2972,6 +2974,7 @@ function summarizeStreamingBenchmarkUrlComparison(primaryUrl: string, compareUrl
 		compareUrl,
 		primary,
 		compare,
+		negativeProfile,
 		comparison: summaryComparison,
 		regressions: [
 			...primary.regressions.map((regression) => `primary: ${regression}`),
@@ -3401,7 +3404,7 @@ function formatStreamingBenchmarkGroup(group: StreamingBenchmarkGroup, target: B
 	return lines.join("\n");
 }
 
-function formatStreamingBenchmarkUrlComparison(comparison: StreamingBenchmarkUrlComparison, target: BrowserUseCdpTarget | { id: string; url: string; title: string }): string {
+export function formatStreamingBenchmarkUrlComparison(comparison: StreamingBenchmarkUrlComparison, target: BrowserUseCdpTarget | { id: string; url: string; title: string }): string {
 	const lines = [
 		`# Web Streaming Benchmark URL Comparison, ${comparison.primary.runs.length} runs x ${(comparison.durationMs / 1000).toFixed(1)}s`,
 		`# target: ${target.id} ${target.url || comparison.primaryUrl}`,
@@ -3411,6 +3414,7 @@ function formatStreamingBenchmarkUrlComparison(comparison: StreamingBenchmarkUrl
 		`compare summary: smoothness=${formatStats(comparison.compare.summary.smoothness)}, domP90=${formatStats(comparison.compare.summary.domGapP90Ms)}, sseTextP90=${formatStats(comparison.compare.summary.sseTextEventGapP90Ms)}, sseLag=${formatStats(comparison.compare.summary.sseTextLagOverFixtureScheduleP90Ms)}ms`,
 		`comparison: smoothness ${signed(comparison.comparison.smoothnessDelta)}, domP90Gap ${signed(comparison.comparison.domGapP90DeltaMs)}ms, domLagVsSchedule ${signed(comparison.comparison.domLagOverFixtureScheduleP90DeltaMs)}ms, sseText ${signed(comparison.comparison.sseTextEventDelta)}, sseP90Gap ${signed(comparison.comparison.sseChunkGapP90DeltaMs)}ms, sseTextLagVsSchedule ${signed(comparison.comparison.sseTextLagOverFixtureScheduleP90DeltaMs)}ms`,
 	];
+	if (comparison.negativeProfile) lines.push(`negative profile: ${comparison.negativeProfile}`);
 	if (comparison.regressions.length) {
 		lines.push("", "Regressions:");
 		for (const regression of comparison.regressions) lines.push(`- ${regression}`);

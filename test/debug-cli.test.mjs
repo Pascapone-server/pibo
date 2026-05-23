@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { PiboDataStore } from "../dist/data/pibo-store.js";
 import { PiboReliabilityStore } from "../dist/reliability/store.js";
-import { attachStreamingProviderTelemetryToBenchmark, collectStreamingProviderTelemetryFromSelectedBrowserSession, collectStreamingProviderTelemetryFromSession, collectStreamingProviderTelemetryFromTurn, evaluateStreamingBenchmarkAssertion, evaluateStreamingBenchmarkUrlComparisonRegressions, evaluateStreamingLivePipelineRegressions, evaluateStreamingProviderRegressions, formatStreamingBenchmarkAssertionSummary, formatWatch, inferWatchFlickers, resolveStreamingBenchmarkHostedCompareUrlFromValues, summarizeStreamingBenchmarks, summarizeStreamingLivePipeline, summarizeStreamingProviderPreservation, summarizeStreamingProviderTelemetry } from "../dist/debug/web.js";
+import { attachStreamingProviderTelemetryToBenchmark, collectStreamingProviderTelemetryFromSelectedBrowserSession, collectStreamingProviderTelemetryFromSession, collectStreamingProviderTelemetryFromTurn, evaluateStreamingBenchmarkAssertion, evaluateStreamingBenchmarkUrlComparisonRegressions, evaluateStreamingLivePipelineRegressions, evaluateStreamingProviderRegressions, formatStreamingBenchmarkAssertionSummary, formatStreamingBenchmarkUrlComparison, formatWatch, inferWatchFlickers, resolveStreamingBenchmarkHostedCompareUrlFromValues, summarizeStreamingBenchmarkUrlComparison, summarizeStreamingBenchmarks, summarizeStreamingLivePipeline, summarizeStreamingProviderPreservation, summarizeStreamingProviderTelemetry } from "../dist/debug/web.js";
 
 const execFileAsyncRaw = promisify(execFile);
 const cliPath = resolve("dist/bin/pibo.js");
@@ -453,6 +453,39 @@ test("streaming URL comparison regressions gate hosted-vs-direct degradation", (
 		"compare selected-live text events delta -1 below 0",
 		"compare selected-live reasoning events delta -1 below 0",
 	]);
+});
+
+test("streaming URL comparison preserves controlled negative profile in artifacts and text", () => {
+	const makeRun = (regression) => ({
+		kind: "streaming-benchmark",
+		durationMs: 1200,
+		url: "http://direct.example/apps/chat/rooms/room/sessions/ps",
+		debug: { available: true, reset: true, before: {}, after: {}, delta: { textDeltaCount: 12, reasoningDeltaCount: 4 } },
+		fixture: { requested: true, mode: "backend", profile: "steady", mix: "reasoning-text", available: true, started: true, deltaCount: 12, reasoningDeltaCount: 4, textBytes: 24, scheduleGapsMs: { count: 11, p90: 100 } },
+		dom: { targetCountStart: 1, targetCountEnd: 1, lengthStart: 0, lengthEnd: 0, updateCount: 0, positiveUpdateCount: 0, gapsMs: { count: 0 }, positiveCharJumps: { count: 0 } },
+		raf: { count: 10, gapsMs: { count: 9, p90: 16.7 } },
+		longTasks: { count: 0, maxMs: 0, totalMs: 0 },
+		score: { smoothness: 10, textDeltaCount: 12, domPositiveUpdateCount: 0 },
+		negativeProfile: "overlay-drop",
+		regressions: [regression],
+		warnings: [],
+	});
+	const makeGroup = (run, label) => ({
+		kind: "streaming-benchmark-runs",
+		createdAt: "2026-05-23T00:00:00.000Z",
+		durationMs: 1200,
+		runs: [run],
+		negativeProfile: "overlay-drop",
+		summary: summarizeStreamingBenchmarks([run]),
+		regressions: run.regressions.map((regression) => `${label}: ${regression}`),
+		warnings: [],
+	});
+	const primary = makeGroup(makeRun("positive DOM updates 0 < 10"), "run 1");
+	const compare = makeGroup(makeRun("positive DOM updates 0 < 10"), "run 1");
+	const comparison = summarizeStreamingBenchmarkUrlComparison("http://direct.example/apps/chat", "https://hosted.example/apps/chat", primary, compare);
+	assert.equal(comparison.negativeProfile, "overlay-drop");
+	assert.deepEqual(comparison.regressions, ["primary: run 1: positive DOM updates 0 < 10", "compare: run 1: positive DOM updates 0 < 10"]);
+	assert.match(formatStreamingBenchmarkUrlComparison(comparison, { id: "target", url: "", title: "" }), /negative profile: overlay-drop/);
 });
 
 test("pibo debug web streaming benchmark rejects missing expected regression value before target discovery", async () => {
