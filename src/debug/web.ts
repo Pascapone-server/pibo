@@ -30,6 +30,7 @@ type WebOptions = {
 	negativeProfile?: string;
 	compareUrl?: string;
 	compareHosted: boolean;
+	compareHostedIfConfigured: boolean;
 	json: boolean;
 	artifact: boolean;
 	fixture: boolean;
@@ -497,7 +498,7 @@ function printScenarioHelp(): void {
 
 Usage:
   pibo debug web scenario new-session [--manual|--act] [--duration ms] [--json] [--artifact]
-  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--fixture-profile steady|jitter|burst|batch] [--fixture-mix text|reasoning-text] [--simulate-reconnect|--simulate-trace-catchup] [--duration ms] [--runs n] [--from artifact.json] [--compare-url url|--compare-hosted] [--assert] [--expect-regression text] [--negative-profile batch] [--json] [--artifact]
+  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--fixture-profile steady|jitter|burst|batch] [--fixture-mix text|reasoning-text] [--simulate-reconnect|--simulate-trace-catchup] [--duration ms] [--runs n] [--from artifact.json] [--compare-url url|--compare-hosted|--compare-hosted-if-configured] [--assert] [--expect-regression text] [--negative-profile batch] [--json] [--artifact]
 
 Defaults:
   new-session --manual waits while you click New Session yourself.
@@ -512,6 +513,7 @@ Defaults:
   streaming-benchmark --runs repeats the same scenario and reports medians; --from compares against a prior benchmark artifact.
   streaming-benchmark --compare-url runs the same backend fixture at another Chat URL, for direct-vs-hosted SSE comparison.
   streaming-benchmark --compare-hosted uses PIBO_DEV_PUBLIC_URL or PIBO_DEV_BASE_URL from the environment or .env.developer-host as the compare URL.
+  streaming-benchmark --compare-hosted-if-configured runs the hosted comparison when a dev URL is configured; otherwise it records a warning and keeps the primary benchmark.
   streaming-benchmark --assert exits non-zero when fixture/debug/DOM smoothness gates fail.
   streaming-benchmark --expect-regression marks a required regression substring for controlled negative benchmarks; unexpected or missing expected regressions still fail with --assert.
   streaming-benchmark --negative-profile batch expands to the backend batch reasoning/text fixture with required controlled regression assertions.
@@ -656,10 +658,13 @@ async function runScenario(options: WebOptions): Promise<void> {
 	if (scenario === "streaming-benchmark" && streamingOptions.simulateReconnect && !streamingOptions.backendFixture) throw new Error("--simulate-reconnect requires --backend-fixture.");
 	if (scenario === "streaming-benchmark" && streamingOptions.simulateTraceCatchup && !streamingOptions.backendFixture) throw new Error("--simulate-trace-catchup requires --backend-fixture.");
 	if (scenario === "streaming-benchmark" && streamingOptions.simulateReconnect && streamingOptions.simulateTraceCatchup) throw new Error("Use either --simulate-reconnect or --simulate-trace-catchup, not both.");
-	if (scenario === "streaming-benchmark" && streamingOptions.compareUrl && streamingOptions.compareHosted) throw new Error("Use either --compare-url or --compare-hosted, not both.");
+	const hostedCompareModes = [streamingOptions.compareUrl ? "--compare-url" : undefined, streamingOptions.compareHosted ? "--compare-hosted" : undefined, streamingOptions.compareHostedIfConfigured ? "--compare-hosted-if-configured" : undefined].filter(Boolean);
+	if (scenario === "streaming-benchmark" && hostedCompareModes.length > 1) throw new Error(`Use only one compare target flag: ${hostedCompareModes.join(", ")}.`);
 	if (scenario === "streaming-benchmark" && streamingOptions.compareUrl && !streamingOptions.backendFixture) throw new Error("--compare-url requires --backend-fixture so the benchmark can replay a deterministic stream at both URLs.");
 	if (scenario === "streaming-benchmark" && streamingOptions.compareHosted && !streamingOptions.backendFixture) throw new Error("--compare-hosted requires --backend-fixture so the benchmark can replay a deterministic stream at both URLs.");
-	const hostedCompareUrl = scenario === "streaming-benchmark" && streamingOptions.compareHosted ? await resolveStreamingBenchmarkHostedCompareUrl() : undefined;
+	if (scenario === "streaming-benchmark" && streamingOptions.compareHostedIfConfigured && !streamingOptions.backendFixture) throw new Error("--compare-hosted-if-configured requires --backend-fixture so the benchmark can replay a deterministic stream at both URLs.");
+	const hostedCompareUrl = scenario === "streaming-benchmark" && (streamingOptions.compareHosted || streamingOptions.compareHostedIfConfigured) ? await resolveStreamingBenchmarkHostedCompareUrl({ optional: streamingOptions.compareHostedIfConfigured }) : undefined;
+	const hostedCompareWarning = scenario === "streaming-benchmark" && streamingOptions.compareHostedIfConfigured && !hostedCompareUrl ? "--compare-hosted-if-configured skipped: PIBO_DEV_PUBLIC_URL or PIBO_DEV_BASE_URL is not configured" : undefined;
 	const fixtureProfile = parseFixtureProfile(streamingOptions.fixtureProfile);
 	const fixtureMix = parseFixtureMix(streamingOptions.fixtureMix);
 	const durationMs = parseDuration(streamingOptions.duration);
@@ -675,6 +680,7 @@ async function runScenario(options: WebOptions): Promise<void> {
 				? benchmarks[0]
 				: summarizeStreamingBenchmarkGroup(benchmarks, baseline);
 			const rawCompareUrl = streamingOptions.compareUrl ?? hostedCompareUrl;
+			if (!rawCompareUrl && hostedCompareWarning) benchmark.warnings.push(hostedCompareWarning);
 			if (rawCompareUrl) {
 				const compareUrl = resolveStreamingBenchmarkCompareUrl(rawCompareUrl, primaryUrl);
 				await navigateStreamingBenchmarkTarget(client, compareUrl);
@@ -2123,6 +2129,7 @@ function parseOptions(args: string[]): WebOptions {
 		assertHealthy: false,
 		expectedRegressionPatterns: [],
 		compareHosted: false,
+		compareHostedIfConfigured: false,
 		act: false,
 		manual: false,
 		includeText: false,
@@ -2164,6 +2171,7 @@ function parseOptions(args: string[]): WebOptions {
 		else if (arg === "--compare-url") options.compareUrl = requireValue(args, ++index, arg);
 		else if (arg.startsWith("--compare-url=")) options.compareUrl = arg.slice("--compare-url=".length);
 		else if (arg === "--compare-hosted") options.compareHosted = true;
+		else if (arg === "--compare-hosted-if-configured") options.compareHostedIfConfigured = true;
 		else if (arg === "--from") options.from = requireValue(args, ++index, arg);
 		else if (arg.startsWith("--from=")) options.from = arg.slice("--from=".length);
 		else options.positionals.push(arg);
@@ -2504,17 +2512,22 @@ function resolveStreamingBenchmarkCompareUrl(rawCompareUrl: string, primaryUrl: 
 	return compare.toString();
 }
 
-async function resolveStreamingBenchmarkHostedCompareUrl(): Promise<string> {
-	const directUrl = process.env.PIBO_DEV_PUBLIC_URL?.trim();
+async function resolveStreamingBenchmarkHostedCompareUrl(options: { optional?: boolean } = {}): Promise<string | undefined> {
+	const hostedUrl = resolveStreamingBenchmarkHostedCompareUrlFromValues(process.env, await readDeveloperHostEnvFile());
+	if (hostedUrl || options.optional) return hostedUrl;
+	throw new Error("--compare-hosted requires PIBO_DEV_PUBLIC_URL or PIBO_DEV_BASE_URL in the environment or .env.developer-host");
+}
+
+export function resolveStreamingBenchmarkHostedCompareUrlFromValues(env: Record<string, string | undefined>, envFile: Record<string, string | undefined>): string | undefined {
+	const directUrl = env.PIBO_DEV_PUBLIC_URL?.trim();
 	if (directUrl) return directUrl;
-	const baseUrl = process.env.PIBO_DEV_BASE_URL?.trim();
+	const baseUrl = env.PIBO_DEV_BASE_URL?.trim();
 	if (baseUrl) return `${baseUrl.replace(/\/+$/, "")}/apps/chat`;
-	const envFile = await readDeveloperHostEnvFile();
 	const fileDirectUrl = envFile.PIBO_DEV_PUBLIC_URL?.trim();
 	if (fileDirectUrl) return fileDirectUrl;
 	const fileBaseUrl = envFile.PIBO_DEV_BASE_URL?.trim();
 	if (fileBaseUrl) return `${fileBaseUrl.replace(/\/+$/, "")}/apps/chat`;
-	throw new Error("--compare-hosted requires PIBO_DEV_PUBLIC_URL or PIBO_DEV_BASE_URL in the environment or .env.developer-host");
+	return undefined;
 }
 
 async function readDeveloperHostEnvFile(): Promise<Record<string, string>> {
