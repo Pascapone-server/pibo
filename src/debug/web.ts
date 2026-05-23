@@ -21,6 +21,7 @@ type WebOptions = {
 	duration?: string;
 	runs?: string;
 	fixtureProfile?: string;
+	fixtureMix?: string;
 	json: boolean;
 	artifact: boolean;
 	fixture: boolean;
@@ -104,6 +105,8 @@ type StreamingDebugCounters = Record<string, unknown> & {
 	eventCount?: number;
 	textDeltaCount?: number;
 	textDeltaBytes?: number;
+	reasoningDeltaCount?: number;
+	reasoningDeltaBytes?: number;
 	enqueueCount?: number;
 	flushCount?: number;
 	overlayUpdateCount?: number;
@@ -236,7 +239,7 @@ type StreamingBenchmark = {
 	};
 	raf: { count: number; gapsMs: NumberStats };
 	longTasks: { count: number; totalMs: number; maxMs: number };
-	fixture?: { requested: boolean; mode: "browser" | "backend"; profile?: string; simulation?: "reconnect" | "trace-catchup"; available: boolean; started: boolean; deltaCount?: number; cadenceMs?: number; textBytes?: number; piboSessionId?: string; error?: string };
+	fixture?: { requested: boolean; mode: "browser" | "backend"; profile?: string; mix?: string; simulation?: "reconnect" | "trace-catchup"; available: boolean; started: boolean; deltaCount?: number; reasoningDeltaCount?: number; cadenceMs?: number; textBytes?: number; reasoningBytes?: number; piboSessionId?: string; error?: string };
 	eventSource?: StreamingBenchmarkEventSourceProbe;
 	trace?: StreamingBenchmarkTraceProbe;
 	score: StreamingSmoothnessScore;
@@ -248,6 +251,7 @@ type StreamingBenchmarkSummary = {
 	runs: number;
 	smoothness: NumberStats;
 	textDeltaCount: NumberStats;
+	reasoningDeltaCount: NumberStats;
 	domPositiveUpdateCount: NumberStats;
 	domGapP50Ms: NumberStats;
 	domGapP90Ms: NumberStats;
@@ -379,7 +383,7 @@ function printScenarioHelp(): void {
 
 Usage:
   pibo debug web scenario new-session [--manual|--act] [--duration ms] [--json] [--artifact]
-  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--fixture-profile steady|jitter|burst] [--simulate-reconnect|--simulate-trace-catchup] [--duration ms] [--runs n] [--from artifact.json] [--assert] [--json] [--artifact]
+  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--fixture-profile steady|jitter|burst] [--fixture-mix text|reasoning-text] [--simulate-reconnect|--simulate-trace-catchup] [--duration ms] [--runs n] [--from artifact.json] [--assert] [--json] [--artifact]
 
 Defaults:
   new-session --manual waits while you click New Session yourself.
@@ -388,6 +392,7 @@ Defaults:
   streaming-benchmark --fixture navigates the target to a deterministic in-browser stream fixture before measuring.
   streaming-benchmark --backend-fixture posts to /api/chat/debug/streaming-fixture so the real app consumes deterministic /api/chat/events frames.
   streaming-benchmark --fixture-profile selects steady cadence, deterministic jitter, or bursty fixture timing.
+  streaming-benchmark --fixture-mix includes text-only or mixed reasoning/text deltas.
   streaming-benchmark --simulate-reconnect reloads the app with an EventSource probe, forces one live stream close, and verifies reconnect/transient ids.
   streaming-benchmark --simulate-trace-catchup suppresses backend live text deltas and verifies trace snapshot recovery.
   streaming-benchmark --runs repeats the same scenario and reports medians; --from compares against a prior benchmark artifact.
@@ -527,23 +532,25 @@ async function runScenario(options: WebOptions): Promise<void> {
 	if (scenario === "streaming-benchmark" && (options.act || options.manual)) throw new Error("streaming-benchmark does not support --act or --manual. Start or observe the stream separately, then run the scenario.");
 	if (scenario === "streaming-benchmark" && options.fixture && options.backendFixture) throw new Error("Use either --fixture or --backend-fixture, not both.");
 	if (scenario === "streaming-benchmark" && options.fixtureProfile && !options.fixture && !options.backendFixture) throw new Error("--fixture-profile requires --fixture or --backend-fixture.");
+	if (scenario === "streaming-benchmark" && options.fixtureMix && !options.fixture && !options.backendFixture) throw new Error("--fixture-mix requires --fixture or --backend-fixture.");
 	if (scenario === "streaming-benchmark" && options.simulateReconnect && !options.backendFixture) throw new Error("--simulate-reconnect requires --backend-fixture.");
 	if (scenario === "streaming-benchmark" && options.simulateTraceCatchup && !options.backendFixture) throw new Error("--simulate-trace-catchup requires --backend-fixture.");
 	if (scenario === "streaming-benchmark" && options.simulateReconnect && options.simulateTraceCatchup) throw new Error("Use either --simulate-reconnect or --simulate-trace-catchup, not both.");
 	const fixtureProfile = parseFixtureProfile(options.fixtureProfile);
+	const fixtureMix = parseFixtureMix(options.fixtureMix);
 	const durationMs = parseDuration(options.duration);
 	const runs = parseRuns(options.runs);
 	const { client, target } = await connectTarget({ ...options, preset: "app" });
 	try {
 		if (scenario === "streaming-benchmark") {
-			if (options.fixture) await navigateStreamingBenchmarkFixture(client, fixtureProfile);
+			if (options.fixture) await navigateStreamingBenchmarkFixture(client, fixtureProfile, fixtureMix);
 			if (options.backendFixture) {
 				if (options.simulateReconnect || options.simulateTraceCatchup) await prepareStreamingBenchmarkEventSourceProbe(client);
 				else await enableStreamingDebugForCurrentApp(client);
 			}
 			const benchmarks: StreamingBenchmark[] = [];
 			for (let run = 0; run < runs; run++) {
-				benchmarks.push(await runStreamingBenchmark(client, durationMs, { startFixture: options.fixture, startBackendFixture: options.backendFixture, fixtureProfile, simulateReconnect: options.simulateReconnect, simulateTraceCatchup: options.simulateTraceCatchup }));
+				benchmarks.push(await runStreamingBenchmark(client, durationMs, { startFixture: options.fixture, startBackendFixture: options.backendFixture, fixtureProfile, fixtureMix, simulateReconnect: options.simulateReconnect, simulateTraceCatchup: options.simulateTraceCatchup }));
 			}
 			const baseline = options.from ? await readStreamingBenchmarkRuns(options.from) : undefined;
 			const benchmark: StreamingBenchmark | StreamingBenchmarkGroup = runs === 1
@@ -628,7 +635,7 @@ async function runBrowserWatch(client: CdpClient, scope: string, durationMs: num
 	return client.evaluate<WebWatch>(expression, durationMs + 10_000);
 }
 
-async function runStreamingBenchmark(client: CdpClient, durationMs: number, options: { startFixture?: boolean; startBackendFixture?: boolean; fixtureProfile?: StreamingFixtureProfile; simulateReconnect?: boolean; simulateTraceCatchup?: boolean } = {}): Promise<StreamingBenchmark> {
+async function runStreamingBenchmark(client: CdpClient, durationMs: number, options: { startFixture?: boolean; startBackendFixture?: boolean; fixtureProfile?: StreamingFixtureProfile; fixtureMix?: StreamingFixtureMix; simulateReconnect?: boolean; simulateTraceCatchup?: boolean } = {}): Promise<StreamingBenchmark> {
 	await client.send("Page.bringToFront").catch(() => undefined);
 	const benchmarkTimeoutMs = durationMs + (options.startBackendFixture ? 20_000 : 10_000);
 	const benchmark = await client.evaluate<Omit<StreamingBenchmark, "score">>(buildStreamingBenchmarkExpression(durationMs, options), benchmarkTimeoutMs);
@@ -662,8 +669,8 @@ async function navigateStreamingBenchmarkTarget(client: CdpClient, url: string):
 	await client.evaluate(`(() => { if (location.href !== ${JSON.stringify(url)}) location.assign(${JSON.stringify(url)}); return true; })()`, 5_000).catch(() => undefined);
 }
 
-async function navigateStreamingBenchmarkFixture(client: CdpClient, fixtureProfile: StreamingFixtureProfile): Promise<void> {
-	const url = `data:text/html;charset=utf-8,${encodeURIComponent(streamingBenchmarkFixtureHtml(fixtureProfile))}`;
+async function navigateStreamingBenchmarkFixture(client: CdpClient, fixtureProfile: StreamingFixtureProfile, fixtureMix: StreamingFixtureMix): Promise<void> {
+	const url = `data:text/html;charset=utf-8,${encodeURIComponent(streamingBenchmarkFixtureHtml(fixtureProfile, fixtureMix))}`;
 	await client.send("Page.enable").catch(() => undefined);
 	await client.send("Page.navigate", { url }, 5_000);
 	await client.send("Page.bringToFront").catch(() => undefined);
@@ -687,6 +694,7 @@ async function enableStreamingDebugForCurrentApp(client: CdpClient): Promise<voi
 }
 
 type StreamingFixtureProfile = "steady" | "jitter" | "burst";
+type StreamingFixtureMix = "text" | "reasoning-text";
 
 function streamingBenchmarkEventSourceProbeScript(): string {
 	return String.raw`
@@ -778,7 +786,7 @@ function streamingBenchmarkEventSourceProbeScript(): string {
 `;
 }
 
-function streamingBenchmarkFixtureHtml(fixtureProfile: StreamingFixtureProfile): string {
+function streamingBenchmarkFixtureHtml(fixtureProfile: StreamingFixtureProfile, fixtureMix: StreamingFixtureMix): string {
 	return `<!doctype html>
 <html>
 <head>
@@ -795,7 +803,10 @@ function streamingBenchmarkFixtureHtml(fixtureProfile: StreamingFixtureProfile):
   const deltas = [' a', ' b', ' c', ' d', ' e', ' f', ' g', ' h', ' i', ' j', ' k', ' l'];
   const cadenceMs = 100;
   const profile = ${JSON.stringify(fixtureProfile)};
+  const mix = ${JSON.stringify(fixtureMix)};
+  const reasoningDeltas = mix === 'reasoning-text' ? [' think', ' plan', ' check', ' answer'] : [];
   const scheduleMs = buildSchedule(deltas.length, cadenceMs, profile);
+  const reasoningScheduleMs = reasoningDeltas.map((_, index) => Math.max(10, Math.round((index + 1) * cadenceMs / 2)));
   let timers = [];
   function buildSchedule(count, cadence, timingProfile) {
     const delays = [];
@@ -842,9 +853,23 @@ function streamingBenchmarkFixtureHtml(fixtureProfile: StreamingFixtureProfile):
     window.__piboStreamingDebug = snapshot();
     return window.__piboStreamingDebug;
   };
-  window.__piboStreamingFixtureConfig = { deltaCount: deltas.length, cadenceMs, profile, scheduleMs };
+  window.__piboStreamingFixtureConfig = { deltaCount: deltas.length, reasoningDeltaCount: reasoningDeltas.length, cadenceMs, profile, mix, scheduleMs, reasoningScheduleMs, textBytes: deltas.join('').length, reasoningBytes: reasoningDeltas.join('').length };
   window.__piboStreamingFixtureStart = () => {
     window.__piboStreamingDebugReset();
+    reasoningDeltas.forEach((delta, index) => {
+      timers.push(setTimeout(() => {
+        const debug = window.__piboStreamingDebug;
+        debug.eventCount += 1;
+        debug.reasoningDeltaCount += 1;
+        debug.reasoningDeltaBytes += delta.length;
+        debug.enqueueCount += 1;
+        debug.flushCount += 1;
+        debug.flushedEventCount += 1;
+        debug.overlayUpdateCount += 1;
+        debug.overlayEventCount += 1;
+        debug.lastTransientLiveId = 'live:reasoning-' + index;
+      }, reasoningScheduleMs[index]));
+    });
     deltas.forEach((delta, index) => {
       timers.push(setTimeout(() => {
         target.textContent += delta;
@@ -856,7 +881,7 @@ function streamingBenchmarkFixtureHtml(fixtureProfile: StreamingFixtureProfile):
         debug.flushCount += 1;
         debug.flushedEventCount += 1;
         debug.overlayUpdateCount += 1;
-        debug.overlayEventCount = index + 1;
+        debug.overlayEventCount += 1;
         debug.currentOutputLength = target.textContent.length;
         debug.lastTransientLiveId = 'live:' + index;
       }, scheduleMs[index]));
@@ -886,9 +911,9 @@ function buildWatchExpression(options: { scope: string; durationMs: number; maxN
 })()`;
 }
 
-function buildStreamingBenchmarkExpression(durationMs: number, input: { startFixture?: boolean; startBackendFixture?: boolean; fixtureProfile?: StreamingFixtureProfile; simulateReconnect?: boolean; simulateTraceCatchup?: boolean } = {}): string {
+function buildStreamingBenchmarkExpression(durationMs: number, input: { startFixture?: boolean; startBackendFixture?: boolean; fixtureProfile?: StreamingFixtureProfile; fixtureMix?: StreamingFixtureMix; simulateReconnect?: boolean; simulateTraceCatchup?: boolean } = {}): string {
 	return `(async () => {
-  const options = ${JSON.stringify({ durationMs, startFixture: Boolean(input.startFixture), startBackendFixture: Boolean(input.startBackendFixture), fixtureProfile: input.fixtureProfile ?? "steady", simulateReconnect: Boolean(input.simulateReconnect), simulateTraceCatchup: Boolean(input.simulateTraceCatchup), reconnectAtMs: input.simulateReconnect ? 325 : undefined, traceCatchupDropMs: input.simulateTraceCatchup ? 1300 : undefined })};
+  const options = ${JSON.stringify({ durationMs, startFixture: Boolean(input.startFixture), startBackendFixture: Boolean(input.startBackendFixture), fixtureProfile: input.fixtureProfile ?? "steady", fixtureMix: input.fixtureMix ?? "text", simulateReconnect: Boolean(input.simulateReconnect), simulateTraceCatchup: Boolean(input.simulateTraceCatchup), reconnectAtMs: input.simulateReconnect ? 325 : undefined, traceCatchupDropMs: input.simulateTraceCatchup ? 1300 : undefined })};
   ${browserStreamingBenchmarkLibrary()}
   return await runStreamingBenchmark(options);
 })()`;
@@ -1174,8 +1199,10 @@ function streamingBenchmarkRegressions(result) {
   const failures = [];
   const fixture = result.fixture;
   const expectedDeltas = fixture && typeof fixture.deltaCount === 'number' ? fixture.deltaCount : undefined;
+  const expectedReasoningDeltas = fixture && typeof fixture.reasoningDeltaCount === 'number' ? fixture.reasoningDeltaCount : undefined;
   const cadenceMs = fixture && typeof fixture.cadenceMs === 'number' ? fixture.cadenceMs : 100;
   const textDeltas = result.debugDelta && typeof result.debugDelta.textDeltaCount === 'number' ? result.debugDelta.textDeltaCount : 0;
+  const reasoningDeltas = result.debugDelta && typeof result.debugDelta.reasoningDeltaCount === 'number' ? result.debugDelta.reasoningDeltaCount : 0;
   const domPositive = result.dom.positiveUpdateCount || 0;
   const domGapP90 = result.dom.gapsMs && typeof result.dom.gapsMs.p90 === 'number' ? result.dom.gapsMs.p90 : undefined;
   const domJumpMax = result.dom.positiveCharJumps && typeof result.dom.positiveCharJumps.max === 'number' ? result.dom.positiveCharJumps.max : undefined;
@@ -1188,6 +1215,7 @@ function streamingBenchmarkRegressions(result) {
     if (!fixture.started) failures.push('fixture did not start');
     if (fixture.error) failures.push('fixture error: ' + fixture.error);
     if (!traceCatchupRequested && expectedDeltas !== undefined && textDeltas < expectedDeltas) failures.push('text deltas ' + textDeltas + ' < fixture deltas ' + expectedDeltas);
+    if (!traceCatchupRequested && expectedReasoningDeltas !== undefined && reasoningDeltas < expectedReasoningDeltas) failures.push('reasoning deltas ' + reasoningDeltas + ' < fixture reasoning deltas ' + expectedReasoningDeltas);
     if (!traceCatchupRequested && expectedDeltas !== undefined && domPositive < Math.max(1, expectedDeltas - 2)) failures.push('positive DOM updates ' + domPositive + ' < ' + Math.max(1, expectedDeltas - 2));
     if (!traceCatchupRequested && domGapP90 !== undefined && domGapP90 > Math.max(300, cadenceMs * 3)) failures.push('DOM p90 gap ' + domGapP90 + 'ms exceeds gate');
     if (!traceCatchupRequested && domJumpMax !== undefined && domJumpMax > 4) failures.push('DOM max jump ' + domJumpMax + ' chars exceeds gate');
@@ -1332,7 +1360,7 @@ async function runStreamingBenchmark(options) {
         const response = await fetchWithTimeout('/api/chat/debug/streaming-fixture', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ piboSessionId, profile: options.fixtureProfile, ...((options.simulateReconnect || options.simulateTraceCatchup) ? { cadenceMs: 150 } : {}), ...(options.simulateTraceCatchup ? { traceSnapshots: true, suppressLiveDeltas: true } : {}) }),
+          body: JSON.stringify({ piboSessionId, profile: options.fixtureProfile, mix: options.fixtureMix, ...((options.simulateReconnect || options.simulateTraceCatchup) ? { cadenceMs: 150 } : {}), ...(options.simulateTraceCatchup ? { traceSnapshots: true, suppressLiveDeltas: true } : {}) }),
         }, options.simulateTraceCatchup ? 15000 : 5000);
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload && payload.error ? payload.error : response.status + ' ' + response.statusText);
@@ -1383,12 +1411,15 @@ async function runStreamingBenchmark(options) {
     requested: true,
     mode: options.startBackendFixture ? 'backend' : 'browser',
     profile: fixtureConfig && typeof fixtureConfig.profile === 'string' ? fixtureConfig.profile : options.fixtureProfile,
+    mix: fixtureConfig && typeof fixtureConfig.mix === 'string' ? fixtureConfig.mix : options.fixtureMix,
     simulation: options.simulateTraceCatchup ? 'trace-catchup' : (options.simulateReconnect ? 'reconnect' : undefined),
     available: options.startBackendFixture ? !backendFixtureError : typeof window.__piboStreamingFixtureStart === 'function',
     started: fixtureStarted,
     deltaCount: fixtureConfig && typeof fixtureConfig.deltaCount === 'number' ? fixtureConfig.deltaCount : undefined,
+    reasoningDeltaCount: fixtureConfig && typeof fixtureConfig.reasoningDeltaCount === 'number' ? fixtureConfig.reasoningDeltaCount : undefined,
     cadenceMs: fixtureConfig && typeof fixtureConfig.cadenceMs === 'number' ? fixtureConfig.cadenceMs : undefined,
     textBytes: fixtureConfig && typeof fixtureConfig.textBytes === 'number' ? fixtureConfig.textBytes : undefined,
+    reasoningBytes: fixtureConfig && typeof fixtureConfig.reasoningBytes === 'number' ? fixtureConfig.reasoningBytes : undefined,
     piboSessionId: fixtureConfig && typeof fixtureConfig.piboSessionId === 'string' ? fixtureConfig.piboSessionId : undefined,
     error: backendFixtureError,
   } : undefined;
@@ -1779,6 +1810,8 @@ function parseOptions(args: string[]): WebOptions {
 		else if (arg.startsWith("--runs=")) options.runs = arg.slice("--runs=".length);
 		else if (arg === "--fixture-profile") options.fixtureProfile = requireValue(args, ++index, arg);
 		else if (arg.startsWith("--fixture-profile=")) options.fixtureProfile = arg.slice("--fixture-profile=".length);
+		else if (arg === "--fixture-mix") options.fixtureMix = requireValue(args, ++index, arg);
+		else if (arg.startsWith("--fixture-mix=")) options.fixtureMix = arg.slice("--fixture-mix=".length);
 		else if (arg === "--from") options.from = requireValue(args, ++index, arg);
 		else if (arg.startsWith("--from=")) options.from = arg.slice("--from=".length);
 		else options.positionals.push(arg);
@@ -1830,6 +1863,12 @@ function parseFixtureProfile(value?: string): StreamingFixtureProfile {
 	if (!value) return "steady";
 	if (value === "steady" || value === "jitter" || value === "burst") return value;
 	throw new Error("--fixture-profile must be steady, jitter, or burst");
+}
+
+function parseFixtureMix(value?: string): StreamingFixtureMix {
+	if (!value) return "text";
+	if (value === "text" || value === "reasoning-text") return value;
+	throw new Error("--fixture-mix must be text or reasoning-text");
 }
 
 function formatSnapshot(snapshot: WebSnapshot, target: BrowserUseCdpTarget | { id: string; url: string; title: string }): string {
@@ -2020,6 +2059,7 @@ function summarizeStreamingBenchmarks(runs: StreamingBenchmark[]): StreamingBenc
 		runs: runs.length,
 		smoothness: numericStats(runs.map((run) => run.score.smoothness)),
 		textDeltaCount: numericStats(runs.map((run) => run.score.textDeltaCount)),
+		reasoningDeltaCount: numericStats(runs.map((run) => numberField(run.debug.delta ?? {}, "reasoningDeltaCount"))),
 		domPositiveUpdateCount: numericStats(runs.map((run) => run.score.domPositiveUpdateCount)),
 		domGapP50Ms: numericStats(runs.map((run) => run.dom.gapsMs.p50)),
 		domGapP90Ms: numericStats(runs.map((run) => run.dom.gapsMs.p90)),
@@ -2121,7 +2161,7 @@ function formatStreamingBenchmark(benchmark: StreamingBenchmark, target: Browser
 		`raf: count=${benchmark.raf.count}, gaps=${formatStats(benchmark.raf.gapsMs)}`,
 		`longTasks: count=${benchmark.longTasks.count}, max=${benchmark.longTasks.maxMs}ms, total=${benchmark.longTasks.totalMs}ms`,
 	];
-	if (benchmark.fixture) lines.push(`fixture: mode=${benchmark.fixture.mode} profile=${jsonShort(benchmark.fixture.profile)} simulation=${jsonShort(benchmark.fixture.simulation)} available=${benchmark.fixture.available} started=${benchmark.fixture.started} deltas=${jsonShort(benchmark.fixture.deltaCount)} cadence=${jsonShort(benchmark.fixture.cadenceMs)}ms session=${jsonShort(benchmark.fixture.piboSessionId)}${benchmark.fixture.error ? ` error=${benchmark.fixture.error}` : ""}`);
+	if (benchmark.fixture) lines.push(`fixture: mode=${benchmark.fixture.mode} profile=${jsonShort(benchmark.fixture.profile)} mix=${jsonShort(benchmark.fixture.mix)} simulation=${jsonShort(benchmark.fixture.simulation)} available=${benchmark.fixture.available} started=${benchmark.fixture.started} deltas=${jsonShort(benchmark.fixture.deltaCount)} reasoningDeltas=${jsonShort(benchmark.fixture.reasoningDeltaCount)} cadence=${jsonShort(benchmark.fixture.cadenceMs)}ms session=${jsonShort(benchmark.fixture.piboSessionId)}${benchmark.fixture.error ? ` error=${benchmark.fixture.error}` : ""}`);
 	if (benchmark.eventSource) {
 		lines.push(`eventSource: requested=${benchmark.eventSource.requested} installed=${benchmark.eventSource.installed} forcedClose=${benchmark.eventSource.forcedCloseCountAfterStart} reconnectOpen=${benchmark.eventSource.openCountAfterStart} text=${benchmark.eventSource.textEventCount} afterStart=${benchmark.eventSource.textEventCountAfterStart} transient=${benchmark.eventSource.uniqueTransientIdCount}/${benchmark.eventSource.transientIdCount} reset=${benchmark.eventSource.transientIdResetObserved} droppedText=${benchmark.eventSource.textDropTextEventCount} last=${jsonShort(benchmark.eventSource.lastEventId)} reconnectObserved=${benchmark.eventSource.reconnectObserved}`);
 		for (const stream of benchmark.eventSource.streams ?? []) {
@@ -2145,7 +2185,7 @@ function formatStreamingBenchmarkGroup(group: StreamingBenchmarkGroup, target: B
 		`# Web Streaming Benchmark, ${group.runs.length} runs x ${(group.durationMs / 1000).toFixed(1)}s`,
 		`# target: ${target.id} ${target.url || group.runs[0]?.url || ""}`,
 		`summary: smoothness=${formatStats(group.summary.smoothness)}, regressions=${formatStats(group.summary.regressionCount)}`,
-		`events: text=${formatStats(group.summary.textDeltaCount)}, domPositive=${formatStats(group.summary.domPositiveUpdateCount)}`,
+		`events: text=${formatStats(group.summary.textDeltaCount)}, reasoning=${formatStats(group.summary.reasoningDeltaCount)}, domPositive=${formatStats(group.summary.domPositiveUpdateCount)}`,
 		`dom gaps p50=${formatStats(group.summary.domGapP50Ms)}, p90=${formatStats(group.summary.domGapP90Ms)}, max=${formatStats(group.summary.domGapMaxMs)}`,
 		`dom jumps p90=${formatStats(group.summary.domJumpP90Chars)}, max=${formatStats(group.summary.domJumpMaxChars)} chars`,
 		`firstVisible=${formatStats(group.summary.firstVisibleMs)}, longTaskMax=${formatStats(group.summary.longTaskMaxMs)}`,

@@ -1727,11 +1727,13 @@ type ChatStreamingFixtureBody = {
 	deltas?: unknown;
 	cadenceMs?: unknown;
 	profile?: unknown;
+	mix?: unknown;
 	traceSnapshots?: unknown;
 	suppressLiveDeltas?: unknown;
 };
 
 type ChatStreamingFixtureProfile = "steady" | "jitter" | "burst";
+type ChatStreamingFixtureMix = "text" | "reasoning-text";
 
 type ChatProjectsBootstrap = ChatBootstrapCatalog & {
 	identity: PiboWebSession["authSession"]["identity"];
@@ -2530,6 +2532,12 @@ function normalizeStreamingFixtureProfile(value: unknown): ChatStreamingFixtureP
 	if (value === undefined) return "steady";
 	if (value === "steady" || value === "jitter" || value === "burst") return value;
 	throw new PiboWebHttpError("profile must be steady, jitter, or burst", 400);
+}
+
+function normalizeStreamingFixtureMix(value: unknown): ChatStreamingFixtureMix {
+	if (value === undefined) return "text";
+	if (value === "text" || value === "reasoning-text") return value;
+	throw new PiboWebHttpError("mix must be text or reasoning-text", 400);
 }
 
 function normalizeStreamingFixtureTraceSnapshots(value: unknown): boolean {
@@ -8122,9 +8130,12 @@ function startChatStreamingFixture(input: {
 	const deltas = normalizeStreamingFixtureDeltas(input.body.deltas);
 	const cadenceMs = normalizeStreamingFixtureCadenceMs(input.body.cadenceMs);
 	const profile = normalizeStreamingFixtureProfile(input.body.profile);
+	const mix = normalizeStreamingFixtureMix(input.body.mix);
 	const traceSnapshots = normalizeStreamingFixtureTraceSnapshots(input.body.traceSnapshots);
 	const suppressLiveDeltas = normalizeStreamingFixtureSuppressLiveDeltas(input.body.suppressLiveDeltas);
 	const scheduleMs = buildStreamingFixtureSchedule(deltas.length, cadenceMs, profile);
+	const reasoningDeltas = mix === "reasoning-text" ? [" think", " plan", " check", " answer"] : [];
+	const reasoningScheduleMs = reasoningDeltas.map((_, index) => Math.max(10, Math.round(((index + 1) * cadenceMs) / 2)));
 	const eventId = `streaming-fixture-${randomUUID()}`;
 	const emit = (event: PiboOutputEvent) => {
 		if (traceSnapshots && (event.type === "assistant_delta" || event.type === "assistant_message" || event.type === "message_finished")) {
@@ -8144,11 +8155,19 @@ function startChatStreamingFixture(input: {
 	};
 
 	emit({ type: "message_started", piboSessionId: selectedSession.id, eventId, text: "Streaming benchmark fixture", source: "service" });
+	if (reasoningDeltas.length) {
+		emit({ type: "thinking_started", piboSessionId: selectedSession.id, eventId, thinkingIndex: 0 });
+		reasoningDeltas.forEach((delta, index) => {
+			emitAt(reasoningScheduleMs[index] ?? Math.max(10, Math.round(((index + 1) * cadenceMs) / 2)), { type: "thinking_delta", piboSessionId: selectedSession.id, eventId, thinkingIndex: 0, text: delta });
+		});
+		emitAt((reasoningScheduleMs[reasoningScheduleMs.length - 1] ?? 0) + Math.max(10, Math.round(cadenceMs / 2)), { type: "thinking_finished", piboSessionId: selectedSession.id, eventId, thinkingIndex: 0, text: reasoningDeltas.join("") });
+	}
 	deltas.forEach((delta, index) => {
 		emitAt(scheduleMs[index] ?? cadenceMs * (index + 1), { type: "assistant_delta", piboSessionId: selectedSession.id, eventId, assistantIndex: 0, text: delta });
 	});
 	const finalText = deltas.join("");
-	const finishDelayMs = (scheduleMs[scheduleMs.length - 1] ?? 0) + cadenceMs;
+	const finalReasoning = reasoningDeltas.join("");
+	const finishDelayMs = Math.max(scheduleMs[scheduleMs.length - 1] ?? 0, reasoningScheduleMs[reasoningScheduleMs.length - 1] ?? 0) + cadenceMs;
 	emitAt(finishDelayMs, { type: "assistant_message", piboSessionId: selectedSession.id, eventId, assistantIndex: 0, text: finalText });
 	emitAt(finishDelayMs, { type: "message_finished", piboSessionId: selectedSession.id, eventId, source: "service" });
 
@@ -8160,10 +8179,14 @@ function startChatStreamingFixture(input: {
 			deltaCount: deltas.length,
 			cadenceMs,
 			profile,
+			mix,
 			traceSnapshots,
 			suppressLiveDeltas,
 			scheduleMs,
+			reasoningScheduleMs,
+			reasoningDeltaCount: reasoningDeltas.length,
 			textBytes: new TextEncoder().encode(finalText).length,
+			reasoningBytes: new TextEncoder().encode(finalReasoning).length,
 		},
 	});
 }
