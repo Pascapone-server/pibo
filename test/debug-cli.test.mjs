@@ -254,11 +254,11 @@ test("pibo debug web report recomputes streaming summaries for older artifacts",
 
 test("pibo debug web streaming benchmark help advertises the deterministic fixture", async () => {
 	const help = await execFileAsync("node", [cliPath, "debug", "web", "scenario", "--help"]);
-	assert.match(help.stdout, /streaming-benchmark \[--fixture\|--backend-fixture\].*\[--fixture-profile steady\|jitter\|burst\|batch\].*\[--fixture-mix text\|reasoning-text\].*\[--simulate-reconnect\|--simulate-trace-catchup\].*\[--provider-request-id pr_\.\.\.\|--provider-session-id ps_\.\.\.\|--provider-turn-id turn_\.\.\.\|--provider-selected-session\].*\[--compare-url url\|--compare-hosted\|--compare-hosted-if-configured\].*\[--assert\].*\[--expect-regression text\].*\[--negative-profile batch\|overlay-drop\]/);
+	assert.match(help.stdout, /streaming-benchmark \[--fixture\|--backend-fixture\].*\[--fixture-profile steady\|jitter\|burst\|batch\].*\[--fixture-mix text\|reasoning-text\|markdown\].*\[--simulate-reconnect\|--simulate-trace-catchup\].*\[--provider-request-id pr_\.\.\.\|--provider-session-id ps_\.\.\.\|--provider-turn-id turn_\.\.\.\|--provider-selected-session\].*\[--compare-url url\|--compare-hosted\|--compare-hosted-if-configured\].*\[--assert\].*\[--expect-regression text\].*\[--negative-profile batch\|overlay-drop\]/);
 	assert.match(help.stdout, /deterministic in-browser stream fixture/);
 	assert.match(help.stdout, /real app consumes deterministic \/api\/chat\/events frames/);
 	assert.match(help.stdout, /--fixture-profile selects steady cadence, deterministic jitter, bursty timing, or intentional batch stress/);
-	assert.match(help.stdout, /--fixture-mix includes text-only or mixed reasoning\/text deltas/);
+	assert.match(help.stdout, /--fixture-mix includes text-only, mixed reasoning\/text, or Markdown-syntax assistant deltas/);
 	assert.match(help.stdout, /--simulate-reconnect reloads the app with an EventSource probe/);
 	assert.match(help.stdout, /--simulate-trace-catchup suppresses backend live text deltas/);
 	assert.match(help.stdout, /--runs repeats the same scenario and reports medians/);
@@ -1066,7 +1066,7 @@ test("pibo debug web streaming benchmark rejects invalid fixture mix before targ
 	await assert.rejects(
 		execFileAsync("node", [cliPath, "debug", "web", "scenario", "streaming-benchmark", "--backend-fixture", "--fixture-mix", "thinking-only"]),
 		(error) => {
-			assert.match(error.stderr, /--fixture-mix must be text or reasoning-text/);
+			assert.match(error.stderr, /--fixture-mix must be text, reasoning-text, or markdown/);
 			assert.doesNotMatch(error.stderr, /No attachable CDP target/);
 			return true;
 		},

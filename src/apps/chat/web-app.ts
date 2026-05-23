@@ -1736,7 +1736,7 @@ type ChatStreamingFixtureBody = {
 };
 
 type ChatStreamingFixtureProfile = "steady" | "jitter" | "burst" | "batch";
-type ChatStreamingFixtureMix = "text" | "reasoning-text";
+type ChatStreamingFixtureMix = "text" | "reasoning-text" | "markdown";
 
 type ChatProjectsBootstrap = ChatBootstrapCatalog & {
 	identity: PiboWebSession["authSession"]["identity"];
@@ -2530,8 +2530,13 @@ function normalizeMessageText(value: unknown): string {
 	return value;
 }
 
-function normalizeStreamingFixtureDeltas(value: unknown): string[] {
-	if (value === undefined) return [" a", " b", " c", " d", " e", " f", " g", " h", " i", " j", " k", " l"];
+function defaultStreamingFixtureDeltas(mix: ChatStreamingFixtureMix): string[] {
+	if (mix === "markdown") return [" #", "a ", "|b", " ~", "c ", "{d", "}e", " [", "f]", " (", "g)", " _h"];
+	return [" a", " b", " c", " d", " e", " f", " g", " h", " i", " j", " k", " l"];
+}
+
+function normalizeStreamingFixtureDeltas(value: unknown, mix: ChatStreamingFixtureMix): string[] {
+	if (value === undefined) return defaultStreamingFixtureDeltas(mix);
 	if (!Array.isArray(value) || value.length === 0) throw new PiboWebHttpError("deltas must be a non-empty string array", 400);
 	if (value.length > 100) throw new PiboWebHttpError("deltas must contain at most 100 entries", 400);
 	return value.map((item) => {
@@ -2557,8 +2562,8 @@ function normalizeStreamingFixtureProfile(value: unknown): ChatStreamingFixtureP
 
 function normalizeStreamingFixtureMix(value: unknown): ChatStreamingFixtureMix {
 	if (value === undefined) return "text";
-	if (value === "text" || value === "reasoning-text") return value;
-	throw new PiboWebHttpError("mix must be text or reasoning-text", 400);
+	if (value === "text" || value === "reasoning-text" || value === "markdown") return value;
+	throw new PiboWebHttpError("mix must be text, reasoning-text, or markdown", 400);
 }
 
 function normalizeStreamingFixtureTraceSnapshots(value: unknown): boolean {
@@ -8227,10 +8232,10 @@ function startChatStreamingFixture(input: {
 	if (isPiboRoomArchived(room)) throw new PiboWebHttpError("Archived rooms are read-only", 403);
 	input.state.sessionQuery.upsertSession(selectedSession);
 
-	const deltas = normalizeStreamingFixtureDeltas(input.body.deltas);
 	const cadenceMs = normalizeStreamingFixtureCadenceMs(input.body.cadenceMs);
 	const profile = normalizeStreamingFixtureProfile(input.body.profile);
 	const mix = normalizeStreamingFixtureMix(input.body.mix);
+	const deltas = normalizeStreamingFixtureDeltas(input.body.deltas, mix);
 	const traceSnapshots = normalizeStreamingFixtureTraceSnapshots(input.body.traceSnapshots);
 	const suppressLiveDeltas = normalizeStreamingFixtureSuppressLiveDeltas(input.body.suppressLiveDeltas);
 	const scheduleMs = buildStreamingFixtureSchedule(deltas.length, cadenceMs, profile);
