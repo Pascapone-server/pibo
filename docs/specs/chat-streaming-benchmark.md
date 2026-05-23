@@ -79,8 +79,8 @@ This is the default deterministic regression mode because it exercises:
 - `reasoning-text`: reasoning deltas plus assistant text deltas.
 - `markdown`: CommonMark assistant deltas with real emphasis markers that force the full Markdown renderer path without GFM plugins while keeping small per-delta visible jumps.
 - `gfm-markdown`: GFM assistant deltas with strikethrough markers that exercise GFM rendering while keeping small per-delta visible jumps. Simple strikethrough may use the GFM fast path.
-- `gfm-task-markdown`: GFM task-list assistant deltas with simple inline links that can exercise narrowly guarded task-list fast rendering while keeping small per-delta visible jumps.
-- `gfm-full-markdown`: GFM task-list assistant deltas with nested Markdown inside link labels that must exercise the full `remark-gfm` parser while keeping small per-delta visible jumps.
+- `gfm-task-markdown`: GFM task-list assistant deltas with simple inline links, including strong labels, that can exercise narrowly guarded task-list fast rendering while keeping small per-delta visible jumps.
+- `gfm-full-markdown`: GFM task-list assistant deltas with richer Markdown inside link labels that must exercise the full `remark-gfm` parser while keeping small per-delta visible jumps.
 
 ### Simulations
 

@@ -74,7 +74,7 @@ export function requiresGfmMarkdown(markdown: string): boolean {
 const simpleGfmStrikethroughForbiddenPattern = /[\n\r\\`*_\[\]<>]/;
 const simpleGfmTaskListPattern = /^\s*[-+*]\s+\[([ xX])\]\s+(.+?)\s*$/;
 const simpleGfmTaskListTextForbiddenPattern = /[\n\r\\_<>|~]/;
-const simpleGfmTaskListLinkTextForbiddenPattern = /[\n\r\\`*_\[\]<>|~]/;
+const simpleGfmTaskListLinkLabelForbiddenPattern = /[\n\r\\`_\[\]<>|~]/;
 const simpleGfmTaskListLinkHrefForbiddenPattern = /[\s\[\]()`<>]/;
 
 function renderSimpleGfmStrikethrough(markdown: string): ReactElement | undefined {
@@ -119,6 +119,33 @@ function normalizeSimpleMarkdownLinkHref(href: string): string | undefined {
 	} catch {
 		return undefined;
 	}
+}
+
+function renderSimpleMarkdownLinkLabel(label: string, linkIndex: number): Array<string | ReactElement> | undefined {
+	if (!label || simpleGfmTaskListLinkLabelForbiddenPattern.test(label)) return undefined;
+	const parts: Array<string | ReactElement> = [];
+	let cursor = 0;
+	let strongCount = 0;
+	while (cursor < label.length) {
+		const start = label.indexOf("**", cursor);
+		if (start === -1) {
+			const suffix = label.slice(cursor);
+			if (suffix.includes("*") || (hasAutolinkCandidate(suffix) && markdownAutolinkPattern.test(suffix))) return undefined;
+			if (suffix) parts.push(suffix);
+			break;
+		}
+		const plainPrefix = label.slice(cursor, start);
+		if (plainPrefix.includes("*") || (hasAutolinkCandidate(plainPrefix) && markdownAutolinkPattern.test(plainPrefix))) return undefined;
+		if (plainPrefix) parts.push(plainPrefix);
+		const end = label.indexOf("**", start + 2);
+		if (end === -1 || end === start + 2) return undefined;
+		const strongText = label.slice(start + 2, end);
+		if (strongText.includes("*") || strongText.includes("[") || strongText.includes("]")) return undefined;
+		parts.push(<strong key={`link-${linkIndex}-strong-${strongCount}`} data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="strong">{strongText}</strong>);
+		strongCount += 1;
+		cursor = end + 2;
+	}
+	return parts.length > 0 ? parts : undefined;
 }
 
 function renderSimpleTaskListText(text: string): Array<string | ReactElement> | undefined {
@@ -166,10 +193,10 @@ function renderSimpleTaskListText(text: string): Array<string | ReactElement> | 
 			if (labelEnd === -1 || labelEnd === start + 1) return undefined;
 			const hrefEnd = text.indexOf(")", labelEnd + 2);
 			if (hrefEnd === -1 || hrefEnd === labelEnd + 2) return undefined;
-			const label = text.slice(start + 1, labelEnd);
+			const labelChildren = renderSimpleMarkdownLinkLabel(text.slice(start + 1, labelEnd), linkCount);
 			const href = normalizeSimpleMarkdownLinkHref(text.slice(labelEnd + 2, hrefEnd));
-			if (!href || simpleGfmTaskListLinkTextForbiddenPattern.test(label)) return undefined;
-			parts.push(<a key={`link-${linkCount}`} href={href} target="_blank" rel="noreferrer" data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="a">{label}</a>);
+			if (!href || !labelChildren) return undefined;
+			parts.push(<a key={`link-${linkCount}`} href={href} target="_blank" rel="noreferrer" data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="a">{labelChildren}</a>);
 			linkCount += 1;
 			cursor = hrefEnd + 1;
 		}

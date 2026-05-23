@@ -1475,8 +1475,8 @@ function streamingBenchmarkFixtureHtml(fixtureProfile: StreamingFixtureProfile, 
   const textDeltas = [' a', ' b', ' c', ' d', ' e', ' f', ' g', ' h', ' i', ' j', ' k', ' l'];
   const markdownDeltas = [' **a**', ' **b**', ' **c**', ' **d**', ' **e**', ' **f**', ' **g**', ' **h**', ' **i**', ' **j**', ' **k**', ' **l**'];
   const gfmMarkdownDeltas = [' ~~a~~', ' ~~b~~', ' ~~c~~', ' ~~d~~', ' ~~e~~', ' ~~f~~', ' ~~g~~', ' ~~h~~', ' ~~i~~', ' ~~j~~', ' ~~k~~', ' ~~l~~'];
-  const gfmTaskMarkdownDeltas = ['- [ ] [a](https://e.co/a)', ' [b](https://e.co/b)', ' [c](https://e.co/c)', ' [d](https://e.co/d)', ' [e](https://e.co/e)', ' [f](https://e.co/f)', ' [g](https://e.co/g)', ' [h](https://e.co/h)', ' [i](https://e.co/i)', ' [j](https://e.co/j)', ' [k](https://e.co/k)', ' [l](https://e.co/l)'];
-  const gfmFullMarkdownDeltas = ['- [ ] [**a**](https://e.co/a)', ' [**b**](https://e.co/b)', ' [**c**](https://e.co/c)', ' [**d**](https://e.co/d)', ' [**e**](https://e.co/e)', ' [**f**](https://e.co/f)', ' [**g**](https://e.co/g)', ' [**h**](https://e.co/h)', ' [**i**](https://e.co/i)', ' [**j**](https://e.co/j)', ' [**k**](https://e.co/k)', ' [**l**](https://e.co/l)'];
+  const gfmTaskMarkdownDeltas = ['- [ ] [**a**](https://e.co/a)', ' [**b**](https://e.co/b)', ' [**c**](https://e.co/c)', ' [**d**](https://e.co/d)', ' [**e**](https://e.co/e)', ' [**f**](https://e.co/f)', ' [**g**](https://e.co/g)', ' [**h**](https://e.co/h)', ' [**i**](https://e.co/i)', ' [**j**](https://e.co/j)', ' [**k**](https://e.co/k)', ' [**l**](https://e.co/l)'];
+  const gfmFullMarkdownDeltas = ['- [ ] [_a_](https://e.co/a)', ' [_b_](https://e.co/b)', ' [_c_](https://e.co/c)', ' [_d_](https://e.co/d)', ' [_e_](https://e.co/e)', ' [_f_](https://e.co/f)', ' [_g_](https://e.co/g)', ' [_h_](https://e.co/h)', ' [_i_](https://e.co/i)', ' [_j_](https://e.co/j)', ' [_k_](https://e.co/k)', ' [_l_](https://e.co/l)'];
   const cadenceMs = 100;
   const profile = ${JSON.stringify(fixtureProfile)};
   const mix = ${JSON.stringify(fixtureMix)};
