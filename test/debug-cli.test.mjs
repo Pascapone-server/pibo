@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { PiboDataStore } from "../dist/data/pibo-store.js";
 import { PiboReliabilityStore } from "../dist/reliability/store.js";
-import { attachStreamingProviderTelemetryToBenchmark, collectStreamingProviderTelemetryFromSelectedBrowserSession, collectStreamingProviderTelemetryFromSession, collectStreamingProviderTelemetryFromTurn, evaluateStreamingBenchmarkAssertion, evaluateStreamingBenchmarkUrlComparisonRegressions, evaluateStreamingLivePipelineRegressions, evaluateStreamingProviderRegressions, formatStreamingBenchmarkAssertionSummary, formatStreamingBenchmarkUrlComparison, formatWatch, inferWatchFlickers, resolveStreamingBenchmarkHostedCompareUrlFromValues, summarizeStreamingBenchmarkUrlComparison, summarizeStreamingBenchmarks, summarizeStreamingLivePipeline, summarizeStreamingProviderPreservation, summarizeStreamingProviderTelemetry } from "../dist/debug/web.js";
+import { attachStreamingProviderTelemetryToBenchmark, collectStreamingProviderTelemetryFromSelectedBrowserSession, collectStreamingProviderTelemetryFromSession, collectStreamingProviderTelemetryFromTurn, evaluateStreamingBenchmarkAssertion, evaluateStreamingBenchmarkUrlComparisonRegressions, evaluateStreamingLivePipelineRegressions, evaluateStreamingProviderRegressions, formatStreamingBenchmarkAssertionSummary, formatStreamingBenchmarkUrlComparison, formatWatch, inferWatchFlickers, resolveStreamingBenchmarkHostedCompareUrlFromValues, summarizeStreamingBenchmarkUrlComparison, summarizeStreamingBenchmarks, summarizeStreamingLivePipeline, summarizeStreamingProviderPreservation, summarizeStreamingProviderTelemetry, summarizeStreamingSelectedLiveEventSource } from "../dist/debug/web.js";
 
 const execFileAsyncRaw = promisify(execFile);
 const cliPath = resolve("dist/bin/pibo.js");
@@ -405,6 +405,45 @@ test("streaming benchmark summaries aggregate selected-live reconnect streams", 
 	assert.equal(summary.selectedLiveReconnectOpenCountAfterStart.p50, 2);
 	assert.equal(summary.selectedLiveTransientIdCountAfterStart.p50, 20);
 	assert.equal(summary.selectedLiveFirstTextEventMsAfterStart.p50, 105);
+});
+
+test("selected-live EventSource summary aggregates reconnect replay status", () => {
+	const selectedLive = summarizeStreamingSelectedLiveEventSource({
+		eventSource: {
+			streams: [
+				{ role: "selected-live", url: "/api/chat/events?piboSessionId=ps_test&mode=live", sinceValues: ["100:1"], liveSinceValues: [], eventCount: 12, eventCountAfterStart: 12, textEventCount: 7, textEventCountAfterStart: 7, reasoningEventCount: 2, reasoningEventCountAfterStart: 2, openCountAfterStart: 1, errorCountAfterStart: 0, closeCountAfterStart: 1, forcedCloseCountAfterStart: 1, transientIdCount: 12, uniqueTransientIdCount: 12, transientIdCountAfterStart: 12, uniqueTransientIdCountAfterStart: 12, durableIdCount: 0, otherIdCount: 0, firstTextEventMsAfterStart: 105 },
+				{ role: "selected-live", url: "/api/chat/events?piboSessionId=ps_test&mode=live&liveSince=42", sinceValues: [], liveSinceValues: ["42"], eventCount: 8, eventCountAfterStart: 8, textEventCount: 5, textEventCountAfterStart: 5, reasoningEventCount: 2, reasoningEventCountAfterStart: 2, openCountAfterStart: 1, errorCountAfterStart: 0, closeCountAfterStart: 0, forcedCloseCountAfterStart: 0, transientIdCount: 8, uniqueTransientIdCount: 8, transientIdCountAfterStart: 8, uniqueTransientIdCountAfterStart: 8, durableIdCount: 0, otherIdCount: 0, liveReplayEventCount: 2, liveReplayEventCountAfterStart: 2, liveReplayMissedCount: 1, liveReplayMissedCountAfterStart: 1, liveReplayEvictedBeforeMax: 41, firstTextEventMsAfterStart: 212 },
+				{ role: "room-summary", url: "/api/chat/events?roomId=room_test&mode=summary", sinceValues: [], liveSinceValues: [], eventCount: 6, eventCountAfterStart: 6, textEventCount: 0, textEventCountAfterStart: 0, reasoningEventCount: 0, reasoningEventCountAfterStart: 0, openCountAfterStart: 1, errorCountAfterStart: 0, closeCountAfterStart: 0, forcedCloseCountAfterStart: 0, transientIdCount: 6, uniqueTransientIdCount: 6, transientIdCountAfterStart: 6, uniqueTransientIdCountAfterStart: 6, durableIdCount: 0, otherIdCount: 0, liveReplayEventCount: 5, liveReplayEventCountAfterStart: 5 },
+			],
+		},
+	});
+	assert.equal(selectedLive.textEventCountAfterStart, 12);
+	assert.equal(selectedLive.reasoningEventCountAfterStart, 4);
+	assert.deepEqual(selectedLive.liveSinceValues, ["42"]);
+	assert.deepEqual(selectedLive.sinceValues, ["100:1"]);
+	assert.equal(selectedLive.liveReplayEventCountAfterStart, 2);
+	assert.equal(selectedLive.liveReplayMissedCountAfterStart, 1);
+	assert.equal(selectedLive.liveReplayEvictedBeforeMax, 41);
+	assert.equal(selectedLive.forcedCloseCountAfterStart, 1);
+	assert.equal(selectedLive.openCountAfterStart, 2);
+	assert.equal(selectedLive.firstTextEventMsAfterStart, 105);
+});
+
+test("provider preservation aggregates selected-live reconnect streams", () => {
+	const preservation = summarizeStreamingProviderPreservation({
+		provider: { available: true, textDeltaCount: 12, reasoningDeltaCount: 4 },
+		eventSource: {
+			streams: [
+				{ role: "selected-live", url: "/api/chat/events?piboSessionId=ps_test&mode=live", sinceValues: [], liveSinceValues: [], eventCount: 12, eventCountAfterStart: 12, textEventCount: 7, textEventCountAfterStart: 7, reasoningEventCount: 2, reasoningEventCountAfterStart: 2, openCountAfterStart: 1, errorCountAfterStart: 0, closeCountAfterStart: 1, forcedCloseCountAfterStart: 1, transientIdCount: 12, uniqueTransientIdCount: 12, transientIdCountAfterStart: 12, uniqueTransientIdCountAfterStart: 12, durableIdCount: 0, otherIdCount: 0 },
+				{ role: "selected-live", url: "/api/chat/events?piboSessionId=ps_test&mode=live&liveSince=42", sinceValues: [], liveSinceValues: ["42"], eventCount: 8, eventCountAfterStart: 8, textEventCount: 5, textEventCountAfterStart: 5, reasoningEventCount: 2, reasoningEventCountAfterStart: 2, openCountAfterStart: 1, errorCountAfterStart: 0, closeCountAfterStart: 0, forcedCloseCountAfterStart: 0, transientIdCount: 8, uniqueTransientIdCount: 8, transientIdCountAfterStart: 8, uniqueTransientIdCountAfterStart: 8, durableIdCount: 0, otherIdCount: 0, liveReplayEventCount: 2, liveReplayEventCountAfterStart: 2 },
+			],
+		},
+		dom: { positiveUpdateCount: 12 },
+	});
+	assert.equal(preservation.selectedLiveTextEventCountAfterStart, 12);
+	assert.equal(preservation.selectedLiveReasoningEventCountAfterStart, 4);
+	assert.equal(preservation.selectedLiveTextToProviderRatio, 1);
+	assert.equal(preservation.selectedLiveReasoningToProviderRatio, 1);
 });
 
 test("streaming live pipeline summary subtracts pre-reset trace state", () => {

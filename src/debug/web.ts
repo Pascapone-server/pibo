@@ -3046,10 +3046,16 @@ function summarizeStreamingCadence(benchmark: Pick<StreamingBenchmark, "fixture"
 	};
 }
 
+export function summarizeStreamingSelectedLiveEventSource(benchmark: { eventSource?: Pick<StreamingBenchmarkEventSourceProbe, "streams"> }): StreamingBenchmarkEventSourceStreamProbe | undefined {
+	const streams = benchmark.eventSource?.streams?.filter((stream) => stream.role === "selected-live") ?? [];
+	if (streams.length <= 1) return streams[0];
+	return aggregateEventSourceStreams(streams, "selected-live");
+}
+
 export function summarizeStreamingProviderPreservation(benchmark: { provider?: StreamingBenchmarkProviderTelemetry; sse?: StreamingBenchmarkSseProbe; eventSource?: Pick<StreamingBenchmarkEventSourceProbe, "streams">; dom?: Pick<StreamingBenchmark["dom"], "positiveUpdateCount"> }): StreamingBenchmarkProviderPreservation | undefined {
 	const provider = benchmark.provider;
 	if (!provider?.available) return undefined;
-	const selectedLive = benchmark.eventSource?.streams?.find((stream) => stream.role === "selected-live");
+	const selectedLive = summarizeStreamingSelectedLiveEventSource(benchmark);
 	return {
 		providerTextDeltaCount: provider.textDeltaCount,
 		providerReasoningDeltaCount: provider.reasoningDeltaCount,
@@ -3517,9 +3523,7 @@ function streamingDebugStateWindowNumber(run: StreamingBenchmark, key: keyof Str
 }
 
 function selectedLiveStream(run: StreamingBenchmark): StreamingBenchmarkEventSourceStreamProbe | undefined {
-	const streams = run.eventSource?.streams.filter((stream) => stream.role === "selected-live") ?? [];
-	if (streams.length <= 1) return streams[0];
-	return aggregateEventSourceStreams(streams, "selected-live");
+	return summarizeStreamingSelectedLiveEventSource(run);
 }
 
 function aggregateEventSourceStreams(streams: StreamingBenchmarkEventSourceStreamProbe[], role: StreamingBenchmarkEventSourceStreamProbe["role"]): StreamingBenchmarkEventSourceStreamProbe {
