@@ -3441,24 +3441,40 @@ async function readStreamingBenchmarkArtifact(file: string): Promise<StreamingBe
 	if (value?.kind === "streaming-benchmark") return normalizeStreamingBenchmarkRun(value as StreamingBenchmark);
 	if (value?.kind === "streaming-benchmark-runs") {
 		const runs = Array.isArray(value.runs) ? value.runs.map((run: StreamingBenchmark) => normalizeStreamingBenchmarkRun(run)) : [];
-		return {
-			...(value as StreamingBenchmarkGroup),
-			runs,
-			summary: value.summary ?? summarizeStreamingBenchmarks(runs),
-		};
+		return normalizeStreamingBenchmarkGroupArtifact(value as Partial<StreamingBenchmarkGroup>, runs);
 	}
 	if (value?.kind === "streaming-benchmark-url-comparison") {
 		const primaryRuns = Array.isArray(value.primary?.runs) ? value.primary.runs.map((run: StreamingBenchmark) => normalizeStreamingBenchmarkRun(run)) : [];
 		const compareRuns = Array.isArray(value.compare?.runs) ? value.compare.runs.map((run: StreamingBenchmark) => normalizeStreamingBenchmarkRun(run)) : [];
-		const primary = { ...(value.primary as StreamingBenchmarkGroup), runs: primaryRuns, summary: value.primary?.summary ?? summarizeStreamingBenchmarks(primaryRuns) };
-		const compare = { ...(value.compare as StreamingBenchmarkGroup), runs: compareRuns, summary: value.compare?.summary ?? summarizeStreamingBenchmarks(compareRuns) };
-		return { ...(value as StreamingBenchmarkUrlComparison), primary, compare };
+		const primary = normalizeStreamingBenchmarkGroupArtifact(value.primary as Partial<StreamingBenchmarkGroup> | undefined, primaryRuns);
+		const compare = normalizeStreamingBenchmarkGroupArtifact(value.compare as Partial<StreamingBenchmarkGroup> | undefined, compareRuns);
+		return {
+			...(value as StreamingBenchmarkUrlComparison),
+			primary,
+			compare,
+			comparison: compareStreamingBenchmarkSummaries(primary.summary, compare.summary),
+			regressions: Array.isArray(value.regressions) ? value.regressions : [],
+			warnings: Array.isArray(value.warnings) ? value.warnings : [],
+		};
 	}
 	throw new Error(`File is not a streaming benchmark artifact: ${file}`);
 }
 
+function normalizeStreamingBenchmarkGroupArtifact(value: Partial<StreamingBenchmarkGroup> | undefined, runs: StreamingBenchmark[]): StreamingBenchmarkGroup {
+	return {
+		...(value as StreamingBenchmarkGroup | undefined),
+		kind: "streaming-benchmark-runs",
+		createdAt: value?.createdAt ?? new Date().toISOString(),
+		durationMs: value?.durationMs ?? runs[0]?.durationMs ?? 0,
+		runs,
+		summary: summarizeStreamingBenchmarks(runs),
+		regressions: Array.isArray(value?.regressions) ? value.regressions : [],
+		warnings: Array.isArray(value?.warnings) ? value.warnings : [],
+	};
+}
+
 function normalizeStreamingBenchmarkRun(run: StreamingBenchmark): StreamingBenchmark {
-	const scored = { ...run, score: run.score ?? scoreStreamingBenchmark(run) };
+	const scored = { ...run, regressions: Array.isArray(run.regressions) ? run.regressions : [], warnings: Array.isArray(run.warnings) ? run.warnings : [], score: run.score ?? scoreStreamingBenchmark(run) };
 	const withProviderPreservation = { ...scored, providerPreservation: run.providerPreservation ?? summarizeStreamingProviderPreservation(scored) };
 	const withLivePipeline = { ...withProviderPreservation, livePipeline: run.livePipeline ?? summarizeStreamingLivePipeline(withProviderPreservation) };
 	return { ...withLivePipeline, cadence: run.cadence ?? summarizeStreamingCadence(withLivePipeline) };
@@ -3542,7 +3558,9 @@ function formatStreamingBenchmarkCompactRun(benchmark: StreamingBenchmark, targe
 		`Target: ${target.url || benchmark.url}`,
 		markdownTable(["Layer", "Preservation", "Cadence / latency"], [
 			["Provider/Pi", benchmark.provider ? `text ${jsonShort(benchmark.provider.textDeltaCount)}, reasoning ${jsonShort(benchmark.provider.reasoningDeltaCount)}, parseErrors ${jsonShort(benchmark.provider.parseErrorCount)}, unknown ${jsonShort(benchmark.provider.unknownEventCount)}` : "n/a", benchmark.provider ? `text gap p90 ${statP90(benchmark.provider.textDeltaGapsMs, "ms")}, first text ${jsonShort(benchmark.provider.firstTextLatencyMs)}ms` : "n/a"],
+			["Provider ratios", benchmark.providerPreservation ? `SSE text ${jsonShort(benchmark.providerPreservation.sseTextToProviderRatio)}, selected-live text ${jsonShort(benchmark.providerPreservation.selectedLiveTextToProviderRatio)}, DOM/text ${jsonShort(benchmark.providerPreservation.domPositiveToProviderTextRatio)}` : "n/a", benchmark.providerPreservation ? `SSE reasoning ${jsonShort(benchmark.providerPreservation.sseReasoningToProviderRatio)}, selected-live reasoning ${jsonShort(benchmark.providerPreservation.selectedLiveReasoningToProviderRatio)}` : "n/a"],
 			["SSE transport", benchmark.sse ? `text ${benchmark.sse.textEventCount}, reasoning ${benchmark.sse.reasoningEventCount}, transient ${benchmark.sse.transientIdCount}` : "n/a", benchmark.sse ? `text gap p90 ${statP90(benchmark.sse.textEventGapsMs, "ms")}, text/chunk p90 ${statP90(benchmark.sse.textEventsPerChunk)}, first text ${jsonShort(benchmark.sse.firstTextEventMs)}ms` : "n/a"],
+			["Cadence lag", benchmark.cadence ? `fixture schedule p90 ${jsonShort(benchmark.cadence.fixtureScheduleGapP90Ms)}ms` : "n/a", benchmark.cadence ? `DOM lag ${jsonShort(benchmark.cadence.domLagOverScheduleP90Ms)}ms, SSE text lag ${jsonShort(benchmark.cadence.sseTextLagOverScheduleP90Ms)}ms` : "n/a"],
 			["EventSource selected-live", selectedLive ? `text ${selectedLive.textEventCountAfterStart}, reasoning ${selectedLive.reasoningEventCountAfterStart}, events ${selectedLive.eventCount}` : "n/a", selectedLive ? `first text ${jsonShort(selectedLive.firstTextEventMsAfterStart)}ms, transient ${selectedLive.uniqueTransientIdCountAfterStart}/${selectedLive.transientIdCountAfterStart}` : "n/a"],
 			["Live overlay", benchmark.livePipeline ? `flushed/expected ${jsonShort(benchmark.livePipeline.flushedEventsToExpectedRatio)}, overlayEvents/expected ${jsonShort(benchmark.livePipeline.overlayEventsToExpectedRatio)}, currentText/expected ${jsonShort(benchmark.livePipeline.currentOutputToExpectedTextBytesRatio)}` : "n/a", benchmark.livePipeline ? `first text ${jsonShort(benchmark.livePipeline.firstTextDeltaMs)}ms, first flush ${jsonShort(benchmark.livePipeline.firstFlushMs)}ms` : "n/a"],
 			["DOM", `positive ${benchmark.dom.positiveUpdateCount}, max jump ${jsonShort(benchmark.dom.positiveCharJumps.max)} chars`, `p90 gap ${statP90(benchmark.dom.gapsMs, "ms")}, first visible ${jsonShort(benchmark.dom.firstPositiveUpdateMs)}ms`],
@@ -3560,7 +3578,9 @@ function formatStreamingBenchmarkCompactGroup(group: StreamingBenchmarkGroup, ta
 		`Runs: ${group.runs.length} x ${(group.durationMs / 1000).toFixed(1)}s`,
 		markdownTable(["Layer", "Median preservation", "Median cadence / latency"], [
 			["Provider/Pi", `text ${statP50(group.summary.providerTextDeltaCount)}, reasoning ${statP50(group.summary.providerReasoningDeltaCount)}, parseErrors ${statP50(group.summary.providerParseErrorCount)}`, `text gap p90 ${statP50(group.summary.providerTextDeltaGapP90Ms, "ms")}, first text ${statP50(group.summary.providerFirstTextLatencyMs, "ms")}`],
+			["Provider ratios", `SSE text ${statP50(group.summary.providerSseTextRatio)}, selected-live text ${statP50(group.summary.providerSelectedLiveTextRatio)}, DOM/text ${statP50(group.summary.providerDomPositiveTextRatio)}`, `SSE reasoning ${statP50(group.summary.providerSseReasoningRatio)}, selected-live reasoning ${statP50(group.summary.providerSelectedLiveReasoningRatio)}`],
 			["SSE transport", `text ${statP50(group.summary.sseTextEventCount)}, reasoning ${statP50(group.summary.sseReasoningEventCount)}`, `text gap p90 ${statP50(group.summary.sseTextEventGapP90Ms, "ms")}, text/chunk p90 ${statP50(group.summary.sseTextEventsPerChunkP90)}, first text ${statP50(group.summary.sseFirstTextEventMs, "ms")}`],
+			["Cadence lag", `fixture schedule p90 ${statP50(group.summary.fixtureScheduleGapP90Ms, "ms")}`, `DOM lag ${statP50(group.summary.domLagOverFixtureScheduleP90Ms, "ms")}, SSE text lag ${statP50(group.summary.sseTextLagOverFixtureScheduleP90Ms, "ms")}`],
 			["EventSource selected-live", `text ${statP50(group.summary.selectedLiveTextEventCountAfterStart)}, reasoning ${statP50(group.summary.selectedLiveReasoningEventCountAfterStart)}, events ${statP50(group.summary.selectedLiveEventCountAfterStart)}`, `first text ${statP50(group.summary.selectedLiveFirstTextEventMsAfterStart, "ms")}, transient ${statP50(group.summary.selectedLiveTransientIdCountAfterStart)}`],
 			["Live overlay", `flushed/expected ${statP50(group.summary.liveFlushedEventsToExpectedRatio)}, overlayEvents/expected ${statP50(group.summary.liveOverlayEventsToExpectedRatio)}, currentText/expected ${statP50(group.summary.liveCurrentOutputToExpectedTextBytesRatio)}`, `first text ${statP50(group.summary.liveFirstTextDeltaMs, "ms")}, first flush ${statP50(group.summary.liveFirstFlushMs, "ms")}`],
 			["DOM", `positive ${statP50(group.summary.domPositiveUpdateCount)}, max jump ${statP50(group.summary.domJumpMaxChars, " chars")}`, `p90 gap ${statP50(group.summary.domGapP90Ms, "ms")}, first visible ${statP50(group.summary.firstVisibleMs, "ms")}`],
@@ -3581,11 +3601,15 @@ function formatStreamingBenchmarkCompactUrlComparison(comparison: StreamingBench
 		markdownTable(["Metric", "Primary p50", "Compare p50", "Delta"], [
 			["Smoothness", statP50(comparison.primary.summary.smoothness), statP50(comparison.compare.summary.smoothness), signed(comparison.comparison.smoothnessDelta)],
 			["DOM p90 gap", statP50(comparison.primary.summary.domGapP90Ms, "ms"), statP50(comparison.compare.summary.domGapP90Ms, "ms"), signedMs(comparison.comparison.domGapP90DeltaMs)],
+			["DOM lag vs schedule", statP50(comparison.primary.summary.domLagOverFixtureScheduleP90Ms, "ms"), statP50(comparison.compare.summary.domLagOverFixtureScheduleP90Ms, "ms"), signedMs(comparison.comparison.domLagOverFixtureScheduleP90DeltaMs)],
 			["SSE chunk p90 gap", statP50(comparison.primary.summary.sseChunkGapP90Ms, "ms"), statP50(comparison.compare.summary.sseChunkGapP90Ms, "ms"), signedMs(comparison.comparison.sseChunkGapP90DeltaMs)],
+			["SSE text lag vs schedule", statP50(comparison.primary.summary.sseTextLagOverFixtureScheduleP90Ms, "ms"), statP50(comparison.compare.summary.sseTextLagOverFixtureScheduleP90Ms, "ms"), signedMs(comparison.comparison.sseTextLagOverFixtureScheduleP90DeltaMs)],
 			["SSE text events", statP50(comparison.primary.summary.sseTextEventCount), statP50(comparison.compare.summary.sseTextEventCount), signed(comparison.comparison.sseTextEventDelta)],
 			["Selected-live text", statP50(comparison.primary.summary.selectedLiveTextEventCountAfterStart), statP50(comparison.compare.summary.selectedLiveTextEventCountAfterStart), signed(comparison.comparison.selectedLiveTextEventDelta)],
 			["Selected-live reasoning", statP50(comparison.primary.summary.selectedLiveReasoningEventCountAfterStart), statP50(comparison.compare.summary.selectedLiveReasoningEventCountAfterStart), signed(comparison.comparison.selectedLiveReasoningEventDelta)],
 			["Live flush/enqueue", statP50(comparison.primary.summary.liveFlushToEnqueueRatio), statP50(comparison.compare.summary.liveFlushToEnqueueRatio), signed(comparison.comparison.liveFlushToEnqueueRatioDelta)],
+			["Provider SSE text ratio", statP50(comparison.primary.summary.providerSseTextRatio), statP50(comparison.compare.summary.providerSseTextRatio), signed(comparison.comparison.providerSseTextRatioDelta)],
+			["Provider selected-live text ratio", statP50(comparison.primary.summary.providerSelectedLiveTextRatio), statP50(comparison.compare.summary.providerSelectedLiveTextRatio), signed(comparison.comparison.providerSelectedLiveTextRatioDelta)],
 			["First selected-live text", statP50(comparison.primary.summary.selectedLiveFirstTextEventMsAfterStart, "ms"), statP50(comparison.compare.summary.selectedLiveFirstTextEventMsAfterStart, "ms"), signedMs(comparison.comparison.selectedLiveFirstTextEventDeltaMs)],
 			["First visible DOM", statP50(comparison.primary.summary.firstVisibleMs, "ms"), statP50(comparison.compare.summary.firstVisibleMs, "ms"), signedMs(comparison.comparison.firstVisibleDeltaMs)],
 		]),

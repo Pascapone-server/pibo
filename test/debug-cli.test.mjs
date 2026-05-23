@@ -87,6 +87,61 @@ test("pibo debug web report renders saved streaming benchmark artifacts without 
 	}
 });
 
+test("pibo debug web report recomputes streaming summaries for older artifacts", async () => {
+	const cwd = await makeEmptyCwd();
+	try {
+		const artifact = join(cwd, "legacy-streaming-runs.json");
+		const run = {
+			kind: "streaming-benchmark",
+			createdAt: "2026-05-23T00:00:00.000Z",
+			url: "http://example.test/apps/chat/rooms/room_test/sessions/ps_test?debugStreaming=1",
+			title: "Chat",
+			durationMs: 1800,
+			debug: {
+				enabledRequested: true,
+				available: true,
+				reset: true,
+				delta: { textDeltaCount: 12, textDeltaBytes: 24, reasoningDeltaCount: 4, enqueueCount: 22, flushCount: 20, flushedEventCount: 22, overlayUpdateCount: 20 },
+				after: { overlayEventCount: 16, currentOutputLength: 24, traceBaseOutputLength: 0 },
+			},
+			dom: {
+				selector: "[data-pibo-component=MarkdownRendererHost]",
+				targetCountStart: 1,
+				targetCountEnd: 1,
+				lengthStart: 0,
+				lengthEnd: 24,
+				lengthMax: 24,
+				updateCount: 12,
+				positiveUpdateCount: 12,
+				firstPositiveUpdateMs: 145,
+				gapsMs: { count: 11, p50: 100, p90: 101, p99: 103, max: 103, avg: 100.4 },
+				positiveCharJumps: { count: 12, p50: 2, p90: 2, p99: 2, max: 2, avg: 2 },
+			},
+			raf: { count: 100, gapsMs: { count: 99, p50: 16.7, p90: 16.8, p99: 17, max: 17, avg: 16.7 } },
+			longTasks: { count: 0, totalMs: 0, maxMs: 0 },
+			fixture: { requested: true, mode: "backend", profile: "steady", mix: "reasoning-text", available: true, started: true, deltaCount: 12, reasoningDeltaCount: 4, scheduleGapsMs: { count: 11, p50: 100, p90: 100, p99: 100, max: 100, avg: 100 }, textBytes: 24 },
+			sse: { requested: true, installed: true, status: 200, textEventCount: 12, reasoningEventCount: 4, transientIdCount: 22, chunkBytes: { count: 1 }, chunkGapsMs: { count: 0 }, textEventsPerChunk: { count: 12, p50: 1, p90: 1, p99: 1, max: 1, avg: 1 }, textEventGapsMs: { count: 11, p50: 100, p90: 101, p99: 103, max: 103, avg: 100.4 }, errors: [] },
+			score: { smoothness: 58, textDeltaCount: 12, domPositiveUpdateCount: 12 },
+			regressions: [],
+			warnings: [],
+		};
+		await writeFile(artifact, JSON.stringify({
+			kind: "streaming-benchmark-runs",
+			createdAt: "2026-05-23T00:00:00.000Z",
+			durationMs: 1800,
+			runs: [run],
+			summary: { runs: 1, smoothness: { count: 1, p50: 58 } },
+			regressions: [],
+			warnings: [],
+		}, null, 2));
+		const report = await execFileAsync("node", [cliPath, "debug", "web", "report", "streaming-benchmark", "--from", artifact, "--compact"], { cwd });
+		assert.match(report.stdout, /\| SSE transport \| text 12, reasoning 4 \|/);
+		assert.match(report.stdout, /\| Cadence lag \| fixture schedule p90 100ms \| DOM lag 1ms, SSE text lag 1ms \|/);
+	} finally {
+		await rm(cwd, { recursive: true, force: true });
+	}
+});
+
 test("pibo debug web streaming benchmark help advertises the deterministic fixture", async () => {
 	const help = await execFileAsync("node", [cliPath, "debug", "web", "scenario", "--help"]);
 	assert.match(help.stdout, /streaming-benchmark \[--fixture\|--backend-fixture\].*\[--fixture-profile steady\|jitter\|burst\|batch\].*\[--fixture-mix text\|reasoning-text\].*\[--simulate-reconnect\|--simulate-trace-catchup\].*\[--provider-request-id pr_\.\.\.\|--provider-session-id ps_\.\.\.\|--provider-turn-id turn_\.\.\.\|--provider-selected-session\].*\[--compare-url url\|--compare-hosted\|--compare-hosted-if-configured\].*\[--assert\].*\[--expect-regression text\].*\[--negative-profile batch\|overlay-drop\]/);
