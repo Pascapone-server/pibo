@@ -346,7 +346,7 @@ export function patchTraceViewWithEvents(
 	if (!candidateEvents.length) return view;
 
 	const allNodes = flattenTraceNodes(view.nodes).map((node) => ({ ...node, children: [] }));
-	const byId = mapTraceNodesById(allNodes);
+	const byId = mapFlatTraceNodesById(allNodes);
 	const childByParent = new Map<string, Array<{ id: string; metadata?: Record<string, unknown> }>>();
 	const linkedChildByToolCallId = new Map<string, string>();
 	const openTranscriptEventIds = new Set<string>();
@@ -392,12 +392,18 @@ function eventsCanAffectAsyncAgentRunStatus(events: readonly ChatWebStoredEvent[
 	});
 }
 
+function mapFlatTraceNodesById(nodes: readonly PiboTraceNode[]): Map<string, PiboTraceNode> {
+	const byId = new Map<string, PiboTraceNode>();
+	for (const node of nodes) byId.set(node.id, node);
+	return byId;
+}
+
 function isConfirmedUserMessageEcho(nodes: readonly PiboTraceNode[], event: ChatWebStoredEvent): boolean {
 	const payload = event.payload as PiboOutputEvent;
 	if (payload.type !== "message_queued" || payload.source !== "user") return false;
 	const eventId = typeof payload.eventId === "string" ? payload.eventId : event.eventId;
 	const text = typeof payload.text === "string" ? payload.text : undefined;
-	return flattenTraceNodes([...nodes]).some((node) => {
+	return nodes.some((node) => {
 		if (node.type !== "user.message" || node.source !== "transcript") return false;
 		if (eventId && (node.entryId === eventId || node.stableKey === `entry:${eventId}`)) return true;
 		return Boolean(text && traceNodeText(node) === text);
