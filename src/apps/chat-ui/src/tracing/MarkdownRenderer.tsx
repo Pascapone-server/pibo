@@ -42,12 +42,15 @@ const allowedElements = [
 	"del",
 ];
 
-const remarkPlugins = [remarkGfm];
+const gfmRemarkPlugins = [remarkGfm];
+const commonMarkRemarkPlugins: typeof gfmRemarkPlugins = [];
 
 const markdownStructuralPattern = /[\n\r\\`*_\[\]<>]|~~/;
 const markdownLinePrefixPattern = /^\s*(?:#{1,6}\s|[-+>]|(?:\d+[.)]))\s/;
 const markdownThematicBreakPattern = /^\s*-{3,}\s*$/;
 const markdownAutolinkPattern = /\b(?:https?:\/\/|www\.)|\S+@\S+\.\S+/i;
+const markdownTaskListPattern = /^\s*[-+*]\s+\[[ xX]\]\s/m;
+const markdownTablePattern = /(^|\n)\s*\|?.+\|.+\n\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*(?:\n|$)/;
 
 export function isPlainMarkdownText(markdown: string): boolean {
 	return markdown.length > 0
@@ -55,6 +58,13 @@ export function isPlainMarkdownText(markdown: string): boolean {
 		&& !markdownLinePrefixPattern.test(markdown)
 		&& !markdownThematicBreakPattern.test(markdown)
 		&& !markdownAutolinkPattern.test(markdown);
+}
+
+export function requiresGfmMarkdown(markdown: string): boolean {
+	return markdown.includes("~~")
+		|| markdownTaskListPattern.test(markdown)
+		|| markdownTablePattern.test(markdown)
+		|| markdownAutolinkPattern.test(markdown);
 }
 
 const components: Components = {
@@ -168,7 +178,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ children }: Mar
 			allowedElements,
 			children,
 			components,
-			remarkPlugins,
+			remarkPlugins: requiresGfmMarkdown(children) ? gfmRemarkPlugins : commonMarkRemarkPlugins,
 			skipHtml: true,
 			urlTransform: safeUrlTransform,
 		});

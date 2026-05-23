@@ -149,7 +149,7 @@ Collected from `window.__piboStreamingDebug` when `?debugStreaming=1` or local s
 - live open/error count;
 - event, enqueue, flush, flushed-event, overlay-update, overlay-event counts;
 - live trace overlay compute count plus total/max duration for committed overlay renders;
-- Markdown renderer invocation count split into plain/full paths plus total/max duration when debug streaming is enabled; full-path timing includes the synchronous ReactMarkdown/GFM parse and React tree build;
+- Markdown renderer invocation count split into plain/full paths plus total/max duration when debug streaming is enabled; full-path timing includes the synchronous ReactMarkdown parse and React tree build, with GFM plugins only when the input uses GFM-specific syntax;
 - current output and trace base output lengths;
 - trace refresh count/duration;
 - first text, enqueue, flush, and overlay-update latency;
