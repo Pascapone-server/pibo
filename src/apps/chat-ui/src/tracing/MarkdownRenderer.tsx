@@ -73,8 +73,8 @@ export function requiresGfmMarkdown(markdown: string): boolean {
 
 const simpleGfmStrikethroughForbiddenPattern = /[\n\r\\`*_\[\]<>]/;
 const simpleGfmTaskListPattern = /^\s*[-+*]\s+\[([ xX])\]\s+(.+?)\s*$/;
-const simpleGfmTaskListTextForbiddenPattern = /[\n\r\\_<>|~]/;
-const simpleGfmTaskListLinkLabelForbiddenPattern = /[\n\r\\`_\[\]<>|~]/;
+const simpleGfmTaskListTextForbiddenPattern = /[\n\r\\<>|~]/;
+const simpleGfmTaskListLinkLabelForbiddenPattern = /[\n\r\\`\[\]<>|~]/;
 const simpleGfmTaskListLinkHrefForbiddenPattern = /[\s\[\]()`<>]/;
 
 function renderSimpleGfmStrikethrough(markdown: string): ReactElement | undefined {
@@ -126,24 +126,40 @@ function renderSimpleMarkdownLinkLabel(label: string, linkIndex: number): Array<
 	const parts: Array<string | ReactElement> = [];
 	let cursor = 0;
 	let strongCount = 0;
+	let emphasisCount = 0;
 	while (cursor < label.length) {
-		const start = label.indexOf("**", cursor);
-		if (start === -1) {
+		const strongStart = label.indexOf("**", cursor);
+		const emphasisStart = label.indexOf("_", cursor);
+		const nextStrong = strongStart === -1 ? Number.POSITIVE_INFINITY : strongStart;
+		const nextEmphasis = emphasisStart === -1 ? Number.POSITIVE_INFINITY : emphasisStart;
+		const start = Math.min(nextStrong, nextEmphasis);
+		if (start === Number.POSITIVE_INFINITY) {
 			const suffix = label.slice(cursor);
-			if (suffix.includes("*") || (hasAutolinkCandidate(suffix) && markdownAutolinkPattern.test(suffix))) return undefined;
+			if (suffix.includes("*") || suffix.includes("_") || (hasAutolinkCandidate(suffix) && markdownAutolinkPattern.test(suffix))) return undefined;
 			if (suffix) parts.push(suffix);
 			break;
 		}
 		const plainPrefix = label.slice(cursor, start);
-		if (plainPrefix.includes("*") || (hasAutolinkCandidate(plainPrefix) && markdownAutolinkPattern.test(plainPrefix))) return undefined;
+		if (plainPrefix.includes("*") || plainPrefix.includes("_") || (hasAutolinkCandidate(plainPrefix) && markdownAutolinkPattern.test(plainPrefix))) return undefined;
 		if (plainPrefix) parts.push(plainPrefix);
-		const end = label.indexOf("**", start + 2);
-		if (end === -1 || end === start + 2) return undefined;
-		const strongText = label.slice(start + 2, end);
-		if (strongText.includes("*") || strongText.includes("[") || strongText.includes("]")) return undefined;
-		parts.push(<strong key={`link-${linkIndex}-strong-${strongCount}`} data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="strong">{strongText}</strong>);
-		strongCount += 1;
-		cursor = end + 2;
+		if (start === nextStrong) {
+			const end = label.indexOf("**", start + 2);
+			if (end === -1 || end === start + 2) return undefined;
+			const strongText = label.slice(start + 2, end);
+			if (strongText.includes("*") || strongText.includes("_") || strongText.includes("[") || strongText.includes("]")) return undefined;
+			parts.push(<strong key={`link-${linkIndex}-strong-${strongCount}`} data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="strong">{strongText}</strong>);
+			strongCount += 1;
+			cursor = end + 2;
+		} else {
+			if (label[start + 1] === "_") return undefined;
+			const end = label.indexOf("_", start + 1);
+			if (end === -1 || end === start + 1) return undefined;
+			const emphasisText = label.slice(start + 1, end);
+			if (emphasisText.includes("*") || emphasisText.includes("_") || emphasisText.includes("[") || emphasisText.includes("]")) return undefined;
+			parts.push(<em key={`link-${linkIndex}-em-${emphasisCount}`} data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="em">{emphasisText}</em>);
+			emphasisCount += 1;
+			cursor = end + 1;
+		}
 	}
 	return parts.length > 0 ? parts : undefined;
 }
@@ -164,18 +180,18 @@ function renderSimpleTaskListText(text: string): Array<string | ReactElement> | 
 		const start = Math.min(nextStrong, nextCode, nextLink);
 		if (start === Number.POSITIVE_INFINITY) {
 			const suffix = text.slice(cursor);
-			if (suffix.includes("*") || suffix.includes("`") || suffix.includes("[") || suffix.includes("]") || (hasAutolinkCandidate(suffix) && markdownAutolinkPattern.test(suffix))) return undefined;
+			if (suffix.includes("*") || suffix.includes("_") || suffix.includes("`") || suffix.includes("[") || suffix.includes("]") || (hasAutolinkCandidate(suffix) && markdownAutolinkPattern.test(suffix))) return undefined;
 			if (suffix) parts.push(suffix);
 			break;
 		}
 		const plainPrefix = text.slice(cursor, start);
-		if (plainPrefix.includes("*") || plainPrefix.includes("`") || plainPrefix.includes("[") || plainPrefix.includes("]") || (hasAutolinkCandidate(plainPrefix) && markdownAutolinkPattern.test(plainPrefix))) return undefined;
+		if (plainPrefix.includes("*") || plainPrefix.includes("_") || plainPrefix.includes("`") || plainPrefix.includes("[") || plainPrefix.includes("]") || (hasAutolinkCandidate(plainPrefix) && markdownAutolinkPattern.test(plainPrefix))) return undefined;
 		if (plainPrefix) parts.push(plainPrefix);
 		if (start === nextStrong) {
 			const end = text.indexOf("**", start + 2);
 			if (end === -1 || end === start + 2) return undefined;
 			const strongText = text.slice(start + 2, end);
-			if (strongText.includes("*") || strongText.includes("`") || strongText.includes("[") || strongText.includes("]")) return undefined;
+			if (strongText.includes("*") || strongText.includes("_") || strongText.includes("`") || strongText.includes("[") || strongText.includes("]")) return undefined;
 			parts.push(<strong key={`strong-${strongCount}`} data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="strong">{strongText}</strong>);
 			strongCount += 1;
 			cursor = end + 2;
@@ -184,7 +200,7 @@ function renderSimpleTaskListText(text: string): Array<string | ReactElement> | 
 			const end = text.indexOf("`", start + 1);
 			if (end === -1 || end === start + 1) return undefined;
 			const codeText = text.slice(start + 1, end);
-			if (codeText.includes("`") || codeText.includes("[") || codeText.includes("]") || codeText.startsWith(" ") || codeText.endsWith(" ")) return undefined;
+			if (codeText.includes("_") || codeText.includes("`") || codeText.includes("[") || codeText.includes("]") || codeText.startsWith(" ") || codeText.endsWith(" ")) return undefined;
 			parts.push(<code key={`code-${codeCount}`} data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="code">{codeText}</code>);
 			codeCount += 1;
 			cursor = end + 1;
