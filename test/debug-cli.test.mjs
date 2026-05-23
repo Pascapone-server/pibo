@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { PiboDataStore } from "../dist/data/pibo-store.js";
 import { PiboReliabilityStore } from "../dist/reliability/store.js";
-import { evaluateStreamingBenchmarkAssertion, evaluateStreamingBenchmarkUrlComparisonRegressions, formatWatch, inferWatchFlickers, resolveStreamingBenchmarkHostedCompareUrlFromValues, summarizeStreamingProviderPreservation, summarizeStreamingProviderTelemetry } from "../dist/debug/web.js";
+import { evaluateStreamingBenchmarkAssertion, evaluateStreamingBenchmarkUrlComparisonRegressions, evaluateStreamingProviderRegressions, formatWatch, inferWatchFlickers, resolveStreamingBenchmarkHostedCompareUrlFromValues, summarizeStreamingProviderPreservation, summarizeStreamingProviderTelemetry } from "../dist/debug/web.js";
 
 const execFileAsyncRaw = promisify(execFile);
 const cliPath = resolve("dist/bin/pibo.js");
@@ -50,7 +50,7 @@ test("pibo debug web streaming benchmark help advertises the deterministic fixtu
 	assert.match(help.stdout, /--compare-hosted uses PIBO_DEV_PUBLIC_URL or PIBO_DEV_BASE_URL/);
 	assert.match(help.stdout, /--compare-hosted-if-configured runs the hosted comparison when a dev URL is configured/);
 	assert.match(help.stdout, /--provider-request-id attaches provider\/Pi telemetry delta counts/);
-	assert.match(help.stdout, /--assert exits non-zero/);
+	assert.match(help.stdout, /--assert exits non-zero when fixture\/debug\/DOM\/provider preservation gates fail/);
 	assert.match(help.stdout, /--expect-regression marks a required regression substring/);
 	assert.match(help.stdout, /--negative-profile batch expands to the backend batch reasoning\/text fixture/);
 });
@@ -113,6 +113,58 @@ test("streaming provider preservation summary computes provider-to-transport rat
 	assert.equal(summary.domPositiveToProviderTextRatio, 0.8);
 	assert.equal(summary.sseReasoningToProviderRatio, 0.75);
 	assert.equal(summary.selectedLiveReasoningToProviderRatio, 1);
+});
+
+test("streaming provider regressions gate telemetry health and preservation ratios", () => {
+	const healthyProvider = {
+		requested: true,
+		available: true,
+		providerRequestId: "pr_fixture",
+		textDeltaCount: 100,
+		reasoningDeltaCount: 20,
+		textDeltaBytes: { count: 100 },
+		reasoningDeltaBytes: { count: 20 },
+		textDeltaGapsMs: { count: 99 },
+		reasoningDeltaGapsMs: { count: 19 },
+		parseErrorCount: 0,
+		unknownEventCount: 0,
+		eventPageCount: 1,
+		truncated: false,
+	};
+	assert.deepEqual(evaluateStreamingProviderRegressions({
+		provider: healthyProvider,
+		providerPreservation: {
+			providerTextDeltaCount: 100,
+			providerReasoningDeltaCount: 20,
+			sseTextToProviderRatio: 0.98,
+			selectedLiveTextToProviderRatio: 0.99,
+			sseReasoningToProviderRatio: 1,
+			selectedLiveReasoningToProviderRatio: 0.95,
+		},
+		sse: { requested: true },
+		eventSource: { requested: true },
+	}), []);
+	assert.deepEqual(evaluateStreamingProviderRegressions({
+		provider: { ...healthyProvider, parseErrorCount: 1, unknownEventCount: 2, truncated: true },
+		providerPreservation: {
+			providerTextDeltaCount: 100,
+			providerReasoningDeltaCount: 20,
+			sseTextToProviderRatio: 0.94,
+			selectedLiveTextToProviderRatio: 0.93,
+			sseReasoningToProviderRatio: 0.9,
+			selectedLiveReasoningToProviderRatio: 0.94,
+		},
+		sse: { requested: true },
+		eventSource: { requested: true },
+	}), [
+		"provider parse errors 1 > 0",
+		"provider unknown events 2 > 0",
+		"provider telemetry events were truncated",
+		"provider SSE text preservation ratio 0.94 < 0.95",
+		"provider selected-live text preservation ratio 0.93 < 0.95",
+		"provider SSE reasoning preservation ratio 0.9 < 0.95",
+		"provider selected-live reasoning preservation ratio 0.94 < 0.95",
+	]);
 });
 
 test("streaming provider telemetry summary extracts delta bytes, gaps, and latencies", () => {

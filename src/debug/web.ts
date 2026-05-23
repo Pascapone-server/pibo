@@ -18,6 +18,8 @@ const URL_COMPARISON_MAX_SMOOTHNESS_DROP = 15;
 const URL_COMPARISON_MAX_DOM_LAG_DELTA_MS = 150;
 const URL_COMPARISON_MAX_SSE_LAG_DELTA_MS = 100;
 const URL_COMPARISON_MAX_SSE_CHUNK_GAP_DELTA_MS = 100;
+const PROVIDER_MIN_TEXT_PRESERVATION_RATIO = 0.95;
+const PROVIDER_MIN_REASONING_PRESERVATION_RATIO = 0.95;
 
 type WebOptions = {
 	positionals: string[];
@@ -586,7 +588,7 @@ Defaults:
   streaming-benchmark --compare-hosted uses PIBO_DEV_PUBLIC_URL or PIBO_DEV_BASE_URL from the environment or .env.developer-host as the compare URL.
   streaming-benchmark --compare-hosted-if-configured runs the hosted comparison when a dev URL is configured; otherwise it records a warning and keeps the primary benchmark.
   streaming-benchmark --provider-request-id attaches provider/Pi telemetry delta counts, byte stats, gap stats, parse errors, first-text latency, and provider-to-transport preservation ratios from pibo debug telemetry.
-  streaming-benchmark --assert exits non-zero when fixture/debug/DOM smoothness gates fail.
+  streaming-benchmark --assert exits non-zero when fixture/debug/DOM/provider preservation gates fail.
   streaming-benchmark --expect-regression marks a required regression substring for controlled negative benchmarks; unexpected or missing expected regressions still fail with --assert.
   streaming-benchmark --negative-profile batch expands to the backend batch reasoning/text fixture with required controlled regression assertions.
 `);
@@ -857,7 +859,8 @@ async function runStreamingBenchmark(client: CdpClient, durationMs: number, opti
 	const benchmark = await client.evaluate<Omit<StreamingBenchmark, "score">>(buildStreamingBenchmarkExpression(durationMs, options), benchmarkTimeoutMs);
 	const withProvider = { ...benchmark, provider: options.providerTelemetry };
 	const scored = { ...withProvider, score: scoreStreamingBenchmark(withProvider), providerPreservation: summarizeStreamingProviderPreservation(withProvider) };
-	return { ...scored, cadence: summarizeStreamingCadence(scored) };
+	const withCadence = { ...scored, cadence: summarizeStreamingCadence(scored) };
+	return { ...withCadence, regressions: [...withCadence.regressions, ...evaluateStreamingProviderRegressions(withCadence)] };
 }
 
 async function currentBrowserUrl(client: CdpClient): Promise<string> {
@@ -2664,6 +2667,30 @@ export function summarizeStreamingProviderPreservation(benchmark: { provider?: S
 		selectedLiveReasoningToProviderRatio: ratioToProvider(selectedLive?.reasoningEventCountAfterStart, provider.reasoningDeltaCount),
 		domPositiveToProviderTextRatio: ratioToProvider(benchmark.dom?.positiveUpdateCount, provider.textDeltaCount),
 	};
+}
+
+export function evaluateStreamingProviderRegressions(benchmark: { provider?: StreamingBenchmarkProviderTelemetry; providerPreservation?: StreamingBenchmarkProviderPreservation; sse?: StreamingBenchmarkSseProbe; eventSource?: Pick<StreamingBenchmarkEventSourceProbe, "requested"> }): string[] {
+	const provider = benchmark.provider;
+	if (!provider?.available) return [];
+	const regressions: string[] = [];
+	if ((provider.parseErrorCount ?? 0) > 0) regressions.push(`provider parse errors ${provider.parseErrorCount} > 0`);
+	if ((provider.unknownEventCount ?? 0) > 0) regressions.push(`provider unknown events ${provider.unknownEventCount} > 0`);
+	if (provider.truncated) regressions.push("provider telemetry events were truncated");
+	const preservation = benchmark.providerPreservation;
+	if (provider.textDeltaCount > 0) {
+		if (benchmark.sse?.requested) pushProviderRatioRegression(regressions, preservation?.sseTextToProviderRatio, PROVIDER_MIN_TEXT_PRESERVATION_RATIO, "provider SSE text preservation ratio");
+		if (benchmark.eventSource?.requested) pushProviderRatioRegression(regressions, preservation?.selectedLiveTextToProviderRatio, PROVIDER_MIN_TEXT_PRESERVATION_RATIO, "provider selected-live text preservation ratio");
+	}
+	if (provider.reasoningDeltaCount > 0) {
+		if (benchmark.sse?.requested) pushProviderRatioRegression(regressions, preservation?.sseReasoningToProviderRatio, PROVIDER_MIN_REASONING_PRESERVATION_RATIO, "provider SSE reasoning preservation ratio");
+		if (benchmark.eventSource?.requested) pushProviderRatioRegression(regressions, preservation?.selectedLiveReasoningToProviderRatio, PROVIDER_MIN_REASONING_PRESERVATION_RATIO, "provider selected-live reasoning preservation ratio");
+	}
+	return regressions;
+}
+
+function pushProviderRatioRegression(regressions: string[], ratio: number | undefined, minimum: number, label: string): void {
+	if (ratio === undefined) regressions.push(`${label} unavailable`);
+	else if (ratio < minimum) regressions.push(`${label} ${ratio} < ${minimum}`);
 }
 
 function ratioToProvider(numerator: number | undefined, denominator: number | undefined): number | undefined {
