@@ -2533,8 +2533,8 @@ function normalizeMessageText(value: unknown): string {
 function defaultStreamingFixtureDeltas(mix: ChatStreamingFixtureMix): string[] {
 	if (mix === "markdown") return [" **a**", " **b**", " **c**", " **d**", " **e**", " **f**", " **g**", " **h**", " **i**", " **j**", " **k**", " **l**"];
 	if (mix === "gfm-markdown") return [" ~~a~~", " ~~b~~", " ~~c~~", " ~~d~~", " ~~e~~", " ~~f~~", " ~~g~~", " ~~h~~", " ~~i~~", " ~~j~~", " ~~k~~", " ~~l~~"];
-	if (mix === "gfm-task-markdown") return ["- [ ] a", " b", " c", " d", " e", " f", " g", " h", " i", " j", " k", " l"];
-	if (mix === "gfm-full-markdown") return ["- [ ] **a**", " **b**", " **c**", " **d**", " **e**", " **f**", " **g**", " **h**", " **i**", " **j**", " **k**", " **l**"];
+	if (mix === "gfm-task-markdown") return ["- [ ] **a**", " **b**", " **c**", " **d**", " **e**", " **f**", " **g**", " **h**", " **i**", " **j**", " **k**", " **l**"];
+	if (mix === "gfm-full-markdown") return ["- [ ] `a`", " `b`", " `c`", " `d`", " `e`", " `f`", " `g`", " `h`", " `i`", " `j`", " `k`", " `l`"];
 	return [" a", " b", " c", " d", " e", " f", " g", " h", " i", " j", " k", " l"];
 }
 
