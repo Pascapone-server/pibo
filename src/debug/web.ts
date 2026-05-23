@@ -190,6 +190,30 @@ type StreamingBenchmarkEventSourceProbe = {
 	streams: StreamingBenchmarkEventSourceStreamProbe[];
 };
 
+type StreamingBenchmarkSseProbe = {
+	requested: boolean;
+	installed: boolean;
+	url?: string;
+	status?: number;
+	headers: Record<string, string>;
+	aborted: boolean;
+	errors: string[];
+	chunkCount: number;
+	chunkBytes: NumberStats;
+	chunkGapsMs: NumberStats;
+	textEventsPerChunk: NumberStats;
+	eventCount: number;
+	textEventCount: number;
+	reasoningEventCount: number;
+	textDeltaBytes: NumberStats;
+	textEventGapsMs: NumberStats;
+	idCount: number;
+	transientIdCount: number;
+	durableIdCount: number;
+	otherIdCount: number;
+	lastEventId?: string;
+};
+
 type StreamingBenchmarkTraceProbeSample = {
 	t: number;
 	version?: string;
@@ -249,6 +273,7 @@ type StreamingBenchmark = {
 	longTasks: { count: number; totalMs: number; maxMs: number };
 	fixture?: { requested: boolean; mode: "browser" | "backend"; profile?: string; mix?: string; simulation?: "reconnect" | "trace-catchup"; available: boolean; started: boolean; deltaCount?: number; reasoningDeltaCount?: number; cadenceMs?: number; textBytes?: number; reasoningBytes?: number; piboSessionId?: string; error?: string };
 	eventSource?: StreamingBenchmarkEventSourceProbe;
+	sse?: StreamingBenchmarkSseProbe;
 	trace?: StreamingBenchmarkTraceProbe;
 	score: StreamingSmoothnessScore;
 	regressions: string[];
@@ -280,6 +305,12 @@ type StreamingBenchmarkSummary = {
 	eventSourceForcedCloseCountAfterStart: NumberStats;
 	eventSourceReconnectOpenCountAfterStart: NumberStats;
 	eventSourceTransientIdCountAfterStart: NumberStats;
+	sseTextEventCount: NumberStats;
+	sseReasoningEventCount: NumberStats;
+	sseChunkBytesP50: NumberStats;
+	sseChunkGapP90Ms: NumberStats;
+	sseTextEventsPerChunkP90: NumberStats;
+	sseTextEventGapP90Ms: NumberStats;
 	selectedLiveTextEventCountAfterStart: NumberStats;
 	selectedLiveReasoningEventCountAfterStart: NumberStats;
 	selectedLiveEventCountAfterStart: NumberStats;
@@ -304,6 +335,8 @@ type StreamingBenchmarkComparison = {
 	traceDurableEventDeltaDelta?: number;
 	eventSourceTextEventDelta?: number;
 	eventSourceReasoningEventDelta?: number;
+	sseTextEventDelta?: number;
+	sseChunkGapP90DeltaMs?: number;
 	selectedLiveTextEventDelta?: number;
 	selectedLiveReasoningEventDelta?: number;
 	selectedLiveEventDelta?: number;
@@ -981,6 +1014,134 @@ function fetchWithTimeout(url, init, timeoutMs) {
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
+function createSseProbe(piboSessionId) {
+  const result = {
+    requested: true,
+    installed: false,
+    url: '/api/chat/events?piboSessionId=' + encodeURIComponent(piboSessionId) + '&mode=live',
+    headers: {},
+    aborted: false,
+    errors: [],
+    chunkCount: 0,
+    chunkBytes: { count: 0 },
+    chunkGapsMs: { count: 0 },
+    textEventsPerChunk: { count: 0 },
+    eventCount: 0,
+    textEventCount: 0,
+    reasoningEventCount: 0,
+    textDeltaBytes: { count: 0 },
+    textEventGapsMs: { count: 0 },
+    idCount: 0,
+    transientIdCount: 0,
+    durableIdCount: 0,
+    otherIdCount: 0,
+  };
+  const chunkBytes = [];
+  const chunkGaps = [];
+  const textEventsPerChunk = [];
+  const textDeltaBytes = [];
+  const textEventGaps = [];
+  const ids = [];
+  let lastChunkAt;
+  let lastTextAt;
+  let buffer = '';
+  let stopped = false;
+  const controller = typeof AbortController === 'undefined' ? undefined : new AbortController();
+  const decoder = typeof TextDecoder === 'undefined' ? undefined : new TextDecoder();
+  const encoder = typeof TextEncoder === 'undefined' ? undefined : new TextEncoder();
+  const byteLength = (text) => encoder ? encoder.encode(text).length : String(text || '').length;
+  const finalize = () => {
+    result.chunkCount = chunkBytes.length;
+    result.chunkBytes = stats(chunkBytes);
+    result.chunkGapsMs = stats(chunkGaps);
+    result.textEventsPerChunk = stats(textEventsPerChunk);
+    result.textDeltaBytes = stats(textDeltaBytes);
+    result.textEventGapsMs = stats(textEventGaps);
+    result.idCount = ids.length;
+    result.transientIdCount = ids.filter((id) => /^live:\d+$/.test(id)).length;
+    result.durableIdCount = ids.filter((id) => /^\d+:\d+$/.test(id)).length;
+    result.otherIdCount = ids.filter((id) => !/^live:\d+$/.test(id) && !/^\d+:\d+$/.test(id)).length;
+    result.lastEventId = ids.at(-1);
+    return result;
+  };
+  const consumeBlock = (block, t) => {
+    if (!block.trim()) return 0;
+    let eventName = '';
+    let id = '';
+    const data = [];
+    for (const line of block.split(/\r?\n/)) {
+      if (line.startsWith('event:')) eventName = line.slice(6).trim();
+      else if (line.startsWith('id:')) id = line.slice(3).trim();
+      else if (line.startsWith('data:')) data.push(line.slice(5).replace(/^ /, ''));
+    }
+    if (id) ids.push(id);
+    if (eventName && eventName !== 'pibo') return 0;
+    result.eventCount += 1;
+    let payload;
+    try { payload = data.length ? JSON.parse(data.join('\n')) : undefined; } catch (error) { result.errors.push('parse: ' + String(error && error.message ? error.message : error)); }
+    if (!payload || typeof payload.type !== 'string') return 0;
+    if (payload.type === 'TEXT_MESSAGE_CONTENT') {
+      result.textEventCount += 1;
+      const delta = typeof payload.delta === 'string' ? payload.delta : '';
+      textDeltaBytes.push(byteLength(delta));
+      if (lastTextAt !== undefined) textEventGaps.push(t - lastTextAt);
+      lastTextAt = t;
+      return 1;
+    }
+    if (payload.type === 'REASONING_MESSAGE_CONTENT') result.reasoningEventCount += 1;
+    return 0;
+  };
+  if (typeof fetch !== 'function' || !decoder) {
+    result.errors.push('fetch streaming unavailable');
+    return { result: finalize(), stop: async () => finalize() };
+  }
+  const done = (async () => {
+    try {
+      const response = await fetch(result.url, { headers: { accept: 'text/event-stream' }, signal: controller && controller.signal });
+      result.status = response.status;
+      response.headers.forEach((value, key) => { result.headers[key] = value; });
+      if (!response.body || typeof response.body.getReader !== 'function') throw new Error('ReadableStream unavailable');
+      result.installed = true;
+      const reader = response.body.getReader();
+      while (true) {
+        const next = await reader.read();
+        if (next.done) break;
+        const t = performance.now();
+        if (lastChunkAt !== undefined) chunkGaps.push(t - lastChunkAt);
+        lastChunkAt = t;
+        const value = next.value || new Uint8Array();
+        chunkBytes.push(value.byteLength || value.length || 0);
+        buffer += decoder.decode(value, { stream: true });
+        let chunkTextEvents = 0;
+        while (true) {
+          const index = buffer.search(/\r?\n\r?\n/);
+          if (index < 0) break;
+          const separatorLength = buffer[index] === '\r' ? 4 : 2;
+          const block = buffer.slice(0, index);
+          buffer = buffer.slice(index + separatorLength);
+          chunkTextEvents += consumeBlock(block, t);
+        }
+        textEventsPerChunk.push(chunkTextEvents);
+      }
+      buffer += decoder.decode();
+      if (buffer.trim()) consumeBlock(buffer, performance.now());
+    } catch (error) {
+      if (stopped || (error && error.name === 'AbortError')) result.aborted = true;
+      else result.errors.push(String(error && error.message ? error.message : error));
+    } finally {
+      finalize();
+    }
+  })();
+  return {
+    result,
+    stop: async () => {
+      stopped = true;
+      if (controller) controller.abort();
+      await done.catch(() => {});
+      return finalize();
+    },
+  };
+}
 function createTraceProbe(piboSessionId, startedAt, intervalMs) {
   const result = {
     requested: true,
@@ -1289,6 +1450,13 @@ function streamingBenchmarkRegressions(result) {
       if (result.eventSource.transientIdCountAfterStart < 1) failures.push('EventSource transient live ids were not observed');
     }
   }
+  if (result.sse && result.sse.requested) {
+    if (!result.sse.installed) failures.push('SSE fetch probe unavailable');
+    if (result.sse.status && result.sse.status !== 200) failures.push('SSE fetch status ' + result.sse.status);
+    if (result.sse.errors && result.sse.errors.length) failures.push('SSE fetch errors: ' + result.sse.errors.slice(0, 2).join('; '));
+    if (!traceCatchupRequested && expectedDeltas !== undefined && result.sse.textEventCount < expectedDeltas) failures.push('SSE text events ' + result.sse.textEventCount + ' < fixture deltas ' + expectedDeltas);
+    if (!traceCatchupRequested && expectedReasoningDeltas !== undefined && result.sse.reasoningEventCount < expectedReasoningDeltas) failures.push('SSE reasoning events ' + result.sse.reasoningEventCount + ' < fixture reasoning deltas ' + expectedReasoningDeltas);
+  }
   if (longTaskMax > 50) failures.push('long task max ' + Math.round(longTaskMax * 1000) / 1000 + 'ms exceeds 50ms');
   return failures;
 }
@@ -1365,6 +1533,7 @@ async function runStreamingBenchmark(options) {
   let fixtureConfig;
   let backendFixtureError;
   let traceProbe;
+  let sseProbe;
   const selectedSessionId = () => document.querySelector('[data-pibo-debug="chat-shell"]')?.getAttribute('data-pibo-session-id')
     || document.querySelector('[data-pibo-selected-session-id]')?.getAttribute('data-pibo-selected-session-id')
     || undefined;
@@ -1396,6 +1565,8 @@ async function runStreamingBenchmark(options) {
       backendFixtureError = 'selected Chat session not found in DOM';
       warnings.push('backend streaming fixture was requested but selected Chat session was not found');
     } else {
+      sseProbe = createSseProbe(piboSessionId);
+      await new Promise((resolve) => setTimeout(resolve, 75));
       try {
         const response = await fetchWithTimeout('/api/chat/debug/streaming-fixture', {
           method: 'POST',
@@ -1419,6 +1590,7 @@ async function runStreamingBenchmark(options) {
     await traceProbe.sample();
     traceProbe.stop();
   }
+  const sseSummary = sseProbe ? await sseProbe.stop() : undefined;
   observer.disconnect();
   if (rafHandle !== undefined) cancelAnimationFrame(rafHandle);
   try { perfObserver && perfObserver.disconnect(); } catch {}
@@ -1470,6 +1642,7 @@ async function runStreamingBenchmark(options) {
     debugDelta,
     fixture: fixtureSummary,
     eventSource: eventSourceSummary,
+    sse: sseSummary,
     trace: traceSummary,
     dom: { lengthStart: initialText.length, lengthEnd: currentLength, lengthMax: maxLength, positiveUpdateCount: positiveUpdates.length, gapsMs: domGaps, positiveCharJumps: domJumps, firstPositiveUpdateMs },
     longTasks,
@@ -1510,6 +1683,7 @@ async function runStreamingBenchmark(options) {
     },
     fixture: fixtureSummary,
     eventSource: eventSourceSummary,
+    sse: sseSummary,
     trace: traceSummary,
     regressions,
     warnings,
@@ -2120,6 +2294,12 @@ function summarizeStreamingBenchmarks(runs: StreamingBenchmark[]): StreamingBenc
 		eventSourceForcedCloseCountAfterStart: numericStats(runs.map((run) => run.eventSource?.forcedCloseCountAfterStart)),
 		eventSourceReconnectOpenCountAfterStart: numericStats(runs.map((run) => run.eventSource?.openCountAfterStart)),
 		eventSourceTransientIdCountAfterStart: numericStats(runs.map((run) => run.eventSource?.transientIdCountAfterStart)),
+		sseTextEventCount: numericStats(runs.map((run) => run.sse?.textEventCount)),
+		sseReasoningEventCount: numericStats(runs.map((run) => run.sse?.reasoningEventCount)),
+		sseChunkBytesP50: numericStats(runs.map((run) => run.sse?.chunkBytes.p50)),
+		sseChunkGapP90Ms: numericStats(runs.map((run) => run.sse?.chunkGapsMs.p90)),
+		sseTextEventsPerChunkP90: numericStats(runs.map((run) => run.sse?.textEventsPerChunk.p90)),
+		sseTextEventGapP90Ms: numericStats(runs.map((run) => run.sse?.textEventGapsMs.p90)),
 		selectedLiveTextEventCountAfterStart: numericStats(runs.map((run) => selectedLiveStream(run)?.textEventCountAfterStart)),
 		selectedLiveReasoningEventCountAfterStart: numericStats(runs.map((run) => selectedLiveStream(run)?.reasoningEventCountAfterStart)),
 		selectedLiveEventCountAfterStart: numericStats(runs.map((run) => selectedLiveStream(run)?.eventCountAfterStart)),
@@ -2146,6 +2326,8 @@ function compareStreamingBenchmarkSummaries(baseline: StreamingBenchmarkSummary,
 		traceDurableEventDeltaDelta: statDelta(current.traceDurableEventDelta, baseline.traceDurableEventDelta),
 		eventSourceTextEventDelta: statDelta(current.eventSourceTextEventCountAfterStart, baseline.eventSourceTextEventCountAfterStart),
 		eventSourceReasoningEventDelta: statDelta(current.eventSourceReasoningEventCountAfterStart, baseline.eventSourceReasoningEventCountAfterStart),
+		sseTextEventDelta: statDelta(current.sseTextEventCount, baseline.sseTextEventCount),
+		sseChunkGapP90DeltaMs: statDelta(current.sseChunkGapP90Ms, baseline.sseChunkGapP90Ms),
 		selectedLiveTextEventDelta: statDelta(current.selectedLiveTextEventCountAfterStart, baseline.selectedLiveTextEventCountAfterStart),
 		selectedLiveReasoningEventDelta: statDelta(current.selectedLiveReasoningEventCountAfterStart, baseline.selectedLiveReasoningEventCountAfterStart),
 		selectedLiveEventDelta: statDelta(current.selectedLiveEventCountAfterStart, baseline.selectedLiveEventCountAfterStart),
@@ -2235,6 +2417,7 @@ function formatStreamingBenchmark(benchmark: StreamingBenchmark, target: Browser
 			lines.push(`eventSource stream: role=${stream.role} mode=${jsonShort(stream.mode)} session=${jsonShort(stream.piboSessionId)} room=${jsonShort(stream.roomId)} text=${stream.textEventCount} afterStart=${stream.textEventCountAfterStart} reasoning=${stream.reasoningEventCount} reasoningAfterStart=${stream.reasoningEventCountAfterStart} events=${stream.eventCount} opens=${stream.openCountAfterStart} forcedClose=${stream.forcedCloseCountAfterStart} transient=${stream.uniqueTransientIdCountAfterStart}/${stream.transientIdCountAfterStart} since=${jsonShort(stream.sinceValues.join(","))} url=${stream.url}`);
 		}
 	}
+	if (benchmark.sse) lines.push(`sse: requested=${benchmark.sse.requested} installed=${benchmark.sse.installed} status=${jsonShort(benchmark.sse.status)} chunks=${benchmark.sse.chunkCount} chunkBytes=${formatStats(benchmark.sse.chunkBytes)} chunkGaps=${formatStats(benchmark.sse.chunkGapsMs)} textPerChunk=${formatStats(benchmark.sse.textEventsPerChunk)} text=${benchmark.sse.textEventCount} reasoning=${benchmark.sse.reasoningEventCount} textGaps=${formatStats(benchmark.sse.textEventGapsMs)} transient=${benchmark.sse.transientIdCount} durable=${benchmark.sse.durableIdCount} errors=${benchmark.sse.errors.length}`);
 	if (benchmark.trace) lines.push(`trace: requested=${benchmark.trace.requested} samples=${benchmark.trace.sampleCount} fetches=${benchmark.trace.fetchCount} failed=${benchmark.trace.failedFetchCount} liveVersions=${benchmark.trace.liveVersionCount} firstLive=${jsonShort(benchmark.trace.firstLiveVersionMs)}ms assistantMax=${benchmark.trace.maxAssistantOutputLength} assistantFinal=${jsonShort(benchmark.trace.finalAssistantOutputLength)} durableEvents=${jsonShort(benchmark.trace.durableEventCountStart)}->${jsonShort(benchmark.trace.durableEventCountEnd)} session=${jsonShort(benchmark.trace.piboSessionId)}`);
 	if (benchmark.regressions.length) {
 		lines.push("", "Regressions:");
@@ -2258,13 +2441,14 @@ function formatStreamingBenchmarkGroup(group: StreamingBenchmarkGroup, target: B
 		`firstVisible=${formatStats(group.summary.firstVisibleMs)}, longTaskMax=${formatStats(group.summary.longTaskMaxMs)}`,
 	];
 	if (group.summary.eventSourceTextEventCountAfterStart.count > 0 || group.summary.eventSourceReasoningEventCountAfterStart.count > 0) lines.push(`eventSource: textAfterStart=${formatStats(group.summary.eventSourceTextEventCountAfterStart)}, reasoningAfterStart=${formatStats(group.summary.eventSourceReasoningEventCountAfterStart)}, forcedClose=${formatStats(group.summary.eventSourceForcedCloseCountAfterStart)}, reconnectOpen=${formatStats(group.summary.eventSourceReconnectOpenCountAfterStart)}, transient=${formatStats(group.summary.eventSourceTransientIdCountAfterStart)}`);
+	if (group.summary.sseTextEventCount.count > 0 || group.summary.sseReasoningEventCount.count > 0) lines.push(`sse: text=${formatStats(group.summary.sseTextEventCount)}, reasoning=${formatStats(group.summary.sseReasoningEventCount)}, chunkBytesP50=${formatStats(group.summary.sseChunkBytesP50)}, chunkGapP90=${formatStats(group.summary.sseChunkGapP90Ms)}, textPerChunkP90=${formatStats(group.summary.sseTextEventsPerChunkP90)}, textGapP90=${formatStats(group.summary.sseTextEventGapP90Ms)}`);
 	if (group.summary.selectedLiveEventCountAfterStart.count > 0) lines.push(`selected-live: eventsAfterStart=${formatStats(group.summary.selectedLiveEventCountAfterStart)}, textAfterStart=${formatStats(group.summary.selectedLiveTextEventCountAfterStart)}, reasoningAfterStart=${formatStats(group.summary.selectedLiveReasoningEventCountAfterStart)}, forcedClose=${formatStats(group.summary.selectedLiveForcedCloseCountAfterStart)}, reconnectOpen=${formatStats(group.summary.selectedLiveReconnectOpenCountAfterStart)}, transient=${formatStats(group.summary.selectedLiveTransientIdCountAfterStart)}`);
 	if (group.summary.roomSummaryEventCountAfterStart.count > 0) lines.push(`room-summary: eventsAfterStart=${formatStats(group.summary.roomSummaryEventCountAfterStart)}, textAfterStart=${formatStats(group.summary.roomSummaryTextEventCountAfterStart)}, reasoningAfterStart=${formatStats(group.summary.roomSummaryReasoningEventCountAfterStart)}`);
 	if (group.summary.traceSampleCount.count > 0) lines.push(`trace: samples=${formatStats(group.summary.traceSampleCount)}, liveVersions=${formatStats(group.summary.traceLiveVersionCount)}, firstLive=${formatStats(group.summary.traceFirstLiveVersionMs)}ms, assistantMax=${formatStats(group.summary.traceMaxAssistantOutputLength)}, assistantFinal=${formatStats(group.summary.traceFinalAssistantOutputLength)}, durableEventDelta=${formatStats(group.summary.traceDurableEventDelta)}`);
 	if (group.comparison) {
 		let comparison = `comparison vs baseline (${group.comparison.baselineRuns} runs): smoothness ${signed(group.comparison.smoothnessDelta)}, domP90Gap ${signed(group.comparison.domGapP90DeltaMs)}ms, domPositive ${signed(group.comparison.domPositiveUpdateDelta)}, maxJump ${signed(group.comparison.domJumpMaxDeltaChars)} chars, longTaskMax ${signed(group.comparison.longTaskMaxDeltaMs)}ms`;
 		if (group.summary.traceSampleCount.count > 0 || group.comparison.traceLiveVersionCountDelta !== undefined || group.comparison.traceMaxAssistantOutputDelta !== undefined || group.comparison.traceDurableEventDeltaDelta !== undefined) comparison += `, traceLiveVersions ${signed(group.comparison.traceLiveVersionCountDelta)}, traceAssistantMax ${signed(group.comparison.traceMaxAssistantOutputDelta)}, traceDurableEventDelta ${signed(group.comparison.traceDurableEventDeltaDelta)}`;
-		if (group.summary.eventSourceTextEventCountAfterStart.count > 0 || group.summary.selectedLiveEventCountAfterStart.count > 0 || group.comparison.eventSourceTextEventDelta !== undefined || group.comparison.selectedLiveTextEventDelta !== undefined) comparison += `, eventSourceText ${signed(group.comparison.eventSourceTextEventDelta)}, eventSourceReasoning ${signed(group.comparison.eventSourceReasoningEventDelta)}, selectedLiveEvents ${signed(group.comparison.selectedLiveEventDelta)}, selectedLiveText ${signed(group.comparison.selectedLiveTextEventDelta)}, selectedLiveReasoning ${signed(group.comparison.selectedLiveReasoningEventDelta)}`;
+		if (group.summary.eventSourceTextEventCountAfterStart.count > 0 || group.summary.selectedLiveEventCountAfterStart.count > 0 || group.summary.sseTextEventCount.count > 0 || group.comparison.eventSourceTextEventDelta !== undefined || group.comparison.selectedLiveTextEventDelta !== undefined || group.comparison.sseTextEventDelta !== undefined) comparison += `, eventSourceText ${signed(group.comparison.eventSourceTextEventDelta)}, eventSourceReasoning ${signed(group.comparison.eventSourceReasoningEventDelta)}, sseText ${signed(group.comparison.sseTextEventDelta)}, sseP90Gap ${signed(group.comparison.sseChunkGapP90DeltaMs)}ms, selectedLiveEvents ${signed(group.comparison.selectedLiveEventDelta)}, selectedLiveText ${signed(group.comparison.selectedLiveTextEventDelta)}, selectedLiveReasoning ${signed(group.comparison.selectedLiveReasoningEventDelta)}`;
 		lines.push(comparison);
 	}
 	if (group.regressions.length) {
