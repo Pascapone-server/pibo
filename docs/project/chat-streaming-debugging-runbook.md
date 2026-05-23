@@ -38,6 +38,18 @@ pibo debug web scenario streaming-benchmark \
   --artifact
 ```
 
+When live trace compute is too small to measure on the default fixture, seed a larger live overlay before counters reset:
+
+```bash
+pibo debug web scenario streaming-benchmark \
+  --backend-fixture \
+  --fixture-mix reasoning-text \
+  --fixture-prelude-messages 20 \
+  --runs 5 \
+  --assert \
+  --artifact
+```
+
 Compare hosted dev against the current direct target when a dev URL is configured:
 
 ```bash

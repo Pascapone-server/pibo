@@ -43,6 +43,8 @@ Useful options:
 
 `--backend-fixture` posts to `/api/chat/debug/streaming-fixture` and drives deterministic live-only events through the real Chat Web `/api/chat/events` path.
 
+`--fixture-prelude-messages <n>` can be used with backend fixtures to seed completed live assistant messages before benchmark counters reset. This creates a larger live overlay for browser-visible trace-compute measurements while keeping the main fixture's text/reasoning preservation denominators unchanged.
+
 This is the default deterministic regression mode because it exercises:
 
 - authenticated Chat Web app;
@@ -242,6 +244,12 @@ npm run typecheck
 npm run build
 node --test test/debug-cli.test.mjs test/web-channel.test.mjs test/trace-live-reducer.test.mjs
 pibo debug web scenario streaming-benchmark --backend-fixture --fixture-mix reasoning-text --assert --artifact
+```
+
+For large live-overlay trace work, add a prelude to make browser trace-compute cost visible:
+
+```bash
+pibo debug web scenario streaming-benchmark --backend-fixture --fixture-mix reasoning-text --fixture-prelude-messages 20 --runs 5 --assert --artifact
 ```
 
 For Markdown rendering changes, also run the Markdown/GFM renderer fixtures:
