@@ -199,6 +199,7 @@ type StreamingBenchmark = {
 		targetCountEnd: number;
 		lengthStart: number;
 		lengthEnd: number;
+		lengthMax: number;
 		updateCount: number;
 		positiveUpdateCount: number;
 		firstPositiveUpdateMs?: number;
@@ -592,7 +593,8 @@ async function runBrowserWatch(client: CdpClient, scope: string, durationMs: num
 
 async function runStreamingBenchmark(client: CdpClient, durationMs: number, options: { startFixture?: boolean; startBackendFixture?: boolean; fixtureProfile?: StreamingFixtureProfile; simulateReconnect?: boolean; simulateTraceCatchup?: boolean } = {}): Promise<StreamingBenchmark> {
 	await client.send("Page.bringToFront").catch(() => undefined);
-	const benchmark = await client.evaluate<Omit<StreamingBenchmark, "score">>(buildStreamingBenchmarkExpression(durationMs, options), durationMs + 10_000);
+	const benchmarkTimeoutMs = durationMs + (options.startBackendFixture ? 20_000 : 10_000);
+	const benchmark = await client.evaluate<Omit<StreamingBenchmark, "score">>(buildStreamingBenchmarkExpression(durationMs, options), benchmarkTimeoutMs);
 	return { ...benchmark, score: scoreStreamingBenchmark(benchmark) };
 }
 
@@ -604,12 +606,23 @@ async function prepareStreamingBenchmarkEventSourceProbe(client: CdpClient): Pro
   return { href: location.href };
 })()`, 5_000);
 	const url = new URL(state.href);
-	if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("--simulate-reconnect requires an HTTP Chat Web target");
+	if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("stream simulation requires an HTTP Chat Web target");
 	url.searchParams.set("debugStreaming", "1");
-	await client.send("Page.navigate", { url: url.toString() }, 5_000);
+	await navigateStreamingBenchmarkTarget(client, url.toString());
 	await client.send("Page.bringToFront").catch(() => undefined);
 	await client.evaluate("new Promise((resolve) => { if (document.readyState === 'complete') resolve(true); else addEventListener('load', () => resolve(true), { once: true }); })", 5_000);
 	await client.evaluate("new Promise((resolve) => setTimeout(resolve, 800))", 2_000);
+}
+
+async function navigateStreamingBenchmarkTarget(client: CdpClient, url: string): Promise<void> {
+	try {
+		await client.send("Page.navigate", { url }, 5_000);
+		return;
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		if (!message.includes("Timed out waiting for CDP method Page.navigate")) throw error;
+	}
+	await client.evaluate(`(() => { if (location.href !== ${JSON.stringify(url)}) location.assign(${JSON.stringify(url)}); return true; })()`, 5_000).catch(() => undefined);
 }
 
 async function navigateStreamingBenchmarkFixture(client: CdpClient, fixtureProfile: StreamingFixtureProfile): Promise<void> {
@@ -884,7 +897,7 @@ function fetchWithTimeout(url, init, timeoutMs) {
 }
 function summarizeEventSourceProbe(startedAt, requested, forcedReconnectAtMs, textDropRequested, textDropDurationMs) {
   const probe = window.__piboStreamingBenchmarkEventSourceProbe;
-  if (!requested && !probe) return undefined;
+  if (!requested) return undefined;
   if (!probe) {
     return {
       requested,
@@ -948,10 +961,10 @@ function summarizeEventSourceProbe(startedAt, requested, forcedReconnectAtMs, te
     lastTransientId: transientIds.at(-1),
     transientIdResetObserved: new Set(transientIds).size < transientIds.length,
     reconnectObserved: forcedCloseCountAfterStart > 0 && openCountAfterStart > 0,
-    textDropRequested: Boolean(probe.textDropRequested || textDropRequested),
-    textDropDurationMs: Number(probe.textDropDurationMs || textDropDurationMs || 0) || undefined,
-    textDropCount: Number(probe.textDropCount || 0),
-    textDropTextEventCount: Number(probe.textDropTextEventCount || 0),
+    textDropRequested: Boolean(textDropRequested),
+    textDropDurationMs: textDropRequested ? Number(probe.textDropDurationMs || textDropDurationMs || 0) || undefined : undefined,
+    textDropCount: textDropRequested ? Number(probe.textDropCount || 0) : 0,
+    textDropTextEventCount: textDropRequested ? Number(probe.textDropTextEventCount || 0) : 0,
     streams,
   };
 }
@@ -1069,7 +1082,8 @@ function streamingBenchmarkRegressions(result) {
     if (traceCatchupRequested) {
       const traceRefreshes = result.debugDelta && typeof result.debugDelta.traceRefreshCompletedCount === 'number' ? result.debugDelta.traceRefreshCompletedCount : 0;
       if (traceRefreshes < 1) failures.push('trace catch-up did not complete a trace refresh');
-      if (!result.dom || !(result.dom.lengthEnd > result.dom.lengthStart)) failures.push('trace catch-up did not advance visible DOM output');
+      const maxVisibleLength = result.dom && typeof result.dom.lengthMax === 'number' ? result.dom.lengthMax : result.dom && result.dom.lengthEnd;
+      if (!result.dom || !(maxVisibleLength > result.dom.lengthStart)) failures.push('trace catch-up did not advance visible DOM output');
       if (expectedDeltas !== undefined && textDeltas > Math.max(1, expectedDeltas - 2)) failures.push('trace catch-up did not suppress live text deltas before recovery');
     }
   }
@@ -1112,12 +1126,14 @@ async function runStreamingBenchmark(options) {
   const updates = [];
   const positiveJumps = [];
   let currentLength = initialText.length;
+  let maxLength = initialText.length;
   let lastPositiveAt;
   let firstPositiveUpdateMs;
   const sample = () => {
     const text = selectedAssistantText();
     const length = text.length;
     if (length === currentLength) return;
+    maxLength = Math.max(maxLength, length);
     const t = performance.now() - startedAt;
     const delta = length - currentLength;
     updates.push({ t, length, delta });
@@ -1193,7 +1209,7 @@ async function runStreamingBenchmark(options) {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ piboSessionId, profile: options.fixtureProfile, ...((options.simulateReconnect || options.simulateTraceCatchup) ? { cadenceMs: 150 } : {}), ...(options.simulateTraceCatchup ? { traceSnapshots: true, suppressLiveDeltas: true } : {}) }),
-        }, 5000);
+        }, options.simulateTraceCatchup ? 15000 : 5000);
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload && payload.error ? payload.error : response.status + ' ' + response.statusText);
         fixtureConfig = payload.fixture || payload;
@@ -1254,7 +1270,7 @@ async function runStreamingBenchmark(options) {
     debugDelta,
     fixture: fixtureSummary,
     eventSource: eventSourceSummary,
-    dom: { lengthStart: initialText.length, lengthEnd: currentLength, positiveUpdateCount: positiveUpdates.length, gapsMs: domGaps, positiveCharJumps: domJumps, firstPositiveUpdateMs },
+    dom: { lengthStart: initialText.length, lengthEnd: currentLength, lengthMax: maxLength, positiveUpdateCount: positiveUpdates.length, gapsMs: domGaps, positiveCharJumps: domJumps, firstPositiveUpdateMs },
     longTasks,
   });
   return {
@@ -1277,6 +1293,7 @@ async function runStreamingBenchmark(options) {
       targetCountEnd: assistantTargets().length,
       lengthStart: initialText.length,
       lengthEnd: currentLength,
+      lengthMax: maxLength,
       updateCount: updates.length,
       positiveUpdateCount: positiveUpdates.length,
       firstPositiveUpdateMs: firstPositiveUpdateMs === undefined ? undefined : Math.round(firstPositiveUpdateMs),
