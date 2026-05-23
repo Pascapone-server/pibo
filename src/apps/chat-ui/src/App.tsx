@@ -3419,6 +3419,11 @@ function SessionTracePane({
 		});
 	}, [selectedPiboSessionId, tracePageQuery.data]);
 
+	const persistedUserMessageIndexForBaseTrace = useMemo(
+		() => baseTraceView ? collectPersistedUserMessageIndex(baseTraceView.nodes) : new Map<string, string[]>(),
+		[baseTraceView],
+	);
+
 	const currentTraceView = useMemo(() => {
 		if (!selectedPiboSessionId || !bootstrap) return null;
 		if (baseTraceView?.piboSessionId !== selectedPiboSessionId) return null;
@@ -3428,9 +3433,9 @@ function SessionTracePane({
 			: [];
 		if (!overlayEvents.length) return reconcileOptimisticUserMessages(baseTraceView);
 		const liveTrace = patchTraceViewWithEvents(baseTraceView, overlayEvents, sessionStatus);
-		annotateLiveTraceForkEntryIds(liveTrace.nodes, baseTraceView.nodes);
+		annotateLiveTraceForkEntryIds(liveTrace.nodes, persistedUserMessageIndexForBaseTrace);
 		return reconcileOptimisticUserMessages(liveTrace);
-	}, [liveTraceOverlay, selectedPiboSessionId, bootstrap, baseTraceView]);
+	}, [liveTraceOverlay, selectedPiboSessionId, bootstrap, baseTraceView, persistedUserMessageIndexForBaseTrace]);
 
 	useEffect(() => {
 		if (!selectedPiboSessionId || !currentTraceView?.piboSessionId || !isStreamingDebugEnabled()) return;
@@ -9874,32 +9879,39 @@ function getResultPiboSessionId(value: unknown): string | undefined {
 	return typeof value.result.piboSessionId === "string" ? value.result.piboSessionId : undefined;
 }
 
-function annotateLiveTraceForkEntryIds(liveNodes: PiboTraceNode[], persistedNodes: readonly PiboTraceNode[]): void {
-	const persistedUserMessages = flattenPiboTraceNodes(persistedNodes)
-		.filter((node) => node.type === "user.message" && node.entryId)
-		.map((node) => ({ entryId: node.entryId!, text: traceNodeText(node) }));
-	if (!persistedUserMessages.length) return;
-	const used = new Set<string>();
-	for (const node of flattenPiboTraceNodes(liveNodes)) {
-		if (node.type !== "user.message" || node.entryId) continue;
+function collectPersistedUserMessageIndex(nodes: readonly PiboTraceNode[]): Map<string, string[]> {
+	const messagesByText = new Map<string, string[]>();
+	forEachPiboTraceNode(nodes, (node) => {
+		if (node.type !== "user.message" || !node.entryId) return;
 		const text = traceNodeText(node);
-		const match = persistedUserMessages.find((candidate) => !used.has(candidate.entryId) && candidate.text === text);
-		if (!match) continue;
-		node.entryId = match.entryId;
-		used.add(match.entryId);
-	}
+		const entryIds = messagesByText.get(text);
+		if (entryIds) entryIds.push(node.entryId);
+		else messagesByText.set(text, [node.entryId]);
+	});
+	return messagesByText;
 }
 
-function flattenPiboTraceNodes(nodes: readonly PiboTraceNode[]): PiboTraceNode[] {
-	const flattened: PiboTraceNode[] = [];
-	const visit = (items: readonly PiboTraceNode[]) => {
-		for (const item of items) {
-			flattened.push(item);
-			visit(item.children);
-		}
-	};
-	visit(nodes);
-	return flattened;
+function annotateLiveTraceForkEntryIds(liveNodes: PiboTraceNode[], persistedUserMessageIndex: ReadonlyMap<string, readonly string[]>): void {
+	if (!persistedUserMessageIndex.size) return;
+	const nextIndexByText = new Map<string, number>();
+	forEachPiboTraceNode(liveNodes, (node) => {
+		if (node.type !== "user.message" || node.entryId) return;
+		const text = traceNodeText(node);
+		const entryIds = persistedUserMessageIndex.get(text);
+		if (!entryIds?.length) return;
+		const nextIndex = nextIndexByText.get(text) ?? 0;
+		const entryId = entryIds[nextIndex];
+		if (!entryId) return;
+		node.entryId = entryId;
+		nextIndexByText.set(text, nextIndex + 1);
+	});
+}
+
+function forEachPiboTraceNode(nodes: readonly PiboTraceNode[], visitNode: (node: PiboTraceNode) => void): void {
+	for (const node of nodes) {
+		visitNode(node);
+		forEachPiboTraceNode(node.children, visitNode);
+	}
 }
 
 function traceNodeText(node: PiboTraceNode): string {
@@ -9908,9 +9920,11 @@ function traceNodeText(node: PiboTraceNode): string {
 
 function traceAssistantOutputLength(trace: PiboSessionTraceView | null | undefined): number | undefined {
 	if (!trace) return undefined;
-	return flattenPiboTraceNodes(trace.nodes)
-		.filter((node) => node.type === "assistant.message")
-		.reduce((sum, node) => sum + traceNodeText(node).length, 0);
+	let length = 0;
+	forEachPiboTraceNode(trace.nodes, (node) => {
+		if (node.type === "assistant.message") length += traceNodeText(node).length;
+	});
+	return length;
 }
 
 type SignalSessionUpdate = { status?: PiboWebSessionNode["status"]; updatedAt?: string; isTreeActive?: boolean };

@@ -206,7 +206,7 @@ Compact single/group reports include rows for:
 - SSE transport;
 - Cadence lag;
 - EventSource selected-live;
-- Live overlay;
+- Live overlay preservation and first live latencies;
 - DOM;
 - Score.
 
