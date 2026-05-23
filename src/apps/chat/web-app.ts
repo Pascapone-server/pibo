@@ -185,6 +185,7 @@ type ChatWebAppState = {
 	liveListeners: Set<(event: ChatLiveEvent) => void>;
 	transientReplaySequence: number;
 	transientReplayBuffer: TransientChatReplayRecord[];
+	transientReplayEvictedBeforeByScope: Map<string, number>;
 	activeEventStreams: Map<string, Map<string, string>>;
 	activeTraceSessions: Set<string>;
 	persistenceMetrics: ChatPersistenceMetrics;
@@ -1770,6 +1771,17 @@ type ChatLiveEvent = StoredChatEvent | TransientChatEvent;
 type TransientChatReplayRecord = TransientChatEvent & {
 	replaySequence: number;
 	createdAtMs: number;
+};
+
+type TransientReplayStatus = {
+	requestedAfter: number;
+	replayed: number;
+	missed: boolean;
+	evictedBefore?: number;
+	oldestAvailable?: number;
+	newestAvailable?: number;
+	bufferSize: number;
+	maxEvents: number;
 };
 
 type PiboRoomNodeWithUnread = PiboRoom & {
@@ -7409,18 +7421,53 @@ function recordTransientReplayEvent(state: ChatWebAppState, event: Omit<Transien
 	const recorded: TransientChatReplayRecord = { ...event, replaySequence, createdAtMs: Date.now() };
 	state.transientReplayBuffer.push(recorded);
 	if (state.transientReplayBuffer.length > TRANSIENT_REPLAY_BUFFER_MAX_EVENTS) {
-		state.transientReplayBuffer.splice(0, state.transientReplayBuffer.length - TRANSIENT_REPLAY_BUFFER_MAX_EVENTS);
+		const removed = state.transientReplayBuffer.splice(0, state.transientReplayBuffer.length - TRANSIENT_REPLAY_BUFFER_MAX_EVENTS);
+		for (const evicted of removed) recordTransientReplayEviction(state, evicted);
 	}
 	return recorded;
 }
 
-function listTransientReplayEvents(
+function transientReplayScopeKeys(input: { roomId?: string; piboSessionId?: string }): string[] {
+	const keys: string[] = [];
+	if (input.piboSessionId) keys.push(`session:${input.piboSessionId}`);
+	if (input.roomId) keys.push(`room:${input.roomId}`);
+	return keys;
+}
+
+function recordTransientReplayEviction(state: ChatWebAppState, event: TransientChatReplayRecord): void {
+	for (const key of transientReplayScopeKeys(event)) {
+		state.transientReplayEvictedBeforeByScope.set(key, Math.max(state.transientReplayEvictedBeforeByScope.get(key) ?? 0, event.replaySequence));
+	}
+}
+
+function transientReplayEvictedBefore(state: ChatWebAppState, input: { roomId?: string; piboSessionId?: string }): number | undefined {
+	const values = transientReplayScopeKeys(input)
+		.map((key) => state.transientReplayEvictedBeforeByScope.get(key))
+		.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+	return values.length ? Math.max(...values) : undefined;
+}
+
+function collectTransientReplayEvents(
 	state: ChatWebAppState,
 	input: { roomId?: string; piboSessionId?: string; afterReplaySequence?: number },
-): TransientChatEvent[] {
+): { events: TransientChatEvent[]; status?: TransientReplayStatus } {
 	const afterReplaySequence = input.afterReplaySequence;
-	if (afterReplaySequence === undefined) return [];
-	return state.transientReplayBuffer.filter((event) => event.replaySequence > afterReplaySequence && liveEventMatches(event, input));
+	if (afterReplaySequence === undefined) return { events: [] };
+	const events = state.transientReplayBuffer.filter((event) => event.replaySequence > afterReplaySequence && liveEventMatches(event, input));
+	const sequences = events.map((event) => event.replaySequence);
+	const evictedBefore = transientReplayEvictedBefore(state, input);
+	return {
+		events,
+		status: {
+			requestedAfter: afterReplaySequence,
+			replayed: events.length,
+			missed: evictedBefore !== undefined && afterReplaySequence < evictedBefore,
+			...(evictedBefore !== undefined ? { evictedBefore } : {}),
+			...(sequences.length ? { oldestAvailable: Math.min(...sequences), newestAvailable: Math.max(...sequences) } : {}),
+			bufferSize: state.transientReplayBuffer.length,
+			maxEvents: TRANSIENT_REPLAY_BUFFER_MAX_EVENTS,
+		},
+	};
 }
 
 function writeChatEventFrames(
@@ -7470,9 +7517,15 @@ function createEventStream(input: {
 				registeredLiveObserver = true;
 			}
 			const streamState = createChatStreamState();
+			const transientReplay = input.mode === "live" ? collectTransientReplayEvents(input.state, {
+				roomId: input.roomId,
+				piboSessionId: input.piboSessionId,
+				afterReplaySequence: input.transientReplayCursor,
+			}) : undefined;
 			writeSse(controller, "pibo", {
 				type: "ready",
 				piboSessionId: input.piboSessionId ?? "",
+				...(transientReplay?.status ? { liveReplay: transientReplay.status } : {}),
 			});
 			for (const stored of input.state.timelineQuery.listEvents({
 				roomId: input.roomId,
@@ -7494,11 +7547,7 @@ function createEventStream(input: {
 						);
 					}
 				}
-				for (const replay of listTransientReplayEvents(input.state, {
-					roomId: input.roomId,
-					piboSessionId: input.piboSessionId,
-					afterReplaySequence: input.transientReplayCursor,
-				})) {
+				for (const replay of transientReplay?.events ?? []) {
 					writeChatEventFrames(controller, replay, streamState, undefined, { mode: input.mode });
 				}
 			}
@@ -9321,6 +9370,7 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 		liveListeners: new Set(),
 		transientReplaySequence: 0,
 		transientReplayBuffer: [],
+		transientReplayEvictedBeforeByScope: new Map(),
 		activeEventStreams: new Map(),
 		activeTraceSessions: new Set(),
 		persistenceMetrics: createPersistenceMetrics(),

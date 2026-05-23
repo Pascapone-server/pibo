@@ -80,7 +80,7 @@ This is the default deterministic regression mode because it exercises:
 
 ### Simulations
 
-`--simulate-reconnect` reloads the app with an EventSource probe, forces live stream closes, and checks reconnect/transient id behavior. Reconnected selected-live streams may resume transient live-only deltas with the `liveSince` replay cursor while keeping SSE ids in the `live:<n>` transient form.
+`--simulate-reconnect` reloads the app with an EventSource probe, forces live stream closes, and checks reconnect/transient id behavior. Reconnected selected-live streams may resume transient live-only deltas with the `liveSince` replay cursor while keeping SSE ids in the `live:<n>` transient form. Replay buffer misses are surfaced in the stream `ready` frame and fail reconnect assertions.
 
 `--simulate-trace-catchup` suppresses backend live text deltas while compacting output into trace snapshots. It verifies trace snapshot recovery rather than fine-grained DOM cadence.
 
@@ -139,7 +139,7 @@ Collected by an in-page EventSource wrapper:
 - transient id count;
 - reconnect/open/error observations;
 - first event/text/reasoning latency;
-- `liveSince` transient replay cursor use and replayed transient frame count during selected-live reconnects.
+- `liveSince` transient replay cursor use, replayed transient frame count, and bounded replay-buffer miss indicators during selected-live reconnects.
 
 ### Live pipeline
 
