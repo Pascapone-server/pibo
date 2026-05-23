@@ -52,7 +52,7 @@ test("pibo debug web report renders saved streaming benchmark artifacts without 
 				enabledRequested: true,
 				available: true,
 				reset: true,
-				delta: { textDeltaCount: 12, textDeltaBytes: 24, reasoningDeltaCount: 4, enqueueCount: 22, flushCount: 20, overlayUpdateCount: 20, markdownRenderCount: 12, markdownRenderPlainCount: 12, markdownRenderCommonMarkCount: 0, markdownRenderGfmCount: 0, markdownRenderFullCount: 0, markdownRenderDurationMsTotal: 1.5 },
+				delta: { textDeltaCount: 12, textDeltaBytes: 24, reasoningDeltaCount: 4, enqueueCount: 22, flushCount: 20, overlayUpdateCount: 20, markdownRenderCount: 12, markdownRenderPlainCount: 12, markdownRenderCommonMarkCount: 0, markdownRenderGfmCount: 0, markdownRenderGfmFastCount: 0, markdownRenderFullCount: 0, markdownRenderDurationMsTotal: 1.5 },
 				after: { overlayEventCount: 16, currentOutputLength: 24, traceBaseOutputLength: 0, markdownRenderDurationMsMax: 0.25 },
 			},
 			dom: {
@@ -85,7 +85,7 @@ test("pibo debug web report renders saved streaming benchmark artifacts without 
 		assert.match(compactReport.stdout, /\| Layer \| Preservation \| Cadence \/ latency \|/);
 		assert.match(compactReport.stdout, /\| SSE transport \| n\/a \| n\/a \|/);
 		assert.match(compactReport.stdout, /\| EventSource selected-live \| text 12, reasoning 4, events 26 \| first text 184ms, transient 17\/24, replay 24, liveSince 1 \|/);
-		assert.match(compactReport.stdout, /\| Markdown render \| count 12, plain 12, commonmark 0, gfm 0, full 0 \| total 1\.5ms, max 0\.25ms \|/);
+		assert.match(compactReport.stdout, /\| Markdown render \| count 12, plain 12, commonmark 0, gfm 0, gfmFast 0, full 0 \| total 1\.5ms, max 0\.25ms \|/);
 		assert.match(compactReport.stdout, /\| DOM \| positive 12, max jump 2 chars \| p90 gap 101ms, first visible 145ms \|/);
 		const output = join(cwd, "reports", "streaming-compact.md");
 		const outputReport = await execFileAsync("node", [cliPath, "debug", "web", "report", "streaming-benchmark", "--from", artifact, "--compact", "--output", output], { cwd });
@@ -103,7 +103,7 @@ test("pibo debug web report renders saved streaming benchmark artifacts without 
 		assert.deepEqual(writtenJson.rows.find((row) => row.metric === "Markdown render"), {
 			section: "compact",
 			metric: "Markdown render",
-			preservation: "count 12, plain 12, commonmark 0, gfm 0, full 0",
+			preservation: "count 12, plain 12, commonmark 0, gfm 0, gfmFast 0, full 0",
 			cadenceLatency: "total 1.5ms, max 0.25ms",
 		});
 		assert.deepEqual(writtenJson.rows.find((row) => row.metric === "DOM"), {
@@ -338,6 +338,7 @@ test("streaming benchmark summaries include live pipeline debug counters", () =>
 				markdownRenderPlainCount: enqueueCount,
 				markdownRenderCommonMarkCount: 1,
 				markdownRenderGfmCount: 1,
+				markdownRenderGfmFastCount: 1,
 				markdownRenderFullCount: 2,
 				markdownRenderDurationMsTotal: enqueueCount * 0.1,
 				traceRefreshScheduledCount: 2,
@@ -383,6 +384,7 @@ test("streaming benchmark summaries include live pipeline debug counters", () =>
 	assert.equal(summary.debugMarkdownRenderFullCount.p50, 2);
 	assert.equal(summary.debugMarkdownRenderCommonMarkCount.p50, 1);
 	assert.equal(summary.debugMarkdownRenderGfmCount.p50, 1);
+	assert.equal(summary.debugMarkdownRenderGfmFastCount.p50, 1);
 	assert.equal(summary.debugMarkdownRenderDurationTotalMs.p50, 1.2);
 	assert.equal(summary.debugMarkdownRenderDurationMaxMs.p50, 0.4);
 	assert.equal(summary.debugMarkdownRenderPlainDurationMaxMs.p50, 0.2);

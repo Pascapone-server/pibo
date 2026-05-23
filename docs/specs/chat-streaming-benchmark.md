@@ -78,7 +78,7 @@ This is the default deterministic regression mode because it exercises:
 - `text`: assistant text deltas only.
 - `reasoning-text`: reasoning deltas plus assistant text deltas.
 - `markdown`: CommonMark assistant deltas with real emphasis markers that force the full Markdown renderer path without GFM plugins while keeping small per-delta visible jumps.
-- `gfm-markdown`: GFM assistant deltas with strikethrough markers that force the full Markdown renderer path with `remark-gfm` while keeping small per-delta visible jumps.
+- `gfm-markdown`: GFM assistant deltas with strikethrough markers that exercise GFM rendering while keeping small per-delta visible jumps. Simple strikethrough may use the GFM fast path; richer GFM still uses the full `remark-gfm` parser.
 
 ### Simulations
 
@@ -150,7 +150,7 @@ Collected from `window.__piboStreamingDebug` when `?debugStreaming=1` or local s
 - live open/error count;
 - event, enqueue, flush, flushed-event, overlay-update, overlay-event counts;
 - live trace overlay compute count plus total/max duration for committed overlay renders;
-- Markdown renderer invocation count split into plain/CommonMark/GFM/full paths plus total/max duration when debug streaming is enabled; full-path timing includes the synchronous ReactMarkdown parse and React tree build, with GFM plugin work counted separately and used only when the input uses GFM-specific syntax;
+- Markdown renderer invocation count split into plain/CommonMark/GFM parser/GFM fast/full paths plus total/max duration when debug streaming is enabled; full-path timing includes the synchronous ReactMarkdown parse and React tree build, while GFM fast timing covers narrowly guarded direct renderers that bypass `remark-gfm`;
 - current output and trace base output lengths;
 - trace refresh count/duration;
 - first text, enqueue, flush, and overlay-update latency;
@@ -213,7 +213,7 @@ Compact single/group reports include rows for:
 - EventSource selected-live; compact single-run and group reports include reconnect replay cursor/frame counts, replay cursor lag, and duplicate replay counts when used;
 - Live overlay preservation and first live latencies;
 - Live trace compute count/total/max duration when debug instrumentation is available;
-- Markdown renderer count/plain/CommonMark/GFM/full and total/max duration when debug instrumentation is available;
+- Markdown renderer count/plain/CommonMark/GFM parser/GFM fast/full and total/max duration when debug instrumentation is available;
 - DOM;
 - Score.
 
@@ -242,7 +242,7 @@ node --test test/debug-cli.test.mjs test/web-channel.test.mjs test/trace-live-re
 pibo debug web scenario streaming-benchmark --backend-fixture --fixture-mix reasoning-text --assert --artifact
 ```
 
-For Markdown rendering changes, also run the full-renderer fixtures:
+For Markdown rendering changes, also run the Markdown/GFM renderer fixtures:
 
 ```bash
 pibo debug web scenario streaming-benchmark --backend-fixture --fixture-mix markdown --runs 5 --assert --artifact

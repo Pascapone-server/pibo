@@ -36,6 +36,7 @@ export type StreamingDebugSnapshot = {
 	markdownRenderFullCount: number;
 	markdownRenderCommonMarkCount: number;
 	markdownRenderGfmCount: number;
+	markdownRenderGfmFastCount: number;
 	markdownRenderDurationMsTotal: number;
 	markdownRenderDurationMsLast?: number;
 	markdownRenderDurationMsMax?: number;
@@ -47,6 +48,8 @@ export type StreamingDebugSnapshot = {
 	markdownRenderCommonMarkDurationMsMax?: number;
 	markdownRenderGfmDurationMsTotal: number;
 	markdownRenderGfmDurationMsMax?: number;
+	markdownRenderGfmFastDurationMsTotal: number;
+	markdownRenderGfmFastDurationMsMax?: number;
 	traceRefreshScheduledCount: number;
 	traceRefreshStartedCount: number;
 	traceRefreshCompletedCount: number;
@@ -178,7 +181,7 @@ export function recordStreamingDebugLiveTraceCompute(piboSessionId: string, dura
 	});
 }
 
-export function recordStreamingDebugMarkdownRender(mode: "plain" | "commonmark" | "gfm", durationMs: number): void {
+export function recordStreamingDebugMarkdownRender(mode: "plain" | "commonmark" | "gfm" | "gfm-fast", durationMs: number): void {
 	updateStreamingDebugSnapshot((snapshot) => {
 		const roundedDurationMs = roundDebugDurationMs(durationMs);
 		snapshot.markdownRenderCount += 1;
@@ -189,6 +192,10 @@ export function recordStreamingDebugMarkdownRender(mode: "plain" | "commonmark" 
 			snapshot.markdownRenderPlainCount += 1;
 			snapshot.markdownRenderPlainDurationMsTotal += roundedDurationMs;
 			snapshot.markdownRenderPlainDurationMsMax = Math.max(snapshot.markdownRenderPlainDurationMsMax ?? 0, roundedDurationMs);
+		} else if (mode === "gfm-fast") {
+			snapshot.markdownRenderGfmFastCount += 1;
+			snapshot.markdownRenderGfmFastDurationMsTotal += roundedDurationMs;
+			snapshot.markdownRenderGfmFastDurationMsMax = Math.max(snapshot.markdownRenderGfmFastDurationMsMax ?? 0, roundedDurationMs);
 		} else {
 			snapshot.markdownRenderFullCount += 1;
 			snapshot.markdownRenderFullDurationMsTotal += roundedDurationMs;
@@ -318,11 +325,13 @@ function createStreamingDebugSnapshot(): StreamingDebugSnapshot {
 		markdownRenderFullCount: 0,
 		markdownRenderCommonMarkCount: 0,
 		markdownRenderGfmCount: 0,
+		markdownRenderGfmFastCount: 0,
 		markdownRenderDurationMsTotal: 0,
 		markdownRenderPlainDurationMsTotal: 0,
 		markdownRenderFullDurationMsTotal: 0,
 		markdownRenderCommonMarkDurationMsTotal: 0,
 		markdownRenderGfmDurationMsTotal: 0,
+		markdownRenderGfmFastDurationMsTotal: 0,
 		traceRefreshScheduledCount: 0,
 		traceRefreshStartedCount: 0,
 		traceRefreshCompletedCount: 0,

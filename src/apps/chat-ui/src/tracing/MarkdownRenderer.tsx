@@ -173,7 +173,7 @@ function languageFromClassName(className?: string): string | undefined {
 	return language;
 }
 
-function recordMarkdownRenderIfEnabled(mode: "plain" | "commonmark" | "gfm", startedAt: number | undefined): void {
+function recordMarkdownRenderIfEnabled(mode: "plain" | "commonmark" | "gfm" | "gfm-fast", startedAt: number | undefined): void {
 	if (startedAt === undefined) return;
 	const endedAt = typeof performance === "undefined" ? Date.now() : performance.now();
 	recordStreamingDebugMarkdownRender(mode, endedAt - startedAt);
@@ -196,18 +196,19 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ children }: Mar
 	const startedAt = isStreamingDebugEnabled()
 		? (typeof performance === "undefined" ? Date.now() : performance.now())
 		: undefined;
-	let mode: "plain" | "commonmark" | "gfm" = "commonmark";
+	let mode: "plain" | "commonmark" | "gfm" | "gfm-fast" = "commonmark";
 	let element: ReactElement;
 	if (isPlainMarkdownText(children)) {
 		mode = "plain";
 		element = <p data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="p">{children}</p>;
 	} else {
 		const useGfm = requiresGfmMarkdown(children);
-		mode = useGfm ? "gfm" : "commonmark";
 		const simpleGfmElement = useGfm ? renderSimpleGfmStrikethrough(children) : undefined;
 		if (simpleGfmElement) {
+			mode = "gfm-fast";
 			element = simpleGfmElement;
 		} else {
+			mode = useGfm ? "gfm" : "commonmark";
 			// ReactMarkdown is a synchronous parser/render function; call it directly so debug timings include its parse/tree-build work.
 			element = ReactMarkdown({
 				allowedElements,
