@@ -1461,7 +1461,7 @@ function streamingBenchmarkFixtureHtml(fixtureProfile: StreamingFixtureProfile, 
   function nowIso() { return new Date().toISOString(); }
   const target = document.querySelector('[data-pibo-component="MarkdownRendererHost"]');
   const textDeltas = [' a', ' b', ' c', ' d', ' e', ' f', ' g', ' h', ' i', ' j', ' k', ' l'];
-  const markdownDeltas = [' #', 'a ', '|b', ' ~', 'c ', '{d', '}e', ' [', 'f]', ' (', 'g)', ' _h'];
+  const markdownDeltas = [' **a**', ' **b**', ' **c**', ' **d**', ' **e**', ' **f**', ' **g**', ' **h**', ' **i**', ' **j**', ' **k**', ' **l**'];
   const cadenceMs = 100;
   const profile = ${JSON.stringify(fixtureProfile)};
   const mix = ${JSON.stringify(fixtureMix)};

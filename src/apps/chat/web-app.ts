@@ -2531,7 +2531,7 @@ function normalizeMessageText(value: unknown): string {
 }
 
 function defaultStreamingFixtureDeltas(mix: ChatStreamingFixtureMix): string[] {
-	if (mix === "markdown") return [" #", "a ", "|b", " ~", "c ", "{d", "}e", " [", "f]", " (", "g)", " _h"];
+	if (mix === "markdown") return [" **a**", " **b**", " **c**", " **d**", " **e**", " **f**", " **g**", " **h**", " **i**", " **j**", " **k**", " **l**"];
 	return [" a", " b", " c", " d", " e", " f", " g", " h", " i", " j", " k", " l"];
 }
 

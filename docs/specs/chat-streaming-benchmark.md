@@ -77,7 +77,7 @@ This is the default deterministic regression mode because it exercises:
 
 - `text`: assistant text deltas only.
 - `reasoning-text`: reasoning deltas plus assistant text deltas.
-- `markdown`: Markdown-syntax assistant deltas that force the full Markdown renderer path while keeping small per-delta visible jumps.
+- `markdown`: Markdown-syntax assistant deltas with real emphasis markers that force the full Markdown renderer path while keeping small per-delta visible jumps.
 
 ### Simulations
 

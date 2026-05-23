@@ -44,14 +44,16 @@ const allowedElements = [
 
 const remarkPlugins = [remarkGfm];
 
-const markdownSyntaxPattern = /[\n\r\\`*_{}\[\]<>()#+|~]/;
-const markdownLinePrefixPattern = /^\s*(?:[-+>]|(?:\d+[.)]))\s/;
+const markdownStructuralPattern = /[\n\r\\`*_\[\]<>]|~~/;
+const markdownLinePrefixPattern = /^\s*(?:#{1,6}\s|[-+>]|(?:\d+[.)]))\s/;
+const markdownThematicBreakPattern = /^\s*-{3,}\s*$/;
 const markdownAutolinkPattern = /\b(?:https?:\/\/|www\.)|\S+@\S+\.\S+/i;
 
 export function isPlainMarkdownText(markdown: string): boolean {
 	return markdown.length > 0
-		&& !markdownSyntaxPattern.test(markdown)
+		&& !markdownStructuralPattern.test(markdown)
 		&& !markdownLinePrefixPattern.test(markdown)
+		&& !markdownThematicBreakPattern.test(markdown)
 		&& !markdownAutolinkPattern.test(markdown);
 }
 
