@@ -11,6 +11,7 @@ const DEFAULT_DEPTH_LIMIT = 8;
 const DEFAULT_EVENT_LIMIT = 500;
 const DEFAULT_TEXT_LIMIT = 80;
 const STDOUT_BUDGET = 12_000;
+const BATCH_NEGATIVE_EXPECTED_REGRESSIONS = ["positive DOM updates", "DOM max jump", "SSE text events per chunk"] as const;
 
 type WebOptions = {
 	positionals: string[];
@@ -22,6 +23,7 @@ type WebOptions = {
 	runs?: string;
 	fixtureProfile?: string;
 	fixtureMix?: string;
+	negativeProfile?: string;
 	json: boolean;
 	artifact: boolean;
 	fixture: boolean;
@@ -324,6 +326,8 @@ type StreamingBenchmarkSummary = {
 	roomSummaryReasoningEventCountAfterStart: NumberStats;
 };
 
+type StreamingNegativeProfile = "batch";
+
 type StreamingBenchmarkComparison = {
 	baselineRuns: number;
 	currentRuns: number;
@@ -454,7 +458,7 @@ function printScenarioHelp(): void {
 
 Usage:
   pibo debug web scenario new-session [--manual|--act] [--duration ms] [--json] [--artifact]
-  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--fixture-profile steady|jitter|burst|batch] [--fixture-mix text|reasoning-text] [--simulate-reconnect|--simulate-trace-catchup] [--duration ms] [--runs n] [--from artifact.json] [--assert] [--expect-regression text] [--json] [--artifact]
+  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--fixture-profile steady|jitter|burst|batch] [--fixture-mix text|reasoning-text] [--simulate-reconnect|--simulate-trace-catchup] [--duration ms] [--runs n] [--from artifact.json] [--assert] [--expect-regression text] [--negative-profile batch] [--json] [--artifact]
 
 Defaults:
   new-session --manual waits while you click New Session yourself.
@@ -469,6 +473,7 @@ Defaults:
   streaming-benchmark --runs repeats the same scenario and reports medians; --from compares against a prior benchmark artifact.
   streaming-benchmark --assert exits non-zero when fixture/debug/DOM smoothness gates fail.
   streaming-benchmark --expect-regression marks a required regression substring for controlled negative benchmarks; unexpected or missing expected regressions still fail with --assert.
+  streaming-benchmark --negative-profile batch expands to the backend batch reasoning/text fixture with required controlled regression assertions.
 `);
 }
 
@@ -602,35 +607,37 @@ async function runScenario(options: WebOptions): Promise<void> {
 	if (options.act && options.manual) throw new Error("Use either --manual or --act, not both.");
 	if (scenario !== "new-session" && scenario !== "streaming-benchmark") throw new Error(`Unknown pibo debug web scenario "${scenario}". Run pibo debug web scenario --help.`);
 	if (scenario === "streaming-benchmark" && (options.act || options.manual)) throw new Error("streaming-benchmark does not support --act or --manual. Start or observe the stream separately, then run the scenario.");
-	if (scenario === "streaming-benchmark" && options.fixture && options.backendFixture) throw new Error("Use either --fixture or --backend-fixture, not both.");
-	if (scenario === "streaming-benchmark" && options.fixtureProfile && !options.fixture && !options.backendFixture) throw new Error("--fixture-profile requires --fixture or --backend-fixture.");
-	if (scenario === "streaming-benchmark" && options.fixtureMix && !options.fixture && !options.backendFixture) throw new Error("--fixture-mix requires --fixture or --backend-fixture.");
-	if (scenario === "streaming-benchmark" && options.simulateReconnect && !options.backendFixture) throw new Error("--simulate-reconnect requires --backend-fixture.");
-	if (scenario === "streaming-benchmark" && options.simulateTraceCatchup && !options.backendFixture) throw new Error("--simulate-trace-catchup requires --backend-fixture.");
-	if (scenario === "streaming-benchmark" && options.simulateReconnect && options.simulateTraceCatchup) throw new Error("Use either --simulate-reconnect or --simulate-trace-catchup, not both.");
-	const fixtureProfile = parseFixtureProfile(options.fixtureProfile);
-	const fixtureMix = parseFixtureMix(options.fixtureMix);
-	const durationMs = parseDuration(options.duration);
-	const runs = parseRuns(options.runs);
+	const negativeProfile = scenario === "streaming-benchmark" ? parseNegativeProfile(options.negativeProfile) : undefined;
+	const streamingOptions = negativeProfile ? applyNegativeStreamingProfile(options, negativeProfile) : options;
+	if (scenario === "streaming-benchmark" && streamingOptions.fixture && streamingOptions.backendFixture) throw new Error("Use either --fixture or --backend-fixture, not both.");
+	if (scenario === "streaming-benchmark" && streamingOptions.fixtureProfile && !streamingOptions.fixture && !streamingOptions.backendFixture) throw new Error("--fixture-profile requires --fixture or --backend-fixture.");
+	if (scenario === "streaming-benchmark" && streamingOptions.fixtureMix && !streamingOptions.fixture && !streamingOptions.backendFixture) throw new Error("--fixture-mix requires --fixture or --backend-fixture.");
+	if (scenario === "streaming-benchmark" && streamingOptions.simulateReconnect && !streamingOptions.backendFixture) throw new Error("--simulate-reconnect requires --backend-fixture.");
+	if (scenario === "streaming-benchmark" && streamingOptions.simulateTraceCatchup && !streamingOptions.backendFixture) throw new Error("--simulate-trace-catchup requires --backend-fixture.");
+	if (scenario === "streaming-benchmark" && streamingOptions.simulateReconnect && streamingOptions.simulateTraceCatchup) throw new Error("Use either --simulate-reconnect or --simulate-trace-catchup, not both.");
+	const fixtureProfile = parseFixtureProfile(streamingOptions.fixtureProfile);
+	const fixtureMix = parseFixtureMix(streamingOptions.fixtureMix);
+	const durationMs = parseDuration(streamingOptions.duration);
+	const runs = parseRuns(streamingOptions.runs);
 	const { client, target } = await connectTarget({ ...options, preset: "app" });
 	try {
 		if (scenario === "streaming-benchmark") {
-			if (options.fixture) await navigateStreamingBenchmarkFixture(client, fixtureProfile, fixtureMix);
-			if (options.backendFixture) await prepareStreamingBenchmarkEventSourceProbe(client);
+			if (streamingOptions.fixture) await navigateStreamingBenchmarkFixture(client, fixtureProfile, fixtureMix);
+			if (streamingOptions.backendFixture) await prepareStreamingBenchmarkEventSourceProbe(client);
 			const benchmarks: StreamingBenchmark[] = [];
 			for (let run = 0; run < runs; run++) {
-				benchmarks.push(await runStreamingBenchmark(client, durationMs, { startFixture: options.fixture, startBackendFixture: options.backendFixture, fixtureProfile, fixtureMix, simulateReconnect: options.simulateReconnect, simulateTraceCatchup: options.simulateTraceCatchup }));
+				benchmarks.push(await runStreamingBenchmark(client, durationMs, { startFixture: streamingOptions.fixture, startBackendFixture: streamingOptions.backendFixture, fixtureProfile, fixtureMix, simulateReconnect: streamingOptions.simulateReconnect, simulateTraceCatchup: streamingOptions.simulateTraceCatchup }));
 			}
-			const baseline = options.from ? await readStreamingBenchmarkRuns(options.from) : undefined;
+			const baseline = streamingOptions.from ? await readStreamingBenchmarkRuns(streamingOptions.from) : undefined;
 			const benchmark: StreamingBenchmark | StreamingBenchmarkGroup = runs === 1
 				? benchmarks[0]
 				: summarizeStreamingBenchmarkGroup(benchmarks, baseline);
-			const assertion = applyExpectedStreamingRegressions(benchmark, options.expectedRegressionPatterns);
-			if (options.json) console.log(JSON.stringify({ target: compactTarget(target), scenario, benchmark }, null, 2));
+			const assertion = applyExpectedStreamingRegressions(benchmark, streamingOptions.expectedRegressionPatterns);
+			if (streamingOptions.json) console.log(JSON.stringify({ target: compactTarget(target), scenario, benchmark }, null, 2));
 			else console.log(limitStdout(formatStreamingBenchmarkResult(benchmark, target)));
 			const artifact = await writeArtifact(`scenario-${scenario}`, benchmark);
-			if (!options.json) console.log(`Artifact: ${artifact}`);
-			if (options.assertHealthy && !assertion.passed) throw new Error(formatStreamingBenchmarkAssertionError(assertion));
+			if (!streamingOptions.json) console.log(`Artifact: ${artifact}`);
+			if (streamingOptions.assertHealthy && !assertion.passed) throw new Error(formatStreamingBenchmarkAssertionError(assertion));
 			return;
 		}
 
@@ -2065,6 +2072,8 @@ function parseOptions(args: string[]): WebOptions {
 		else if (arg.startsWith("--fixture-profile=")) options.fixtureProfile = arg.slice("--fixture-profile=".length);
 		else if (arg === "--fixture-mix") options.fixtureMix = requireValue(args, ++index, arg);
 		else if (arg.startsWith("--fixture-mix=")) options.fixtureMix = arg.slice("--fixture-mix=".length);
+		else if (arg === "--negative-profile") options.negativeProfile = requireValue(args, ++index, arg);
+		else if (arg.startsWith("--negative-profile=")) options.negativeProfile = arg.slice("--negative-profile=".length);
 		else if (arg === "--from") options.from = requireValue(args, ++index, arg);
 		else if (arg.startsWith("--from=")) options.from = arg.slice("--from=".length);
 		else options.positionals.push(arg);
@@ -2122,6 +2131,32 @@ function parseFixtureMix(value?: string): StreamingFixtureMix {
 	if (!value) return "text";
 	if (value === "text" || value === "reasoning-text") return value;
 	throw new Error("--fixture-mix must be text or reasoning-text");
+}
+
+function parseNegativeProfile(value?: string): StreamingNegativeProfile | undefined {
+	if (!value) return undefined;
+	if (value === "batch") return value;
+	throw new Error("--negative-profile must be batch");
+}
+
+function applyNegativeStreamingProfile(options: WebOptions, profile: StreamingNegativeProfile): WebOptions {
+	const conflictingFlags: string[] = [];
+	if (options.fixture) conflictingFlags.push("--fixture");
+	if (options.backendFixture) conflictingFlags.push("--backend-fixture");
+	if (options.fixtureProfile) conflictingFlags.push("--fixture-profile");
+	if (options.fixtureMix) conflictingFlags.push("--fixture-mix");
+	if (options.simulateReconnect) conflictingFlags.push("--simulate-reconnect");
+	if (options.simulateTraceCatchup) conflictingFlags.push("--simulate-trace-catchup");
+	if (options.expectedRegressionPatterns.length > 0) conflictingFlags.push("--expect-regression");
+	if (conflictingFlags.length > 0) throw new Error(`--negative-profile ${profile} already selects fixture settings and expected regressions; remove ${conflictingFlags.join(", ")}`);
+	return {
+		...options,
+		backendFixture: true,
+		fixtureProfile: "batch",
+		fixtureMix: "reasoning-text",
+		assertHealthy: true,
+		expectedRegressionPatterns: [...BATCH_NEGATIVE_EXPECTED_REGRESSIONS],
+	};
 }
 
 function formatSnapshot(snapshot: WebSnapshot, target: BrowserUseCdpTarget | { id: string; url: string; title: string }): string {
