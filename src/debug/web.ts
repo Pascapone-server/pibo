@@ -594,6 +594,16 @@ type StreamingBenchmarkUrlComparison = {
 	assertion?: StreamingBenchmarkAssertion;
 };
 
+type StreamingBenchmarkReportRow = {
+	section: "compact" | "compact-url-comparison";
+	metric: string;
+	preservation?: string;
+	cadenceLatency?: string;
+	primaryP50?: string;
+	compareP50?: string;
+	delta?: string;
+};
+
 export async function runDebugWeb(args: string[]): Promise<void> {
 	if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
 		printWebDiscovery();
@@ -725,7 +735,7 @@ Reports:
   streaming-benchmark  Summarize saved pibo debug web scenario streaming-benchmark JSON as Markdown.
   --compact            Render reviewer-friendly Markdown tables instead of the detailed line report.
   --output             Write the Markdown report to a specific file path.
-  --json-output        Write the normalized JSON report payload to a specific file path.
+  --json-output        Write the normalized JSON report payload and compact rows to a specific file path.
 
 Next:
   pibo debug web scenario streaming-benchmark --backend-fixture --assert --artifact
@@ -953,7 +963,8 @@ async function runReport(options: WebOptions): Promise<void> {
 	const output = options.output ? await writeReportOutput(options.output, markdown) : undefined;
 	const artifact = options.artifact ? await writeTextArtifact(options.compact ? "report-streaming-benchmark-compact" : "report-streaming-benchmark", "md", markdown) : undefined;
 	const jsonOutput = options.jsonOutput ? path.resolve(options.jsonOutput) : undefined;
-	const jsonPayload = { report, source: options.from, format, target, output, artifact, jsonOutput, markdown, benchmark };
+	const rows = streamingBenchmarkReportRows(benchmark, options.compact);
+	const jsonPayload = { report, source: options.from, format, target, output, artifact, jsonOutput, markdown, rows, benchmark };
 	if (options.jsonOutput) await writeReportOutput(options.jsonOutput, JSON.stringify(jsonPayload, null, 2));
 	if (options.json) console.log(JSON.stringify(jsonPayload, null, 2));
 	else {
@@ -3563,6 +3574,58 @@ function formatStreamingBenchmarkCompactReport(benchmark: StreamingBenchmark | S
 	if (benchmark.kind === "streaming-benchmark-url-comparison") return formatStreamingBenchmarkCompactUrlComparison(benchmark, target);
 	if (benchmark.kind === "streaming-benchmark-runs") return formatStreamingBenchmarkCompactGroup(benchmark, target);
 	return formatStreamingBenchmarkCompactRun(benchmark, target);
+}
+
+function streamingBenchmarkReportRows(benchmark: StreamingBenchmark | StreamingBenchmarkGroup | StreamingBenchmarkUrlComparison, compact: boolean): StreamingBenchmarkReportRow[] {
+	if (!compact) return [];
+	if (benchmark.kind === "streaming-benchmark-url-comparison") return streamingBenchmarkCompactUrlComparisonRows(benchmark);
+	if (benchmark.kind === "streaming-benchmark-runs") return streamingBenchmarkCompactGroupRows(benchmark);
+	return streamingBenchmarkCompactRunRows(benchmark);
+}
+
+function streamingBenchmarkCompactRunRows(benchmark: StreamingBenchmark): StreamingBenchmarkReportRow[] {
+	const selectedLive = selectedLiveStream(benchmark);
+	return [
+		{ section: "compact", metric: "Provider/Pi", preservation: benchmark.provider ? `text ${jsonShort(benchmark.provider.textDeltaCount)}, reasoning ${jsonShort(benchmark.provider.reasoningDeltaCount)}, parseErrors ${jsonShort(benchmark.provider.parseErrorCount)}, unknown ${jsonShort(benchmark.provider.unknownEventCount)}` : "n/a", cadenceLatency: benchmark.provider ? `text gap p90 ${statP90(benchmark.provider.textDeltaGapsMs, "ms")}, first text ${jsonShort(benchmark.provider.firstTextLatencyMs)}ms` : "n/a" },
+		{ section: "compact", metric: "Provider ratios", preservation: benchmark.providerPreservation ? `SSE text ${jsonShort(benchmark.providerPreservation.sseTextToProviderRatio)}, selected-live text ${jsonShort(benchmark.providerPreservation.selectedLiveTextToProviderRatio)}, DOM/text ${jsonShort(benchmark.providerPreservation.domPositiveToProviderTextRatio)}` : "n/a", cadenceLatency: benchmark.providerPreservation ? `SSE reasoning ${jsonShort(benchmark.providerPreservation.sseReasoningToProviderRatio)}, selected-live reasoning ${jsonShort(benchmark.providerPreservation.selectedLiveReasoningToProviderRatio)}` : "n/a" },
+		{ section: "compact", metric: "SSE transport", preservation: benchmark.sse ? `text ${benchmark.sse.textEventCount}, reasoning ${benchmark.sse.reasoningEventCount}, transient ${benchmark.sse.transientIdCount}` : "n/a", cadenceLatency: benchmark.sse ? `text gap p90 ${statP90(benchmark.sse.textEventGapsMs, "ms")}, text/chunk p90 ${statP90(benchmark.sse.textEventsPerChunk)}, first text ${jsonShort(benchmark.sse.firstTextEventMs)}ms` : "n/a" },
+		{ section: "compact", metric: "Cadence lag", preservation: benchmark.cadence ? `fixture schedule p90 ${jsonShort(benchmark.cadence.fixtureScheduleGapP90Ms)}ms` : "n/a", cadenceLatency: benchmark.cadence ? `DOM lag ${jsonShort(benchmark.cadence.domLagOverScheduleP90Ms)}ms, SSE text lag ${jsonShort(benchmark.cadence.sseTextLagOverScheduleP90Ms)}ms` : "n/a" },
+		{ section: "compact", metric: "EventSource selected-live", preservation: selectedLive ? `text ${selectedLive.textEventCountAfterStart}, reasoning ${selectedLive.reasoningEventCountAfterStart}, events ${selectedLive.eventCount}` : "n/a", cadenceLatency: selectedLive ? `first text ${jsonShort(selectedLive.firstTextEventMsAfterStart)}ms, transient ${selectedLive.uniqueTransientIdCountAfterStart}/${selectedLive.transientIdCountAfterStart}` : "n/a" },
+		{ section: "compact", metric: "Live overlay", preservation: benchmark.livePipeline ? `flushed/expected ${jsonShort(benchmark.livePipeline.flushedEventsToExpectedRatio)}, overlayEvents/expected ${jsonShort(benchmark.livePipeline.overlayEventsToExpectedRatio)}, currentText/expected ${jsonShort(benchmark.livePipeline.currentOutputToExpectedTextBytesRatio)}` : "n/a", cadenceLatency: benchmark.livePipeline ? `first text ${jsonShort(benchmark.livePipeline.firstTextDeltaMs)}ms, first flush ${jsonShort(benchmark.livePipeline.firstFlushMs)}ms` : "n/a" },
+		{ section: "compact", metric: "DOM", preservation: `positive ${benchmark.dom.positiveUpdateCount}, max jump ${jsonShort(benchmark.dom.positiveCharJumps.max)} chars`, cadenceLatency: `p90 gap ${statP90(benchmark.dom.gapsMs, "ms")}, first visible ${jsonShort(benchmark.dom.firstPositiveUpdateMs)}ms` },
+		{ section: "compact", metric: "Score", preservation: `smoothness ${benchmark.score.smoothness}`, cadenceLatency: `regressions ${benchmark.regressions.length}, warnings ${benchmark.warnings.length}` },
+	];
+}
+
+function streamingBenchmarkCompactGroupRows(group: StreamingBenchmarkGroup): StreamingBenchmarkReportRow[] {
+	return [
+		{ section: "compact", metric: "Provider/Pi", preservation: `text ${statP50(group.summary.providerTextDeltaCount)}, reasoning ${statP50(group.summary.providerReasoningDeltaCount)}, parseErrors ${statP50(group.summary.providerParseErrorCount)}`, cadenceLatency: `text gap p90 ${statP50(group.summary.providerTextDeltaGapP90Ms, "ms")}, first text ${statP50(group.summary.providerFirstTextLatencyMs, "ms")}` },
+		{ section: "compact", metric: "Provider ratios", preservation: `SSE text ${statP50(group.summary.providerSseTextRatio)}, selected-live text ${statP50(group.summary.providerSelectedLiveTextRatio)}, DOM/text ${statP50(group.summary.providerDomPositiveTextRatio)}`, cadenceLatency: `SSE reasoning ${statP50(group.summary.providerSseReasoningRatio)}, selected-live reasoning ${statP50(group.summary.providerSelectedLiveReasoningRatio)}` },
+		{ section: "compact", metric: "SSE transport", preservation: `text ${statP50(group.summary.sseTextEventCount)}, reasoning ${statP50(group.summary.sseReasoningEventCount)}`, cadenceLatency: `text gap p90 ${statP50(group.summary.sseTextEventGapP90Ms, "ms")}, text/chunk p90 ${statP50(group.summary.sseTextEventsPerChunkP90)}, first text ${statP50(group.summary.sseFirstTextEventMs, "ms")}` },
+		{ section: "compact", metric: "Cadence lag", preservation: `fixture schedule p90 ${statP50(group.summary.fixtureScheduleGapP90Ms, "ms")}`, cadenceLatency: `DOM lag ${statP50(group.summary.domLagOverFixtureScheduleP90Ms, "ms")}, SSE text lag ${statP50(group.summary.sseTextLagOverFixtureScheduleP90Ms, "ms")}` },
+		{ section: "compact", metric: "EventSource selected-live", preservation: `text ${statP50(group.summary.selectedLiveTextEventCountAfterStart)}, reasoning ${statP50(group.summary.selectedLiveReasoningEventCountAfterStart)}, events ${statP50(group.summary.selectedLiveEventCountAfterStart)}`, cadenceLatency: `first text ${statP50(group.summary.selectedLiveFirstTextEventMsAfterStart, "ms")}, transient ${statP50(group.summary.selectedLiveTransientIdCountAfterStart)}` },
+		{ section: "compact", metric: "Live overlay", preservation: `flushed/expected ${statP50(group.summary.liveFlushedEventsToExpectedRatio)}, overlayEvents/expected ${statP50(group.summary.liveOverlayEventsToExpectedRatio)}, currentText/expected ${statP50(group.summary.liveCurrentOutputToExpectedTextBytesRatio)}`, cadenceLatency: `first text ${statP50(group.summary.liveFirstTextDeltaMs, "ms")}, first flush ${statP50(group.summary.liveFirstFlushMs, "ms")}` },
+		{ section: "compact", metric: "DOM", preservation: `positive ${statP50(group.summary.domPositiveUpdateCount)}, max jump ${statP50(group.summary.domJumpMaxChars, " chars")}`, cadenceLatency: `p90 gap ${statP50(group.summary.domGapP90Ms, "ms")}, first visible ${statP50(group.summary.firstVisibleMs, "ms")}` },
+		{ section: "compact", metric: "Score", preservation: `smoothness ${statP50(group.summary.smoothness)}`, cadenceLatency: `regressions ${statP50(group.summary.regressionCount)}, warnings ${group.warnings.length}` },
+	];
+}
+
+function streamingBenchmarkCompactUrlComparisonRows(comparison: StreamingBenchmarkUrlComparison): StreamingBenchmarkReportRow[] {
+	return [
+		{ section: "compact-url-comparison", metric: "Smoothness", primaryP50: statP50(comparison.primary.summary.smoothness), compareP50: statP50(comparison.compare.summary.smoothness), delta: signed(comparison.comparison.smoothnessDelta) },
+		{ section: "compact-url-comparison", metric: "DOM p90 gap", primaryP50: statP50(comparison.primary.summary.domGapP90Ms, "ms"), compareP50: statP50(comparison.compare.summary.domGapP90Ms, "ms"), delta: signedMs(comparison.comparison.domGapP90DeltaMs) },
+		{ section: "compact-url-comparison", metric: "DOM lag vs schedule", primaryP50: statP50(comparison.primary.summary.domLagOverFixtureScheduleP90Ms, "ms"), compareP50: statP50(comparison.compare.summary.domLagOverFixtureScheduleP90Ms, "ms"), delta: signedMs(comparison.comparison.domLagOverFixtureScheduleP90DeltaMs) },
+		{ section: "compact-url-comparison", metric: "SSE chunk p90 gap", primaryP50: statP50(comparison.primary.summary.sseChunkGapP90Ms, "ms"), compareP50: statP50(comparison.compare.summary.sseChunkGapP90Ms, "ms"), delta: signedMs(comparison.comparison.sseChunkGapP90DeltaMs) },
+		{ section: "compact-url-comparison", metric: "SSE text lag vs schedule", primaryP50: statP50(comparison.primary.summary.sseTextLagOverFixtureScheduleP90Ms, "ms"), compareP50: statP50(comparison.compare.summary.sseTextLagOverFixtureScheduleP90Ms, "ms"), delta: signedMs(comparison.comparison.sseTextLagOverFixtureScheduleP90DeltaMs) },
+		{ section: "compact-url-comparison", metric: "SSE text events", primaryP50: statP50(comparison.primary.summary.sseTextEventCount), compareP50: statP50(comparison.compare.summary.sseTextEventCount), delta: signed(comparison.comparison.sseTextEventDelta) },
+		{ section: "compact-url-comparison", metric: "Selected-live text", primaryP50: statP50(comparison.primary.summary.selectedLiveTextEventCountAfterStart), compareP50: statP50(comparison.compare.summary.selectedLiveTextEventCountAfterStart), delta: signed(comparison.comparison.selectedLiveTextEventDelta) },
+		{ section: "compact-url-comparison", metric: "Selected-live reasoning", primaryP50: statP50(comparison.primary.summary.selectedLiveReasoningEventCountAfterStart), compareP50: statP50(comparison.compare.summary.selectedLiveReasoningEventCountAfterStart), delta: signed(comparison.comparison.selectedLiveReasoningEventDelta) },
+		{ section: "compact-url-comparison", metric: "Live flush/enqueue", primaryP50: statP50(comparison.primary.summary.liveFlushToEnqueueRatio), compareP50: statP50(comparison.compare.summary.liveFlushToEnqueueRatio), delta: signed(comparison.comparison.liveFlushToEnqueueRatioDelta) },
+		{ section: "compact-url-comparison", metric: "Provider SSE text ratio", primaryP50: statP50(comparison.primary.summary.providerSseTextRatio), compareP50: statP50(comparison.compare.summary.providerSseTextRatio), delta: signed(comparison.comparison.providerSseTextRatioDelta) },
+		{ section: "compact-url-comparison", metric: "Provider selected-live text ratio", primaryP50: statP50(comparison.primary.summary.providerSelectedLiveTextRatio), compareP50: statP50(comparison.compare.summary.providerSelectedLiveTextRatio), delta: signed(comparison.comparison.providerSelectedLiveTextRatioDelta) },
+		{ section: "compact-url-comparison", metric: "First selected-live text", primaryP50: statP50(comparison.primary.summary.selectedLiveFirstTextEventMsAfterStart, "ms"), compareP50: statP50(comparison.compare.summary.selectedLiveFirstTextEventMsAfterStart, "ms"), delta: signedMs(comparison.comparison.selectedLiveFirstTextEventDeltaMs) },
+		{ section: "compact-url-comparison", metric: "First visible DOM", primaryP50: statP50(comparison.primary.summary.firstVisibleMs, "ms"), compareP50: statP50(comparison.compare.summary.firstVisibleMs, "ms"), delta: signedMs(comparison.comparison.firstVisibleDeltaMs) },
+	];
 }
 
 function formatStreamingBenchmarkCompactRun(benchmark: StreamingBenchmark, target: BrowserUseCdpTarget | { id: string; url: string; title: string }): string {
