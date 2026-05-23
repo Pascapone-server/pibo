@@ -36,6 +36,7 @@ type WebOptions = {
 	providerRequestId?: string;
 	providerSessionId?: string;
 	providerTurnId?: string;
+	providerSelectedSession: boolean;
 	compareHosted: boolean;
 	compareHostedIfConfigured: boolean;
 	json: boolean;
@@ -573,7 +574,7 @@ function printScenarioHelp(): void {
 
 Usage:
   pibo debug web scenario new-session [--manual|--act] [--duration ms] [--json] [--artifact]
-  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--fixture-profile steady|jitter|burst|batch] [--fixture-mix text|reasoning-text] [--simulate-reconnect|--simulate-trace-catchup] [--duration ms] [--runs n] [--from artifact.json] [--provider-request-id pr_...|--provider-session-id ps_...|--provider-turn-id turn_...] [--compare-url url|--compare-hosted|--compare-hosted-if-configured] [--assert] [--expect-regression text] [--negative-profile batch] [--json] [--artifact]
+  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--fixture-profile steady|jitter|burst|batch] [--fixture-mix text|reasoning-text] [--simulate-reconnect|--simulate-trace-catchup] [--duration ms] [--runs n] [--from artifact.json] [--provider-request-id pr_...|--provider-session-id ps_...|--provider-turn-id turn_...|--provider-selected-session] [--compare-url url|--compare-hosted|--compare-hosted-if-configured] [--assert] [--expect-regression text] [--negative-profile batch] [--json] [--artifact]
 
 Defaults:
   new-session --manual waits while you click New Session yourself.
@@ -590,7 +591,7 @@ Defaults:
   streaming-benchmark --compare-hosted uses PIBO_DEV_PUBLIC_URL or PIBO_DEV_BASE_URL from the environment or .env.developer-host as the compare URL.
   streaming-benchmark --compare-hosted-if-configured runs the hosted comparison when a dev URL is configured; otherwise it records a warning and keeps the primary benchmark.
   streaming-benchmark --provider-request-id attaches provider/Pi telemetry delta counts, byte stats, gap stats, parse errors, first-text latency, and provider-to-transport preservation ratios from pibo debug telemetry.
-  streaming-benchmark --provider-session-id or --provider-turn-id discovers the latest provider request from telemetry session/turn metadata before attaching provider metrics.
+  streaming-benchmark --provider-session-id, --provider-turn-id, or --provider-selected-session discovers the latest provider request from telemetry session/turn metadata before attaching provider metrics.
   streaming-benchmark --assert exits non-zero when fixture/debug/DOM/provider preservation gates fail.
   streaming-benchmark --expect-regression marks a required regression substring for controlled negative benchmarks; unexpected or missing expected regressions still fail with --assert.
   streaming-benchmark --negative-profile batch expands to the backend batch reasoning/text fixture with required controlled regression assertions.
@@ -735,7 +736,7 @@ async function runScenario(options: WebOptions): Promise<void> {
 	if (scenario === "streaming-benchmark" && streamingOptions.simulateReconnect && !streamingOptions.backendFixture) throw new Error("--simulate-reconnect requires --backend-fixture.");
 	if (scenario === "streaming-benchmark" && streamingOptions.simulateTraceCatchup && !streamingOptions.backendFixture) throw new Error("--simulate-trace-catchup requires --backend-fixture.");
 	if (scenario === "streaming-benchmark" && streamingOptions.simulateReconnect && streamingOptions.simulateTraceCatchup) throw new Error("Use either --simulate-reconnect or --simulate-trace-catchup, not both.");
-	const providerTelemetryModes = [streamingOptions.providerRequestId ? "--provider-request-id" : undefined, streamingOptions.providerSessionId ? "--provider-session-id" : undefined, streamingOptions.providerTurnId ? "--provider-turn-id" : undefined].filter(Boolean);
+	const providerTelemetryModes = [streamingOptions.providerRequestId ? "--provider-request-id" : undefined, streamingOptions.providerSessionId ? "--provider-session-id" : undefined, streamingOptions.providerTurnId ? "--provider-turn-id" : undefined, streamingOptions.providerSelectedSession ? "--provider-selected-session" : undefined].filter(Boolean);
 	if (scenario === "streaming-benchmark" && providerTelemetryModes.length > 1) throw new Error(`Use only one provider telemetry source flag: ${providerTelemetryModes.join(", ")}.`);
 	const hostedCompareModes = [streamingOptions.compareUrl ? "--compare-url" : undefined, streamingOptions.compareHosted ? "--compare-hosted" : undefined, streamingOptions.compareHostedIfConfigured ? "--compare-hosted-if-configured" : undefined].filter(Boolean);
 	if (scenario === "streaming-benchmark" && hostedCompareModes.length > 1) throw new Error(`Use only one compare target flag: ${hostedCompareModes.join(", ")}.`);
@@ -752,7 +753,7 @@ async function runScenario(options: WebOptions): Promise<void> {
 	try {
 		if (scenario === "streaming-benchmark") {
 			const baseline = streamingOptions.from ? await readStreamingBenchmarkRuns(streamingOptions.from) : undefined;
-			const providerTelemetry = collectStreamingProviderTelemetryForOptions(streamingOptions);
+			const providerTelemetry = await collectStreamingProviderTelemetryForOptions(streamingOptions, client);
 			const runOptions = { startFixture: streamingOptions.fixture, startBackendFixture: streamingOptions.backendFixture, fixtureProfile, fixtureMix, simulateReconnect: streamingOptions.simulateReconnect, simulateTraceCatchup: streamingOptions.simulateTraceCatchup, providerTelemetry };
 			const primaryUrl = await currentBrowserUrl(client);
 			const benchmarks = await runStreamingBenchmarkSeries(client, runs, durationMs, runOptions);
@@ -914,11 +915,23 @@ export function summarizeStreamingProviderTelemetry(input: { request: Record<str
 	};
 }
 
-function collectStreamingProviderTelemetryForOptions(options: WebOptions): StreamingBenchmarkProviderTelemetry | undefined {
+async function collectStreamingProviderTelemetryForOptions(options: WebOptions, client: Pick<CdpClient, "evaluate">): Promise<StreamingBenchmarkProviderTelemetry | undefined> {
 	if (options.providerRequestId) return collectStreamingProviderTelemetry(options.providerRequestId);
 	if (options.providerSessionId) return collectStreamingProviderTelemetryFromSession(options.providerSessionId);
 	if (options.providerTurnId) return collectStreamingProviderTelemetryFromTurn(options.providerTurnId);
+	if (options.providerSelectedSession) return collectStreamingProviderTelemetryFromSelectedBrowserSession(client);
 	return undefined;
+}
+
+export async function collectStreamingProviderTelemetryFromSelectedBrowserSession(client: Pick<CdpClient, "evaluate">): Promise<StreamingBenchmarkProviderTelemetry> {
+	const selected = await client.evaluate<{ piboSessionId?: string }>(`(() => ({
+  piboSessionId: document.querySelector('[data-pibo-debug="chat-shell"]')?.getAttribute('data-pibo-session-id')
+    || document.querySelector('[data-pibo-selected-session-id]')?.getAttribute('data-pibo-selected-session-id')
+    || undefined,
+}))()`, 5_000).catch(() => ({}));
+	const piboSessionId = isRecord(selected) && typeof selected.piboSessionId === "string" ? selected.piboSessionId : undefined;
+	if (!piboSessionId) return unavailableStreamingProviderTelemetry("selected-session", "No selected Chat session was found in the current browser target.");
+	return collectStreamingProviderTelemetryFromSession(piboSessionId);
 }
 
 function collectStreamingProviderTelemetry(providerRequestId: string, store = resolveDebugStore("pibo-data")): StreamingBenchmarkProviderTelemetry {
@@ -2376,6 +2389,7 @@ function parseOptions(args: string[]): WebOptions {
 		simulateTraceCatchup: false,
 		assertHealthy: false,
 		expectedRegressionPatterns: [],
+		providerSelectedSession: false,
 		compareHosted: false,
 		compareHostedIfConfigured: false,
 		act: false,
@@ -2424,6 +2438,7 @@ function parseOptions(args: string[]): WebOptions {
 		else if (arg.startsWith("--provider-session-id=")) options.providerSessionId = arg.slice("--provider-session-id=".length);
 		else if (arg === "--provider-turn-id") options.providerTurnId = requireValue(args, ++index, arg);
 		else if (arg.startsWith("--provider-turn-id=")) options.providerTurnId = arg.slice("--provider-turn-id=".length);
+		else if (arg === "--provider-selected-session") options.providerSelectedSession = true;
 		else if (arg === "--compare-hosted") options.compareHosted = true;
 		else if (arg === "--compare-hosted-if-configured") options.compareHostedIfConfigured = true;
 		else if (arg === "--from") options.from = requireValue(args, ++index, arg);

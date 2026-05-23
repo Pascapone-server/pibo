@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { PiboDataStore } from "../dist/data/pibo-store.js";
 import { PiboReliabilityStore } from "../dist/reliability/store.js";
-import { collectStreamingProviderTelemetryFromSession, collectStreamingProviderTelemetryFromTurn, evaluateStreamingBenchmarkAssertion, evaluateStreamingBenchmarkUrlComparisonRegressions, evaluateStreamingProviderRegressions, formatWatch, inferWatchFlickers, resolveStreamingBenchmarkHostedCompareUrlFromValues, summarizeStreamingProviderPreservation, summarizeStreamingProviderTelemetry } from "../dist/debug/web.js";
+import { collectStreamingProviderTelemetryFromSelectedBrowserSession, collectStreamingProviderTelemetryFromSession, collectStreamingProviderTelemetryFromTurn, evaluateStreamingBenchmarkAssertion, evaluateStreamingBenchmarkUrlComparisonRegressions, evaluateStreamingProviderRegressions, formatWatch, inferWatchFlickers, resolveStreamingBenchmarkHostedCompareUrlFromValues, summarizeStreamingProviderPreservation, summarizeStreamingProviderTelemetry } from "../dist/debug/web.js";
 
 const execFileAsyncRaw = promisify(execFile);
 const cliPath = resolve("dist/bin/pibo.js");
@@ -38,7 +38,7 @@ test("pibo debug web watch rejects action flags", async () => {
 
 test("pibo debug web streaming benchmark help advertises the deterministic fixture", async () => {
 	const help = await execFileAsync("node", [cliPath, "debug", "web", "scenario", "--help"]);
-	assert.match(help.stdout, /streaming-benchmark \[--fixture\|--backend-fixture\].*\[--fixture-profile steady\|jitter\|burst\|batch\].*\[--fixture-mix text\|reasoning-text\].*\[--simulate-reconnect\|--simulate-trace-catchup\].*\[--provider-request-id pr_\.\.\.\|--provider-session-id ps_\.\.\.\|--provider-turn-id turn_\.\.\.\].*\[--compare-url url\|--compare-hosted\|--compare-hosted-if-configured\].*\[--assert\].*\[--expect-regression text\].*\[--negative-profile batch\]/);
+	assert.match(help.stdout, /streaming-benchmark \[--fixture\|--backend-fixture\].*\[--fixture-profile steady\|jitter\|burst\|batch\].*\[--fixture-mix text\|reasoning-text\].*\[--simulate-reconnect\|--simulate-trace-catchup\].*\[--provider-request-id pr_\.\.\.\|--provider-session-id ps_\.\.\.\|--provider-turn-id turn_\.\.\.\|--provider-selected-session\].*\[--compare-url url\|--compare-hosted\|--compare-hosted-if-configured\].*\[--assert\].*\[--expect-regression text\].*\[--negative-profile batch\]/);
 	assert.match(help.stdout, /deterministic in-browser stream fixture/);
 	assert.match(help.stdout, /real app consumes deterministic \/api\/chat\/events frames/);
 	assert.match(help.stdout, /--fixture-profile selects steady cadence, deterministic jitter, bursty timing, or intentional batch stress/);
@@ -50,7 +50,7 @@ test("pibo debug web streaming benchmark help advertises the deterministic fixtu
 	assert.match(help.stdout, /--compare-hosted uses PIBO_DEV_PUBLIC_URL or PIBO_DEV_BASE_URL/);
 	assert.match(help.stdout, /--compare-hosted-if-configured runs the hosted comparison when a dev URL is configured/);
 	assert.match(help.stdout, /--provider-request-id attaches provider\/Pi telemetry delta counts/);
-	assert.match(help.stdout, /--provider-session-id or --provider-turn-id discovers the latest provider request/);
+	assert.match(help.stdout, /--provider-session-id, --provider-turn-id, or --provider-selected-session discovers the latest provider request/);
 	assert.match(help.stdout, /--assert exits non-zero when fixture\/debug\/DOM\/provider preservation gates fail/);
 	assert.match(help.stdout, /--expect-regression marks a required regression substring/);
 	assert.match(help.stdout, /--negative-profile batch expands to the backend batch reasoning\/text fixture/);
@@ -224,6 +224,19 @@ test("streaming provider telemetry can be discovered from session or turn metada
 		assert.equal(byTurn.providerRequestId, "pr_debug_stuck");
 		assert.equal(byTurn.unknownEventCount, 1);
 
+		const bySelectedSession = await collectStreamingProviderTelemetryFromSelectedBrowserSession({
+			evaluate: async () => ({ piboSessionId: "ps_running" }),
+		});
+		assert.equal(bySelectedSession.available, true);
+		assert.equal(bySelectedSession.providerRequestId, "pr_debug_stuck");
+
+		const missingSelectedSession = await collectStreamingProviderTelemetryFromSelectedBrowserSession({
+			evaluate: async () => ({}),
+		});
+		assert.equal(missingSelectedSession.available, false);
+		assert.equal(missingSelectedSession.providerRequestId, "selected-session");
+		assert.match(missingSelectedSession.error, /No selected Chat session/);
+
 		const missing = collectStreamingProviderTelemetryFromSession("ps_missing");
 		assert.equal(missing.available, false);
 		assert.equal(missing.providerRequestId, "session:ps_missing");
@@ -303,9 +316,9 @@ test("pibo debug web streaming benchmark rejects missing provider session id bef
 
 test("pibo debug web streaming benchmark rejects multiple provider telemetry sources before target discovery", async () => {
 	await assert.rejects(
-		execFileAsync("node", [cliPath, "debug", "web", "scenario", "streaming-benchmark", "--provider-request-id", "pr_one", "--provider-session-id", "ps_one"]),
+		execFileAsync("node", [cliPath, "debug", "web", "scenario", "streaming-benchmark", "--provider-request-id", "pr_one", "--provider-selected-session"]),
 		(error) => {
-			assert.match(error.stderr, /Use only one provider telemetry source flag: --provider-request-id, --provider-session-id/);
+			assert.match(error.stderr, /Use only one provider telemetry source flag: --provider-request-id, --provider-selected-session/);
 			assert.doesNotMatch(error.stderr, /No attachable CDP target/);
 			return true;
 		},
