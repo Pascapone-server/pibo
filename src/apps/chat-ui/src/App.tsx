@@ -3439,8 +3439,9 @@ function SessionTracePane({
 		const measureCompute = isStreamingDebugEnabled();
 		const startedAt = measureCompute ? performance.now() : 0;
 		const liveTrace = patchTraceViewWithEvents(reconciledBaseTraceView, overlayEvents, selectedSessionStatus ?? "idle");
-		annotateLiveTraceForkEntryIds(liveTrace.nodes, persistedUserMessageIndexForBaseTrace);
-		const traceView = overlayIncludesOptimisticUserMessage(overlayEvents) ? reconcileOptimisticUserMessages(liveTrace) : liveTrace;
+		const hasOptimisticUserMessage = overlayIncludesOptimisticUserMessage(overlayEvents);
+		if (hasOptimisticUserMessage) annotateLiveTraceForkEntryIds(liveTrace.nodes, persistedUserMessageIndexForBaseTrace);
+		const traceView = hasOptimisticUserMessage ? reconcileOptimisticUserMessages(liveTrace) : liveTrace;
 		return { traceView, liveTraceComputeDurationMs: measureCompute ? performance.now() - startedAt : undefined };
 	}, [liveTraceOverlay, selectedPiboSessionId, selectedSessionStatus, reconciledBaseTraceView, persistedUserMessageIndexForBaseTrace]);
 	const currentTraceView = currentTraceComputation.traceView;

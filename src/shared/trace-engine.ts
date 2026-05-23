@@ -239,6 +239,26 @@ function applySingleEventToNodes(
 		);
 		return;
 	}
+	if (payload.type === "assistant_message") {
+		const node = assistantMessageNodeFromEvent(
+			piboSessionId,
+			payload,
+			storedEvent.createdAt,
+			storedEvent.eventSequence,
+			storedEvent.streamId,
+			storedEvent.streamFrameIndex,
+		);
+		const existing = byId.get(node.id);
+		if (existing) {
+			mergeAssistantMessageEvent(existing, node);
+			closeParentTurnForFinalAssistant(byId, existing);
+			return;
+		}
+		closeParentTurnForFinalAssistant(byId, node);
+		nodes.push(node);
+		byId.set(node.id, node);
+		return;
+	}
 	const node = traceNodeFromEvent(
 		piboSessionId,
 		payload,
@@ -305,6 +325,35 @@ function applySingleEventToNodes(
 	attachAsyncAgentRunNode(node, piboSessionId, storedEvent.createdAt);
 	nodes.push(node);
 	for (const indexed of flattenTraceNodes([node])) byId.set(indexed.id, indexed);
+}
+
+function assistantMessageNodeFromEvent(
+	piboSessionId: string,
+	event: Extract<PiboOutputEvent, { type: "assistant_message" }>,
+	createdAt?: string,
+	eventSequence?: number,
+	streamId?: number,
+	streamFrameIndex?: number,
+): PiboTraceNode {
+	const eventId = typeof event.eventId === "string" ? event.eventId : undefined;
+	const assistantId = assistantEventNodeId(event);
+	const id = assistantId ? assistantMessageNodeId(assistantId) : `event:${event.type}:${cryptoSafeId(event)}`;
+	return {
+		id,
+		piboSessionId,
+		eventId,
+		parentId: eventId ? messageTurnNodeId(eventId) : undefined,
+		type: "assistant.message",
+		title: "Agent Message",
+		status: "done",
+		startedAt: createdAt,
+		summary: event.text,
+		output: event.text,
+		source: "event-log",
+		stableKey: assistantId ? `assistant:${assistantId}` : eventStableKey(event),
+		orderKey: eventTraceNodeOrder(eventSequence, event.type, streamId, streamFrameIndex),
+		children: [],
+	};
 }
 
 function attachExecutionCommandToOpenTurn(
@@ -413,7 +462,7 @@ export function patchTraceViewWithEvents(
 
 	return {
 		...view,
-		rawEvents: [...view.rawEvents, ...appliedEvents],
+		rawEvents: view.rawEvents.length ? [...view.rawEvents, ...appliedEvents] : appliedEvents,
 		nodes: sharedNodes,
 		latestStreamId: latestTraceStreamId(appliedEvents, view.latestStreamId),
 	};
