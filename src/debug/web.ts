@@ -179,6 +179,33 @@ type StreamingBenchmarkEventSourceProbe = {
 	streams: StreamingBenchmarkEventSourceStreamProbe[];
 };
 
+type StreamingBenchmarkTraceProbeSample = {
+	t: number;
+	version?: string;
+	eventCount?: number;
+	rawEventCount: number;
+	assistantOutputLength: number;
+	liveVersion: boolean;
+	rawEventTypes: Record<string, number>;
+};
+
+type StreamingBenchmarkTraceProbe = {
+	requested: boolean;
+	installed: boolean;
+	piboSessionId?: string;
+	intervalMs: number;
+	sampleCount: number;
+	fetchCount: number;
+	failedFetchCount: number;
+	liveVersionCount: number;
+	firstLiveVersionMs?: number;
+	durableEventCountStart?: number;
+	durableEventCountEnd?: number;
+	maxAssistantOutputLength: number;
+	finalAssistantOutputLength?: number;
+	samples: StreamingBenchmarkTraceProbeSample[];
+};
+
 type StreamingBenchmark = {
 	kind: "streaming-benchmark";
 	createdAt: string;
@@ -211,6 +238,7 @@ type StreamingBenchmark = {
 	longTasks: { count: number; totalMs: number; maxMs: number };
 	fixture?: { requested: boolean; mode: "browser" | "backend"; profile?: string; simulation?: "reconnect" | "trace-catchup"; available: boolean; started: boolean; deltaCount?: number; cadenceMs?: number; textBytes?: number; piboSessionId?: string; error?: string };
 	eventSource?: StreamingBenchmarkEventSourceProbe;
+	trace?: StreamingBenchmarkTraceProbe;
 	score: StreamingSmoothnessScore;
 	regressions: string[];
 	warnings: string[];
@@ -895,6 +923,82 @@ function fetchWithTimeout(url, init, timeoutMs) {
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
+function createTraceProbe(piboSessionId, startedAt, intervalMs) {
+  const result = {
+    requested: true,
+    installed: true,
+    piboSessionId,
+    intervalMs,
+    sampleCount: 0,
+    fetchCount: 0,
+    failedFetchCount: 0,
+    liveVersionCount: 0,
+    maxAssistantOutputLength: 0,
+    samples: [],
+  };
+  let sampling = false;
+  const sample = async () => {
+    if (sampling) return;
+    sampling = true;
+    try {
+      const t = Math.round(performance.now() - startedAt);
+      const response = await fetchWithTimeout('/api/chat/trace?piboSessionId=' + encodeURIComponent(piboSessionId) + '&includeRawEvents=true&rawEventsLimit=80', {}, 2500);
+      if (!response.ok) throw new Error(response.status + ' ' + response.statusText);
+      const trace = await response.json();
+      result.fetchCount += 1;
+      const version = typeof trace.version === 'string' ? trace.version : undefined;
+      const rawEvents = Array.isArray(trace.rawEvents) ? trace.rawEvents : [];
+      const assistantOutputLength = maxTraceAssistantOutputLength(trace);
+      const liveVersion = Boolean(version && version.includes(':live:'));
+      const sampleResult = {
+        t,
+        version,
+        eventCount: typeof trace.eventCount === 'number' ? trace.eventCount : undefined,
+        rawEventCount: rawEvents.length,
+        assistantOutputLength,
+        liveVersion,
+        rawEventTypes: countRawTraceEventTypes(rawEvents),
+      };
+      result.samples.push(sampleResult);
+      if (result.samples.length > 80) result.samples.shift();
+      result.sampleCount = result.samples.length;
+      result.maxAssistantOutputLength = Math.max(result.maxAssistantOutputLength, assistantOutputLength);
+      result.finalAssistantOutputLength = assistantOutputLength;
+      if (typeof sampleResult.eventCount === 'number') {
+        result.durableEventCountStart ??= sampleResult.eventCount;
+        result.durableEventCountEnd = sampleResult.eventCount;
+      }
+      if (liveVersion) {
+        result.liveVersionCount += 1;
+        result.firstLiveVersionMs ??= t;
+      }
+    } catch {
+      result.failedFetchCount += 1;
+    } finally {
+      sampling = false;
+    }
+  };
+  const timer = setInterval(() => { sample().catch(() => {}); }, intervalMs);
+  return { result, sample, stop: () => clearInterval(timer) };
+}
+function countRawTraceEventTypes(rawEvents) {
+  const counts = {};
+  for (const event of rawEvents) {
+    const type = typeof event?.type === 'string' ? event.type : (typeof event?.payload?.type === 'string' ? event.payload.type : 'unknown');
+    counts[type] = (counts[type] || 0) + 1;
+  }
+  return counts;
+}
+function maxTraceAssistantOutputLength(trace) {
+  let max = 0;
+  const visit = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.type === 'assistant.message' && typeof node.output === 'string') max = Math.max(max, node.output.length);
+    if (Array.isArray(node.children)) node.children.forEach(visit);
+  };
+  if (Array.isArray(trace?.nodes)) trace.nodes.forEach(visit);
+  return max;
+}
 function summarizeEventSourceProbe(startedAt, requested, forcedReconnectAtMs, textDropRequested, textDropDurationMs) {
   const probe = window.__piboStreamingBenchmarkEventSourceProbe;
   if (!requested) return undefined;
@@ -1085,6 +1189,12 @@ function streamingBenchmarkRegressions(result) {
       const maxVisibleLength = result.dom && typeof result.dom.lengthMax === 'number' ? result.dom.lengthMax : result.dom && result.dom.lengthEnd;
       if (!result.dom || !(maxVisibleLength > result.dom.lengthStart)) failures.push('trace catch-up did not advance visible DOM output');
       if (expectedDeltas !== undefined && textDeltas > Math.max(1, expectedDeltas - 2)) failures.push('trace catch-up did not suppress live text deltas before recovery');
+      if (!result.trace) failures.push('trace catch-up trace probe unavailable');
+      else {
+        if (result.trace.sampleCount < 1 || result.trace.fetchCount < 1) failures.push('trace catch-up trace probe did not fetch samples');
+        if (result.trace.liveVersionCount < 1) failures.push('trace catch-up trace probe did not observe live snapshot version');
+        if (result.trace.maxAssistantOutputLength < 1) failures.push('trace catch-up trace probe did not observe assistant output');
+      }
     }
   }
   if (result.eventSource && result.eventSource.requested) {
@@ -1177,6 +1287,7 @@ async function runStreamingBenchmark(options) {
   let fixtureStarted = false;
   let fixtureConfig;
   let backendFixtureError;
+  let traceProbe;
   const selectedSessionId = () => document.querySelector('[data-pibo-debug="chat-shell"]')?.getAttribute('data-pibo-session-id')
     || document.querySelector('[data-pibo-selected-session-id]')?.getAttribute('data-pibo-selected-session-id')
     || undefined;
@@ -1200,6 +1311,10 @@ async function runStreamingBenchmark(options) {
       warnings.push('trace catch-up simulation was requested but the EventSource probe is unavailable');
     }
     const piboSessionId = selectedSessionId();
+    if (options.simulateTraceCatchup && piboSessionId) {
+      traceProbe = createTraceProbe(piboSessionId, startedAt, 250);
+      await traceProbe.sample();
+    }
     if (!piboSessionId) {
       backendFixtureError = 'selected Chat session not found in DOM';
       warnings.push('backend streaming fixture was requested but selected Chat session was not found');
@@ -1223,6 +1338,10 @@ async function runStreamingBenchmark(options) {
 
   await new Promise((resolve) => setTimeout(resolve, options.durationMs));
   sample();
+  if (traceProbe) {
+    await traceProbe.sample();
+    traceProbe.stop();
+  }
   observer.disconnect();
   if (rafHandle !== undefined) cancelAnimationFrame(rafHandle);
   try { perfObserver && perfObserver.disconnect(); } catch {}
@@ -1265,11 +1384,13 @@ async function runStreamingBenchmark(options) {
     error: backendFixtureError,
   } : undefined;
   const eventSourceSummary = summarizeEventSourceProbe(startedAt, Boolean(options.simulateReconnect || options.simulateTraceCatchup), options.reconnectAtMs, Boolean(options.simulateTraceCatchup), options.traceCatchupDropMs);
+  const traceSummary = traceProbe && traceProbe.result;
   const regressions = streamingBenchmarkRegressions({
     debugAfter,
     debugDelta,
     fixture: fixtureSummary,
     eventSource: eventSourceSummary,
+    trace: traceSummary,
     dom: { lengthStart: initialText.length, lengthEnd: currentLength, lengthMax: maxLength, positiveUpdateCount: positiveUpdates.length, gapsMs: domGaps, positiveCharJumps: domJumps, firstPositiveUpdateMs },
     longTasks,
   });
@@ -1309,6 +1430,7 @@ async function runStreamingBenchmark(options) {
     },
     fixture: fixtureSummary,
     eventSource: eventSourceSummary,
+    trace: traceSummary,
     regressions,
     warnings,
   };
@@ -1983,6 +2105,7 @@ function formatStreamingBenchmark(benchmark: StreamingBenchmark, target: Browser
 			lines.push(`eventSource stream: role=${stream.role} mode=${jsonShort(stream.mode)} session=${jsonShort(stream.piboSessionId)} room=${jsonShort(stream.roomId)} text=${stream.textEventCount} afterStart=${stream.textEventCountAfterStart} events=${stream.eventCount} opens=${stream.openCountAfterStart} forcedClose=${stream.forcedCloseCountAfterStart} transient=${stream.uniqueTransientIdCount}/${stream.transientIdCount} since=${jsonShort(stream.sinceValues.join(","))} url=${stream.url}`);
 		}
 	}
+	if (benchmark.trace) lines.push(`trace: requested=${benchmark.trace.requested} samples=${benchmark.trace.sampleCount} fetches=${benchmark.trace.fetchCount} failed=${benchmark.trace.failedFetchCount} liveVersions=${benchmark.trace.liveVersionCount} firstLive=${jsonShort(benchmark.trace.firstLiveVersionMs)}ms assistantMax=${benchmark.trace.maxAssistantOutputLength} assistantFinal=${jsonShort(benchmark.trace.finalAssistantOutputLength)} durableEvents=${jsonShort(benchmark.trace.durableEventCountStart)}->${jsonShort(benchmark.trace.durableEventCountEnd)} session=${jsonShort(benchmark.trace.piboSessionId)}`);
 	if (benchmark.regressions.length) {
 		lines.push("", "Regressions:");
 		for (const regression of benchmark.regressions) lines.push(`- ${regression}`);
