@@ -57,14 +57,18 @@ export function isPlainMarkdownText(markdown: string): boolean {
 		&& !markdownStructuralPattern.test(markdown)
 		&& !markdownLinePrefixPattern.test(markdown)
 		&& !markdownThematicBreakPattern.test(markdown)
-		&& !markdownAutolinkPattern.test(markdown);
+		&& !(hasAutolinkCandidate(markdown) && markdownAutolinkPattern.test(markdown));
+}
+
+function hasAutolinkCandidate(markdown: string): boolean {
+	return markdown.includes("://") || markdown.includes("www.") || markdown.includes("@");
 }
 
 export function requiresGfmMarkdown(markdown: string): boolean {
 	return markdown.includes("~~")
-		|| markdownTaskListPattern.test(markdown)
-		|| markdownTablePattern.test(markdown)
-		|| markdownAutolinkPattern.test(markdown);
+		|| (markdown.includes("[") && markdownTaskListPattern.test(markdown))
+		|| (markdown.includes("|") && markdownTablePattern.test(markdown))
+		|| (hasAutolinkCandidate(markdown) && markdownAutolinkPattern.test(markdown));
 }
 
 const simpleGfmStrikethroughForbiddenPattern = /[\n\r\\`*_\[\]<>]/;
@@ -74,7 +78,11 @@ const simpleGfmTaskListTextForbiddenPattern = /[\n\r\\`*_\[\]<>|~]/;
 function renderSimpleGfmStrikethrough(markdown: string): ReactElement | undefined {
 	if (!markdown.includes("~~")) return undefined;
 	if (simpleGfmStrikethroughForbiddenPattern.test(markdown)) return undefined;
-	if (markdownLinePrefixPattern.test(markdown) || markdownThematicBreakPattern.test(markdown) || markdownAutolinkPattern.test(markdown) || markdownTaskListPattern.test(markdown) || markdownTablePattern.test(markdown)) return undefined;
+	if (markdownLinePrefixPattern.test(markdown)
+		|| markdownThematicBreakPattern.test(markdown)
+		|| (hasAutolinkCandidate(markdown) && markdownAutolinkPattern.test(markdown))
+		|| (markdown.includes("[") && markdownTaskListPattern.test(markdown))
+		|| (markdown.includes("|") && markdownTablePattern.test(markdown))) return undefined;
 
 	const parts: Array<string | ReactElement> = [];
 	let cursor = 0;
@@ -102,7 +110,7 @@ function renderSimpleGfmTaskList(markdown: string): ReactElement | undefined {
 	const match = simpleGfmTaskListPattern.exec(markdown);
 	if (!match) return undefined;
 	const text = match[2];
-	if (!text || simpleGfmTaskListTextForbiddenPattern.test(text) || markdownAutolinkPattern.test(text)) return undefined;
+	if (!text || simpleGfmTaskListTextForbiddenPattern.test(text) || (hasAutolinkCandidate(text) && markdownAutolinkPattern.test(text))) return undefined;
 	const checked = match[1].toLowerCase() === "x";
 	return (
 		<ul className="contains-task-list" data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="ul">
