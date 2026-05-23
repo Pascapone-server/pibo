@@ -3419,23 +3419,28 @@ function SessionTracePane({
 		});
 	}, [selectedPiboSessionId, tracePageQuery.data]);
 
-	const persistedUserMessageIndexForBaseTrace = useMemo(
-		() => baseTraceView ? collectPersistedUserMessageIndex(baseTraceView.nodes) : new Map<string, string[]>(),
+	const reconciledBaseTraceView = useMemo(
+		() => baseTraceView ? reconcileOptimisticUserMessages(baseTraceView) : null,
 		[baseTraceView],
+	);
+
+	const persistedUserMessageIndexForBaseTrace = useMemo(
+		() => reconciledBaseTraceView ? collectPersistedUserMessageIndex(reconciledBaseTraceView.nodes) : new Map<string, string[]>(),
+		[reconciledBaseTraceView],
 	);
 
 	const currentTraceView = useMemo(() => {
 		if (!selectedPiboSessionId || !bootstrap) return null;
-		if (baseTraceView?.piboSessionId !== selectedPiboSessionId) return null;
+		if (reconciledBaseTraceView?.piboSessionId !== selectedPiboSessionId) return null;
 		const sessionStatus = findSessionNode(bootstrap.sessions, selectedPiboSessionId)?.status ?? "idle";
 		const overlayEvents = liveTraceOverlay?.piboSessionId === selectedPiboSessionId
 			? liveTraceOverlay.events
 			: [];
-		if (!overlayEvents.length) return reconcileOptimisticUserMessages(baseTraceView);
-		const liveTrace = patchTraceViewWithEvents(baseTraceView, overlayEvents, sessionStatus);
+		if (!overlayEvents.length) return reconciledBaseTraceView;
+		const liveTrace = patchTraceViewWithEvents(reconciledBaseTraceView, overlayEvents, sessionStatus);
 		annotateLiveTraceForkEntryIds(liveTrace.nodes, persistedUserMessageIndexForBaseTrace);
-		return reconcileOptimisticUserMessages(liveTrace);
-	}, [liveTraceOverlay, selectedPiboSessionId, bootstrap, baseTraceView, persistedUserMessageIndexForBaseTrace]);
+		return overlayIncludesOptimisticUserMessage(overlayEvents) ? reconcileOptimisticUserMessages(liveTrace) : liveTrace;
+	}, [liveTraceOverlay, selectedPiboSessionId, bootstrap, reconciledBaseTraceView, persistedUserMessageIndexForBaseTrace]);
 
 	useEffect(() => {
 		if (!selectedPiboSessionId || !currentTraceView?.piboSessionId || !isStreamingDebugEnabled()) return;
@@ -4377,6 +4382,10 @@ function reconcileOptimisticUserMessages(view: PiboSessionTraceView): PiboSessio
 	if (!persistedByText.size) return view;
 	const { nodes, changed } = dropReplacedOptimisticUserMessages(view.nodes, persistedByText);
 	return changed ? { ...view, nodes } : view;
+}
+
+function overlayIncludesOptimisticUserMessage(events: readonly ChatWebStoredEvent[]): boolean {
+	return events.some(isUserMessageQueuedEvent);
 }
 
 function collectPersistedUserMessageText(nodes: readonly PiboTraceNode[], byText: Map<string, number>): void {
