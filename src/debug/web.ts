@@ -3341,12 +3341,12 @@ export function summarizeStreamingBenchmarks(runs: StreamingBenchmark[]): Stream
 		debugFlushCount: numericStats(runs.map((run) => streamingDebugDeltaNumber(run, "flushCount"))),
 		debugFlushedEventCount: numericStats(runs.map((run) => streamingDebugDeltaNumber(run, "flushedEventCount"))),
 		debugOverlayUpdateCount: numericStats(runs.map((run) => streamingDebugDeltaNumber(run, "overlayUpdateCount"))),
-		debugOverlayEventCount: numericStats(runs.map((run) => streamingDebugAfterNumber(run, "overlayEventCount"))),
+		debugOverlayEventCount: numericStats(runs.map((run) => streamingDebugStateWindowNumber(run, "overlayEventCount"))),
 		debugTraceRefreshScheduledCount: numericStats(runs.map((run) => streamingDebugDeltaNumber(run, "traceRefreshScheduledCount"))),
 		debugTraceRefreshCompletedCount: numericStats(runs.map((run) => streamingDebugDeltaNumber(run, "traceRefreshCompletedCount"))),
 		debugTraceRefreshFailedCount: numericStats(runs.map((run) => streamingDebugDeltaNumber(run, "traceRefreshFailedCount"))),
 		debugTraceRefreshDurationMaxMs: numericStats(runs.map((run) => streamingDebugAfterNumber(run, "traceRefreshDurationMsMax"))),
-		debugCurrentOutputLength: numericStats(runs.map((run) => streamingDebugAfterNumber(run, "currentOutputLength"))),
+		debugCurrentOutputLength: numericStats(runs.map((run) => streamingDebugStateWindowNumber(run, "currentOutputLength"))),
 		debugTraceBaseOutputLength: numericStats(runs.map((run) => streamingDebugAfterNumber(run, "traceBaseOutputLength"))),
 		liveExpectedInputEventCount: numericStats(runs.map((run) => streamingLivePipeline(run)?.expectedInputEventCount)),
 		liveExpectedPipelineEventCount: numericStats(runs.map((run) => streamingLivePipeline(run)?.expectedPipelineEventCount)),
@@ -3469,6 +3469,10 @@ function streamingDebugDeltaNumber(run: StreamingBenchmark, key: string): number
 function streamingDebugAfterNumber(run: StreamingBenchmark, key: keyof StreamingDebugCounters): number | undefined {
 	const value = run.debug.after?.[key];
 	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function streamingDebugStateWindowNumber(run: StreamingBenchmark, key: keyof StreamingDebugCounters): number | undefined {
+	return stateWindowNumber(run.debug.after?.[key], run.debug.stateBeforeReset?.[key]);
 }
 
 function selectedLiveStream(run: StreamingBenchmark): StreamingBenchmarkEventSourceStreamProbe | undefined {

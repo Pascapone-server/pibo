@@ -150,6 +150,7 @@ Collected from `window.__piboStreamingDebug` when `?debugStreaming=1` or local s
 - trace refresh count/duration;
 - first text, enqueue, flush, and overlay-update latency;
 - preservation ratios split by denominator: enqueue/flushed frames normalized to expected stream frames, overlay/current text normalized to expected text and reasoning input.
+- multi-run summaries report overlay/current output as the per-run state window when a pre-reset trace state is available, not the cumulative selected-session total.
 
 ### DOM
 

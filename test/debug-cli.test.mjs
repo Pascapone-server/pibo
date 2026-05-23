@@ -309,9 +309,13 @@ test("streaming hosted compare URL resolution prefers env and supports optional 
 });
 
 test("streaming benchmark summaries include live pipeline debug counters", () => {
-	const run = (enqueueCount, traceRefreshCompletedCount) => ({
+	const run = (enqueueCount, traceRefreshCompletedCount, stateBaseline = 0) => ({
 		kind: "streaming-benchmark",
 		debug: {
+			stateBeforeReset: {
+				overlayEventCount: stateBaseline,
+				currentOutputLength: stateBaseline * 2,
+			},
 			delta: {
 				textDeltaCount: 12,
 				reasoningDeltaCount: 4,
@@ -330,8 +334,8 @@ test("streaming benchmark summaries include live pipeline debug counters", () =>
 				firstEnqueueAt: "2026-01-01T00:00:00.110Z",
 				firstFlushAt: "2026-01-01T00:00:00.125Z",
 				firstOverlayUpdateAt: "2026-01-01T00:00:00.126Z",
-				overlayEventCount: enqueueCount,
-				currentOutputLength: enqueueCount * 2,
+				overlayEventCount: stateBaseline + enqueueCount,
+				currentOutputLength: (stateBaseline * 2) + (enqueueCount * 2),
 				traceBaseOutputLength: 4,
 				traceRefreshDurationMsMax: 25,
 			},
@@ -344,7 +348,7 @@ test("streaming benchmark summaries include live pipeline debug counters", () =>
 		regressions: [],
 		score: { smoothness: 50, textDeltaCount: 12, domPositiveUpdateCount: enqueueCount },
 	});
-	const summary = summarizeStreamingBenchmarks([run(12, 1), run(14, 2)]);
+	const summary = summarizeStreamingBenchmarks([run(12, 1), run(14, 2, 40)]);
 	assert.equal(summary.debugEnqueueCount.p50, 12);
 	assert.equal(summary.debugFlushCount.p50, 11);
 	assert.equal(summary.debugFlushedEventCount.p90, 12);
