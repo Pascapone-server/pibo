@@ -739,7 +739,7 @@ function printScenarioHelp(): void {
 
 Usage:
   pibo debug web scenario new-session [--manual|--act] [--duration ms] [--json] [--artifact]
-  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--fixture-profile steady|jitter|burst|batch] [--fixture-mix text|reasoning-text|markdown] [--simulate-reconnect|--simulate-trace-catchup] [--duration ms] [--runs n] [--from artifact.json] [--provider-request-id pr_...|--provider-session-id ps_...|--provider-turn-id turn_...|--provider-selected-session] [--compare-url url|--compare-hosted|--compare-hosted-if-configured] [--assert] [--expect-regression text] [--negative-profile batch|overlay-drop] [--json] [--artifact]
+  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--fixture-profile steady|jitter|burst|batch] [--fixture-mix text|reasoning-text|markdown|gfm-markdown] [--simulate-reconnect|--simulate-trace-catchup] [--duration ms] [--runs n] [--from artifact.json] [--provider-request-id pr_...|--provider-session-id ps_...|--provider-turn-id turn_...|--provider-selected-session] [--compare-url url|--compare-hosted|--compare-hosted-if-configured] [--assert] [--expect-regression text] [--negative-profile batch|overlay-drop] [--json] [--artifact]
 
 Defaults:
   new-session --manual waits while you click New Session yourself.
@@ -748,7 +748,7 @@ Defaults:
   streaming-benchmark --fixture navigates the target to a deterministic in-browser stream fixture before measuring.
   streaming-benchmark --backend-fixture posts to /api/chat/debug/streaming-fixture and records EventSource metrics while the real app consumes deterministic /api/chat/events frames.
   streaming-benchmark --fixture-profile selects steady cadence, deterministic jitter, bursty timing, or intentional batch stress.
-  streaming-benchmark --fixture-mix includes text-only, mixed reasoning/text, or Markdown-syntax assistant deltas.
+  streaming-benchmark --fixture-mix includes text-only, mixed reasoning/text, CommonMark Markdown, or GFM Markdown assistant deltas.
   streaming-benchmark --simulate-reconnect reloads the app with an EventSource probe, forces one live stream close, and verifies reconnect/transient ids.
   streaming-benchmark --simulate-trace-catchup suppresses backend live text deltas and verifies trace snapshot recovery.
   streaming-benchmark --runs repeats the same scenario and reports medians; --from compares against a prior benchmark artifact.
@@ -1343,7 +1343,7 @@ async function enableStreamingDebugForCurrentApp(client: CdpClient): Promise<voi
 }
 
 type StreamingFixtureProfile = "steady" | "jitter" | "burst" | "batch";
-type StreamingFixtureMix = "text" | "reasoning-text" | "markdown";
+type StreamingFixtureMix = "text" | "reasoning-text" | "markdown" | "gfm-markdown";
 
 function streamingBenchmarkEventSourceProbeScript(): string {
 	return String.raw`
@@ -1462,10 +1462,11 @@ function streamingBenchmarkFixtureHtml(fixtureProfile: StreamingFixtureProfile, 
   const target = document.querySelector('[data-pibo-component="MarkdownRendererHost"]');
   const textDeltas = [' a', ' b', ' c', ' d', ' e', ' f', ' g', ' h', ' i', ' j', ' k', ' l'];
   const markdownDeltas = [' **a**', ' **b**', ' **c**', ' **d**', ' **e**', ' **f**', ' **g**', ' **h**', ' **i**', ' **j**', ' **k**', ' **l**'];
+  const gfmMarkdownDeltas = [' ~~a~~', ' ~~b~~', ' ~~c~~', ' ~~d~~', ' ~~e~~', ' ~~f~~', ' ~~g~~', ' ~~h~~', ' ~~i~~', ' ~~j~~', ' ~~k~~', ' ~~l~~'];
   const cadenceMs = 100;
   const profile = ${JSON.stringify(fixtureProfile)};
   const mix = ${JSON.stringify(fixtureMix)};
-  const deltas = mix === 'markdown' ? markdownDeltas : textDeltas;
+  const deltas = mix === 'markdown' ? markdownDeltas : (mix === 'gfm-markdown' ? gfmMarkdownDeltas : textDeltas);
   const reasoningDeltas = mix === 'reasoning-text' ? [' think', ' plan', ' check', ' answer'] : [];
   const scheduleMs = buildSchedule(deltas.length, cadenceMs, profile);
   const reasoningScheduleMs = reasoningDeltas.map((_, index) => Math.max(10, Math.round((index + 1) * cadenceMs / 2)));
@@ -2888,8 +2889,8 @@ function parseFixtureProfile(value?: string): StreamingFixtureProfile {
 
 function parseFixtureMix(value?: string): StreamingFixtureMix {
 	if (!value) return "text";
-	if (value === "text" || value === "reasoning-text" || value === "markdown") return value;
-	throw new Error("--fixture-mix must be text, reasoning-text, or markdown");
+	if (value === "text" || value === "reasoning-text" || value === "markdown" || value === "gfm-markdown") return value;
+	throw new Error("--fixture-mix must be text, reasoning-text, markdown, or gfm-markdown");
 }
 
 function parseNegativeProfile(value?: string): StreamingNegativeProfile | undefined {

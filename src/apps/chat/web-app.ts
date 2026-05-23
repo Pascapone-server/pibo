@@ -1736,7 +1736,7 @@ type ChatStreamingFixtureBody = {
 };
 
 type ChatStreamingFixtureProfile = "steady" | "jitter" | "burst" | "batch";
-type ChatStreamingFixtureMix = "text" | "reasoning-text" | "markdown";
+type ChatStreamingFixtureMix = "text" | "reasoning-text" | "markdown" | "gfm-markdown";
 
 type ChatProjectsBootstrap = ChatBootstrapCatalog & {
 	identity: PiboWebSession["authSession"]["identity"];
@@ -2532,6 +2532,7 @@ function normalizeMessageText(value: unknown): string {
 
 function defaultStreamingFixtureDeltas(mix: ChatStreamingFixtureMix): string[] {
 	if (mix === "markdown") return [" **a**", " **b**", " **c**", " **d**", " **e**", " **f**", " **g**", " **h**", " **i**", " **j**", " **k**", " **l**"];
+	if (mix === "gfm-markdown") return [" ~~a~~", " ~~b~~", " ~~c~~", " ~~d~~", " ~~e~~", " ~~f~~", " ~~g~~", " ~~h~~", " ~~i~~", " ~~j~~", " ~~k~~", " ~~l~~"];
 	return [" a", " b", " c", " d", " e", " f", " g", " h", " i", " j", " k", " l"];
 }
 
@@ -2562,8 +2563,8 @@ function normalizeStreamingFixtureProfile(value: unknown): ChatStreamingFixtureP
 
 function normalizeStreamingFixtureMix(value: unknown): ChatStreamingFixtureMix {
 	if (value === undefined) return "text";
-	if (value === "text" || value === "reasoning-text" || value === "markdown") return value;
-	throw new PiboWebHttpError("mix must be text, reasoning-text, or markdown", 400);
+	if (value === "text" || value === "reasoning-text" || value === "markdown" || value === "gfm-markdown") return value;
+	throw new PiboWebHttpError("mix must be text, reasoning-text, markdown, or gfm-markdown", 400);
 }
 
 function normalizeStreamingFixtureTraceSnapshots(value: unknown): boolean {

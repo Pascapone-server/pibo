@@ -77,7 +77,8 @@ This is the default deterministic regression mode because it exercises:
 
 - `text`: assistant text deltas only.
 - `reasoning-text`: reasoning deltas plus assistant text deltas.
-- `markdown`: Markdown-syntax assistant deltas with real emphasis markers that force the full Markdown renderer path while keeping small per-delta visible jumps.
+- `markdown`: CommonMark assistant deltas with real emphasis markers that force the full Markdown renderer path without GFM plugins while keeping small per-delta visible jumps.
+- `gfm-markdown`: GFM assistant deltas with strikethrough markers that force the full Markdown renderer path with `remark-gfm` while keeping small per-delta visible jumps.
 
 ### Simulations
 
@@ -241,10 +242,11 @@ node --test test/debug-cli.test.mjs test/web-channel.test.mjs test/trace-live-re
 pibo debug web scenario streaming-benchmark --backend-fixture --fixture-mix reasoning-text --assert --artifact
 ```
 
-For Markdown rendering changes, also run the full-renderer fixture:
+For Markdown rendering changes, also run the full-renderer fixtures:
 
 ```bash
 pibo debug web scenario streaming-benchmark --backend-fixture --fixture-mix markdown --runs 5 --assert --artifact
+pibo debug web scenario streaming-benchmark --backend-fixture --fixture-mix gfm-markdown --runs 5 --assert --artifact
 ```
 
 Use `--runs 5` when comparing performance or smoothness changes.
