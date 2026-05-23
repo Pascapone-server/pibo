@@ -257,6 +257,12 @@ type StreamingBenchmarkSummary = {
 	firstVisibleMs: NumberStats;
 	longTaskMaxMs: NumberStats;
 	regressionCount: NumberStats;
+	traceSampleCount: NumberStats;
+	traceLiveVersionCount: NumberStats;
+	traceFirstLiveVersionMs: NumberStats;
+	traceMaxAssistantOutputLength: NumberStats;
+	traceFinalAssistantOutputLength: NumberStats;
+	traceDurableEventDelta: NumberStats;
 };
 
 type StreamingBenchmarkComparison = {
@@ -267,6 +273,9 @@ type StreamingBenchmarkComparison = {
 	domPositiveUpdateDelta?: number;
 	domJumpMaxDeltaChars?: number;
 	longTaskMaxDeltaMs?: number;
+	traceLiveVersionCountDelta?: number;
+	traceMaxAssistantOutputDelta?: number;
+	traceDurableEventDeltaDelta?: number;
 };
 
 type StreamingBenchmarkGroup = {
@@ -2020,6 +2029,12 @@ function summarizeStreamingBenchmarks(runs: StreamingBenchmark[]): StreamingBenc
 		firstVisibleMs: numericStats(runs.map((run) => run.dom.firstPositiveUpdateMs)),
 		longTaskMaxMs: numericStats(runs.map((run) => run.longTasks.maxMs)),
 		regressionCount: numericStats(runs.map((run) => run.regressions.length)),
+		traceSampleCount: numericStats(runs.map((run) => run.trace?.sampleCount)),
+		traceLiveVersionCount: numericStats(runs.map((run) => run.trace?.liveVersionCount)),
+		traceFirstLiveVersionMs: numericStats(runs.map((run) => run.trace?.firstLiveVersionMs)),
+		traceMaxAssistantOutputLength: numericStats(runs.map((run) => run.trace?.maxAssistantOutputLength)),
+		traceFinalAssistantOutputLength: numericStats(runs.map((run) => run.trace?.finalAssistantOutputLength)),
+		traceDurableEventDelta: numericStats(runs.map((run) => traceDurableEventDelta(run.trace))),
 	};
 }
 
@@ -2032,7 +2047,15 @@ function compareStreamingBenchmarkSummaries(baseline: StreamingBenchmarkSummary,
 		domPositiveUpdateDelta: statDelta(current.domPositiveUpdateCount, baseline.domPositiveUpdateCount),
 		domJumpMaxDeltaChars: statDelta(current.domJumpMaxChars, baseline.domJumpMaxChars),
 		longTaskMaxDeltaMs: statDelta(current.longTaskMaxMs, baseline.longTaskMaxMs),
+		traceLiveVersionCountDelta: statDelta(current.traceLiveVersionCount, baseline.traceLiveVersionCount),
+		traceMaxAssistantOutputDelta: statDelta(current.traceMaxAssistantOutputLength, baseline.traceMaxAssistantOutputLength),
+		traceDurableEventDeltaDelta: statDelta(current.traceDurableEventDelta, baseline.traceDurableEventDelta),
 	};
+}
+
+function traceDurableEventDelta(trace: StreamingBenchmarkTraceProbe | undefined): number | undefined {
+	if (!trace || trace.durableEventCountStart === undefined || trace.durableEventCountEnd === undefined) return undefined;
+	return trace.durableEventCountEnd - trace.durableEventCountStart;
 }
 
 async function readStreamingBenchmarkRuns(file: string): Promise<StreamingBenchmark[]> {
@@ -2127,8 +2150,11 @@ function formatStreamingBenchmarkGroup(group: StreamingBenchmarkGroup, target: B
 		`dom jumps p90=${formatStats(group.summary.domJumpP90Chars)}, max=${formatStats(group.summary.domJumpMaxChars)} chars`,
 		`firstVisible=${formatStats(group.summary.firstVisibleMs)}, longTaskMax=${formatStats(group.summary.longTaskMaxMs)}`,
 	];
+	if (group.summary.traceSampleCount.count > 0) lines.push(`trace: samples=${formatStats(group.summary.traceSampleCount)}, liveVersions=${formatStats(group.summary.traceLiveVersionCount)}, firstLive=${formatStats(group.summary.traceFirstLiveVersionMs)}ms, assistantMax=${formatStats(group.summary.traceMaxAssistantOutputLength)}, assistantFinal=${formatStats(group.summary.traceFinalAssistantOutputLength)}, durableEventDelta=${formatStats(group.summary.traceDurableEventDelta)}`);
 	if (group.comparison) {
-		lines.push(`comparison vs baseline (${group.comparison.baselineRuns} runs): smoothness ${signed(group.comparison.smoothnessDelta)}, domP90Gap ${signed(group.comparison.domGapP90DeltaMs)}ms, domPositive ${signed(group.comparison.domPositiveUpdateDelta)}, maxJump ${signed(group.comparison.domJumpMaxDeltaChars)} chars, longTaskMax ${signed(group.comparison.longTaskMaxDeltaMs)}ms`);
+		let comparison = `comparison vs baseline (${group.comparison.baselineRuns} runs): smoothness ${signed(group.comparison.smoothnessDelta)}, domP90Gap ${signed(group.comparison.domGapP90DeltaMs)}ms, domPositive ${signed(group.comparison.domPositiveUpdateDelta)}, maxJump ${signed(group.comparison.domJumpMaxDeltaChars)} chars, longTaskMax ${signed(group.comparison.longTaskMaxDeltaMs)}ms`;
+		if (group.summary.traceSampleCount.count > 0 || group.comparison.traceLiveVersionCountDelta !== undefined || group.comparison.traceMaxAssistantOutputDelta !== undefined || group.comparison.traceDurableEventDeltaDelta !== undefined) comparison += `, traceLiveVersions ${signed(group.comparison.traceLiveVersionCountDelta)}, traceAssistantMax ${signed(group.comparison.traceMaxAssistantOutputDelta)}, traceDurableEventDelta ${signed(group.comparison.traceDurableEventDeltaDelta)}`;
+		lines.push(comparison);
 	}
 	if (group.regressions.length) {
 		lines.push("", "Regressions:");
