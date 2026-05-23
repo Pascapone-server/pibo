@@ -1370,6 +1370,7 @@ function streamingBenchmarkEventSourceProbeScript(): string {
         lastEventId: message.lastEventId || '',
         type: typeof type === 'string' ? type : undefined,
         liveReplayId: payload && typeof payload.liveReplayId === 'number' && Number.isFinite(payload.liveReplayId) ? payload.liveReplayId : undefined,
+        liveReplayReplayed: payload && payload.liveReplay && typeof payload.liveReplay.replayed === 'number' && Number.isFinite(payload.liveReplay.replayed) ? payload.liveReplay.replayed : undefined,
         liveReplayMissed: Boolean(payload && payload.liveReplay && payload.liveReplay.missed === true),
         liveReplayEvictedBefore: payload && payload.liveReplay && typeof payload.liveReplay.evictedBefore === 'number' && Number.isFinite(payload.liveReplay.evictedBefore) ? payload.liveReplay.evictedBefore : undefined,
       };
@@ -2011,8 +2012,8 @@ function summarizeEventSourceStreams(streamEvents, afterStartConnections, starte
     const afterStartIds = afterStartEvents.map((event) => event.lastEventId).filter(Boolean);
     const transientIds = ids.filter((id) => /^live:\d+$/.test(id));
     const afterStartTransientIds = afterStartIds.filter((id) => /^live:\d+$/.test(id));
-    const liveReplayEvents = events.filter((event) => typeof event.liveReplayId === 'number');
-    const afterStartLiveReplayEvents = afterStartEvents.filter((event) => typeof event.liveReplayId === 'number');
+    const liveReplayReplayedCount = events.reduce((total, event) => total + (typeof event.liveReplayReplayed === 'number' && Number.isFinite(event.liveReplayReplayed) ? event.liveReplayReplayed : 0), 0);
+    const liveReplayReplayedCountAfterStart = afterStartEvents.reduce((total, event) => total + (typeof event.liveReplayReplayed === 'number' && Number.isFinite(event.liveReplayReplayed) ? event.liveReplayReplayed : 0), 0);
     const liveReplayMisses = events.filter((event) => event.liveReplayMissed === true);
     const afterStartLiveReplayMisses = afterStartEvents.filter((event) => event.liveReplayMissed === true);
     const liveReplayEvictedBeforeValues = events.map((event) => event.liveReplayEvictedBefore).filter((value) => typeof value === 'number' && Number.isFinite(value));
@@ -2045,8 +2046,8 @@ function summarizeEventSourceStreams(streamEvents, afterStartConnections, starte
       uniqueTransientIdCountAfterStart: new Set(afterStartTransientIds).size,
       durableIdCount: durableIds.length,
       otherIdCount: otherIds.length,
-      liveReplayEventCount: liveReplayEvents.length,
-      liveReplayEventCountAfterStart: afterStartLiveReplayEvents.length,
+      liveReplayEventCount: liveReplayReplayedCount,
+      liveReplayEventCountAfterStart: liveReplayReplayedCountAfterStart,
       liveReplayMissedCount: liveReplayMisses.length,
       liveReplayMissedCountAfterStart: afterStartLiveReplayMisses.length,
       liveReplayEvictedBeforeMax: liveReplayEvictedBeforeValues.length ? Math.max(...liveReplayEvictedBeforeValues) : undefined,
@@ -2130,8 +2131,10 @@ function streamingBenchmarkRegressions(result) {
       ? selectedLiveStreams.reduce((total, stream) => ({
           textEventCountAfterStart: total.textEventCountAfterStart + (stream.textEventCountAfterStart || 0),
           reasoningEventCountAfterStart: total.reasoningEventCountAfterStart + (stream.reasoningEventCountAfterStart || 0),
+          liveReplayEventCountAfterStart: total.liveReplayEventCountAfterStart + (stream.liveReplayEventCountAfterStart || 0),
           liveReplayMissedCountAfterStart: total.liveReplayMissedCountAfterStart + (stream.liveReplayMissedCountAfterStart || 0),
-        }), { textEventCountAfterStart: 0, reasoningEventCountAfterStart: 0, liveReplayMissedCountAfterStart: 0 })
+          liveSinceValues: Array.from(new Set(total.liveSinceValues.concat(stream.liveSinceValues || []))),
+        }), { textEventCountAfterStart: 0, reasoningEventCountAfterStart: 0, liveReplayEventCountAfterStart: 0, liveReplayMissedCountAfterStart: 0, liveSinceValues: [] })
       : selectedLiveStreams[0];
     if (!selectedLive) failures.push('EventSource selected-live stream was not observed');
     if (!traceCatchupRequested && selectedLive && expectedDeltas !== undefined && selectedLive.textEventCountAfterStart < expectedDeltas) failures.push('selected-live text events after start ' + selectedLive.textEventCountAfterStart + ' < fixture deltas ' + expectedDeltas);
@@ -2142,6 +2145,7 @@ function streamingBenchmarkRegressions(result) {
       if (reconnectRequested && result.eventSource.forcedCloseCountAfterStart < 1) failures.push('EventSource forced close was not observed');
       if (reconnectRequested && result.eventSource.openCountAfterStart < 1) failures.push('EventSource reconnect open was not observed');
       if (reconnectRequested && selectedLive && (selectedLive.liveReplayMissedCountAfterStart || 0) > 0) failures.push('selected-live transient replay missed buffered events');
+      if (reconnectRequested && selectedLive && (selectedLive.liveSinceValues || []).length > 0 && (selectedLive.liveReplayEventCountAfterStart || 0) < 1) failures.push('selected-live transient replay cursor did not replay buffered events');
       if (result.eventSource.transientIdCountAfterStart < 1) failures.push('EventSource transient live ids were not observed');
     }
   }

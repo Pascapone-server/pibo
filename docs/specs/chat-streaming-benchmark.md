@@ -139,7 +139,7 @@ Collected by an in-page EventSource wrapper:
 - transient id count;
 - reconnect/open/error observations;
 - first event/text/reasoning latency;
-- `liveSince` transient replay cursor use, replayed transient frame count, and bounded replay-buffer miss indicators during selected-live reconnects.
+- `liveSince` transient replay cursor use, replayed transient frame count from the stream `ready` replay status, and bounded replay-buffer miss indicators during selected-live reconnects.
 
 ### Live pipeline
 
