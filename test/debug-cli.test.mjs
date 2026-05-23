@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { PiboDataStore } from "../dist/data/pibo-store.js";
 import { PiboReliabilityStore } from "../dist/reliability/store.js";
-import { evaluateStreamingBenchmarkAssertion, evaluateStreamingBenchmarkUrlComparisonRegressions, formatWatch, inferWatchFlickers, resolveStreamingBenchmarkHostedCompareUrlFromValues, summarizeStreamingProviderTelemetry } from "../dist/debug/web.js";
+import { evaluateStreamingBenchmarkAssertion, evaluateStreamingBenchmarkUrlComparisonRegressions, formatWatch, inferWatchFlickers, resolveStreamingBenchmarkHostedCompareUrlFromValues, summarizeStreamingProviderPreservation, summarizeStreamingProviderTelemetry } from "../dist/debug/web.js";
 
 const execFileAsyncRaw = promisify(execFile);
 const cliPath = resolve("dist/bin/pibo.js");
@@ -86,6 +86,33 @@ test("streaming hosted compare URL resolution prefers env and supports optional 
 	assert.equal(resolveStreamingBenchmarkHostedCompareUrlFromValues({ PIBO_DEV_BASE_URL: "https://dev.example.test/" }, {}), "https://dev.example.test/apps/chat");
 	assert.equal(resolveStreamingBenchmarkHostedCompareUrlFromValues({}, { PIBO_DEV_PUBLIC_URL: "https://file.example.test/apps/chat" }), "https://file.example.test/apps/chat");
 	assert.equal(resolveStreamingBenchmarkHostedCompareUrlFromValues({ PIBO_DEV_PUBLIC_URL: "", PIBO_DEV_BASE_URL: "" }, {}), undefined);
+});
+
+test("streaming provider preservation summary computes provider-to-transport ratios", () => {
+	const summary = summarizeStreamingProviderPreservation({
+		provider: {
+			requested: true,
+			available: true,
+			providerRequestId: "pr_fixture",
+			textDeltaCount: 10,
+			reasoningDeltaCount: 4,
+			textDeltaBytes: { count: 10 },
+			reasoningDeltaBytes: { count: 4 },
+			textDeltaGapsMs: { count: 9 },
+			reasoningDeltaGapsMs: { count: 3 },
+			eventPageCount: 1,
+			truncated: false,
+		},
+		sse: { textEventCount: 10, reasoningEventCount: 3 },
+		eventSource: { streams: [{ role: "selected-live", textEventCountAfterStart: 9, reasoningEventCountAfterStart: 4 }] },
+		dom: { positiveUpdateCount: 8 },
+	});
+	assert.equal(summary.providerTextDeltaCount, 10);
+	assert.equal(summary.sseTextToProviderRatio, 1);
+	assert.equal(summary.selectedLiveTextToProviderRatio, 0.9);
+	assert.equal(summary.domPositiveToProviderTextRatio, 0.8);
+	assert.equal(summary.sseReasoningToProviderRatio, 0.75);
+	assert.equal(summary.selectedLiveReasoningToProviderRatio, 1);
 });
 
 test("streaming provider telemetry summary extracts delta bytes, gaps, and latencies", () => {
