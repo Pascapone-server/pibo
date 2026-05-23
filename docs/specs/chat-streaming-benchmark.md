@@ -43,7 +43,7 @@ Useful options:
 
 `--backend-fixture` posts to `/api/chat/debug/streaming-fixture` and drives deterministic live-only events through the real Chat Web `/api/chat/events` path.
 
-`--fixture-prelude-messages <n>` can be used with backend fixtures to seed completed live assistant messages before benchmark counters reset. This creates a larger live overlay for browser-visible trace-compute measurements while keeping the main fixture's text/reasoning preservation denominators unchanged.
+`--fixture-prelude-messages <n>` can be used with backend fixtures to seed completed live assistant messages before benchmark counters reset. This creates a larger live overlay for browser-visible trace-compute measurements while keeping the main fixture's text/reasoning preservation denominators unchanged. DOM cadence/jump measurement for backend fixtures scopes to assistant targets created after the timing window begins and ignores debug prelude rows, so delayed prelude rendering does not masquerade as active fixture batching.
 
 This is the default deterministic regression mode because it exercises:
 

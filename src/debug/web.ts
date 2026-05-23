@@ -2245,8 +2245,16 @@ function streamingBenchmarkRegressions(result) {
 function assistantTargets() {
   return Array.from(document.querySelectorAll(ASSISTANT_SELECTOR));
 }
-function selectedAssistantText() {
-  return assistantTargets().map((target) => target.innerText || target.textContent || '').join('\n');
+function selectedAssistantText(initialTargets, ignorePreludeTargets) {
+  const targets = assistantTargets();
+  const texts = [];
+  for (const target of targets) {
+    if (initialTargets && initialTargets.has(target)) continue;
+    const text = target.innerText || target.textContent || '';
+    if (ignorePreludeTargets && /\bprelude\b/i.test(text)) continue;
+    texts.push(text);
+  }
+  return texts.join('\n');
 }
 async function waitForAssistantDomSettle(timeoutMs) {
   const deadline = performance.now() + timeoutMs;
@@ -2296,6 +2304,8 @@ async function runStreamingBenchmark(options) {
       }
     }
   }
+  const fixtureDomInitialTargets = options.startBackendFixture ? new WeakSet(assistantTargets()) : undefined;
+  const ignorePreludeDomTargets = Boolean(options.startBackendFixture && options.fixturePreludeMessages > 0);
   const startedAt = performance.now();
   const debugStateBeforeReset = cloneDebugSnapshot(window.__piboStreamingDebug);
   if (typeof window.__piboStreamingDebugReset === 'function') {
@@ -2304,7 +2314,7 @@ async function runStreamingBenchmark(options) {
   const overlayDrop = installOverlayDropSimulation(Boolean(options.simulateOverlayDrop));
 
   const debugBefore = cloneDebugSnapshot(window.__piboStreamingDebug);
-  const initialText = selectedAssistantText();
+  const initialText = selectedAssistantText(fixtureDomInitialTargets, ignorePreludeDomTargets);
   const targetCountStart = assistantTargets().length;
   const updates = [];
   const positiveJumps = [];
@@ -2313,7 +2323,7 @@ async function runStreamingBenchmark(options) {
   let lastPositiveAt;
   let firstPositiveUpdateMs;
   const sample = () => {
-    const text = selectedAssistantText();
+    const text = selectedAssistantText(fixtureDomInitialTargets, ignorePreludeDomTargets);
     const length = text.length;
     if (length === currentLength) return;
     maxLength = Math.max(maxLength, length);

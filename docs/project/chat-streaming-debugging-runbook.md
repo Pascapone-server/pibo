@@ -38,7 +38,7 @@ pibo debug web scenario streaming-benchmark \
   --artifact
 ```
 
-When live trace compute is too small to measure on the default fixture, seed a larger live overlay before counters reset:
+When live trace compute is too small to measure on the default fixture, seed a larger live overlay before counters reset. Backend fixture DOM metrics are scoped to the active fixture message and ignore debug prelude rows, so larger preludes can profile overlay compute without turning delayed prelude rendering into DOM max-jump failures:
 
 ```bash
 pibo debug web scenario streaming-benchmark \
