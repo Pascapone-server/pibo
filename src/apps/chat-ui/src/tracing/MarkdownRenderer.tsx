@@ -149,8 +149,19 @@ function renderSimpleMarkdownLinkLabel(label: string, linkIndex: number): Array<
 			const end = label.indexOf("**", start + 2);
 			if (end === -1 || end === start + 2) return undefined;
 			const strongText = label.slice(start + 2, end);
-			if (strongText.includes("*") || strongText.includes("_") || strongText.includes("`") || strongText.includes("[") || strongText.includes("]")) return undefined;
-			parts.push(<strong key={`link-${linkIndex}-strong-${strongCount}`} data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="strong">{strongText}</strong>);
+			if (strongText.includes("*") || strongText.includes("`") || strongText.includes("[") || strongText.includes("]")) return undefined;
+			if (strongText.includes("_")) {
+				if (!strongText.startsWith("_") || !strongText.endsWith("_") || strongText.length <= 2) return undefined;
+				const emphasisText = strongText.slice(1, -1);
+				if (emphasisText.includes("*") || emphasisText.includes("_") || emphasisText.includes("`") || emphasisText.includes("[") || emphasisText.includes("]")) return undefined;
+				parts.push(
+					<strong key={`link-${linkIndex}-strong-${strongCount}`} data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="strong">
+						<em data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="em">{emphasisText}</em>
+					</strong>,
+				);
+			} else {
+				parts.push(<strong key={`link-${linkIndex}-strong-${strongCount}`} data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="strong">{strongText}</strong>);
+			}
 			strongCount += 1;
 			cursor = end + 2;
 		} else if (start === nextEmphasis) {
