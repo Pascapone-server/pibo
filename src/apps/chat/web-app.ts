@@ -1721,6 +1721,13 @@ type ChatMessageBody = {
 	fileAttachmentPaths?: unknown;
 };
 
+type ChatStreamingFixtureBody = {
+	piboSessionId?: unknown;
+	roomId?: unknown;
+	deltas?: unknown;
+	cadenceMs?: unknown;
+};
+
 type ChatProjectsBootstrap = ChatBootstrapCatalog & {
 	identity: PiboWebSession["authSession"]["identity"];
 	personalProject: PiboProject;
@@ -2493,6 +2500,25 @@ function normalizeMessageText(value: unknown): string {
 		throw new PiboWebHttpError("Message text is required", 400);
 	}
 	return value;
+}
+
+function normalizeStreamingFixtureDeltas(value: unknown): string[] {
+	if (value === undefined) return [" a", " b", " c", " d", " e", " f", " g", " h", " i", " j", " k", " l"];
+	if (!Array.isArray(value) || value.length === 0) throw new PiboWebHttpError("deltas must be a non-empty string array", 400);
+	if (value.length > 100) throw new PiboWebHttpError("deltas must contain at most 100 entries", 400);
+	return value.map((item) => {
+		if (typeof item !== "string" || item.length === 0) throw new PiboWebHttpError("deltas entries must be non-empty strings", 400);
+		if (item.length > 200) throw new PiboWebHttpError("deltas entries must be at most 200 characters", 400);
+		return item;
+	});
+}
+
+function normalizeStreamingFixtureCadenceMs(value: unknown): number {
+	if (value === undefined) return 100;
+	if (typeof value !== "number" || !Number.isFinite(value) || value < 10 || value > 5_000) {
+		throw new PiboWebHttpError("cadenceMs must be a number between 10 and 5000", 400);
+	}
+	return Math.round(value);
 }
 
 let defaultChatWebAnnotationStore: WebAnnotationStore | undefined;
@@ -8032,6 +8058,63 @@ async function sendProjectMessage(input: {
 	return responseJson({ accepted, output });
 }
 
+function startChatStreamingFixture(input: {
+	state: ChatWebAppState;
+	context: PiboWebAppContext;
+	webSession: PiboWebSession;
+	defaultProfile: string;
+	body: ChatStreamingFixtureBody;
+}): Response {
+	const requestedRoomId = typeof input.body.roomId === "string" ? input.body.roomId : undefined;
+	const selectedSession = resolveRequestedSession(
+		input.state,
+		input.context,
+		input.webSession,
+		input.defaultProfile,
+		typeof input.body.piboSessionId === "string" ? input.body.piboSessionId : undefined,
+		requestedRoomId,
+	);
+	const room = ensureSessionRoom(input.state, input.context, selectedSession, input.webSession);
+	if (requestedRoomId && room.id !== requestedRoomId) throw new PiboWebHttpError("Session is not available in this room", 404);
+	if (isPiboRoomArchived(room)) throw new PiboWebHttpError("Archived rooms are read-only", 403);
+	input.state.sessionQuery.upsertSession(selectedSession);
+
+	const deltas = normalizeStreamingFixtureDeltas(input.body.deltas);
+	const cadenceMs = normalizeStreamingFixtureCadenceMs(input.body.cadenceMs);
+	const eventId = `streaming-fixture-${randomUUID()}`;
+	const emit = (event: PiboOutputEvent) => {
+		const liveEvent: TransientChatEvent = {
+			roomId: room.id,
+			piboSessionId: selectedSession.id,
+			eventType: event.type,
+			payload: event,
+		};
+		for (const listener of input.state.liveListeners) listener(liveEvent);
+	};
+	const emitAt = (delayMs: number, event: PiboOutputEvent) => {
+		setTimeout(() => emit(event), delayMs);
+	};
+
+	emit({ type: "message_started", piboSessionId: selectedSession.id, eventId, text: "Streaming benchmark fixture", source: "service" });
+	deltas.forEach((delta, index) => {
+		emitAt(cadenceMs * (index + 1), { type: "assistant_delta", piboSessionId: selectedSession.id, eventId, assistantIndex: 0, text: delta });
+	});
+	const finalText = deltas.join("");
+	emitAt(cadenceMs * (deltas.length + 1), { type: "assistant_message", piboSessionId: selectedSession.id, eventId, assistantIndex: 0, text: finalText });
+	emitAt(cadenceMs * (deltas.length + 1), { type: "message_finished", piboSessionId: selectedSession.id, eventId, source: "service" });
+
+	return responseJson({
+		fixture: {
+			piboSessionId: selectedSession.id,
+			roomId: room.id,
+			eventId,
+			deltaCount: deltas.length,
+			cadenceMs,
+			textBytes: new TextEncoder().encode(finalText).length,
+		},
+	});
+}
+
 async function sendChatMessage(input: {
 	state: ChatWebAppState;
 	context: PiboWebAppContext;
@@ -10685,6 +10768,13 @@ export function createChatWebApp(options: ChatWebAppOptions = {}): PiboWebApp {
 					status: indexedSession?.status,
 				});
 				return responseJson(trace);
+			}
+
+			if (url.pathname === `${CHAT_WEB_API_PREFIX}/debug/streaming-fixture` && request.method === "POST") {
+				requireSameOriginJsonRequest(request);
+				const webSession = await requireSession(request, context);
+				const body = await readJsonBody<ChatStreamingFixtureBody>(request);
+				return startChatStreamingFixture({ state, context, webSession, defaultProfile, body });
 			}
 
 			if (url.pathname === `${CHAT_WEB_API_PREFIX}/message` && request.method === "POST") {

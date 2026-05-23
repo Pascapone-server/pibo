@@ -1,0 +1,166 @@
+{
+  "target": {
+    "id": "16ED7595BB6629B99B8D4BF8295A9713",
+    "url": "http://127.0.0.1:4802/apps/chat/rooms/room_32b34077-0037-479c-8620-be04b457f8b9/sessions/ps_108ee635-058b-4c69-bb2c-7a1c22abbbb0?view=terminal",
+    "title": "Pibo Web Chat",
+    "webSocketDebuggerUrl": "ws://127.0.0.1:55221/devtools/page/16ED7595BB6629B99B8D4BF8295A9713"
+  },
+  "scenario": "streaming-benchmark",
+  "benchmark": {
+    "kind": "streaming-benchmark",
+    "createdAt": "2026-05-23T00:22:34.613Z",
+    "url": "http://127.0.0.1:4802/apps/chat/rooms/room_32b34077-0037-479c-8620-be04b457f8b9/sessions/ps_108ee635-058b-4c69-bb2c-7a1c22abbbb0?view=terminal",
+    "title": "Pibo Web Chat",
+    "durationMs": 1800,
+    "debug": {
+      "enabledRequested": true,
+      "available": true,
+      "reset": true,
+      "before": {
+        "enabled": true,
+        "startedAt": "2026-05-23T00:22:32.794Z",
+        "updatedAt": "2026-05-23T00:22:32.794Z",
+        "sessionIds": [],
+        "liveOpenCount": 0,
+        "liveErrorCount": 0,
+        "eventCount": 0,
+        "eventTypeCounts": {},
+        "textDeltaCount": 0,
+        "textDeltaBytes": 0,
+        "reasoningDeltaCount": 0,
+        "reasoningDeltaBytes": 0,
+        "enqueueCount": 0,
+        "enqueueFlushImmediateCount": 0,
+        "pendingEventCount": 0,
+        "flushCount": 0,
+        "flushedEventCount": 0,
+        "overlayUpdateCount": 0,
+        "overlayEventCount": 0,
+        "traceRefreshScheduledCount": 0,
+        "traceRefreshStartedCount": 0,
+        "traceRefreshCompletedCount": 0,
+        "traceRefreshFailedCount": 0,
+        "traceRefreshDurationMsTotal": 0,
+        "traceBaseUpdateCount": 0
+      },
+      "after": {
+        "enabled": true,
+        "startedAt": "2026-05-23T00:22:32.794Z",
+        "updatedAt": "2026-05-23T00:22:34.505Z",
+        "sessionIds": [
+          "ps_108ee635-058b-4c69-bb2c-7a1c22abbbb0"
+        ],
+        "liveOpenCount": 0,
+        "liveErrorCount": 0,
+        "eventCount": 16,
+        "eventTypeCounts": {
+          "RUN_STARTED": 1,
+          "TEXT_MESSAGE_START": 1,
+          "TEXT_MESSAGE_CONTENT": 12,
+          "TEXT_MESSAGE_END": 1,
+          "RUN_FINISHED": 1
+        },
+        "textDeltaCount": 12,
+        "textDeltaBytes": 24,
+        "reasoningDeltaCount": 0,
+        "reasoningDeltaBytes": 0,
+        "enqueueCount": 16,
+        "enqueueFlushImmediateCount": 4,
+        "pendingEventCount": 0,
+        "flushCount": 16,
+        "flushedEventCount": 16,
+        "overlayUpdateCount": 16,
+        "overlayEventCount": 84,
+        "traceRefreshScheduledCount": 16,
+        "traceRefreshStartedCount": 1,
+        "traceRefreshCompletedCount": 1,
+        "traceRefreshFailedCount": 0,
+        "traceRefreshDurationMsTotal": 12.200000002980232,
+        "traceBaseUpdateCount": 0,
+        "selectedPiboSessionId": "ps_108ee635-058b-4c69-bb2c-7a1c22abbbb0",
+        "lastEventAt": "2026-05-23T00:22:34.101Z",
+        "lastReadyState": 1,
+        "lastEventId": "live:111",
+        "lastTransientLiveId": "live:111",
+        "lastFlushAt": "2026-05-23T00:22:34.101Z",
+        "lastTraceRefreshScheduledAt": "2026-05-23T00:22:34.101Z",
+        "lastTraceRefreshDelayMs": 300,
+        "traceBaseOutputLength": 0,
+        "currentOutputLength": 168,
+        "traceRefreshDurationMsLast": 12,
+        "traceRefreshDurationMsMax": 12.200000002980232
+      },
+      "delta": {
+        "eventCount": 16,
+        "textDeltaCount": 12,
+        "textDeltaBytes": 24,
+        "reasoningDeltaCount": 0,
+        "reasoningDeltaBytes": 0,
+        "enqueueCount": 16,
+        "flushCount": 16,
+        "flushedEventCount": 16,
+        "overlayUpdateCount": 16,
+        "traceRefreshStartedCount": 1,
+        "traceRefreshCompletedCount": 1,
+        "traceRefreshFailedCount": 0,
+        "traceBaseUpdateCount": 0
+      }
+    },
+    "dom": {
+      "selector": "[data-pibo-component=\"MarkdownRendererHost\"][data-pibo-markdown-kind=\"assistant-message\"]",
+      "targetCountStart": 6,
+      "targetCountEnd": 7,
+      "lengthStart": 23,
+      "lengthEnd": 23,
+      "updateCount": 12,
+      "positiveUpdateCount": 11,
+      "firstPositiveUpdateMs": 215,
+      "lastPositiveUpdateMs": 1215,
+      "gapsMs": {
+        "count": 10,
+        "min": 99.4,
+        "p50": 100,
+        "p90": 100.2,
+        "p99": 100.2,
+        "max": 100.6,
+        "avg": 100.03
+      },
+      "positiveCharJumps": {
+        "count": 11,
+        "min": 2,
+        "p50": 2,
+        "p90": 2,
+        "p99": 2,
+        "max": 2,
+        "avg": 2
+      }
+    },
+    "raf": {
+      "count": 110,
+      "gapsMs": {
+        "count": 109,
+        "min": 16.6,
+        "p50": 16.7,
+        "p90": 16.7,
+        "p99": 16.8,
+        "max": 16.8,
+        "avg": 16.665
+      }
+    },
+    "longTasks": {
+      "count": 0,
+      "totalMs": 0,
+      "maxMs": 0
+    },
+    "fixture": {
+      "requested": true,
+      "mode": "backend",
+      "available": true,
+      "started": true,
+      "deltaCount": 12,
+      "cadenceMs": 100,
+      "piboSessionId": "ps_108ee635-058b-4c69-bb2c-7a1c22abbbb0"
+    },
+    "warnings": []
+  }
+}
