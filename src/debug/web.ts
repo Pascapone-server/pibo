@@ -29,6 +29,7 @@ type WebOptions = {
 	fixtureMix?: string;
 	negativeProfile?: string;
 	compareUrl?: string;
+	compareHosted: boolean;
 	json: boolean;
 	artifact: boolean;
 	fixture: boolean;
@@ -496,7 +497,7 @@ function printScenarioHelp(): void {
 
 Usage:
   pibo debug web scenario new-session [--manual|--act] [--duration ms] [--json] [--artifact]
-  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--fixture-profile steady|jitter|burst|batch] [--fixture-mix text|reasoning-text] [--simulate-reconnect|--simulate-trace-catchup] [--duration ms] [--runs n] [--from artifact.json] [--compare-url url] [--assert] [--expect-regression text] [--negative-profile batch] [--json] [--artifact]
+  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--fixture-profile steady|jitter|burst|batch] [--fixture-mix text|reasoning-text] [--simulate-reconnect|--simulate-trace-catchup] [--duration ms] [--runs n] [--from artifact.json] [--compare-url url|--compare-hosted] [--assert] [--expect-regression text] [--negative-profile batch] [--json] [--artifact]
 
 Defaults:
   new-session --manual waits while you click New Session yourself.
@@ -510,6 +511,7 @@ Defaults:
   streaming-benchmark --simulate-trace-catchup suppresses backend live text deltas and verifies trace snapshot recovery.
   streaming-benchmark --runs repeats the same scenario and reports medians; --from compares against a prior benchmark artifact.
   streaming-benchmark --compare-url runs the same backend fixture at another Chat URL, for direct-vs-hosted SSE comparison.
+  streaming-benchmark --compare-hosted uses PIBO_DEV_PUBLIC_URL or PIBO_DEV_BASE_URL from the environment or .env.developer-host as the compare URL.
   streaming-benchmark --assert exits non-zero when fixture/debug/DOM smoothness gates fail.
   streaming-benchmark --expect-regression marks a required regression substring for controlled negative benchmarks; unexpected or missing expected regressions still fail with --assert.
   streaming-benchmark --negative-profile batch expands to the backend batch reasoning/text fixture with required controlled regression assertions.
@@ -654,7 +656,10 @@ async function runScenario(options: WebOptions): Promise<void> {
 	if (scenario === "streaming-benchmark" && streamingOptions.simulateReconnect && !streamingOptions.backendFixture) throw new Error("--simulate-reconnect requires --backend-fixture.");
 	if (scenario === "streaming-benchmark" && streamingOptions.simulateTraceCatchup && !streamingOptions.backendFixture) throw new Error("--simulate-trace-catchup requires --backend-fixture.");
 	if (scenario === "streaming-benchmark" && streamingOptions.simulateReconnect && streamingOptions.simulateTraceCatchup) throw new Error("Use either --simulate-reconnect or --simulate-trace-catchup, not both.");
+	if (scenario === "streaming-benchmark" && streamingOptions.compareUrl && streamingOptions.compareHosted) throw new Error("Use either --compare-url or --compare-hosted, not both.");
 	if (scenario === "streaming-benchmark" && streamingOptions.compareUrl && !streamingOptions.backendFixture) throw new Error("--compare-url requires --backend-fixture so the benchmark can replay a deterministic stream at both URLs.");
+	if (scenario === "streaming-benchmark" && streamingOptions.compareHosted && !streamingOptions.backendFixture) throw new Error("--compare-hosted requires --backend-fixture so the benchmark can replay a deterministic stream at both URLs.");
+	const hostedCompareUrl = scenario === "streaming-benchmark" && streamingOptions.compareHosted ? await resolveStreamingBenchmarkHostedCompareUrl() : undefined;
 	const fixtureProfile = parseFixtureProfile(streamingOptions.fixtureProfile);
 	const fixtureMix = parseFixtureMix(streamingOptions.fixtureMix);
 	const durationMs = parseDuration(streamingOptions.duration);
@@ -669,8 +674,9 @@ async function runScenario(options: WebOptions): Promise<void> {
 			let benchmark: StreamingBenchmark | StreamingBenchmarkGroup | StreamingBenchmarkUrlComparison = runs === 1
 				? benchmarks[0]
 				: summarizeStreamingBenchmarkGroup(benchmarks, baseline);
-			if (streamingOptions.compareUrl) {
-				const compareUrl = resolveStreamingBenchmarkCompareUrl(streamingOptions.compareUrl, primaryUrl);
+			const rawCompareUrl = streamingOptions.compareUrl ?? hostedCompareUrl;
+			if (rawCompareUrl) {
+				const compareUrl = resolveStreamingBenchmarkCompareUrl(rawCompareUrl, primaryUrl);
 				await navigateStreamingBenchmarkTarget(client, compareUrl);
 				const compareRuns = await runStreamingBenchmarkSeries(client, runs, durationMs, runOptions);
 				const primaryGroup = summarizeStreamingBenchmarkGroup(benchmarks, baseline);
@@ -2116,6 +2122,7 @@ function parseOptions(args: string[]): WebOptions {
 		simulateTraceCatchup: false,
 		assertHealthy: false,
 		expectedRegressionPatterns: [],
+		compareHosted: false,
 		act: false,
 		manual: false,
 		includeText: false,
@@ -2156,6 +2163,7 @@ function parseOptions(args: string[]): WebOptions {
 		else if (arg.startsWith("--negative-profile=")) options.negativeProfile = arg.slice("--negative-profile=".length);
 		else if (arg === "--compare-url") options.compareUrl = requireValue(args, ++index, arg);
 		else if (arg.startsWith("--compare-url=")) options.compareUrl = arg.slice("--compare-url=".length);
+		else if (arg === "--compare-hosted") options.compareHosted = true;
 		else if (arg === "--from") options.from = requireValue(args, ++index, arg);
 		else if (arg.startsWith("--from=")) options.from = arg.slice("--from=".length);
 		else options.positionals.push(arg);
@@ -2494,6 +2502,50 @@ function resolveStreamingBenchmarkCompareUrl(rawCompareUrl: string, primaryUrl: 
 	}
 	compare.searchParams.set("debugStreaming", "1");
 	return compare.toString();
+}
+
+async function resolveStreamingBenchmarkHostedCompareUrl(): Promise<string> {
+	const directUrl = process.env.PIBO_DEV_PUBLIC_URL?.trim();
+	if (directUrl) return directUrl;
+	const baseUrl = process.env.PIBO_DEV_BASE_URL?.trim();
+	if (baseUrl) return `${baseUrl.replace(/\/+$/, "")}/apps/chat`;
+	const envFile = await readDeveloperHostEnvFile();
+	const fileDirectUrl = envFile.PIBO_DEV_PUBLIC_URL?.trim();
+	if (fileDirectUrl) return fileDirectUrl;
+	const fileBaseUrl = envFile.PIBO_DEV_BASE_URL?.trim();
+	if (fileBaseUrl) return `${fileBaseUrl.replace(/\/+$/, "")}/apps/chat`;
+	throw new Error("--compare-hosted requires PIBO_DEV_PUBLIC_URL or PIBO_DEV_BASE_URL in the environment or .env.developer-host");
+}
+
+async function readDeveloperHostEnvFile(): Promise<Record<string, string>> {
+	try {
+		return parseSimpleEnvFile(await readFile(path.resolve(process.cwd(), ".env.developer-host"), "utf8"));
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+		throw error;
+	}
+}
+
+function parseSimpleEnvFile(text: string): Record<string, string> {
+	const values: Record<string, string> = {};
+	for (const rawLine of text.split(/\r?\n/)) {
+		const line = rawLine.trim();
+		if (!line || line.startsWith("#")) continue;
+		const assignment = line.startsWith("export ") ? line.slice("export ".length).trimStart() : line;
+		const equals = assignment.indexOf("=");
+		if (equals <= 0) continue;
+		const key = assignment.slice(0, equals).trim();
+		if (key !== "PIBO_DEV_PUBLIC_URL" && key !== "PIBO_DEV_BASE_URL") continue;
+		values[key] = stripEnvQuotes(assignment.slice(equals + 1).trim());
+	}
+	return values;
+}
+
+function stripEnvQuotes(value: string): string {
+	if (value.length >= 2 && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
+		return value.slice(1, -1);
+	}
+	return value;
 }
 
 function applyExpectedStreamingRegressions(benchmark: StreamingBenchmark | StreamingBenchmarkGroup | StreamingBenchmarkUrlComparison, expectedPatterns: readonly string[]): StreamingBenchmarkAssertion {

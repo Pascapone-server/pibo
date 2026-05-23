@@ -38,7 +38,7 @@ test("pibo debug web watch rejects action flags", async () => {
 
 test("pibo debug web streaming benchmark help advertises the deterministic fixture", async () => {
 	const help = await execFileAsync("node", [cliPath, "debug", "web", "scenario", "--help"]);
-	assert.match(help.stdout, /streaming-benchmark \[--fixture\|--backend-fixture\].*\[--fixture-profile steady\|jitter\|burst\|batch\].*\[--fixture-mix text\|reasoning-text\].*\[--simulate-reconnect\|--simulate-trace-catchup\].*\[--compare-url url\].*\[--assert\].*\[--expect-regression text\].*\[--negative-profile batch\]/);
+	assert.match(help.stdout, /streaming-benchmark \[--fixture\|--backend-fixture\].*\[--fixture-profile steady\|jitter\|burst\|batch\].*\[--fixture-mix text\|reasoning-text\].*\[--simulate-reconnect\|--simulate-trace-catchup\].*\[--compare-url url\|--compare-hosted\].*\[--assert\].*\[--expect-regression text\].*\[--negative-profile batch\]/);
 	assert.match(help.stdout, /deterministic in-browser stream fixture/);
 	assert.match(help.stdout, /real app consumes deterministic \/api\/chat\/events frames/);
 	assert.match(help.stdout, /--fixture-profile selects steady cadence, deterministic jitter, bursty timing, or intentional batch stress/);
@@ -47,6 +47,7 @@ test("pibo debug web streaming benchmark help advertises the deterministic fixtu
 	assert.match(help.stdout, /--simulate-trace-catchup suppresses backend live text deltas/);
 	assert.match(help.stdout, /--runs repeats the same scenario and reports medians/);
 	assert.match(help.stdout, /--compare-url runs the same backend fixture at another Chat URL/);
+	assert.match(help.stdout, /--compare-hosted uses PIBO_DEV_PUBLIC_URL or PIBO_DEV_BASE_URL/);
 	assert.match(help.stdout, /--assert exits non-zero/);
 	assert.match(help.stdout, /--expect-regression marks a required regression substring/);
 	assert.match(help.stdout, /--negative-profile batch expands to the backend batch reasoning\/text fixture/);
@@ -153,6 +154,44 @@ test("pibo debug web streaming benchmark rejects compare URL without backend fix
 			return true;
 		},
 	);
+});
+
+test("pibo debug web streaming benchmark rejects compare hosted without backend fixture before target discovery", async () => {
+	await assert.rejects(
+		execFileAsync("node", [cliPath, "debug", "web", "scenario", "streaming-benchmark", "--compare-hosted"]),
+		(error) => {
+			assert.match(error.stderr, /--compare-hosted requires --backend-fixture/);
+			assert.doesNotMatch(error.stderr, /No attachable CDP target/);
+			return true;
+		},
+	);
+});
+
+test("pibo debug web streaming benchmark rejects mutually exclusive compare targets before target discovery", async () => {
+	await assert.rejects(
+		execFileAsync("node", [cliPath, "debug", "web", "scenario", "streaming-benchmark", "--backend-fixture", "--compare-url", "http://example.test/apps/chat", "--compare-hosted"]),
+		(error) => {
+			assert.match(error.stderr, /Use either --compare-url or --compare-hosted, not both/);
+			assert.doesNotMatch(error.stderr, /No attachable CDP target/);
+			return true;
+		},
+	);
+});
+
+test("pibo debug web streaming benchmark rejects compare hosted without configured dev URL before target discovery", async () => {
+	const cwd = await makeEmptyCwd();
+	try {
+		await assert.rejects(
+			execFileAsync("node", [cliPath, "debug", "web", "scenario", "streaming-benchmark", "--backend-fixture", "--compare-hosted"], { cwd, env: { PIBO_DEV_PUBLIC_URL: "", PIBO_DEV_BASE_URL: "" } }),
+			(error) => {
+				assert.match(error.stderr, /--compare-hosted requires PIBO_DEV_PUBLIC_URL or PIBO_DEV_BASE_URL/);
+				assert.doesNotMatch(error.stderr, /No attachable CDP target/);
+				return true;
+			},
+		);
+	} finally {
+		await rm(cwd, { recursive: true, force: true });
+	}
 });
 
 test("pibo debug web streaming benchmark rejects invalid negative profile before target discovery", async () => {
