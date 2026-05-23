@@ -1,0 +1,149 @@
+{
+  "target": {
+    "id": "F95340F012FC3F6EE0CC1D39CD9F292B",
+    "url": "http://127.0.0.1:4788/apps/chat/rooms/room_700b623f-c20c-4c74-bcb4-389d8daac410/sessions/ps_cf74f57f-9083-40d8-a6bc-133383fe4dbf?view=terminal&debugStreaming=1",
+    "title": "Pibo Web Chat",
+    "webSocketDebuggerUrl": "ws://127.0.0.1:33175/devtools/page/F95340F012FC3F6EE0CC1D39CD9F292B"
+  },
+  "scenario": "streaming-benchmark",
+  "benchmark": {
+    "kind": "streaming-benchmark",
+    "createdAt": "2026-05-23T03:10:43.594Z",
+    "url": "data:text/html;charset=utf-8,%3C!doctype%20html%3E%0A%3Chtml%3E%0A%3Chead%3E%0A%3Cmeta%20charset%3D%22utf-8%22%3E%0A%3Ctitle%3EStreaming%20Benchmark%20Fixture%3C%2Ftitle%3E%0A%3Cstyle%3Ebody%7Bfont-family%3Asystem-ui%2Csans-serif%3Bmargin%3A24px%3Bline-height%3A1.4%7D%20%5Bdata-pibo-component%5D%7Bwhite-space%3Apre-wrap%7D%3C%2Fstyle%3E%0A%3C%2Fhead%3E%0A%3Cbody%20data-pibo-debug%3D%22chat-app%22%3E%0A%3Ch1%3EStreaming%20Benchmark%20Fixture%3C%2Fh1%3E%0A%3Cdiv%20data-pibo-component%3D%22MarkdownRendererHost%22%20data-pibo-markdown-kind%3D%22assistant-message%22%3Ehello%3C%2Fdiv%3E%0A%3Cscript%3E%0A(()%20%3D%3E%20%7B%0A%20%20const%20target%20%3D%20document.querySelector('%5Bdata-pibo-component%3D%22MarkdownRendererHost%22%5D')%3B%0A%20%20const%20deltas%20%3D%20%5B'%20a'%2C%20'%20b'%2C%20'%20c'%2C%20'%20d'%2C%20'%20e'%2C%20'%20f'%2C%20'%20g'%2C%20'%20h'%2C%20'%20i'%2C%20'%20j'%2C%20'%20k'%2C%20'%20l'%5D%3B%0A%20%20const%20cadenceMs%20%3D%20100%3B%0A%20%20const%20profile%20%3D%20%22batch%22%3B%0A%20%20const%20mix%20%3D%20%22text%22%3B%0A%20%20const%20reasoningDeltas%20%3D%20mix%20%3D%3D%3D%20'reasoning-text'%20%3F%20%5B'%20think'%2C%20'%20plan'%2C%20'%20check'%2C%20'%20answer'%5D%20%3A%20%5B%5D%3B%0A%20%20const%20scheduleMs%20%3D%20buildSchedule(deltas.length%2C%20cadenceMs%2C%20profile)%3B%0A%20%20const%20reasoningScheduleMs%20%3D%20reasoningDeltas.map((_%2C%20index)%20%3D%3E%20Math.max(10%2C%20Math.round((index%20%2B%201)%20*%20cadenceMs%20%2F%202)))%3B%0A%20%20let%20timers%20%3D%20%5B%5D%3B%0A%20%20function%20buildSchedule(count%2C%20cadence%2C%20timingProfile)%20%7B%0A%20%20%20%20const%20delays%20%3D%20%5B%5D%3B%0A%20%20%20%20let%20elapsed%20%3D%200%3B%0A%20%20%20%20for%20(let%20index%20%3D%200%3B%20index%20%3C%20count%3B%20index%20%2B%3D%201)%20%7B%0A%20%20%20%20%20%20let%20gap%20%3D%20cadence%3B%0A%20%20%20%20%20%20if%20(timingProfile%20%3D%3D%3D%20'jitter')%20%7B%0A%20%20%20%20%20%20%20%20const%20jitter%20%3D%20%5B-30%2C%2050%2C%20-20%2C%2030%2C%20-40%2C%2060%2C%20-10%2C%2040%2C%20-50%2C%2070%2C%20-20%2C%2030%5D%5Bindex%20%25%2012%5D%3B%0A%20%20%20%20%20%20%20%20gap%20%3D%20Math.max(10%2C%20cadence%20%2B%20jitter)%3B%0A%20%20%20%20%20%20%7D%20else%20if%20(timingProfile%20%3D%3D%3D%20'burst')%20%7B%0A%20%20%20%20%20%20%20%20gap%20%3D%20index%20%3E%200%20%26%26%20index%20%25%203%20!%3D%3D%200%20%3F%20Math.max(10%2C%20Math.round(cadence%20%2F%205))%20%3A%20Math.max(cadence%2C%20Math.round(cadence%20*%202.5))%3B%0A%20%20%20%20%20%20%7D%20else%20if%20(timingProfile%20%3D%3D%3D%20'batch')%20%7B%0A%20%20%20%20%20%20%20%20gap%20%3D%20index%20%25%204%20%3D%3D%3D%200%20%3F%20Math.max(cadence%2C%20Math.round(cadence%20*%203))%20%3A%200%3B%0A%20%20%20%20%20%20%7D%0A%20%20%20%20%20%20elapsed%20%2B%3D%20gap%3B%0A%20%20%20%20%20%20delays.push(elapsed)%3B%0A%20%20%20%20%7D%0A%20%20%20%20return%20delays%3B%0A%20%20%7D%0A%20%20function%20snapshot()%20%7B%0A%20%20%20%20return%20%7B%0A%20%20%20%20%20%20eventCount%3A%200%2C%0A%20%20%20%20%20%20textDeltaCount%3A%200%2C%0A%20%20%20%20%20%20textDeltaBytes%3A%200%2C%0A%20%20%20%20%20%20reasoningDeltaCount%3A%200%2C%0A%20%20%20%20%20%20reasoningDeltaBytes%3A%200%2C%0A%20%20%20%20%20%20enqueueCount%3A%200%2C%0A%20%20%20%20%20%20flushCount%3A%200%2C%0A%20%20%20%20%20%20flushedEventCount%3A%200%2C%0A%20%20%20%20%20%20overlayUpdateCount%3A%200%2C%0A%20%20%20%20%20%20overlayEventCount%3A%200%2C%0A%20%20%20%20%20%20traceRefreshStartedCount%3A%200%2C%0A%20%20%20%20%20%20traceRefreshCompletedCount%3A%200%2C%0A%20%20%20%20%20%20traceRefreshFailedCount%3A%200%2C%0A%20%20%20%20%20%20traceBaseUpdateCount%3A%200%2C%0A%20%20%20%20%20%20traceBaseOutputLength%3A%200%2C%0A%20%20%20%20%20%20currentOutputLength%3A%20target.textContent.length%2C%0A%20%20%20%20%20%20lastDurableCursor%3A%20undefined%2C%0A%20%20%20%20%20%20lastTransientLiveId%3A%20'live%3A-1'%2C%0A%20%20%20%20%7D%3B%0A%20%20%7D%0A%20%20window.__piboStreamingDebugReset%20%3D%20()%20%3D%3E%20%7B%0A%20%20%20%20for%20(const%20timer%20of%20timers)%20clearTimeout(timer)%3B%0A%20%20%20%20timers%20%3D%20%5B%5D%3B%0A%20%20%20%20target.textContent%20%3D%20'hello'%3B%0A%20%20%20%20window.__piboStreamingDebug%20%3D%20snapshot()%3B%0A%20%20%20%20return%20window.__piboStreamingDebug%3B%0A%20%20%7D%3B%0A%20%20window.__piboStreamingFixtureConfig%20%3D%20%7B%20deltaCount%3A%20deltas.length%2C%20reasoningDeltaCount%3A%20reasoningDeltas.length%2C%20cadenceMs%2C%20profile%2C%20mix%2C%20scheduleMs%2C%20reasoningScheduleMs%2C%20textBytes%3A%20deltas.join('').length%2C%20reasoningBytes%3A%20reasoningDeltas.join('').length%20%7D%3B%0A%20%20window.__piboStreamingFixtureStart%20%3D%20()%20%3D%3E%20%7B%0A%20%20%20%20window.__piboStreamingDebugReset()%3B%0A%20%20%20%20reasoningDeltas.forEach((delta%2C%20index)%20%3D%3E%20%7B%0A%20%20%20%20%20%20timers.push(setTimeout(()%20%3D%3E%20%7B%0A%20%20%20%20%20%20%20%20const%20debug%20%3D%20window.__piboStreamingDebug%3B%0A%20%20%20%20%20%20%20%20debug.eventCount%20%2B%3D%201%3B%0A%20%20%20%20%20%20%20%20debug.reasoningDeltaCount%20%2B%3D%201%3B%0A%20%20%20%20%20%20%20%20debug.reasoningDeltaBytes%20%2B%3D%20delta.length%3B%0A%20%20%20%20%20%20%20%20debug.enqueueCount%20%2B%3D%201%3B%0A%20%20%20%20%20%20%20%20debug.flushCount%20%2B%3D%201%3B%0A%20%20%20%20%20%20%20%20debug.flushedEventCount%20%2B%3D%201%3B%0A%20%20%20%20%20%20%20%20debug.overlayUpdateCount%20%2B%3D%201%3B%0A%20%20%20%20%20%20%20%20debug.overlayEventCount%20%2B%3D%201%3B%0A%20%20%20%20%20%20%20%20debug.lastTransientLiveId%20%3D%20'live%3Areasoning-'%20%2B%20index%3B%0A%20%20%20%20%20%20%7D%2C%20reasoningScheduleMs%5Bindex%5D))%3B%0A%20%20%20%20%7D)%3B%0A%20%20%20%20deltas.forEach((delta%2C%20index)%20%3D%3E%20%7B%0A%20%20%20%20%20%20timers.push(setTimeout(()%20%3D%3E%20%7B%0A%20%20%20%20%20%20%20%20target.textContent%20%2B%3D%20delta%3B%0A%20%20%20%20%20%20%20%20const%20debug%20%3D%20window.__piboStreamingDebug%3B%0A%20%20%20%20%20%20%20%20debug.eventCount%20%2B%3D%201%3B%0A%20%20%20%20%20%20%20%20debug.textDeltaCount%20%2B%3D%201%3B%0A%20%20%20%20%20%20%20%20debug.textDeltaBytes%20%2B%3D%20delta.length%3B%0A%20%20%20%20%20%20%20%20debug.enqueueCount%20%2B%3D%201%3B%0A%20%20%20%20%20%20%20%20debug.flushCount%20%2B%3D%201%3B%0A%20%20%20%20%20%20%20%20debug.flushedEventCount%20%2B%3D%201%3B%0A%20%20%20%20%20%20%20%20debug.overlayUpdateCount%20%2B%3D%201%3B%0A%20%20%20%20%20%20%20%20debug.overlayEventCount%20%2B%3D%201%3B%0A%20%20%20%20%20%20%20%20debug.currentOutputLength%20%3D%20target.textContent.length%3B%0A%20%20%20%20%20%20%20%20debug.lastTransientLiveId%20%3D%20'live%3A'%20%2B%20index%3B%0A%20%20%20%20%20%20%7D%2C%20scheduleMs%5Bindex%5D))%3B%0A%20%20%20%20%7D)%3B%0A%20%20%20%20return%20window.__piboStreamingFixtureConfig%3B%0A%20%20%7D%3B%0A%20%20window.__piboStreamingDebugReset()%3B%0A%7D)()%3B%0A%3C%2Fscript%3E%0A%3C%2Fbody%3E%0A%3C%2Fhtml%3E",
+    "title": "Streaming Benchmark Fixture",
+    "durationMs": 1600,
+    "debug": {
+      "enabledRequested": true,
+      "available": true,
+      "reset": true,
+      "before": {
+        "eventCount": 0,
+        "textDeltaCount": 0,
+        "textDeltaBytes": 0,
+        "reasoningDeltaCount": 0,
+        "reasoningDeltaBytes": 0,
+        "enqueueCount": 0,
+        "flushCount": 0,
+        "flushedEventCount": 0,
+        "overlayUpdateCount": 0,
+        "overlayEventCount": 0,
+        "traceRefreshStartedCount": 0,
+        "traceRefreshCompletedCount": 0,
+        "traceRefreshFailedCount": 0,
+        "traceBaseUpdateCount": 0,
+        "traceBaseOutputLength": 0,
+        "currentOutputLength": 5,
+        "lastTransientLiveId": "live:-1"
+      },
+      "after": {
+        "eventCount": 12,
+        "textDeltaCount": 12,
+        "textDeltaBytes": 24,
+        "reasoningDeltaCount": 0,
+        "reasoningDeltaBytes": 0,
+        "enqueueCount": 12,
+        "flushCount": 12,
+        "flushedEventCount": 12,
+        "overlayUpdateCount": 12,
+        "overlayEventCount": 12,
+        "traceRefreshStartedCount": 0,
+        "traceRefreshCompletedCount": 0,
+        "traceRefreshFailedCount": 0,
+        "traceBaseUpdateCount": 0,
+        "traceBaseOutputLength": 0,
+        "currentOutputLength": 29,
+        "lastTransientLiveId": "live:11"
+      },
+      "delta": {
+        "liveOpenCount": 0,
+        "liveErrorCount": 0,
+        "eventCount": 12,
+        "textDeltaCount": 12,
+        "textDeltaBytes": 24,
+        "reasoningDeltaCount": 0,
+        "reasoningDeltaBytes": 0,
+        "enqueueCount": 12,
+        "flushCount": 12,
+        "flushedEventCount": 12,
+        "overlayUpdateCount": 12,
+        "traceRefreshStartedCount": 0,
+        "traceRefreshCompletedCount": 0,
+        "traceRefreshFailedCount": 0,
+        "traceBaseUpdateCount": 0
+      }
+    },
+    "dom": {
+      "selector": "[data-pibo-component=\"MarkdownRendererHost\"][data-pibo-markdown-kind=\"assistant-message\"]",
+      "targetCountStart": 1,
+      "targetCountEnd": 1,
+      "lengthStart": 5,
+      "lengthEnd": 29,
+      "lengthMax": 29,
+      "updateCount": 12,
+      "positiveUpdateCount": 12,
+      "firstPositiveUpdateMs": 302,
+      "lastPositiveUpdateMs": 903,
+      "gapsMs": {
+        "count": 11,
+        "min": 0.2,
+        "p50": 0.3,
+        "p90": 299.1,
+        "p99": 299.1,
+        "max": 299.7,
+        "avg": 54.655
+      },
+      "positiveCharJumps": {
+        "count": 12,
+        "min": 2,
+        "p50": 2,
+        "p90": 2,
+        "p99": 2,
+        "max": 2,
+        "avg": 2
+      }
+    },
+    "raf": {
+      "count": 96,
+      "gapsMs": {
+        "count": 95,
+        "min": 16.5,
+        "p50": 16.7,
+        "p90": 16.7,
+        "p99": 16.8,
+        "max": 16.8,
+        "avg": 16.666
+      }
+    },
+    "longTasks": {
+      "count": 0,
+      "totalMs": 0,
+      "maxMs": 0
+    },
+    "fixture": {
+      "requested": true,
+      "mode": "browser",
+      "profile": "batch",
+      "mix": "text",
+      "available": true,
+      "started": true,
+      "deltaCount": 12,
+      "reasoningDeltaCount": 0,
+      "cadenceMs": 100,
+      "textBytes": 24,
+      "reasoningBytes": 0
+    },
+    "regressions": [],
+    "warnings": [
+      "failed to set debugStreaming localStorage: SecurityError: Failed to read the 'localStorage' property from 'Window': Storage is disabled inside 'data:' URLs."
+    ],
+    "score": {
+      "smoothness": 68.612,
+      "domGapP50Ms": 0.3,
+      "domGapP90Ms": 299.1,
+      "domJumpP90Chars": 2,
+      "textDeltaCount": 12,
+      "domPositiveUpdateCount": 12,
+      "firstVisibleMs": 302
+    }
+  }
+}

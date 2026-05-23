@@ -1,0 +1,259 @@
+{
+  "target": {
+    "id": "F95340F012FC3F6EE0CC1D39CD9F292B",
+    "url": "http://127.0.0.1:4788/apps/chat/rooms/room_700b623f-c20c-4c74-bcb4-389d8daac410/sessions/ps_cf74f57f-9083-40d8-a6bc-133383fe4dbf?view=terminal",
+    "title": "Pibo Web Chat",
+    "webSocketDebuggerUrl": "ws://127.0.0.1:33175/devtools/page/F95340F012FC3F6EE0CC1D39CD9F292B"
+  },
+  "scenario": "streaming-benchmark",
+  "benchmark": {
+    "kind": "streaming-benchmark",
+    "createdAt": "2026-05-23T03:12:34.022Z",
+    "url": "http://127.0.0.1:4788/apps/chat/rooms/room_700b623f-c20c-4c74-bcb4-389d8daac410/sessions/ps_cf74f57f-9083-40d8-a6bc-133383fe4dbf?view=terminal&debugStreaming=1",
+    "title": "Pibo Web Chat",
+    "durationMs": 2200,
+    "debug": {
+      "enabledRequested": true,
+      "available": true,
+      "reset": true,
+      "before": {
+        "enabled": true,
+        "startedAt": "2026-05-23T03:12:26.742Z",
+        "updatedAt": "2026-05-23T03:12:26.742Z",
+        "sessionIds": [],
+        "liveOpenCount": 0,
+        "liveErrorCount": 0,
+        "eventCount": 0,
+        "eventTypeCounts": {},
+        "textDeltaCount": 0,
+        "textDeltaBytes": 0,
+        "reasoningDeltaCount": 0,
+        "reasoningDeltaBytes": 0,
+        "enqueueCount": 0,
+        "enqueueFlushImmediateCount": 0,
+        "pendingEventCount": 0,
+        "flushCount": 0,
+        "flushedEventCount": 0,
+        "overlayUpdateCount": 0,
+        "overlayEventCount": 0,
+        "traceRefreshScheduledCount": 0,
+        "traceRefreshStartedCount": 0,
+        "traceRefreshCompletedCount": 0,
+        "traceRefreshFailedCount": 0,
+        "traceRefreshDurationMsTotal": 0,
+        "traceBaseUpdateCount": 0
+      },
+      "after": {
+        "enabled": true,
+        "startedAt": "2026-05-23T03:12:26.742Z",
+        "updatedAt": "2026-05-23T03:12:26.742Z",
+        "sessionIds": [],
+        "liveOpenCount": 0,
+        "liveErrorCount": 0,
+        "eventCount": 0,
+        "eventTypeCounts": {},
+        "textDeltaCount": 0,
+        "textDeltaBytes": 0,
+        "reasoningDeltaCount": 0,
+        "reasoningDeltaBytes": 0,
+        "enqueueCount": 0,
+        "enqueueFlushImmediateCount": 0,
+        "pendingEventCount": 0,
+        "flushCount": 0,
+        "flushedEventCount": 0,
+        "overlayUpdateCount": 0,
+        "overlayEventCount": 0,
+        "traceRefreshScheduledCount": 0,
+        "traceRefreshStartedCount": 0,
+        "traceRefreshCompletedCount": 0,
+        "traceRefreshFailedCount": 0,
+        "traceRefreshDurationMsTotal": 0,
+        "traceBaseUpdateCount": 0
+      },
+      "delta": {
+        "liveOpenCount": 0,
+        "liveErrorCount": 0,
+        "eventCount": 0,
+        "textDeltaCount": 0,
+        "textDeltaBytes": 0,
+        "reasoningDeltaCount": 0,
+        "reasoningDeltaBytes": 0,
+        "enqueueCount": 0,
+        "flushCount": 0,
+        "flushedEventCount": 0,
+        "overlayUpdateCount": 0,
+        "traceRefreshStartedCount": 0,
+        "traceRefreshCompletedCount": 0,
+        "traceRefreshFailedCount": 0,
+        "traceBaseUpdateCount": 0
+      }
+    },
+    "dom": {
+      "selector": "[data-pibo-component=\"MarkdownRendererHost\"][data-pibo-markdown-kind=\"assistant-message\"]",
+      "targetCountStart": 0,
+      "targetCountEnd": 0,
+      "lengthStart": 0,
+      "lengthEnd": 0,
+      "lengthMax": 0,
+      "updateCount": 0,
+      "positiveUpdateCount": 0,
+      "gapsMs": {
+        "count": 0
+      },
+      "positiveCharJumps": {
+        "count": 0
+      }
+    },
+    "raf": {
+      "count": 438,
+      "gapsMs": {
+        "count": 437,
+        "min": 16.5,
+        "p50": 16.7,
+        "p90": 16.7,
+        "p99": 16.8,
+        "max": 16.8,
+        "avg": 16.666
+      }
+    },
+    "longTasks": {
+      "count": 0,
+      "totalMs": 0,
+      "maxMs": 0
+    },
+    "fixture": {
+      "requested": true,
+      "mode": "backend",
+      "profile": "steady",
+      "mix": "reasoning-text",
+      "available": false,
+      "started": false,
+      "error": "signal is aborted without reason"
+    },
+    "eventSource": {
+      "requested": true,
+      "installed": true,
+      "openCount": 3,
+      "openCountAfterStart": 0,
+      "errorCount": 0,
+      "errorCountAfterStart": 0,
+      "closeCount": 0,
+      "forcedCloseCount": 0,
+      "forcedCloseCountAfterStart": 0,
+      "eventCount": 2,
+      "eventCountAfterStart": 0,
+      "textEventCount": 0,
+      "textEventCountAfterStart": 0,
+      "reasoningEventCount": 0,
+      "reasoningEventCountAfterStart": 0,
+      "transientIdCount": 0,
+      "uniqueTransientIdCount": 0,
+      "transientIdCountAfterStart": 0,
+      "uniqueTransientIdCountAfterStart": 0,
+      "durableIdCount": 0,
+      "otherIdCount": 0,
+      "transientIdResetObserved": false,
+      "reconnectObserved": false,
+      "textDropRequested": false,
+      "textDropCount": 0,
+      "textDropTextEventCount": 0,
+      "streams": [
+        {
+          "url": "/api/chat/events?piboSessionId=ps_cf74f57f-9083-40d8-a6bc-133383fe4dbf&mode=live",
+          "mode": "live",
+          "role": "selected-live",
+          "piboSessionId": "ps_cf74f57f-9083-40d8-a6bc-133383fe4dbf",
+          "sinceValues": [],
+          "openCountAfterStart": 0,
+          "errorCountAfterStart": 0,
+          "closeCountAfterStart": 0,
+          "forcedCloseCountAfterStart": 0,
+          "eventCount": 1,
+          "eventCountAfterStart": 0,
+          "textEventCount": 0,
+          "textEventCountAfterStart": 0,
+          "reasoningEventCount": 0,
+          "reasoningEventCountAfterStart": 0,
+          "transientIdCount": 0,
+          "uniqueTransientIdCount": 0,
+          "transientIdCountAfterStart": 0,
+          "uniqueTransientIdCountAfterStart": 0,
+          "durableIdCount": 0,
+          "otherIdCount": 0
+        },
+        {
+          "url": "/api/chat/events?roomId=room_700b623f-c20c-4c74-bcb4-389d8daac410&mode=summary",
+          "mode": "summary",
+          "role": "room-summary",
+          "roomId": "room_700b623f-c20c-4c74-bcb4-389d8daac410",
+          "sinceValues": [
+            "0:999999"
+          ],
+          "openCountAfterStart": 0,
+          "errorCountAfterStart": 0,
+          "closeCountAfterStart": 0,
+          "forcedCloseCountAfterStart": 0,
+          "eventCount": 1,
+          "eventCountAfterStart": 0,
+          "textEventCount": 0,
+          "textEventCountAfterStart": 0,
+          "reasoningEventCount": 0,
+          "reasoningEventCountAfterStart": 0,
+          "transientIdCount": 0,
+          "uniqueTransientIdCount": 0,
+          "transientIdCountAfterStart": 0,
+          "uniqueTransientIdCountAfterStart": 0,
+          "durableIdCount": 0,
+          "otherIdCount": 0
+        }
+      ]
+    },
+    "sse": {
+      "requested": true,
+      "installed": false,
+      "url": "/api/chat/events?piboSessionId=ps_cf74f57f-9083-40d8-a6bc-133383fe4dbf&mode=live",
+      "headers": {},
+      "aborted": true,
+      "errors": [],
+      "chunkCount": 0,
+      "chunkBytes": {
+        "count": 0
+      },
+      "chunkGapsMs": {
+        "count": 0
+      },
+      "textEventsPerChunk": {
+        "count": 0
+      },
+      "eventCount": 0,
+      "textEventCount": 0,
+      "reasoningEventCount": 0,
+      "textDeltaBytes": {
+        "count": 0
+      },
+      "textEventGapsMs": {
+        "count": 0
+      },
+      "idCount": 0,
+      "transientIdCount": 0,
+      "durableIdCount": 0,
+      "otherIdCount": 0
+    },
+    "regressions": [
+      "fixture unavailable",
+      "fixture did not start",
+      "fixture error: signal is aborted without reason",
+      "EventSource transient live ids were not observed",
+      "SSE fetch probe unavailable",
+      "SSE X-Accel-Buffering header is not no"
+    ],
+    "warnings": [
+      "failed to start backend streaming fixture: signal is aborted without reason"
+    ],
+    "score": {
+      "smoothness": 0,
+      "textDeltaCount": 0,
+      "domPositiveUpdateCount": 0
+    }
+  }
+}

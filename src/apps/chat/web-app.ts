@@ -1732,7 +1732,7 @@ type ChatStreamingFixtureBody = {
 	suppressLiveDeltas?: unknown;
 };
 
-type ChatStreamingFixtureProfile = "steady" | "jitter" | "burst";
+type ChatStreamingFixtureProfile = "steady" | "jitter" | "burst" | "batch";
 type ChatStreamingFixtureMix = "text" | "reasoning-text";
 
 type ChatProjectsBootstrap = ChatBootstrapCatalog & {
@@ -2530,8 +2530,8 @@ function normalizeStreamingFixtureCadenceMs(value: unknown): number {
 
 function normalizeStreamingFixtureProfile(value: unknown): ChatStreamingFixtureProfile {
 	if (value === undefined) return "steady";
-	if (value === "steady" || value === "jitter" || value === "burst") return value;
-	throw new PiboWebHttpError("profile must be steady, jitter, or burst", 400);
+	if (value === "steady" || value === "jitter" || value === "burst" || value === "batch") return value;
+	throw new PiboWebHttpError("profile must be steady, jitter, burst, or batch", 400);
 }
 
 function normalizeStreamingFixtureMix(value: unknown): ChatStreamingFixtureMix {
@@ -2562,6 +2562,8 @@ function buildStreamingFixtureSchedule(deltaCount: number, cadenceMs: number, pr
 			gapMs = Math.max(10, cadenceMs + jitterMs);
 		} else if (profile === "burst") {
 			gapMs = index > 0 && index % 3 !== 0 ? Math.max(10, Math.round(cadenceMs / 5)) : Math.max(cadenceMs, Math.round(cadenceMs * 2.5));
+		} else if (profile === "batch") {
+			gapMs = index % 4 === 0 ? Math.max(cadenceMs, Math.round(cadenceMs * 3)) : 0;
 		}
 		elapsedMs += gapMs;
 		delays.push(elapsedMs);

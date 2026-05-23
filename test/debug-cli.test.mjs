@@ -38,10 +38,10 @@ test("pibo debug web watch rejects action flags", async () => {
 
 test("pibo debug web streaming benchmark help advertises the deterministic fixture", async () => {
 	const help = await execFileAsync("node", [cliPath, "debug", "web", "scenario", "--help"]);
-	assert.match(help.stdout, /streaming-benchmark \[--fixture\|--backend-fixture\].*\[--fixture-profile steady\|jitter\|burst\].*\[--fixture-mix text\|reasoning-text\].*\[--simulate-reconnect\|--simulate-trace-catchup\].*\[--assert\]/);
+	assert.match(help.stdout, /streaming-benchmark \[--fixture\|--backend-fixture\].*\[--fixture-profile steady\|jitter\|burst\|batch\].*\[--fixture-mix text\|reasoning-text\].*\[--simulate-reconnect\|--simulate-trace-catchup\].*\[--assert\]/);
 	assert.match(help.stdout, /deterministic in-browser stream fixture/);
 	assert.match(help.stdout, /real app consumes deterministic \/api\/chat\/events frames/);
-	assert.match(help.stdout, /--fixture-profile selects steady cadence, deterministic jitter, or bursty fixture timing/);
+	assert.match(help.stdout, /--fixture-profile selects steady cadence, deterministic jitter, bursty timing, or intentional batch stress/);
 	assert.match(help.stdout, /--fixture-mix includes text-only or mixed reasoning\/text deltas/);
 	assert.match(help.stdout, /--simulate-reconnect reloads the app with an EventSource probe/);
 	assert.match(help.stdout, /--simulate-trace-catchup suppresses backend live text deltas/);
@@ -75,7 +75,7 @@ test("pibo debug web streaming benchmark rejects invalid fixture profiles before
 	await assert.rejects(
 		execFileAsync("node", [cliPath, "debug", "web", "scenario", "streaming-benchmark", "--backend-fixture", "--fixture-profile", "random"]),
 		(error) => {
-			assert.match(error.stderr, /--fixture-profile must be steady, jitter, or burst/);
+			assert.match(error.stderr, /--fixture-profile must be steady, jitter, burst, or batch/);
 			assert.doesNotMatch(error.stderr, /No attachable CDP target/);
 			return true;
 		},

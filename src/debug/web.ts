@@ -443,7 +443,7 @@ function printScenarioHelp(): void {
 
 Usage:
   pibo debug web scenario new-session [--manual|--act] [--duration ms] [--json] [--artifact]
-  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--fixture-profile steady|jitter|burst] [--fixture-mix text|reasoning-text] [--simulate-reconnect|--simulate-trace-catchup] [--duration ms] [--runs n] [--from artifact.json] [--assert] [--json] [--artifact]
+  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--fixture-profile steady|jitter|burst|batch] [--fixture-mix text|reasoning-text] [--simulate-reconnect|--simulate-trace-catchup] [--duration ms] [--runs n] [--from artifact.json] [--assert] [--json] [--artifact]
 
 Defaults:
   new-session --manual waits while you click New Session yourself.
@@ -451,7 +451,7 @@ Defaults:
   streaming-benchmark enables debugStreaming for future events, observes assistant DOM increments, and snapshots window.__piboStreamingDebug.
   streaming-benchmark --fixture navigates the target to a deterministic in-browser stream fixture before measuring.
   streaming-benchmark --backend-fixture posts to /api/chat/debug/streaming-fixture and records EventSource metrics while the real app consumes deterministic /api/chat/events frames.
-  streaming-benchmark --fixture-profile selects steady cadence, deterministic jitter, or bursty fixture timing.
+  streaming-benchmark --fixture-profile selects steady cadence, deterministic jitter, bursty timing, or intentional batch stress.
   streaming-benchmark --fixture-mix includes text-only or mixed reasoning/text deltas.
   streaming-benchmark --simulate-reconnect reloads the app with an EventSource probe, forces one live stream close, and verifies reconnect/transient ids.
   streaming-benchmark --simulate-trace-catchup suppresses backend live text deltas and verifies trace snapshot recovery.
@@ -750,7 +750,7 @@ async function enableStreamingDebugForCurrentApp(client: CdpClient): Promise<voi
 	await client.evaluate("new Promise((resolve) => setTimeout(resolve, 500))", 2_000);
 }
 
-type StreamingFixtureProfile = "steady" | "jitter" | "burst";
+type StreamingFixtureProfile = "steady" | "jitter" | "burst" | "batch";
 type StreamingFixtureMix = "text" | "reasoning-text";
 
 function streamingBenchmarkEventSourceProbeScript(): string {
@@ -875,6 +875,8 @@ function streamingBenchmarkFixtureHtml(fixtureProfile: StreamingFixtureProfile, 
         gap = Math.max(10, cadence + jitter);
       } else if (timingProfile === 'burst') {
         gap = index > 0 && index % 3 !== 0 ? Math.max(10, Math.round(cadence / 5)) : Math.max(cadence, Math.round(cadence * 2.5));
+      } else if (timingProfile === 'batch') {
+        gap = index % 4 === 0 ? Math.max(cadence, Math.round(cadence * 3)) : 0;
       }
       elapsed += gap;
       delays.push(elapsed);
@@ -1046,6 +1048,7 @@ function createSseProbe(piboSessionId) {
   let lastTextAt;
   let buffer = '';
   let stopped = false;
+  let finished = false;
   const controller = typeof AbortController === 'undefined' ? undefined : new AbortController();
   const decoder = typeof TextDecoder === 'undefined' ? undefined : new TextDecoder();
   const encoder = typeof TextEncoder === 'undefined' ? undefined : new TextEncoder();
@@ -1129,6 +1132,7 @@ function createSseProbe(piboSessionId) {
       if (stopped || (error && error.name === 'AbortError')) result.aborted = true;
       else result.errors.push(String(error && error.message ? error.message : error));
     } finally {
+      finished = true;
       finalize();
     }
   })();
@@ -1137,7 +1141,11 @@ function createSseProbe(piboSessionId) {
     stop: async () => {
       stopped = true;
       if (controller) controller.abort();
-      await done.catch(() => {});
+      await Promise.race([done.catch(() => {}), new Promise((resolve) => setTimeout(resolve, 2500))]);
+      if (!finished) {
+        result.aborted = true;
+        result.errors.push('stop timeout after abort');
+      }
       return finalize();
     },
   };
@@ -2084,8 +2092,8 @@ function parseRuns(value?: string): number {
 
 function parseFixtureProfile(value?: string): StreamingFixtureProfile {
 	if (!value) return "steady";
-	if (value === "steady" || value === "jitter" || value === "burst") return value;
-	throw new Error("--fixture-profile must be steady, jitter, or burst");
+	if (value === "steady" || value === "jitter" || value === "burst" || value === "batch") return value;
+	throw new Error("--fixture-profile must be steady, jitter, burst, or batch");
 }
 
 function parseFixtureMix(value?: string): StreamingFixtureMix {
