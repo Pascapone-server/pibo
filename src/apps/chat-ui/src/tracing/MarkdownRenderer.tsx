@@ -67,6 +67,35 @@ export function requiresGfmMarkdown(markdown: string): boolean {
 		|| markdownAutolinkPattern.test(markdown);
 }
 
+const simpleGfmStrikethroughForbiddenPattern = /[\n\r\\`*_\[\]<>]/;
+
+function renderSimpleGfmStrikethrough(markdown: string): ReactElement | undefined {
+	if (!markdown.includes("~~")) return undefined;
+	if (simpleGfmStrikethroughForbiddenPattern.test(markdown)) return undefined;
+	if (markdownLinePrefixPattern.test(markdown) || markdownThematicBreakPattern.test(markdown) || markdownAutolinkPattern.test(markdown) || markdownTaskListPattern.test(markdown) || markdownTablePattern.test(markdown)) return undefined;
+
+	const parts: Array<string | ReactElement> = [];
+	let cursor = 0;
+	let delCount = 0;
+	while (cursor < markdown.length) {
+		const start = markdown.indexOf("~~", cursor);
+		if (start === -1) {
+			parts.push(markdown.slice(cursor));
+			break;
+		}
+		const end = markdown.indexOf("~~", start + 2);
+		if (end === -1 || end === start + 2) return undefined;
+		const plainPrefix = markdown.slice(cursor, start);
+		if (plainPrefix) parts.push(plainPrefix);
+		const deletedText = markdown.slice(start + 2, end);
+		if (deletedText.includes("~")) return undefined;
+		parts.push(<del key={`del-${delCount}`} data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="del">{deletedText}</del>);
+		delCount += 1;
+		cursor = end + 2;
+	}
+	return delCount > 0 ? <p data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="p">{parts}</p> : undefined;
+}
+
 const components: Components = {
 	p({ children, node: _node, ...props }) {
 		return <p data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="p" {...props}>{children}</p>;
@@ -175,15 +204,20 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ children }: Mar
 	} else {
 		const useGfm = requiresGfmMarkdown(children);
 		mode = useGfm ? "gfm" : "commonmark";
-		// ReactMarkdown is a synchronous parser/render function; call it directly so debug timings include its parse/tree-build work.
-		element = ReactMarkdown({
-			allowedElements,
-			children,
-			components,
-			remarkPlugins: useGfm ? gfmRemarkPlugins : commonMarkRemarkPlugins,
-			skipHtml: true,
-			urlTransform: safeUrlTransform,
-		});
+		const simpleGfmElement = useGfm ? renderSimpleGfmStrikethrough(children) : undefined;
+		if (simpleGfmElement) {
+			element = simpleGfmElement;
+		} else {
+			// ReactMarkdown is a synchronous parser/render function; call it directly so debug timings include its parse/tree-build work.
+			element = ReactMarkdown({
+				allowedElements,
+				children,
+				components,
+				remarkPlugins: useGfm ? gfmRemarkPlugins : commonMarkRemarkPlugins,
+				skipHtml: true,
+				urlTransform: safeUrlTransform,
+			});
+		}
 	}
 	recordMarkdownRenderIfEnabled(mode, startedAt);
 	return element;
