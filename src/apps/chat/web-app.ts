@@ -1726,7 +1726,10 @@ type ChatStreamingFixtureBody = {
 	roomId?: unknown;
 	deltas?: unknown;
 	cadenceMs?: unknown;
+	profile?: unknown;
 };
+
+type ChatStreamingFixtureProfile = "steady" | "jitter" | "burst";
 
 type ChatProjectsBootstrap = ChatBootstrapCatalog & {
 	identity: PiboWebSession["authSession"]["identity"];
@@ -2519,6 +2522,29 @@ function normalizeStreamingFixtureCadenceMs(value: unknown): number {
 		throw new PiboWebHttpError("cadenceMs must be a number between 10 and 5000", 400);
 	}
 	return Math.round(value);
+}
+
+function normalizeStreamingFixtureProfile(value: unknown): ChatStreamingFixtureProfile {
+	if (value === undefined) return "steady";
+	if (value === "steady" || value === "jitter" || value === "burst") return value;
+	throw new PiboWebHttpError("profile must be steady, jitter, or burst", 400);
+}
+
+function buildStreamingFixtureSchedule(deltaCount: number, cadenceMs: number, profile: ChatStreamingFixtureProfile): number[] {
+	const delays: number[] = [];
+	let elapsedMs = 0;
+	for (let index = 0; index < deltaCount; index += 1) {
+		let gapMs = cadenceMs;
+		if (profile === "jitter") {
+			const jitterMs = [-30, 50, -20, 30, -40, 60, -10, 40, -50, 70, -20, 30][index % 12];
+			gapMs = Math.max(10, cadenceMs + jitterMs);
+		} else if (profile === "burst") {
+			gapMs = index > 0 && index % 3 !== 0 ? Math.max(10, Math.round(cadenceMs / 5)) : Math.max(cadenceMs, Math.round(cadenceMs * 2.5));
+		}
+		elapsedMs += gapMs;
+		delays.push(elapsedMs);
+	}
+	return delays;
 }
 
 let defaultChatWebAnnotationStore: WebAnnotationStore | undefined;
@@ -8081,6 +8107,8 @@ function startChatStreamingFixture(input: {
 
 	const deltas = normalizeStreamingFixtureDeltas(input.body.deltas);
 	const cadenceMs = normalizeStreamingFixtureCadenceMs(input.body.cadenceMs);
+	const profile = normalizeStreamingFixtureProfile(input.body.profile);
+	const scheduleMs = buildStreamingFixtureSchedule(deltas.length, cadenceMs, profile);
 	const eventId = `streaming-fixture-${randomUUID()}`;
 	const emit = (event: PiboOutputEvent) => {
 		const liveEvent: TransientChatEvent = {
@@ -8097,11 +8125,12 @@ function startChatStreamingFixture(input: {
 
 	emit({ type: "message_started", piboSessionId: selectedSession.id, eventId, text: "Streaming benchmark fixture", source: "service" });
 	deltas.forEach((delta, index) => {
-		emitAt(cadenceMs * (index + 1), { type: "assistant_delta", piboSessionId: selectedSession.id, eventId, assistantIndex: 0, text: delta });
+		emitAt(scheduleMs[index] ?? cadenceMs * (index + 1), { type: "assistant_delta", piboSessionId: selectedSession.id, eventId, assistantIndex: 0, text: delta });
 	});
 	const finalText = deltas.join("");
-	emitAt(cadenceMs * (deltas.length + 1), { type: "assistant_message", piboSessionId: selectedSession.id, eventId, assistantIndex: 0, text: finalText });
-	emitAt(cadenceMs * (deltas.length + 1), { type: "message_finished", piboSessionId: selectedSession.id, eventId, source: "service" });
+	const finishDelayMs = (scheduleMs[scheduleMs.length - 1] ?? 0) + cadenceMs;
+	emitAt(finishDelayMs, { type: "assistant_message", piboSessionId: selectedSession.id, eventId, assistantIndex: 0, text: finalText });
+	emitAt(finishDelayMs, { type: "message_finished", piboSessionId: selectedSession.id, eventId, source: "service" });
 
 	return responseJson({
 		fixture: {
@@ -8110,6 +8139,8 @@ function startChatStreamingFixture(input: {
 			eventId,
 			deltaCount: deltas.length,
 			cadenceMs,
+			profile,
+			scheduleMs,
 			textBytes: new TextEncoder().encode(finalText).length,
 		},
 	});

@@ -20,6 +20,7 @@ type WebOptions = {
 	preset?: string;
 	duration?: string;
 	runs?: string;
+	fixtureProfile?: string;
 	json: boolean;
 	artifact: boolean;
 	fixture: boolean;
@@ -152,7 +153,7 @@ type StreamingBenchmark = {
 	};
 	raf: { count: number; gapsMs: NumberStats };
 	longTasks: { count: number; totalMs: number; maxMs: number };
-	fixture?: { requested: boolean; mode: "browser" | "backend"; available: boolean; started: boolean; deltaCount?: number; cadenceMs?: number; piboSessionId?: string; error?: string };
+	fixture?: { requested: boolean; mode: "browser" | "backend"; profile?: string; available: boolean; started: boolean; deltaCount?: number; cadenceMs?: number; piboSessionId?: string; error?: string };
 	score: StreamingSmoothnessScore;
 	regressions: string[];
 	warnings: string[];
@@ -284,7 +285,7 @@ function printScenarioHelp(): void {
 
 Usage:
   pibo debug web scenario new-session [--manual|--act] [--duration ms] [--json] [--artifact]
-  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--duration ms] [--runs n] [--from artifact.json] [--assert] [--json] [--artifact]
+  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--fixture-profile steady|jitter|burst] [--duration ms] [--runs n] [--from artifact.json] [--assert] [--json] [--artifact]
 
 Defaults:
   new-session --manual waits while you click New Session yourself.
@@ -292,6 +293,7 @@ Defaults:
   streaming-benchmark enables debugStreaming for future events, observes assistant DOM increments, and snapshots window.__piboStreamingDebug.
   streaming-benchmark --fixture navigates the target to a deterministic in-browser stream fixture before measuring.
   streaming-benchmark --backend-fixture posts to /api/chat/debug/streaming-fixture so the real app consumes deterministic /api/chat/events frames.
+  streaming-benchmark --fixture-profile selects steady cadence, deterministic jitter, or bursty fixture timing.
   streaming-benchmark --runs repeats the same scenario and reports medians; --from compares against a prior benchmark artifact.
   streaming-benchmark --assert exits non-zero when fixture/debug/DOM smoothness gates fail.
 `);
@@ -428,16 +430,18 @@ async function runScenario(options: WebOptions): Promise<void> {
 	if (scenario !== "new-session" && scenario !== "streaming-benchmark") throw new Error(`Unknown pibo debug web scenario "${scenario}". Run pibo debug web scenario --help.`);
 	if (scenario === "streaming-benchmark" && (options.act || options.manual)) throw new Error("streaming-benchmark does not support --act or --manual. Start or observe the stream separately, then run the scenario.");
 	if (scenario === "streaming-benchmark" && options.fixture && options.backendFixture) throw new Error("Use either --fixture or --backend-fixture, not both.");
+	if (scenario === "streaming-benchmark" && options.fixtureProfile && !options.fixture && !options.backendFixture) throw new Error("--fixture-profile requires --fixture or --backend-fixture.");
+	const fixtureProfile = parseFixtureProfile(options.fixtureProfile);
 	const durationMs = parseDuration(options.duration);
 	const runs = parseRuns(options.runs);
 	const { client, target } = await connectTarget({ ...options, preset: "app" });
 	try {
 		if (scenario === "streaming-benchmark") {
-			if (options.fixture) await navigateStreamingBenchmarkFixture(client);
+			if (options.fixture) await navigateStreamingBenchmarkFixture(client, fixtureProfile);
 			if (options.backendFixture) await enableStreamingDebugForCurrentApp(client);
 			const benchmarks: StreamingBenchmark[] = [];
 			for (let run = 0; run < runs; run++) {
-				benchmarks.push(await runStreamingBenchmark(client, durationMs, { startFixture: options.fixture, startBackendFixture: options.backendFixture }));
+				benchmarks.push(await runStreamingBenchmark(client, durationMs, { startFixture: options.fixture, startBackendFixture: options.backendFixture, fixtureProfile }));
 			}
 			const baseline = options.from ? await readStreamingBenchmarkRuns(options.from) : undefined;
 			const benchmark: StreamingBenchmark | StreamingBenchmarkGroup = runs === 1
@@ -522,14 +526,14 @@ async function runBrowserWatch(client: CdpClient, scope: string, durationMs: num
 	return client.evaluate<WebWatch>(expression, durationMs + 10_000);
 }
 
-async function runStreamingBenchmark(client: CdpClient, durationMs: number, options: { startFixture?: boolean; startBackendFixture?: boolean } = {}): Promise<StreamingBenchmark> {
+async function runStreamingBenchmark(client: CdpClient, durationMs: number, options: { startFixture?: boolean; startBackendFixture?: boolean; fixtureProfile?: StreamingFixtureProfile } = {}): Promise<StreamingBenchmark> {
 	await client.send("Page.bringToFront").catch(() => undefined);
 	const benchmark = await client.evaluate<Omit<StreamingBenchmark, "score">>(buildStreamingBenchmarkExpression(durationMs, options), durationMs + 10_000);
 	return { ...benchmark, score: scoreStreamingBenchmark(benchmark) };
 }
 
-async function navigateStreamingBenchmarkFixture(client: CdpClient): Promise<void> {
-	const url = `data:text/html;charset=utf-8,${encodeURIComponent(streamingBenchmarkFixtureHtml())}`;
+async function navigateStreamingBenchmarkFixture(client: CdpClient, fixtureProfile: StreamingFixtureProfile): Promise<void> {
+	const url = `data:text/html;charset=utf-8,${encodeURIComponent(streamingBenchmarkFixtureHtml(fixtureProfile))}`;
 	await client.send("Page.enable").catch(() => undefined);
 	await client.send("Page.navigate", { url }, 5_000);
 	await client.send("Page.bringToFront").catch(() => undefined);
@@ -552,7 +556,9 @@ async function enableStreamingDebugForCurrentApp(client: CdpClient): Promise<voi
 	await client.evaluate("new Promise((resolve) => setTimeout(resolve, 500))", 2_000);
 }
 
-function streamingBenchmarkFixtureHtml(): string {
+type StreamingFixtureProfile = "steady" | "jitter" | "burst";
+
+function streamingBenchmarkFixtureHtml(fixtureProfile: StreamingFixtureProfile): string {
 	return `<!doctype html>
 <html>
 <head>
@@ -568,8 +574,25 @@ function streamingBenchmarkFixtureHtml(): string {
   const target = document.querySelector('[data-pibo-component="MarkdownRendererHost"]');
   const deltas = [' a', ' b', ' c', ' d', ' e', ' f', ' g', ' h', ' i', ' j', ' k', ' l'];
   const cadenceMs = 100;
-  let timer;
-  let index = 0;
+  const profile = ${JSON.stringify(fixtureProfile)};
+  const scheduleMs = buildSchedule(deltas.length, cadenceMs, profile);
+  let timers = [];
+  function buildSchedule(count, cadence, timingProfile) {
+    const delays = [];
+    let elapsed = 0;
+    for (let index = 0; index < count; index += 1) {
+      let gap = cadence;
+      if (timingProfile === 'jitter') {
+        const jitter = [-30, 50, -20, 30, -40, 60, -10, 40, -50, 70, -20, 30][index % 12];
+        gap = Math.max(10, cadence + jitter);
+      } else if (timingProfile === 'burst') {
+        gap = index > 0 && index % 3 !== 0 ? Math.max(10, Math.round(cadence / 5)) : Math.max(cadence, Math.round(cadence * 2.5));
+      }
+      elapsed += gap;
+      delays.push(elapsed);
+    }
+    return delays;
+  }
   function snapshot() {
     return {
       eventCount: 0,
@@ -593,36 +616,31 @@ function streamingBenchmarkFixtureHtml(): string {
     };
   }
   window.__piboStreamingDebugReset = () => {
-    if (timer) clearInterval(timer);
-    timer = undefined;
-    index = 0;
+    for (const timer of timers) clearTimeout(timer);
+    timers = [];
     target.textContent = 'hello';
     window.__piboStreamingDebug = snapshot();
     return window.__piboStreamingDebug;
   };
-  window.__piboStreamingFixtureConfig = { deltaCount: deltas.length, cadenceMs };
+  window.__piboStreamingFixtureConfig = { deltaCount: deltas.length, cadenceMs, profile, scheduleMs };
   window.__piboStreamingFixtureStart = () => {
     window.__piboStreamingDebugReset();
-    timer = setInterval(() => {
-      const delta = deltas[index];
-      target.textContent += delta;
-      const debug = window.__piboStreamingDebug;
-      debug.eventCount += 1;
-      debug.textDeltaCount += 1;
-      debug.textDeltaBytes += delta.length;
-      debug.enqueueCount += 1;
-      debug.flushCount += 1;
-      debug.flushedEventCount += 1;
-      debug.overlayUpdateCount += 1;
-      debug.overlayEventCount = index + 1;
-      debug.currentOutputLength = target.textContent.length;
-      debug.lastTransientLiveId = 'live:' + index;
-      index += 1;
-      if (index >= deltas.length) {
-        clearInterval(timer);
-        timer = undefined;
-      }
-    }, cadenceMs);
+    deltas.forEach((delta, index) => {
+      timers.push(setTimeout(() => {
+        target.textContent += delta;
+        const debug = window.__piboStreamingDebug;
+        debug.eventCount += 1;
+        debug.textDeltaCount += 1;
+        debug.textDeltaBytes += delta.length;
+        debug.enqueueCount += 1;
+        debug.flushCount += 1;
+        debug.flushedEventCount += 1;
+        debug.overlayUpdateCount += 1;
+        debug.overlayEventCount = index + 1;
+        debug.currentOutputLength = target.textContent.length;
+        debug.lastTransientLiveId = 'live:' + index;
+      }, scheduleMs[index]));
+    });
     return window.__piboStreamingFixtureConfig;
   };
   window.__piboStreamingDebugReset();
@@ -648,9 +666,9 @@ function buildWatchExpression(options: { scope: string; durationMs: number; maxN
 })()`;
 }
 
-function buildStreamingBenchmarkExpression(durationMs: number, input: { startFixture?: boolean; startBackendFixture?: boolean } = {}): string {
+function buildStreamingBenchmarkExpression(durationMs: number, input: { startFixture?: boolean; startBackendFixture?: boolean; fixtureProfile?: StreamingFixtureProfile } = {}): string {
 	return `(async () => {
-  const options = ${JSON.stringify({ durationMs, startFixture: Boolean(input.startFixture), startBackendFixture: Boolean(input.startBackendFixture) })};
+  const options = ${JSON.stringify({ durationMs, startFixture: Boolean(input.startFixture), startBackendFixture: Boolean(input.startBackendFixture), fixtureProfile: input.fixtureProfile ?? "steady" })};
   ${browserStreamingBenchmarkLibrary()}
   return await runStreamingBenchmark(options);
 })()`;
@@ -810,7 +828,7 @@ async function runStreamingBenchmark(options) {
         const response = await fetchWithTimeout('/api/chat/debug/streaming-fixture', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ piboSessionId }),
+          body: JSON.stringify({ piboSessionId, profile: options.fixtureProfile }),
         }, 5000);
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload && payload.error ? payload.error : response.status + ' ' + response.statusText);
@@ -854,6 +872,7 @@ async function runStreamingBenchmark(options) {
   const fixtureSummary = (options.startFixture || options.startBackendFixture) ? {
     requested: true,
     mode: options.startBackendFixture ? 'backend' : 'browser',
+    profile: fixtureConfig && typeof fixtureConfig.profile === 'string' ? fixtureConfig.profile : options.fixtureProfile,
     available: options.startBackendFixture ? !backendFixtureError : typeof window.__piboStreamingFixtureStart === 'function',
     started: fixtureStarted,
     deltaCount: fixtureConfig && typeof fixtureConfig.deltaCount === 'number' ? fixtureConfig.deltaCount : undefined,
@@ -1235,6 +1254,8 @@ function parseOptions(args: string[]): WebOptions {
 		else if (arg.startsWith("--duration=")) options.duration = arg.slice("--duration=".length);
 		else if (arg === "--runs") options.runs = requireValue(args, ++index, arg);
 		else if (arg.startsWith("--runs=")) options.runs = arg.slice("--runs=".length);
+		else if (arg === "--fixture-profile") options.fixtureProfile = requireValue(args, ++index, arg);
+		else if (arg.startsWith("--fixture-profile=")) options.fixtureProfile = arg.slice("--fixture-profile=".length);
 		else if (arg === "--from") options.from = requireValue(args, ++index, arg);
 		else if (arg.startsWith("--from=")) options.from = arg.slice("--from=".length);
 		else options.positionals.push(arg);
@@ -1280,6 +1301,12 @@ function parseRuns(value?: string): number {
 	if (!Number.isInteger(runs) || runs <= 0) throw new Error("--runs must be a positive integer");
 	if (runs > 10) throw new Error("--runs must be <= 10");
 	return runs;
+}
+
+function parseFixtureProfile(value?: string): StreamingFixtureProfile {
+	if (!value) return "steady";
+	if (value === "steady" || value === "jitter" || value === "burst") return value;
+	throw new Error("--fixture-profile must be steady, jitter, or burst");
 }
 
 function formatSnapshot(snapshot: WebSnapshot, target: BrowserUseCdpTarget | { id: string; url: string; title: string }): string {
@@ -1557,7 +1584,7 @@ function formatStreamingBenchmark(benchmark: StreamingBenchmark, target: Browser
 		`raf: count=${benchmark.raf.count}, gaps=${formatStats(benchmark.raf.gapsMs)}`,
 		`longTasks: count=${benchmark.longTasks.count}, max=${benchmark.longTasks.maxMs}ms, total=${benchmark.longTasks.totalMs}ms`,
 	];
-	if (benchmark.fixture) lines.push(`fixture: mode=${benchmark.fixture.mode} available=${benchmark.fixture.available} started=${benchmark.fixture.started} deltas=${jsonShort(benchmark.fixture.deltaCount)} cadence=${jsonShort(benchmark.fixture.cadenceMs)}ms session=${jsonShort(benchmark.fixture.piboSessionId)}${benchmark.fixture.error ? ` error=${benchmark.fixture.error}` : ""}`);
+	if (benchmark.fixture) lines.push(`fixture: mode=${benchmark.fixture.mode} profile=${jsonShort(benchmark.fixture.profile)} available=${benchmark.fixture.available} started=${benchmark.fixture.started} deltas=${jsonShort(benchmark.fixture.deltaCount)} cadence=${jsonShort(benchmark.fixture.cadenceMs)}ms session=${jsonShort(benchmark.fixture.piboSessionId)}${benchmark.fixture.error ? ` error=${benchmark.fixture.error}` : ""}`);
 	if (benchmark.regressions.length) {
 		lines.push("", "Regressions:");
 		for (const regression of benchmark.regressions) lines.push(`- ${regression}`);
