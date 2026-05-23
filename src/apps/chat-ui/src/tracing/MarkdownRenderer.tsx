@@ -73,7 +73,7 @@ export function requiresGfmMarkdown(markdown: string): boolean {
 
 const simpleGfmStrikethroughForbiddenPattern = /[\n\r\\`*_\[\]<>]/;
 const simpleGfmTaskListPattern = /^\s*[-+*]\s+\[([ xX])\]\s+(.+?)\s*$/;
-const simpleGfmTaskListTextForbiddenPattern = /[\n\r\\`_\[\]<>|~]/;
+const simpleGfmTaskListTextForbiddenPattern = /[\n\r\\_\[\]<>|~]/;
 
 function renderSimpleGfmStrikethrough(markdown: string): ReactElement | undefined {
 	if (!markdown.includes("~~")) return undefined;
@@ -106,28 +106,44 @@ function renderSimpleGfmStrikethrough(markdown: string): ReactElement | undefine
 	return delCount > 0 ? <p data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="p">{parts}</p> : undefined;
 }
 
-function renderSimpleStrongText(text: string): Array<string | ReactElement> | undefined {
+function renderSimpleTaskListText(text: string): Array<string | ReactElement> | undefined {
 	const parts: Array<string | ReactElement> = [];
 	let cursor = 0;
 	let strongCount = 0;
+	let codeCount = 0;
 	while (cursor < text.length) {
-		const start = text.indexOf("**", cursor);
-		if (start === -1) {
+		const strongStart = text.indexOf("**", cursor);
+		const codeStart = text.indexOf("`", cursor);
+		const nextStrong = strongStart === -1 ? Number.POSITIVE_INFINITY : strongStart;
+		const nextCode = codeStart === -1 ? Number.POSITIVE_INFINITY : codeStart;
+		const start = Math.min(nextStrong, nextCode);
+		if (start === Number.POSITIVE_INFINITY) {
 			const suffix = text.slice(cursor);
-			if (suffix.includes("*")) return undefined;
+			if (suffix.includes("*") || suffix.includes("`")) return undefined;
 			if (suffix) parts.push(suffix);
 			break;
 		}
 		const plainPrefix = text.slice(cursor, start);
-		if (plainPrefix.includes("*")) return undefined;
+		if (plainPrefix.includes("*") || plainPrefix.includes("`")) return undefined;
 		if (plainPrefix) parts.push(plainPrefix);
-		const end = text.indexOf("**", start + 2);
-		if (end === -1 || end === start + 2) return undefined;
-		const strongText = text.slice(start + 2, end);
-		if (strongText.includes("*")) return undefined;
-		parts.push(<strong key={`strong-${strongCount}`} data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="strong">{strongText}</strong>);
-		strongCount += 1;
-		cursor = end + 2;
+		if (start === nextStrong) {
+			const end = text.indexOf("**", start + 2);
+			if (end === -1 || end === start + 2) return undefined;
+			const strongText = text.slice(start + 2, end);
+			if (strongText.includes("*") || strongText.includes("`")) return undefined;
+			parts.push(<strong key={`strong-${strongCount}`} data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="strong">{strongText}</strong>);
+			strongCount += 1;
+			cursor = end + 2;
+		} else {
+			if (text[start + 1] === "`") return undefined;
+			const end = text.indexOf("`", start + 1);
+			if (end === -1 || end === start + 1) return undefined;
+			const codeText = text.slice(start + 1, end);
+			if (codeText.includes("`") || codeText.startsWith(" ") || codeText.endsWith(" ")) return undefined;
+			parts.push(<code key={`code-${codeCount}`} data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="code">{codeText}</code>);
+			codeCount += 1;
+			cursor = end + 1;
+		}
 	}
 	return parts.length > 0 ? parts : undefined;
 }
@@ -137,7 +153,7 @@ function renderSimpleGfmTaskList(markdown: string): ReactElement | undefined {
 	if (!match) return undefined;
 	const text = match[2];
 	if (!text || simpleGfmTaskListTextForbiddenPattern.test(text) || (hasAutolinkCandidate(text) && markdownAutolinkPattern.test(text))) return undefined;
-	const renderedText = renderSimpleStrongText(text);
+	const renderedText = renderSimpleTaskListText(text);
 	if (!renderedText) return undefined;
 	const checked = match[1].toLowerCase() === "x";
 	return (

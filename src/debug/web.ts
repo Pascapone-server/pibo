@@ -1475,8 +1475,8 @@ function streamingBenchmarkFixtureHtml(fixtureProfile: StreamingFixtureProfile, 
   const textDeltas = [' a', ' b', ' c', ' d', ' e', ' f', ' g', ' h', ' i', ' j', ' k', ' l'];
   const markdownDeltas = [' **a**', ' **b**', ' **c**', ' **d**', ' **e**', ' **f**', ' **g**', ' **h**', ' **i**', ' **j**', ' **k**', ' **l**'];
   const gfmMarkdownDeltas = [' ~~a~~', ' ~~b~~', ' ~~c~~', ' ~~d~~', ' ~~e~~', ' ~~f~~', ' ~~g~~', ' ~~h~~', ' ~~i~~', ' ~~j~~', ' ~~k~~', ' ~~l~~'];
-  const gfmTaskMarkdownDeltas = ['- [ ] **a**', ' **b**', ' **c**', ' **d**', ' **e**', ' **f**', ' **g**', ' **h**', ' **i**', ' **j**', ' **k**', ' **l**'];
-  const gfmFullMarkdownDeltas = ['- [ ] \`a\`', ' \`b\`', ' \`c\`', ' \`d\`', ' \`e\`', ' \`f\`', ' \`g\`', ' \`h\`', ' \`i\`', ' \`j\`', ' \`k\`', ' \`l\`'];
+  const gfmTaskMarkdownDeltas = ['- [ ] **a**', ' \`b\`', ' **c**', ' \`d\`', ' **e**', ' \`f\`', ' **g**', ' \`h\`', ' **i**', ' \`j\`', ' **k**', ' \`l\`'];
+  const gfmFullMarkdownDeltas = ['- [ ] [a](https://e.co/a)', ' [b](https://e.co/b)', ' [c](https://e.co/c)', ' [d](https://e.co/d)', ' [e](https://e.co/e)', ' [f](https://e.co/f)', ' [g](https://e.co/g)', ' [h](https://e.co/h)', ' [i](https://e.co/i)', ' [j](https://e.co/j)', ' [k](https://e.co/k)', ' [l](https://e.co/l)'];
   const cadenceMs = 100;
   const profile = ${JSON.stringify(fixtureProfile)};
   const mix = ${JSON.stringify(fixtureMix)};
