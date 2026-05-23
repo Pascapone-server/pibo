@@ -141,6 +141,9 @@ type StreamingDebugCounters = Record<string, unknown> & {
 	flushedEventCount?: number;
 	overlayUpdateCount?: number;
 	overlayEventCount?: number;
+	liveTraceComputeCount?: number;
+	liveTraceComputeDurationMsTotal?: number;
+	liveTraceComputeDurationMsMax?: number;
 	traceRefreshCompletedCount?: number;
 	traceRefreshFailedCount?: number;
 	currentOutputLength?: number;
@@ -448,6 +451,9 @@ type StreamingBenchmarkSummary = {
 	debugFlushedEventCount: NumberStats;
 	debugOverlayUpdateCount: NumberStats;
 	debugOverlayEventCount: NumberStats;
+	debugLiveTraceComputeCount: NumberStats;
+	debugLiveTraceComputeDurationTotalMs: NumberStats;
+	debugLiveTraceComputeDurationMaxMs: NumberStats;
 	debugTraceRefreshScheduledCount: NumberStats;
 	debugTraceRefreshCompletedCount: NumberStats;
 	debugTraceRefreshFailedCount: NumberStats;
@@ -2278,6 +2284,8 @@ async function runStreamingBenchmark(options) {
     'flushCount',
     'flushedEventCount',
     'overlayUpdateCount',
+    'liveTraceComputeCount',
+    'liveTraceComputeDurationMsTotal',
     'traceRefreshStartedCount',
     'traceRefreshCompletedCount',
     'traceRefreshFailedCount',
@@ -3332,6 +3340,9 @@ export function summarizeStreamingBenchmarks(runs: StreamingBenchmark[]): Stream
 		debugFlushedEventCount: numericStats(runs.map((run) => streamingDebugDeltaNumber(run, "flushedEventCount"))),
 		debugOverlayUpdateCount: numericStats(runs.map((run) => streamingDebugDeltaNumber(run, "overlayUpdateCount"))),
 		debugOverlayEventCount: numericStats(runs.map((run) => streamingDebugStateWindowNumber(run, "overlayEventCount"))),
+		debugLiveTraceComputeCount: numericStats(runs.map((run) => streamingDebugDeltaNumber(run, "liveTraceComputeCount"))),
+		debugLiveTraceComputeDurationTotalMs: numericStats(runs.map((run) => streamingDebugDeltaNumber(run, "liveTraceComputeDurationMsTotal"))),
+		debugLiveTraceComputeDurationMaxMs: numericStats(runs.map((run) => streamingDebugAfterNumber(run, "liveTraceComputeDurationMsMax"))),
 		debugTraceRefreshScheduledCount: numericStats(runs.map((run) => streamingDebugDeltaNumber(run, "traceRefreshScheduledCount"))),
 		debugTraceRefreshCompletedCount: numericStats(runs.map((run) => streamingDebugDeltaNumber(run, "traceRefreshCompletedCount"))),
 		debugTraceRefreshFailedCount: numericStats(runs.map((run) => streamingDebugDeltaNumber(run, "traceRefreshFailedCount"))),
@@ -3611,6 +3622,9 @@ function streamingBenchmarkReportRows(benchmark: StreamingBenchmark | StreamingB
 
 function streamingBenchmarkCompactRunRows(benchmark: StreamingBenchmark): StreamingBenchmarkReportRow[] {
 	const selectedLive = selectedLiveStream(benchmark);
+	const liveTraceComputeCount = streamingDebugDeltaNumber(benchmark, "liveTraceComputeCount");
+	const liveTraceComputeTotalMs = streamingDebugDeltaNumber(benchmark, "liveTraceComputeDurationMsTotal");
+	const liveTraceComputeMaxMs = streamingDebugAfterNumber(benchmark, "liveTraceComputeDurationMsMax");
 	return [
 		{ section: "compact", metric: "Provider/Pi", preservation: benchmark.provider ? `text ${jsonShort(benchmark.provider.textDeltaCount)}, reasoning ${jsonShort(benchmark.provider.reasoningDeltaCount)}, parseErrors ${jsonShort(benchmark.provider.parseErrorCount)}, unknown ${jsonShort(benchmark.provider.unknownEventCount)}` : "n/a", cadenceLatency: benchmark.provider ? `text gap p90 ${statP90(benchmark.provider.textDeltaGapsMs, "ms")}, first text ${jsonShort(benchmark.provider.firstTextLatencyMs)}ms` : "n/a" },
 		{ section: "compact", metric: "Provider ratios", preservation: benchmark.providerPreservation ? `SSE text ${jsonShort(benchmark.providerPreservation.sseTextToProviderRatio)}, selected-live text ${jsonShort(benchmark.providerPreservation.selectedLiveTextToProviderRatio)}, DOM/text ${jsonShort(benchmark.providerPreservation.domPositiveToProviderTextRatio)}` : "n/a", cadenceLatency: benchmark.providerPreservation ? `SSE reasoning ${jsonShort(benchmark.providerPreservation.sseReasoningToProviderRatio)}, selected-live reasoning ${jsonShort(benchmark.providerPreservation.selectedLiveReasoningToProviderRatio)}` : "n/a" },
@@ -3618,6 +3632,7 @@ function streamingBenchmarkCompactRunRows(benchmark: StreamingBenchmark): Stream
 		{ section: "compact", metric: "Cadence lag", preservation: benchmark.cadence ? `fixture schedule p90 ${jsonShort(benchmark.cadence.fixtureScheduleGapP90Ms)}ms` : "n/a", cadenceLatency: benchmark.cadence ? `DOM lag ${jsonShort(benchmark.cadence.domLagOverScheduleP90Ms)}ms, SSE text lag ${jsonShort(benchmark.cadence.sseTextLagOverScheduleP90Ms)}ms` : "n/a" },
 		{ section: "compact", metric: "EventSource selected-live", preservation: selectedLive ? `text ${selectedLive.textEventCountAfterStart}, reasoning ${selectedLive.reasoningEventCountAfterStart}, events ${selectedLive.eventCount}` : "n/a", cadenceLatency: selectedLive ? `first text ${jsonShort(selectedLive.firstTextEventMsAfterStart)}ms, transient ${selectedLive.uniqueTransientIdCountAfterStart}/${selectedLive.transientIdCountAfterStart}` : "n/a" },
 		{ section: "compact", metric: "Live overlay", preservation: benchmark.livePipeline ? `flushed/overlayExpected ${jsonShort(benchmark.livePipeline.flushedEventsToExpectedRatio)}, overlayEvents/inputExpected ${jsonShort(benchmark.livePipeline.overlayEventsToExpectedRatio)}, currentText/expected ${jsonShort(benchmark.livePipeline.currentOutputToExpectedTextBytesRatio)}` : "n/a", cadenceLatency: benchmark.livePipeline ? `first text ${jsonShort(benchmark.livePipeline.firstTextDeltaMs)}ms, first flush ${jsonShort(benchmark.livePipeline.firstFlushMs)}ms, first overlay ${jsonShort(benchmark.livePipeline.firstOverlayUpdateMs)}ms` : "n/a" },
+		{ section: "compact", metric: "Live trace compute", preservation: liveTraceComputeCount !== undefined ? `count ${jsonShort(liveTraceComputeCount)}, total ${jsonShort(liveTraceComputeTotalMs)}ms` : "n/a", cadenceLatency: liveTraceComputeMaxMs !== undefined ? `max ${jsonShort(liveTraceComputeMaxMs)}ms` : "n/a" },
 		{ section: "compact", metric: "DOM", preservation: `positive ${benchmark.dom.positiveUpdateCount}, max jump ${jsonShort(benchmark.dom.positiveCharJumps.max)} chars`, cadenceLatency: `p90 gap ${statP90(benchmark.dom.gapsMs, "ms")}, first visible ${jsonShort(benchmark.dom.firstPositiveUpdateMs)}ms` },
 		{ section: "compact", metric: "Score", preservation: `smoothness ${benchmark.score.smoothness}`, cadenceLatency: `regressions ${benchmark.regressions.length}, warnings ${benchmark.warnings.length}` },
 	];
@@ -3631,6 +3646,7 @@ function streamingBenchmarkCompactGroupRows(group: StreamingBenchmarkGroup): Str
 		{ section: "compact", metric: "Cadence lag", preservation: `fixture schedule p90 ${statP50(group.summary.fixtureScheduleGapP90Ms, "ms")}`, cadenceLatency: `DOM lag ${statP50(group.summary.domLagOverFixtureScheduleP90Ms, "ms")}, SSE text lag ${statP50(group.summary.sseTextLagOverFixtureScheduleP90Ms, "ms")}` },
 		{ section: "compact", metric: "EventSource selected-live", preservation: `text ${statP50(group.summary.selectedLiveTextEventCountAfterStart)}, reasoning ${statP50(group.summary.selectedLiveReasoningEventCountAfterStart)}, events ${statP50(group.summary.selectedLiveEventCountAfterStart)}`, cadenceLatency: `first text ${statP50(group.summary.selectedLiveFirstTextEventMsAfterStart, "ms")}, transient ${statP50(group.summary.selectedLiveTransientIdCountAfterStart)}` },
 		{ section: "compact", metric: "Live overlay", preservation: `flushed/overlayExpected ${statP50(group.summary.liveFlushedEventsToExpectedRatio)}, overlayEvents/inputExpected ${statP50(group.summary.liveOverlayEventsToExpectedRatio)}, currentText/expected ${statP50(group.summary.liveCurrentOutputToExpectedTextBytesRatio)}`, cadenceLatency: `first text ${statP50(group.summary.liveFirstTextDeltaMs, "ms")}, first flush ${statP50(group.summary.liveFirstFlushMs, "ms")}, first overlay ${statP50(group.summary.liveFirstOverlayUpdateMs, "ms")}` },
+		{ section: "compact", metric: "Live trace compute", preservation: `count ${statP50(group.summary.debugLiveTraceComputeCount)}, total ${statP50(group.summary.debugLiveTraceComputeDurationTotalMs, "ms")}`, cadenceLatency: `max ${statP50(group.summary.debugLiveTraceComputeDurationMaxMs, "ms")}` },
 		{ section: "compact", metric: "DOM", preservation: `positive ${statP50(group.summary.domPositiveUpdateCount)}, max jump ${statP50(group.summary.domJumpMaxChars, " chars")}`, cadenceLatency: `p90 gap ${statP50(group.summary.domGapP90Ms, "ms")}, first visible ${statP50(group.summary.firstVisibleMs, "ms")}` },
 		{ section: "compact", metric: "Score", preservation: `smoothness ${statP50(group.summary.smoothness)}`, cadenceLatency: `regressions ${statP50(group.summary.regressionCount)}, warnings ${group.warnings.length}` },
 	];
@@ -3661,6 +3677,9 @@ function streamingBenchmarkCompactUrlComparisonRows(comparison: StreamingBenchma
 
 function formatStreamingBenchmarkCompactRun(benchmark: StreamingBenchmark, target: BrowserUseCdpTarget | { id: string; url: string; title: string }): string {
 	const selectedLive = selectedLiveStream(benchmark);
+	const liveTraceComputeCount = streamingDebugDeltaNumber(benchmark, "liveTraceComputeCount");
+	const liveTraceComputeTotalMs = streamingDebugDeltaNumber(benchmark, "liveTraceComputeDurationMsTotal");
+	const liveTraceComputeMaxMs = streamingDebugAfterNumber(benchmark, "liveTraceComputeDurationMsMax");
 	const lines = [
 		`# Web Streaming Benchmark Compact Report`,
 		`Target: ${target.url || benchmark.url}`,
@@ -3671,6 +3690,7 @@ function formatStreamingBenchmarkCompactRun(benchmark: StreamingBenchmark, targe
 			["Cadence lag", benchmark.cadence ? `fixture schedule p90 ${jsonShort(benchmark.cadence.fixtureScheduleGapP90Ms)}ms` : "n/a", benchmark.cadence ? `DOM lag ${jsonShort(benchmark.cadence.domLagOverScheduleP90Ms)}ms, SSE text lag ${jsonShort(benchmark.cadence.sseTextLagOverScheduleP90Ms)}ms` : "n/a"],
 			["EventSource selected-live", selectedLive ? `text ${selectedLive.textEventCountAfterStart}, reasoning ${selectedLive.reasoningEventCountAfterStart}, events ${selectedLive.eventCount}` : "n/a", selectedLive ? `first text ${jsonShort(selectedLive.firstTextEventMsAfterStart)}ms, transient ${selectedLive.uniqueTransientIdCountAfterStart}/${selectedLive.transientIdCountAfterStart}` : "n/a"],
 			["Live overlay", benchmark.livePipeline ? `flushed/overlayExpected ${jsonShort(benchmark.livePipeline.flushedEventsToExpectedRatio)}, overlayEvents/inputExpected ${jsonShort(benchmark.livePipeline.overlayEventsToExpectedRatio)}, currentText/expected ${jsonShort(benchmark.livePipeline.currentOutputToExpectedTextBytesRatio)}` : "n/a", benchmark.livePipeline ? `first text ${jsonShort(benchmark.livePipeline.firstTextDeltaMs)}ms, first flush ${jsonShort(benchmark.livePipeline.firstFlushMs)}ms, first overlay ${jsonShort(benchmark.livePipeline.firstOverlayUpdateMs)}ms` : "n/a"],
+			["Live trace compute", liveTraceComputeCount !== undefined ? `count ${jsonShort(liveTraceComputeCount)}, total ${jsonShort(liveTraceComputeTotalMs)}ms` : "n/a", liveTraceComputeMaxMs !== undefined ? `max ${jsonShort(liveTraceComputeMaxMs)}ms` : "n/a"],
 			["DOM", `positive ${benchmark.dom.positiveUpdateCount}, max jump ${jsonShort(benchmark.dom.positiveCharJumps.max)} chars`, `p90 gap ${statP90(benchmark.dom.gapsMs, "ms")}, first visible ${jsonShort(benchmark.dom.firstPositiveUpdateMs)}ms`],
 			["Score", `smoothness ${benchmark.score.smoothness}`, `regressions ${benchmark.regressions.length}, warnings ${benchmark.warnings.length}`],
 		]),
@@ -3691,6 +3711,7 @@ function formatStreamingBenchmarkCompactGroup(group: StreamingBenchmarkGroup, ta
 			["Cadence lag", `fixture schedule p90 ${statP50(group.summary.fixtureScheduleGapP90Ms, "ms")}`, `DOM lag ${statP50(group.summary.domLagOverFixtureScheduleP90Ms, "ms")}, SSE text lag ${statP50(group.summary.sseTextLagOverFixtureScheduleP90Ms, "ms")}`],
 			["EventSource selected-live", `text ${statP50(group.summary.selectedLiveTextEventCountAfterStart)}, reasoning ${statP50(group.summary.selectedLiveReasoningEventCountAfterStart)}, events ${statP50(group.summary.selectedLiveEventCountAfterStart)}`, `first text ${statP50(group.summary.selectedLiveFirstTextEventMsAfterStart, "ms")}, transient ${statP50(group.summary.selectedLiveTransientIdCountAfterStart)}`],
 			["Live overlay", `flushed/overlayExpected ${statP50(group.summary.liveFlushedEventsToExpectedRatio)}, overlayEvents/inputExpected ${statP50(group.summary.liveOverlayEventsToExpectedRatio)}, currentText/expected ${statP50(group.summary.liveCurrentOutputToExpectedTextBytesRatio)}`, `first text ${statP50(group.summary.liveFirstTextDeltaMs, "ms")}, first flush ${statP50(group.summary.liveFirstFlushMs, "ms")}, first overlay ${statP50(group.summary.liveFirstOverlayUpdateMs, "ms")}`],
+			["Live trace compute", `count ${statP50(group.summary.debugLiveTraceComputeCount)}, total ${statP50(group.summary.debugLiveTraceComputeDurationTotalMs, "ms")}`, `max ${statP50(group.summary.debugLiveTraceComputeDurationMaxMs, "ms")}`],
 			["DOM", `positive ${statP50(group.summary.domPositiveUpdateCount)}, max jump ${statP50(group.summary.domJumpMaxChars, " chars")}`, `p90 gap ${statP50(group.summary.domGapP90Ms, "ms")}, first visible ${statP50(group.summary.firstVisibleMs, "ms")}`],
 			["Score", `smoothness ${statP50(group.summary.smoothness)}`, `regressions ${statP50(group.summary.regressionCount)}, warnings ${group.warnings.length}`],
 		]),
@@ -3816,6 +3837,7 @@ function formatStreamingBenchmarkGroup(group: StreamingBenchmarkGroup, target: B
 	if (group.summary.fixtureScheduleGapP90Ms.count > 0) lines.push(`fixture: scheduleGapP90=${formatStats(group.summary.fixtureScheduleGapP90Ms)}`);
 	if (group.summary.domLagOverFixtureScheduleP90Ms.count > 0 || group.summary.sseTextLagOverFixtureScheduleP90Ms.count > 0) lines.push(`cadence lag: domP90-scheduleP90=${formatStats(group.summary.domLagOverFixtureScheduleP90Ms)}ms, sseTextP90-scheduleP90=${formatStats(group.summary.sseTextLagOverFixtureScheduleP90Ms)}ms, domRatio=${formatStats(group.summary.domToFixtureScheduleP90Ratio)}, sseRatio=${formatStats(group.summary.sseTextToFixtureScheduleP90Ratio)}`);
 	if (group.summary.debugEnqueueCount.count > 0 || group.summary.debugFlushCount.count > 0 || group.summary.debugOverlayUpdateCount.count > 0) lines.push(`live pipeline: enqueue=${formatStats(group.summary.debugEnqueueCount)}, flush=${formatStats(group.summary.debugFlushCount)}, flushedEvents=${formatStats(group.summary.debugFlushedEventCount)}, overlayUpdates=${formatStats(group.summary.debugOverlayUpdateCount)}, overlayEvents=${formatStats(group.summary.debugOverlayEventCount)}, currentOutput=${formatStats(group.summary.debugCurrentOutputLength)}, traceBase=${formatStats(group.summary.debugTraceBaseOutputLength)}`);
+	if (group.summary.debugLiveTraceComputeCount.count > 0) lines.push(`live trace compute: count=${formatStats(group.summary.debugLiveTraceComputeCount)}, total=${formatStats(group.summary.debugLiveTraceComputeDurationTotalMs)}ms, max=${formatStats(group.summary.debugLiveTraceComputeDurationMaxMs)}ms`);
 	if (group.summary.liveEnqueueToExpectedRatio.count > 0 || group.summary.liveFlushToEnqueueRatio.count > 0) lines.push(`live ratios: inputExpected=${formatStats(group.summary.liveExpectedInputEventCount)}, overlayExpected=${formatStats(group.summary.liveExpectedPipelineEventCount)}, enqueue/overlayExpected=${formatStats(group.summary.liveEnqueueToExpectedRatio)}, flushed/overlayExpected=${formatStats(group.summary.liveFlushedEventsToExpectedRatio)}, overlayEvents/inputExpected=${formatStats(group.summary.liveOverlayEventsToExpectedRatio)}, currentText/expected=${formatStats(group.summary.liveCurrentOutputToExpectedTextBytesRatio)}, flush/enqueue=${formatStats(group.summary.liveFlushToEnqueueRatio)}, overlayUpdates/flushed=${formatStats(group.summary.liveOverlayUpdatesToFlushedEventsRatio)}`);
 	if (group.summary.liveFirstTextDeltaMs.count > 0 || group.summary.liveFirstEnqueueMs.count > 0 || group.summary.liveFirstFlushMs.count > 0 || group.summary.sseFirstTextEventMs.count > 0 || group.summary.selectedLiveFirstTextEventMsAfterStart.count > 0 || group.summary.firstVisibleMs.count > 0) lines.push(`first latency: selectedLiveText=${formatStats(group.summary.selectedLiveFirstTextEventMsAfterStart)}ms, sseText=${formatStats(group.summary.sseFirstTextEventMs)}ms, liveText=${formatStats(group.summary.liveFirstTextDeltaMs)}ms, liveEnqueue=${formatStats(group.summary.liveFirstEnqueueMs)}ms, liveFlush=${formatStats(group.summary.liveFirstFlushMs)}ms, firstVisible=${formatStats(group.summary.firstVisibleMs)}ms`);
 	if (group.summary.debugTraceRefreshScheduledCount.count > 0 || group.summary.debugTraceRefreshCompletedCount.count > 0 || group.summary.debugTraceRefreshFailedCount.count > 0) lines.push(`trace refresh: scheduled=${formatStats(group.summary.debugTraceRefreshScheduledCount)}, completed=${formatStats(group.summary.debugTraceRefreshCompletedCount)}, failed=${formatStats(group.summary.debugTraceRefreshFailedCount)}, maxDuration=${formatStats(group.summary.debugTraceRefreshDurationMaxMs)}ms`);

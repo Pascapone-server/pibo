@@ -323,6 +323,8 @@ test("streaming benchmark summaries include live pipeline debug counters", () =>
 				flushCount: enqueueCount - 1,
 				flushedEventCount: enqueueCount,
 				overlayUpdateCount: enqueueCount - 1,
+				liveTraceComputeCount: enqueueCount - 1,
+				liveTraceComputeDurationMsTotal: (enqueueCount - 1) * 0.25,
 				traceRefreshScheduledCount: 2,
 				traceRefreshCompletedCount,
 				traceRefreshFailedCount: 0,
@@ -337,6 +339,7 @@ test("streaming benchmark summaries include live pipeline debug counters", () =>
 				overlayEventCount: stateBaseline + enqueueCount,
 				currentOutputLength: (stateBaseline * 2) + (enqueueCount * 2),
 				traceBaseOutputLength: 4,
+				liveTraceComputeDurationMsMax: 0.5,
 				traceRefreshDurationMsMax: 25,
 			},
 		},
@@ -354,6 +357,9 @@ test("streaming benchmark summaries include live pipeline debug counters", () =>
 	assert.equal(summary.debugFlushedEventCount.p90, 12);
 	assert.equal(summary.debugOverlayUpdateCount.p90, 11);
 	assert.equal(summary.debugOverlayEventCount.max, 14);
+	assert.equal(summary.debugLiveTraceComputeCount.p50, 11);
+	assert.equal(summary.debugLiveTraceComputeDurationTotalMs.p50, 2.75);
+	assert.equal(summary.debugLiveTraceComputeDurationMaxMs.p50, 0.5);
 	assert.equal(summary.debugTraceRefreshCompletedCount.max, 2);
 	assert.equal(summary.debugTraceRefreshDurationMaxMs.p50, 25);
 	assert.equal(summary.debugCurrentOutputLength.max, 28);

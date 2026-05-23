@@ -88,6 +88,7 @@ import {
 	recordStreamingDebugFlush,
 	recordStreamingDebugLiveError,
 	recordStreamingDebugLiveOpen,
+	recordStreamingDebugLiveTraceCompute,
 	recordStreamingDebugStreamEvent,
 	recordStreamingDebugTraceRefreshEnd,
 	recordStreamingDebugTraceRefreshScheduled,
@@ -3429,18 +3430,22 @@ function SessionTracePane({
 		[reconciledBaseTraceView],
 	);
 
-	const currentTraceView = useMemo(() => {
-		if (!selectedPiboSessionId || !bootstrap) return null;
-		if (reconciledBaseTraceView?.piboSessionId !== selectedPiboSessionId) return null;
+	const currentTraceComputation = useMemo((): { traceView: PiboSessionTraceView | null; liveTraceComputeDurationMs?: number } => {
+		if (!selectedPiboSessionId || !bootstrap) return { traceView: null };
+		if (reconciledBaseTraceView?.piboSessionId !== selectedPiboSessionId) return { traceView: null };
 		const sessionStatus = findSessionNode(bootstrap.sessions, selectedPiboSessionId)?.status ?? "idle";
 		const overlayEvents = liveTraceOverlay?.piboSessionId === selectedPiboSessionId
 			? liveTraceOverlay.events
 			: [];
-		if (!overlayEvents.length) return reconciledBaseTraceView;
+		if (!overlayEvents.length) return { traceView: reconciledBaseTraceView };
+		const measureCompute = isStreamingDebugEnabled();
+		const startedAt = measureCompute ? performance.now() : 0;
 		const liveTrace = patchTraceViewWithEvents(reconciledBaseTraceView, overlayEvents, sessionStatus);
 		annotateLiveTraceForkEntryIds(liveTrace.nodes, persistedUserMessageIndexForBaseTrace);
-		return overlayIncludesOptimisticUserMessage(overlayEvents) ? reconcileOptimisticUserMessages(liveTrace) : liveTrace;
+		const traceView = overlayIncludesOptimisticUserMessage(overlayEvents) ? reconcileOptimisticUserMessages(liveTrace) : liveTrace;
+		return { traceView, liveTraceComputeDurationMs: measureCompute ? performance.now() - startedAt : undefined };
 	}, [liveTraceOverlay, selectedPiboSessionId, bootstrap, reconciledBaseTraceView, persistedUserMessageIndexForBaseTrace]);
+	const currentTraceView = currentTraceComputation.traceView;
 
 	useEffect(() => {
 		if (!selectedPiboSessionId || !currentTraceView?.piboSessionId || !isStreamingDebugEnabled()) return;
@@ -3449,7 +3454,10 @@ function SessionTracePane({
 			traceBaseOutputLength: traceAssistantOutputLength(baseTraceView),
 			currentOutputLength: traceAssistantOutputLength(currentTraceView),
 		});
-	}, [baseTraceView, currentTraceView, liveTraceOverlay, selectedPiboSessionId]);
+		if (currentTraceComputation.liveTraceComputeDurationMs !== undefined) {
+			recordStreamingDebugLiveTraceCompute(currentTraceView.piboSessionId, currentTraceComputation.liveTraceComputeDurationMs);
+		}
+	}, [baseTraceView, currentTraceComputation.liveTraceComputeDurationMs, currentTraceView, liveTraceOverlay, selectedPiboSessionId]);
 
 	const loadOlderTracePage = useCallback(async () => {
 		if (!selectedPiboSessionId || !currentTraceView?.nextBeforeSequence) return;

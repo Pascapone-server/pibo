@@ -146,6 +146,7 @@ Collected from `window.__piboStreamingDebug` when `?debugStreaming=1` or local s
 
 - live open/error count;
 - event, enqueue, flush, flushed-event, overlay-update, overlay-event counts;
+- live trace overlay compute count plus total/max duration for committed overlay renders;
 - current output and trace base output lengths;
 - trace refresh count/duration;
 - first text, enqueue, flush, and overlay-update latency;
@@ -207,6 +208,7 @@ Compact single/group reports include rows for:
 - Cadence lag;
 - EventSource selected-live;
 - Live overlay preservation and first live latencies;
+- Live trace compute count/total/max duration when debug instrumentation is available;
 - DOM;
 - Score.
 

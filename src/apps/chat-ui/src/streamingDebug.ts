@@ -27,6 +27,10 @@ export type StreamingDebugSnapshot = {
 	flushedEventCount: number;
 	overlayUpdateCount: number;
 	overlayEventCount: number;
+	liveTraceComputeCount: number;
+	liveTraceComputeDurationMsTotal: number;
+	liveTraceComputeDurationMsLast?: number;
+	liveTraceComputeDurationMsMax?: number;
 	traceRefreshScheduledCount: number;
 	traceRefreshStartedCount: number;
 	traceRefreshCompletedCount: number;
@@ -148,6 +152,16 @@ export function recordStreamingDebugFlush(piboSessionId: string, flushedEventCou
 	});
 }
 
+export function recordStreamingDebugLiveTraceCompute(piboSessionId: string, durationMs: number): void {
+	updateStreamingDebug(piboSessionId, (snapshot) => {
+		const roundedDurationMs = Math.max(0, Math.round(durationMs * 1000) / 1000);
+		snapshot.liveTraceComputeCount += 1;
+		snapshot.liveTraceComputeDurationMsLast = roundedDurationMs;
+		snapshot.liveTraceComputeDurationMsTotal += roundedDurationMs;
+		snapshot.liveTraceComputeDurationMsMax = Math.max(snapshot.liveTraceComputeDurationMsMax ?? 0, roundedDurationMs);
+	});
+}
+
 export function recordStreamingDebugTraceRefreshScheduled(piboSessionId: string, delayMs: number): void {
 	updateStreamingDebug(piboSessionId, (snapshot) => {
 		snapshot.traceRefreshScheduledCount += 1;
@@ -247,6 +261,8 @@ function createStreamingDebugSnapshot(): StreamingDebugSnapshot {
 		flushedEventCount: 0,
 		overlayUpdateCount: 0,
 		overlayEventCount: 0,
+		liveTraceComputeCount: 0,
+		liveTraceComputeDurationMsTotal: 0,
 		traceRefreshScheduledCount: 0,
 		traceRefreshStartedCount: 0,
 		traceRefreshCompletedCount: 0,
