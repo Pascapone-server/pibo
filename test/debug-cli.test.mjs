@@ -358,9 +358,9 @@ test("streaming benchmark summaries include live pipeline debug counters", () =>
 	assert.equal(summary.debugTraceRefreshDurationMaxMs.p50, 25);
 	assert.equal(summary.debugCurrentOutputLength.max, 28);
 	assert.equal(summary.liveExpectedInputEventCount.p50, 16);
-	assert.equal(summary.liveExpectedPipelineEventCount.p50, 22);
-	assert.equal(summary.liveEnqueueToExpectedRatio.p50, 0.545);
-	assert.equal(summary.liveFlushedEventsToExpectedRatio.p90, 0.545);
+	assert.equal(summary.liveExpectedPipelineEventCount.p50, 16);
+	assert.equal(summary.liveEnqueueToExpectedRatio.p50, 0.75);
+	assert.equal(summary.liveFlushedEventsToExpectedRatio.p90, 0.75);
 	assert.equal(summary.liveOverlayEventsToExpectedRatio.max, 0.875);
 	assert.equal(summary.liveCurrentOutputToExpectedTextBytesRatio.max, 1.167);
 	assert.equal(summary.liveFlushToEnqueueRatio.p50, 0.917);
@@ -377,13 +377,13 @@ test("streaming benchmark summaries include live pipeline debug counters", () =>
 test("streaming live pipeline summary subtracts pre-reset trace state", () => {
 	const summary = summarizeStreamingLivePipeline({
 		debug: {
-			delta: { enqueueCount: 22, flushCount: 20, flushedEventCount: 22, overlayUpdateCount: 20, textDeltaCount: 12, reasoningDeltaCount: 4 },
+			delta: { enqueueCount: 16, flushCount: 16, flushedEventCount: 16, overlayUpdateCount: 16, textDeltaCount: 12, reasoningDeltaCount: 4 },
 			stateBeforeReset: { overlayEventCount: 32, currentOutputLength: 48 },
 			after: { overlayEventCount: 48, currentOutputLength: 72 },
 		},
 		fixture: { available: true, requested: true, mode: "backend", started: true, deltaCount: 12, reasoningDeltaCount: 4, textBytes: 24 },
 	});
-	assert.equal(summary.expectedPipelineEventCount, 22);
+	assert.equal(summary.expectedPipelineEventCount, 16);
 	assert.equal(summary.overlayEventCount, 16);
 	assert.equal(summary.currentOutputLength, 24);
 	assert.equal(summary.overlayEventsToExpectedRatio, 1);
@@ -393,7 +393,7 @@ test("streaming live pipeline summary subtracts pre-reset trace state", () => {
 test("streaming live pipeline summary computes fixture-normalized ratios", () => {
 	const summary = summarizeStreamingLivePipeline({
 		debug: {
-			delta: { enqueueCount: 22, flushCount: 20, flushedEventCount: 22, overlayUpdateCount: 20, textDeltaCount: 12, reasoningDeltaCount: 4 },
+			delta: { enqueueCount: 16, flushCount: 16, flushedEventCount: 16, overlayUpdateCount: 16, textDeltaCount: 12, reasoningDeltaCount: 4 },
 			after: {
 				startedAt: "2026-01-01T00:00:00.000Z",
 				firstTextDeltaAt: "2026-01-01T00:00:00.120Z",
@@ -407,13 +407,13 @@ test("streaming live pipeline summary computes fixture-normalized ratios", () =>
 	});
 	assert.equal(summary.expectedSource, "fixture");
 	assert.equal(summary.expectedInputEventCount, 16);
-	assert.equal(summary.expectedPipelineEventCount, 22);
+	assert.equal(summary.expectedPipelineEventCount, 16);
 	assert.equal(summary.enqueueToExpectedRatio, 1);
 	assert.equal(summary.flushedEventsToExpectedRatio, 1);
 	assert.equal(summary.overlayEventsToExpectedRatio, 1);
 	assert.equal(summary.currentOutputToExpectedTextBytesRatio, 1);
-	assert.equal(summary.flushToEnqueueRatio, 0.909);
-	assert.equal(summary.overlayUpdatesToFlushedEventsRatio, 0.909);
+	assert.equal(summary.flushToEnqueueRatio, 1);
+	assert.equal(summary.overlayUpdatesToFlushedEventsRatio, 1);
 	assert.equal(summary.firstTextDeltaMs, 120);
 	assert.equal(summary.firstEnqueueMs, 121);
 	assert.equal(summary.firstFlushMs, 130);
@@ -426,17 +426,17 @@ test("streaming live pipeline regressions gate preservation and flush ratios", (
 			expectedTextDeltaCount: 12,
 			expectedReasoningDeltaCount: 4,
 			expectedInputEventCount: 16,
-			enqueueCount: 22,
-			flushCount: 20,
-			flushedEventCount: 22,
-			overlayUpdateCount: 20,
+			enqueueCount: 16,
+			flushCount: 16,
+			flushedEventCount: 16,
+			overlayUpdateCount: 16,
 			overlayEventCount: 16,
-			expectedPipelineEventCount: 22,
+			expectedPipelineEventCount: 16,
 			flushedEventsToExpectedRatio: 1,
 			overlayEventsToExpectedRatio: 1,
 			currentOutputToExpectedTextBytesRatio: 1,
-			flushToEnqueueRatio: 0.909,
-			overlayUpdatesToFlushedEventsRatio: 0.909,
+			flushToEnqueueRatio: 1,
+			overlayUpdatesToFlushedEventsRatio: 1,
 			expectedTextBytes: 24,
 		},
 	}), []);
@@ -451,8 +451,8 @@ test("streaming live pipeline regressions gate preservation and flush ratios", (
 			flushedEventCount: 14,
 			overlayUpdateCount: 13,
 			overlayEventCount: 13,
-			expectedPipelineEventCount: 22,
-			flushedEventsToExpectedRatio: 0.636,
+			expectedPipelineEventCount: 16,
+			flushedEventsToExpectedRatio: 0.875,
 			overlayEventsToExpectedRatio: 0.8,
 			currentOutputToExpectedTextBytesRatio: 0.7,
 			flushToEnqueueRatio: 0.591,
@@ -460,7 +460,7 @@ test("streaming live pipeline regressions gate preservation and flush ratios", (
 			expectedTextBytes: 24,
 		},
 	}), [
-		"live pipeline flushed events/frame expected ratio 0.636 < 0.95",
+		"live pipeline flushed events/overlay expected ratio 0.875 < 0.95",
 		"live pipeline overlay events/input expected ratio 0.8 < 0.95",
 		"live pipeline current text/expected bytes ratio 0.7 < 0.95",
 		"live pipeline flush/enqueue ratio 0.591 < 0.75",
@@ -744,7 +744,7 @@ test("streaming URL comparison preserves controlled negative profile in artifact
 		longTasks: { count: 0, maxMs: 0, totalMs: 0 },
 		eventSource: { streams: [{ role: "selected-live", eventCountAfterStart: 22, textEventCountAfterStart: 12, reasoningEventCountAfterStart: 4, transientIdCountAfterStart: 22, firstTextEventMsAfterStart: 121 }] },
 		sse: { textEventCount: 12, reasoningEventCount: 4, firstTextEventMs: 119, chunkBytes: { count: 1, p50: 200 }, chunkGapsMs: { count: 1, p90: 100 }, textEventsPerChunk: { count: 1, p90: 1 }, textEventGapsMs: { count: 1, p90: 100 } },
-		livePipeline: { expectedInputEventCount: 16, expectedPipelineEventCount: 22, flushedEventsToExpectedRatio: 0.273, overlayEventsToExpectedRatio: 0, currentOutputToExpectedTextBytesRatio: 0, flushToEnqueueRatio: 0.5, overlayUpdatesToFlushedEventsRatio: 0.5, firstTextDeltaMs: 120, firstEnqueueMs: 40, firstFlushMs: 42, firstOverlayUpdateMs: 44 },
+		livePipeline: { expectedInputEventCount: 16, expectedPipelineEventCount: 16, flushedEventsToExpectedRatio: 0, overlayEventsToExpectedRatio: 0, currentOutputToExpectedTextBytesRatio: 0, flushToEnqueueRatio: 0.5, overlayUpdatesToFlushedEventsRatio: 0.5, firstTextDeltaMs: 120, firstEnqueueMs: 40, firstFlushMs: 42, firstOverlayUpdateMs: 44 },
 		score: { smoothness: 10, textDeltaCount: 12, domPositiveUpdateCount: 0 },
 		negativeProfile: "overlay-drop",
 		regressions: [regression],
@@ -774,9 +774,9 @@ test("streaming URL comparison preserves controlled negative profile in artifact
 	assert.match(text, /primary selected-live: .*text=count=1, p50=12/);
 	assert.match(text, /compare selected-live: .*reasoning=count=1, p50=4/);
 	assert.match(text, /comparison selected-live: events 0, text 0, reasoning 0/);
-	assert.match(text, /primary live ratios: .*frameExpected=count=1, p50=22.*flushed\/frameExpected=count=1, p50=0.273/);
+	assert.match(text, /primary live ratios: .*overlayExpected=count=1, p50=16.*flushed\/overlayExpected=count=1, p50=0/);
 	assert.match(text, /compare live ratios: .*overlayEvents\/inputExpected=count=1, p50=0/);
-	assert.match(text, /comparison live ratios: flushed\/frameExpected 0, overlayEvents\/inputExpected 0, flush\/enqueue 0, overlayUpdates\/flushed 0/);
+	assert.match(text, /comparison live ratios: flushed\/overlayExpected 0, overlayEvents\/inputExpected 0, flush\/enqueue 0, overlayUpdates\/flushed 0/);
 	assert.match(text, /primary first latency: .*selectedLive=count=1, p50=121.*sse=count=1, p50=119.*liveText=count=1, p50=120.*domVisible=count=1, p50=140/);
 	assert.match(text, /comparison first latency: selectedLive 0ms, sse 0ms, liveText 0ms, liveEnqueue 0ms, liveFlush 0ms, liveOverlay 0ms, domVisible 0ms/);
 });

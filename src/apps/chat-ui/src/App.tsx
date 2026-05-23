@@ -3655,7 +3655,7 @@ function SessionTracePane({
 			recordStreamingDebugStreamEvent(targetPiboSessionId, event, message.lastEventId, events.readyState);
 			if (shouldDropStreamingBenchmarkOverlayEvent(event)) return;
 			const flushImmediately = event.type !== "TEXT_MESSAGE_CONTENT" && event.type !== "REASONING_MESSAGE_CONTENT";
-			if (targetPiboSessionId === selectedPiboSessionId) {
+			if (targetPiboSessionId === selectedPiboSessionId && eventUpdatesLiveOverlay(event)) {
 				enqueueStreamEvent(targetPiboSessionId, event, flushImmediately);
 			}
 			const traceRefreshDelay = eventTraceRefreshDelay(event);
@@ -9625,6 +9625,16 @@ function eventTraceRefreshDelay(event: ChatStreamEvent): number | undefined {
 
 function eventShouldRefreshNavigation(event: ChatStreamEvent): boolean {
 	return event.type === "RUN_STARTED" || event.type === "RUN_FINISHED" || event.type === "RUN_ERROR" || event.type === "TEXT_MESSAGE_END";
+}
+
+function eventUpdatesLiveOverlay(event: ChatStreamEvent): boolean {
+	return event.type === "TEXT_MESSAGE_CONTENT"
+		|| event.type === "REASONING_MESSAGE_CONTENT"
+		|| event.type === "TOOL_CALL_START"
+		|| event.type === "TOOL_CALL_ARGS"
+		|| event.type === "TOOL_CALL_RESULT"
+		|| event.type === "RUN_ERROR"
+		|| event.type === "RAW_EVENT";
 }
 
 function resetLiveContentFlushTracking(keysBySession: Map<string, Set<string>>, piboSessionId: string, event: ChatStreamEvent): void {
