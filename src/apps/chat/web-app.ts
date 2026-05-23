@@ -1736,7 +1736,7 @@ type ChatStreamingFixtureBody = {
 };
 
 type ChatStreamingFixtureProfile = "steady" | "jitter" | "burst" | "batch";
-type ChatStreamingFixtureMix = "text" | "reasoning-text" | "markdown" | "gfm-markdown" | "gfm-full-markdown";
+type ChatStreamingFixtureMix = "text" | "reasoning-text" | "markdown" | "gfm-markdown" | "gfm-task-markdown" | "gfm-full-markdown";
 
 type ChatProjectsBootstrap = ChatBootstrapCatalog & {
 	identity: PiboWebSession["authSession"]["identity"];
@@ -2533,7 +2533,8 @@ function normalizeMessageText(value: unknown): string {
 function defaultStreamingFixtureDeltas(mix: ChatStreamingFixtureMix): string[] {
 	if (mix === "markdown") return [" **a**", " **b**", " **c**", " **d**", " **e**", " **f**", " **g**", " **h**", " **i**", " **j**", " **k**", " **l**"];
 	if (mix === "gfm-markdown") return [" ~~a~~", " ~~b~~", " ~~c~~", " ~~d~~", " ~~e~~", " ~~f~~", " ~~g~~", " ~~h~~", " ~~i~~", " ~~j~~", " ~~k~~", " ~~l~~"];
-	if (mix === "gfm-full-markdown") return ["- [ ] a", " b", " c", " d", " e", " f", " g", " h", " i", " j", " k", " l"];
+	if (mix === "gfm-task-markdown") return ["- [ ] a", " b", " c", " d", " e", " f", " g", " h", " i", " j", " k", " l"];
+	if (mix === "gfm-full-markdown") return ["- [ ] **a**", " **b**", " **c**", " **d**", " **e**", " **f**", " **g**", " **h**", " **i**", " **j**", " **k**", " **l**"];
 	return [" a", " b", " c", " d", " e", " f", " g", " h", " i", " j", " k", " l"];
 }
 
@@ -2564,8 +2565,8 @@ function normalizeStreamingFixtureProfile(value: unknown): ChatStreamingFixtureP
 
 function normalizeStreamingFixtureMix(value: unknown): ChatStreamingFixtureMix {
 	if (value === undefined) return "text";
-	if (value === "text" || value === "reasoning-text" || value === "markdown" || value === "gfm-markdown" || value === "gfm-full-markdown") return value;
-	throw new PiboWebHttpError("mix must be text, reasoning-text, markdown, gfm-markdown, or gfm-full-markdown", 400);
+	if (value === "text" || value === "reasoning-text" || value === "markdown" || value === "gfm-markdown" || value === "gfm-task-markdown" || value === "gfm-full-markdown") return value;
+	throw new PiboWebHttpError("mix must be text, reasoning-text, markdown, gfm-markdown, gfm-task-markdown, or gfm-full-markdown", 400);
 }
 
 function normalizeStreamingFixtureTraceSnapshots(value: unknown): boolean {

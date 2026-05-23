@@ -254,7 +254,7 @@ test("pibo debug web report recomputes streaming summaries for older artifacts",
 
 test("pibo debug web streaming benchmark help advertises the deterministic fixture", async () => {
 	const help = await execFileAsync("node", [cliPath, "debug", "web", "scenario", "--help"]);
-	assert.match(help.stdout, /streaming-benchmark \[--fixture\|--backend-fixture\].*\[--fixture-profile steady\|jitter\|burst\|batch\].*\[--fixture-mix text\|reasoning-text\|markdown\|gfm-markdown\|gfm-full-markdown\].*\[--simulate-reconnect\|--simulate-trace-catchup\].*\[--provider-request-id pr_\.\.\.\|--provider-session-id ps_\.\.\.\|--provider-turn-id turn_\.\.\.\|--provider-selected-session\].*\[--compare-url url\|--compare-hosted\|--compare-hosted-if-configured\].*\[--assert\].*\[--expect-regression text\].*\[--negative-profile batch\|overlay-drop\]/);
+	assert.match(help.stdout, /streaming-benchmark \[--fixture\|--backend-fixture\].*\[--fixture-profile steady\|jitter\|burst\|batch\].*\[--fixture-mix text\|reasoning-text\|markdown\|gfm-markdown\|gfm-task-markdown\|gfm-full-markdown\].*\[--simulate-reconnect\|--simulate-trace-catchup\].*\[--provider-request-id pr_\.\.\.\|--provider-session-id ps_\.\.\.\|--provider-turn-id turn_\.\.\.\|--provider-selected-session\].*\[--compare-url url\|--compare-hosted\|--compare-hosted-if-configured\].*\[--assert\].*\[--expect-regression text\].*\[--negative-profile batch\|overlay-drop\]/);
 	assert.match(help.stdout, /deterministic in-browser stream fixture/);
 	assert.match(help.stdout, /real app consumes deterministic \/api\/chat\/events frames/);
 	assert.match(help.stdout, /--fixture-profile selects steady cadence, deterministic jitter, bursty timing, or intentional batch stress/);
@@ -1072,7 +1072,7 @@ test("pibo debug web streaming benchmark rejects invalid fixture mix before targ
 	await assert.rejects(
 		execFileAsync("node", [cliPath, "debug", "web", "scenario", "streaming-benchmark", "--backend-fixture", "--fixture-mix", "thinking-only"]),
 		(error) => {
-			assert.match(error.stderr, /--fixture-mix must be text, reasoning-text, markdown, gfm-markdown, or gfm-full-markdown/);
+			assert.match(error.stderr, /--fixture-mix must be text, reasoning-text, markdown, gfm-markdown, gfm-task-markdown, or gfm-full-markdown/);
 			assert.doesNotMatch(error.stderr, /No attachable CDP target/);
 			return true;
 		},

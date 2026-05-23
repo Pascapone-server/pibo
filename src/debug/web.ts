@@ -751,7 +751,7 @@ function printScenarioHelp(): void {
 
 Usage:
   pibo debug web scenario new-session [--manual|--act] [--duration ms] [--json] [--artifact]
-  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--fixture-profile steady|jitter|burst|batch] [--fixture-mix text|reasoning-text|markdown|gfm-markdown|gfm-full-markdown] [--simulate-reconnect|--simulate-trace-catchup] [--duration ms] [--runs n] [--from artifact.json] [--provider-request-id pr_...|--provider-session-id ps_...|--provider-turn-id turn_...|--provider-selected-session] [--compare-url url|--compare-hosted|--compare-hosted-if-configured] [--assert] [--expect-regression text] [--negative-profile batch|overlay-drop] [--json] [--artifact]
+  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--fixture-profile steady|jitter|burst|batch] [--fixture-mix text|reasoning-text|markdown|gfm-markdown|gfm-task-markdown|gfm-full-markdown] [--simulate-reconnect|--simulate-trace-catchup] [--duration ms] [--runs n] [--from artifact.json] [--provider-request-id pr_...|--provider-session-id ps_...|--provider-turn-id turn_...|--provider-selected-session] [--compare-url url|--compare-hosted|--compare-hosted-if-configured] [--assert] [--expect-regression text] [--negative-profile batch|overlay-drop] [--json] [--artifact]
 
 Defaults:
   new-session --manual waits while you click New Session yourself.
@@ -1355,7 +1355,7 @@ async function enableStreamingDebugForCurrentApp(client: CdpClient): Promise<voi
 }
 
 type StreamingFixtureProfile = "steady" | "jitter" | "burst" | "batch";
-type StreamingFixtureMix = "text" | "reasoning-text" | "markdown" | "gfm-markdown" | "gfm-full-markdown";
+type StreamingFixtureMix = "text" | "reasoning-text" | "markdown" | "gfm-markdown" | "gfm-task-markdown" | "gfm-full-markdown";
 
 function streamingBenchmarkEventSourceProbeScript(): string {
 	return String.raw`
@@ -1475,11 +1475,12 @@ function streamingBenchmarkFixtureHtml(fixtureProfile: StreamingFixtureProfile, 
   const textDeltas = [' a', ' b', ' c', ' d', ' e', ' f', ' g', ' h', ' i', ' j', ' k', ' l'];
   const markdownDeltas = [' **a**', ' **b**', ' **c**', ' **d**', ' **e**', ' **f**', ' **g**', ' **h**', ' **i**', ' **j**', ' **k**', ' **l**'];
   const gfmMarkdownDeltas = [' ~~a~~', ' ~~b~~', ' ~~c~~', ' ~~d~~', ' ~~e~~', ' ~~f~~', ' ~~g~~', ' ~~h~~', ' ~~i~~', ' ~~j~~', ' ~~k~~', ' ~~l~~'];
-  const gfmFullMarkdownDeltas = ['- [ ] a', ' b', ' c', ' d', ' e', ' f', ' g', ' h', ' i', ' j', ' k', ' l'];
+  const gfmTaskMarkdownDeltas = ['- [ ] a', ' b', ' c', ' d', ' e', ' f', ' g', ' h', ' i', ' j', ' k', ' l'];
+  const gfmFullMarkdownDeltas = ['- [ ] **a**', ' **b**', ' **c**', ' **d**', ' **e**', ' **f**', ' **g**', ' **h**', ' **i**', ' **j**', ' **k**', ' **l**'];
   const cadenceMs = 100;
   const profile = ${JSON.stringify(fixtureProfile)};
   const mix = ${JSON.stringify(fixtureMix)};
-  const deltas = mix === 'markdown' ? markdownDeltas : (mix === 'gfm-markdown' ? gfmMarkdownDeltas : (mix === 'gfm-full-markdown' ? gfmFullMarkdownDeltas : textDeltas));
+  const deltas = mix === 'markdown' ? markdownDeltas : (mix === 'gfm-markdown' ? gfmMarkdownDeltas : (mix === 'gfm-task-markdown' ? gfmTaskMarkdownDeltas : (mix === 'gfm-full-markdown' ? gfmFullMarkdownDeltas : textDeltas)));
   const reasoningDeltas = mix === 'reasoning-text' ? [' think', ' plan', ' check', ' answer'] : [];
   const scheduleMs = buildSchedule(deltas.length, cadenceMs, profile);
   const reasoningScheduleMs = reasoningDeltas.map((_, index) => Math.max(10, Math.round((index + 1) * cadenceMs / 2)));
@@ -2908,8 +2909,8 @@ function parseFixtureProfile(value?: string): StreamingFixtureProfile {
 
 function parseFixtureMix(value?: string): StreamingFixtureMix {
 	if (!value) return "text";
-	if (value === "text" || value === "reasoning-text" || value === "markdown" || value === "gfm-markdown" || value === "gfm-full-markdown") return value;
-	throw new Error("--fixture-mix must be text, reasoning-text, markdown, gfm-markdown, or gfm-full-markdown");
+	if (value === "text" || value === "reasoning-text" || value === "markdown" || value === "gfm-markdown" || value === "gfm-task-markdown" || value === "gfm-full-markdown") return value;
+	throw new Error("--fixture-mix must be text, reasoning-text, markdown, gfm-markdown, gfm-task-markdown, or gfm-full-markdown");
 }
 
 function parseNegativeProfile(value?: string): StreamingNegativeProfile | undefined {

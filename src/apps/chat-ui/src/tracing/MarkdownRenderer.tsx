@@ -68,6 +68,8 @@ export function requiresGfmMarkdown(markdown: string): boolean {
 }
 
 const simpleGfmStrikethroughForbiddenPattern = /[\n\r\\`*_\[\]<>]/;
+const simpleGfmTaskListPattern = /^\s*[-+*]\s+\[([ xX])\]\s+(.+?)\s*$/;
+const simpleGfmTaskListTextForbiddenPattern = /[\n\r\\`*_\[\]<>|~]/;
 
 function renderSimpleGfmStrikethrough(markdown: string): ReactElement | undefined {
 	if (!markdown.includes("~~")) return undefined;
@@ -94,6 +96,22 @@ function renderSimpleGfmStrikethrough(markdown: string): ReactElement | undefine
 		cursor = end + 2;
 	}
 	return delCount > 0 ? <p data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="p">{parts}</p> : undefined;
+}
+
+function renderSimpleGfmTaskList(markdown: string): ReactElement | undefined {
+	const match = simpleGfmTaskListPattern.exec(markdown);
+	if (!match) return undefined;
+	const text = match[2];
+	if (!text || simpleGfmTaskListTextForbiddenPattern.test(text) || markdownAutolinkPattern.test(text)) return undefined;
+	const checked = match[1].toLowerCase() === "x";
+	return (
+		<ul className="contains-task-list" data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="ul">
+			<li className="task-list-item" data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="li">
+				<input type="checkbox" checked={checked} readOnly disabled data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="input" />
+				{text}
+			</li>
+		</ul>
+	);
 }
 
 const components: Components = {
@@ -203,7 +221,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ children }: Mar
 		element = <p data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="p">{children}</p>;
 	} else {
 		const useGfm = requiresGfmMarkdown(children);
-		const simpleGfmElement = useGfm ? renderSimpleGfmStrikethrough(children) : undefined;
+		const simpleGfmElement = useGfm ? renderSimpleGfmStrikethrough(children) ?? renderSimpleGfmTaskList(children) : undefined;
 		if (simpleGfmElement) {
 			mode = "gfm-fast";
 			element = simpleGfmElement;

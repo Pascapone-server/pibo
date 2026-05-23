@@ -79,7 +79,8 @@ This is the default deterministic regression mode because it exercises:
 - `reasoning-text`: reasoning deltas plus assistant text deltas.
 - `markdown`: CommonMark assistant deltas with real emphasis markers that force the full Markdown renderer path without GFM plugins while keeping small per-delta visible jumps.
 - `gfm-markdown`: GFM assistant deltas with strikethrough markers that exercise GFM rendering while keeping small per-delta visible jumps. Simple strikethrough may use the GFM fast path.
-- `gfm-full-markdown`: GFM task-list assistant deltas that must exercise the full `remark-gfm` parser while keeping small per-delta visible jumps.
+- `gfm-task-markdown`: GFM task-list assistant deltas that can exercise narrowly guarded task-list fast rendering while keeping small per-delta visible jumps.
+- `gfm-full-markdown`: GFM task-list assistant deltas with nested emphasis that must exercise the full `remark-gfm` parser while keeping small per-delta visible jumps.
 
 ### Simulations
 
@@ -151,7 +152,7 @@ Collected from `window.__piboStreamingDebug` when `?debugStreaming=1` or local s
 - live open/error count;
 - event, enqueue, flush, flushed-event, overlay-update, overlay-event counts;
 - live trace overlay compute count plus total/max duration for committed overlay renders;
-- Markdown renderer invocation count split into plain/CommonMark/GFM parser/GFM fast/full paths plus total/max duration when debug streaming is enabled; full-path timing includes the synchronous ReactMarkdown parse and React tree build, while GFM fast timing covers narrowly guarded direct renderers that bypass `remark-gfm`;
+- Markdown renderer invocation count split into plain/CommonMark/GFM parser/GFM fast/full paths plus total/max duration when debug streaming is enabled; full-path timing includes the synchronous ReactMarkdown parse and React tree build, while GFM fast timing covers narrowly guarded direct renderers such as simple strikethrough and task-list output that bypass `remark-gfm`;
 - current output and trace base output lengths;
 - trace refresh count/duration;
 - first text, enqueue, flush, and overlay-update latency;
