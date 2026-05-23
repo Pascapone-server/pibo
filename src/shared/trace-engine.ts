@@ -405,7 +405,7 @@ export function patchTraceViewWithEvents(
 
 	if (!appliedEvents.length) return view;
 
-	const nestedNodes = nestTraceNodes(allNodes);
+	const nestedNodes = nestMutableCopiedTraceNodes(allNodes);
 	if (eventsCanAffectAsyncAgentRunStatus(appliedEvents)) {
 		reconcileAsyncAgentRunStatuses(nestedNodes);
 	}
@@ -438,6 +438,23 @@ function contentDeltaPatchNodeId(event: PiboOutputEvent): string | undefined {
 		return thinkingId ? thinkingNodeId(thinkingId) : undefined;
 	}
 	return undefined;
+}
+
+function nestMutableCopiedTraceNodes(nodes: readonly PiboTraceNode[]): PiboTraceNode[] {
+	const byId = new Map<string, PiboTraceNode>();
+	for (const node of nodes) byId.set(node.id, node);
+
+	const roots: PiboTraceNode[] = [];
+	for (const node of nodes) {
+		if (!node.parentId) {
+			roots.push(node);
+			continue;
+		}
+		const parent = byId.get(node.parentId);
+		if (parent) parent.children.push(node);
+		else roots.push(node);
+	}
+	return sortTraceNodes(roots);
 }
 
 function mapFlatTraceNodesById(nodes: readonly PiboTraceNode[]): Map<string, PiboTraceNode> {
