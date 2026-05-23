@@ -1,3 +1,4 @@
+import { memo } from "react";
 import ReactMarkdown, { defaultUrlTransform, type Components, type UrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import prism from "../context/prism-client";
@@ -39,6 +40,19 @@ const allowedElements = [
 	"input",
 	"del",
 ];
+
+const remarkPlugins = [remarkGfm];
+
+const markdownSyntaxPattern = /[\n\r\\`*_{}\[\]<>()#+|~]/;
+const markdownLinePrefixPattern = /^\s*(?:[-+>]|(?:\d+[.)]))\s/;
+const markdownAutolinkPattern = /\b(?:https?:\/\/|www\.)|\S+@\S+\.\S+/i;
+
+export function isPlainMarkdownText(markdown: string): boolean {
+	return markdown.length > 0
+		&& !markdownSyntaxPattern.test(markdown)
+		&& !markdownLinePrefixPattern.test(markdown)
+		&& !markdownAutolinkPattern.test(markdown);
+}
 
 const components: Components = {
 	p({ children, node: _node, ...props }) {
@@ -130,16 +144,19 @@ const safeUrlTransform: UrlTransform = (url, key, node) => {
 	}
 };
 
-export function MarkdownRenderer({ children }: MarkdownRendererProps) {
+export const MarkdownRenderer = memo(function MarkdownRenderer({ children }: MarkdownRendererProps) {
+	if (isPlainMarkdownText(children)) {
+		return <p data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="p">{children}</p>;
+	}
 	return (
 		<ReactMarkdown
 			allowedElements={allowedElements}
 			components={components}
-			remarkPlugins={[remarkGfm]}
+			remarkPlugins={remarkPlugins}
 			skipHtml
 			urlTransform={safeUrlTransform}
 		>
 			{children}
 		</ReactMarkdown>
 	);
-}
+});
