@@ -19,6 +19,7 @@ type WebOptions = {
 	scope?: string;
 	preset?: string;
 	duration?: string;
+	runs?: string;
 	json: boolean;
 	artifact: boolean;
 	fixture: boolean;
@@ -112,6 +113,16 @@ type StreamingDebugCounters = Record<string, unknown> & {
 	lastTransientLiveId?: string;
 };
 
+type StreamingSmoothnessScore = {
+	smoothness: number;
+	domGapP50Ms?: number;
+	domGapP90Ms?: number;
+	domJumpP90Chars?: number;
+	textDeltaCount: number;
+	domPositiveUpdateCount: number;
+	firstVisibleMs?: number;
+};
+
 type StreamingBenchmark = {
 	kind: "streaming-benchmark";
 	createdAt: string;
@@ -142,6 +153,43 @@ type StreamingBenchmark = {
 	raf: { count: number; gapsMs: NumberStats };
 	longTasks: { count: number; totalMs: number; maxMs: number };
 	fixture?: { requested: boolean; mode: "browser" | "backend"; available: boolean; started: boolean; deltaCount?: number; cadenceMs?: number; piboSessionId?: string; error?: string };
+	score: StreamingSmoothnessScore;
+	regressions: string[];
+	warnings: string[];
+};
+
+type StreamingBenchmarkSummary = {
+	runs: number;
+	smoothness: NumberStats;
+	textDeltaCount: NumberStats;
+	domPositiveUpdateCount: NumberStats;
+	domGapP50Ms: NumberStats;
+	domGapP90Ms: NumberStats;
+	domGapMaxMs: NumberStats;
+	domJumpP90Chars: NumberStats;
+	domJumpMaxChars: NumberStats;
+	firstVisibleMs: NumberStats;
+	longTaskMaxMs: NumberStats;
+	regressionCount: NumberStats;
+};
+
+type StreamingBenchmarkComparison = {
+	baselineRuns: number;
+	currentRuns: number;
+	smoothnessDelta?: number;
+	domGapP90DeltaMs?: number;
+	domPositiveUpdateDelta?: number;
+	domJumpMaxDeltaChars?: number;
+	longTaskMaxDeltaMs?: number;
+};
+
+type StreamingBenchmarkGroup = {
+	kind: "streaming-benchmark-runs";
+	createdAt: string;
+	durationMs: number;
+	runs: StreamingBenchmark[];
+	summary: StreamingBenchmarkSummary;
+	comparison?: StreamingBenchmarkComparison;
 	regressions: string[];
 	warnings: string[];
 };
@@ -236,7 +284,7 @@ function printScenarioHelp(): void {
 
 Usage:
   pibo debug web scenario new-session [--manual|--act] [--duration ms] [--json] [--artifact]
-  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--duration ms] [--assert] [--json] [--artifact]
+  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--duration ms] [--runs n] [--from artifact.json] [--assert] [--json] [--artifact]
 
 Defaults:
   new-session --manual waits while you click New Session yourself.
@@ -244,6 +292,7 @@ Defaults:
   streaming-benchmark enables debugStreaming for future events, observes assistant DOM increments, and snapshots window.__piboStreamingDebug.
   streaming-benchmark --fixture navigates the target to a deterministic in-browser stream fixture before measuring.
   streaming-benchmark --backend-fixture posts to /api/chat/debug/streaming-fixture so the real app consumes deterministic /api/chat/events frames.
+  streaming-benchmark --runs repeats the same scenario and reports medians; --from compares against a prior benchmark artifact.
   streaming-benchmark --assert exits non-zero when fixture/debug/DOM smoothness gates fail.
 `);
 }
@@ -380,17 +429,26 @@ async function runScenario(options: WebOptions): Promise<void> {
 	if (scenario === "streaming-benchmark" && (options.act || options.manual)) throw new Error("streaming-benchmark does not support --act or --manual. Start or observe the stream separately, then run the scenario.");
 	if (scenario === "streaming-benchmark" && options.fixture && options.backendFixture) throw new Error("Use either --fixture or --backend-fixture, not both.");
 	const durationMs = parseDuration(options.duration);
+	const runs = parseRuns(options.runs);
 	const { client, target } = await connectTarget({ ...options, preset: "app" });
 	try {
 		if (scenario === "streaming-benchmark") {
 			if (options.fixture) await navigateStreamingBenchmarkFixture(client);
 			if (options.backendFixture) await enableStreamingDebugForCurrentApp(client);
-			const benchmark = await runStreamingBenchmark(client, durationMs, { startFixture: options.fixture, startBackendFixture: options.backendFixture });
+			const benchmarks: StreamingBenchmark[] = [];
+			for (let run = 0; run < runs; run++) {
+				benchmarks.push(await runStreamingBenchmark(client, durationMs, { startFixture: options.fixture, startBackendFixture: options.backendFixture }));
+			}
+			const baseline = options.from ? await readStreamingBenchmarkRuns(options.from) : undefined;
+			const benchmark: StreamingBenchmark | StreamingBenchmarkGroup = runs === 1
+				? benchmarks[0]
+				: summarizeStreamingBenchmarkGroup(benchmarks, baseline);
 			if (options.json) console.log(JSON.stringify({ target: compactTarget(target), scenario, benchmark }, null, 2));
-			else console.log(limitStdout(formatStreamingBenchmark(benchmark, target)));
+			else console.log(limitStdout(formatStreamingBenchmarkResult(benchmark, target)));
 			const artifact = await writeArtifact(`scenario-${scenario}`, benchmark);
 			if (!options.json) console.log(`Artifact: ${artifact}`);
-			if (options.assertHealthy && benchmark.regressions.length) throw new Error(`streaming benchmark assertions failed: ${benchmark.regressions.join("; ")}`);
+			const regressions = benchmark.kind === "streaming-benchmark-runs" ? benchmark.regressions : benchmark.regressions;
+			if (options.assertHealthy && regressions.length) throw new Error(`streaming benchmark assertions failed: ${regressions.join("; ")}`);
 			return;
 		}
 
@@ -466,7 +524,8 @@ async function runBrowserWatch(client: CdpClient, scope: string, durationMs: num
 
 async function runStreamingBenchmark(client: CdpClient, durationMs: number, options: { startFixture?: boolean; startBackendFixture?: boolean } = {}): Promise<StreamingBenchmark> {
 	await client.send("Page.bringToFront").catch(() => undefined);
-	return client.evaluate<StreamingBenchmark>(buildStreamingBenchmarkExpression(durationMs, options), durationMs + 10_000);
+	const benchmark = await client.evaluate<Omit<StreamingBenchmark, "score">>(buildStreamingBenchmarkExpression(durationMs, options), durationMs + 10_000);
+	return { ...benchmark, score: scoreStreamingBenchmark(benchmark) };
 }
 
 async function navigateStreamingBenchmarkFixture(client: CdpClient): Promise<void> {
@@ -1174,6 +1233,8 @@ function parseOptions(args: string[]): WebOptions {
 		else if (arg.startsWith("--preset=")) options.preset = arg.slice("--preset=".length);
 		else if (arg === "--duration") options.duration = requireValue(args, ++index, arg);
 		else if (arg.startsWith("--duration=")) options.duration = arg.slice("--duration=".length);
+		else if (arg === "--runs") options.runs = requireValue(args, ++index, arg);
+		else if (arg.startsWith("--runs=")) options.runs = arg.slice("--runs=".length);
 		else if (arg === "--from") options.from = requireValue(args, ++index, arg);
 		else if (arg.startsWith("--from=")) options.from = arg.slice("--from=".length);
 		else options.positionals.push(arg);
@@ -1211,6 +1272,14 @@ function parseDuration(value?: string): number {
 	if (!Number.isFinite(duration) || duration <= 0) throw new Error("--duration must be a positive number of milliseconds");
 	if (duration > MAX_WATCH_DURATION_MS) throw new Error(`--duration must be <= ${MAX_WATCH_DURATION_MS}ms`);
 	return Math.round(duration);
+}
+
+function parseRuns(value?: string): number {
+	if (!value) return 1;
+	const runs = Number(value);
+	if (!Number.isInteger(runs) || runs <= 0) throw new Error("--runs must be a positive integer");
+	if (runs > 10) throw new Error("--runs must be <= 10");
+	return runs;
 }
 
 function formatSnapshot(snapshot: WebSnapshot, target: BrowserUseCdpTarget | { id: string; url: string; title: string }): string {
@@ -1357,6 +1426,121 @@ function hasSnapshotDiff(diff: ReturnType<typeof diffSnapshots>): boolean {
 	return Boolean(diff.added.length || diff.removed.length || diff.changed.length);
 }
 
+function scoreStreamingBenchmark(benchmark: Omit<StreamingBenchmark, "score">): StreamingSmoothnessScore {
+	const debugDelta = benchmark.debug.delta ?? {};
+	const textDeltaCount = numberField(debugDelta, "textDeltaCount");
+	const domGapP50Ms = finiteNumber(benchmark.dom.gapsMs.p50);
+	const domGapP90Ms = finiteNumber(benchmark.dom.gapsMs.p90);
+	const domJumpP90Chars = finiteNumber(benchmark.dom.positiveCharJumps.p90);
+	const firstVisibleMs = finiteNumber(benchmark.dom.firstPositiveUpdateMs);
+	const providerToDomRatio = textDeltaCount > 0 ? Math.min(1, benchmark.dom.positiveUpdateCount / textDeltaCount) : 0;
+	const smoothness =
+		0.30 * clampScore(100 - (domGapP50Ms ?? 100))
+		+ 0.25 * clampScore(((300 - (domGapP90Ms ?? 300)) / 3))
+		+ 0.20 * clampScore(((120 - (domJumpP90Chars ?? 120)) / 1.2))
+		+ 0.15 * clampScore(providerToDomRatio * 100)
+		+ 0.10 * clampScore(100 - ((firstVisibleMs ?? 500) / 5));
+	return {
+		smoothness: round3(smoothness),
+		domGapP50Ms,
+		domGapP90Ms,
+		domJumpP90Chars,
+		textDeltaCount,
+		domPositiveUpdateCount: benchmark.dom.positiveUpdateCount,
+		firstVisibleMs,
+	};
+}
+
+function summarizeStreamingBenchmarkGroup(runs: StreamingBenchmark[], baselineRuns?: StreamingBenchmark[]): StreamingBenchmarkGroup {
+	const summary = summarizeStreamingBenchmarks(runs);
+	return {
+		kind: "streaming-benchmark-runs",
+		createdAt: new Date().toISOString(),
+		durationMs: runs[0]?.durationMs ?? 0,
+		runs,
+		summary,
+		comparison: baselineRuns?.length ? compareStreamingBenchmarkSummaries(summarizeStreamingBenchmarks(baselineRuns), summary) : undefined,
+		regressions: runs.flatMap((run, index) => run.regressions.map((regression) => `run ${index + 1}: ${regression}`)),
+		warnings: runs.flatMap((run, index) => run.warnings.map((warning) => `run ${index + 1}: ${warning}`)),
+	};
+}
+
+function summarizeStreamingBenchmarks(runs: StreamingBenchmark[]): StreamingBenchmarkSummary {
+	return {
+		runs: runs.length,
+		smoothness: numericStats(runs.map((run) => run.score.smoothness)),
+		textDeltaCount: numericStats(runs.map((run) => run.score.textDeltaCount)),
+		domPositiveUpdateCount: numericStats(runs.map((run) => run.score.domPositiveUpdateCount)),
+		domGapP50Ms: numericStats(runs.map((run) => run.dom.gapsMs.p50)),
+		domGapP90Ms: numericStats(runs.map((run) => run.dom.gapsMs.p90)),
+		domGapMaxMs: numericStats(runs.map((run) => run.dom.gapsMs.max)),
+		domJumpP90Chars: numericStats(runs.map((run) => run.dom.positiveCharJumps.p90)),
+		domJumpMaxChars: numericStats(runs.map((run) => run.dom.positiveCharJumps.max)),
+		firstVisibleMs: numericStats(runs.map((run) => run.dom.firstPositiveUpdateMs)),
+		longTaskMaxMs: numericStats(runs.map((run) => run.longTasks.maxMs)),
+		regressionCount: numericStats(runs.map((run) => run.regressions.length)),
+	};
+}
+
+function compareStreamingBenchmarkSummaries(baseline: StreamingBenchmarkSummary, current: StreamingBenchmarkSummary): StreamingBenchmarkComparison {
+	return {
+		baselineRuns: baseline.runs,
+		currentRuns: current.runs,
+		smoothnessDelta: statDelta(current.smoothness, baseline.smoothness),
+		domGapP90DeltaMs: statDelta(current.domGapP90Ms, baseline.domGapP90Ms),
+		domPositiveUpdateDelta: statDelta(current.domPositiveUpdateCount, baseline.domPositiveUpdateCount),
+		domJumpMaxDeltaChars: statDelta(current.domJumpMaxChars, baseline.domJumpMaxChars),
+		longTaskMaxDeltaMs: statDelta(current.longTaskMaxMs, baseline.longTaskMaxMs),
+	};
+}
+
+async function readStreamingBenchmarkRuns(file: string): Promise<StreamingBenchmark[]> {
+	const parsed = JSON.parse(await readFile(file, "utf8"));
+	const value = parsed.benchmark ?? parsed;
+	const runs = value.kind === "streaming-benchmark-runs" ? value.runs : [value];
+	return runs.filter((run: Partial<StreamingBenchmark>) => run.kind === "streaming-benchmark").map((run: StreamingBenchmark) => ({
+		...run,
+		score: run.score ?? scoreStreamingBenchmark(run),
+	}));
+}
+
+function numericStats(values: readonly unknown[]): NumberStats {
+	const nums = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value)).slice().sort((a, b) => a - b);
+	if (!nums.length) return { count: 0 };
+	const pick = (q: number) => nums[Math.min(nums.length - 1, Math.max(0, Math.floor((nums.length - 1) * q)))];
+	const avg = nums.reduce((sum, value) => sum + value, 0) / nums.length;
+	return {
+		count: nums.length,
+		min: round3(nums[0]),
+		p50: round3(pick(0.50)),
+		p90: round3(pick(0.90)),
+		p99: round3(pick(0.99)),
+		max: round3(nums[nums.length - 1]),
+		avg: round3(avg),
+	};
+}
+
+function statDelta(current: NumberStats, baseline: NumberStats): number | undefined {
+	if (current.p50 === undefined || baseline.p50 === undefined) return undefined;
+	return round3(current.p50 - baseline.p50);
+}
+
+function clampScore(value: number): number {
+	return Math.min(100, Math.max(0, value));
+}
+
+function finiteNumber(value: unknown): number | undefined {
+	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function round3(value: number): number {
+	return Math.round(value * 1000) / 1000;
+}
+
+function formatStreamingBenchmarkResult(benchmark: StreamingBenchmark | StreamingBenchmarkGroup, target: BrowserUseCdpTarget | { id: string; url: string; title: string }): string {
+	return benchmark.kind === "streaming-benchmark-runs" ? formatStreamingBenchmarkGroup(benchmark, target) : formatStreamingBenchmark(benchmark, target);
+}
+
 function formatStreamingBenchmark(benchmark: StreamingBenchmark, target: BrowserUseCdpTarget | { id: string; url: string; title: string }): string {
 	const debugDelta: Record<string, number> = benchmark.debug.delta ?? {};
 	const debugAfter: StreamingDebugCounters = benchmark.debug.after ?? {};
@@ -1366,6 +1550,7 @@ function formatStreamingBenchmark(benchmark: StreamingBenchmark, target: Browser
 		`debug: available=${benchmark.debug.available} reset=${benchmark.debug.reset}`,
 		`events: text=${numberField(debugDelta, "textDeltaCount")} (${numberField(debugDelta, "textDeltaBytes")} bytes), reasoning=${numberField(debugDelta, "reasoningDeltaCount")}, enqueue=${numberField(debugDelta, "enqueueCount")}, flush=${numberField(debugDelta, "flushCount")}, overlayUpdates=${numberField(debugDelta, "overlayUpdateCount")}`,
 		`state: overlayEvents=${jsonShort(debugAfter.overlayEventCount)} currentOutput=${jsonShort(debugAfter.currentOutputLength)} traceBase=${jsonShort(debugAfter.traceBaseOutputLength)} durable=${jsonShort(debugAfter.lastDurableCursor)} transient=${jsonShort(debugAfter.lastTransientLiveId)}`,
+		`score: smoothness=${benchmark.score.smoothness}, dom/provider updates=${benchmark.score.domPositiveUpdateCount}/${benchmark.score.textDeltaCount}`,
 		`dom: targets=${benchmark.dom.targetCountStart}->${benchmark.dom.targetCountEnd}, length=${benchmark.dom.lengthStart}->${benchmark.dom.lengthEnd}, updates=${benchmark.dom.updateCount}, positive=${benchmark.dom.positiveUpdateCount}, firstPositive=${jsonShort(benchmark.dom.firstPositiveUpdateMs)}ms`,
 		`dom gaps: ${formatStats(benchmark.dom.gapsMs)}`,
 		`dom jumps: ${formatStats(benchmark.dom.positiveCharJumps)} chars`,
@@ -1382,6 +1567,35 @@ function formatStreamingBenchmark(benchmark: StreamingBenchmark, target: Browser
 		for (const warning of benchmark.warnings) lines.push(`- ${warning}`);
 	}
 	return lines.join("\n");
+}
+
+function formatStreamingBenchmarkGroup(group: StreamingBenchmarkGroup, target: BrowserUseCdpTarget | { id: string; url: string; title: string }): string {
+	const lines = [
+		`# Web Streaming Benchmark, ${group.runs.length} runs x ${(group.durationMs / 1000).toFixed(1)}s`,
+		`# target: ${target.id} ${target.url || group.runs[0]?.url || ""}`,
+		`summary: smoothness=${formatStats(group.summary.smoothness)}, regressions=${formatStats(group.summary.regressionCount)}`,
+		`events: text=${formatStats(group.summary.textDeltaCount)}, domPositive=${formatStats(group.summary.domPositiveUpdateCount)}`,
+		`dom gaps p50=${formatStats(group.summary.domGapP50Ms)}, p90=${formatStats(group.summary.domGapP90Ms)}, max=${formatStats(group.summary.domGapMaxMs)}`,
+		`dom jumps p90=${formatStats(group.summary.domJumpP90Chars)}, max=${formatStats(group.summary.domJumpMaxChars)} chars`,
+		`firstVisible=${formatStats(group.summary.firstVisibleMs)}, longTaskMax=${formatStats(group.summary.longTaskMaxMs)}`,
+	];
+	if (group.comparison) {
+		lines.push(`comparison vs baseline (${group.comparison.baselineRuns} runs): smoothness ${signed(group.comparison.smoothnessDelta)}, domP90Gap ${signed(group.comparison.domGapP90DeltaMs)}ms, domPositive ${signed(group.comparison.domPositiveUpdateDelta)}, maxJump ${signed(group.comparison.domJumpMaxDeltaChars)} chars, longTaskMax ${signed(group.comparison.longTaskMaxDeltaMs)}ms`);
+	}
+	if (group.regressions.length) {
+		lines.push("", "Regressions:");
+		for (const regression of group.regressions) lines.push(`- ${regression}`);
+	}
+	if (group.warnings.length) {
+		lines.push("", "Warnings:");
+		for (const warning of group.warnings) lines.push(`- ${warning}`);
+	}
+	return lines.join("\n");
+}
+
+function signed(value: number | undefined): string {
+	if (value === undefined) return "n/a";
+	return value > 0 ? `+${value}` : String(value);
 }
 
 function numberField(record: Record<string, unknown>, key: string): number {

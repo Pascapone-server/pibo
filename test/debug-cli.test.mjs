@@ -41,6 +41,7 @@ test("pibo debug web streaming benchmark help advertises the deterministic fixtu
 	assert.match(help.stdout, /streaming-benchmark \[--fixture\|--backend-fixture\].*\[--assert\]/);
 	assert.match(help.stdout, /deterministic in-browser stream fixture/);
 	assert.match(help.stdout, /real app consumes deterministic \/api\/chat\/events frames/);
+	assert.match(help.stdout, /--runs repeats the same scenario and reports medians/);
 	assert.match(help.stdout, /--assert exits non-zero/);
 });
 
