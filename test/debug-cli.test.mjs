@@ -465,6 +465,8 @@ test("streaming URL comparison preserves controlled negative profile in artifact
 		dom: { targetCountStart: 1, targetCountEnd: 1, lengthStart: 0, lengthEnd: 0, updateCount: 0, positiveUpdateCount: 0, gapsMs: { count: 0 }, positiveCharJumps: { count: 0 } },
 		raf: { count: 10, gapsMs: { count: 9, p90: 16.7 } },
 		longTasks: { count: 0, maxMs: 0, totalMs: 0 },
+		eventSource: { streams: [{ role: "selected-live", eventCountAfterStart: 22, textEventCountAfterStart: 12, reasoningEventCountAfterStart: 4, transientIdCountAfterStart: 22 }] },
+		livePipeline: { expectedInputEventCount: 16, flushedEventsToExpectedRatio: 0.375, overlayEventsToExpectedRatio: 0, currentOutputToExpectedTextBytesRatio: 0, flushToEnqueueRatio: 0.5, overlayUpdatesToFlushedEventsRatio: 0.5 },
 		score: { smoothness: 10, textDeltaCount: 12, domPositiveUpdateCount: 0 },
 		negativeProfile: "overlay-drop",
 		regressions: [regression],
@@ -485,7 +487,14 @@ test("streaming URL comparison preserves controlled negative profile in artifact
 	const comparison = summarizeStreamingBenchmarkUrlComparison("http://direct.example/apps/chat", "https://hosted.example/apps/chat", primary, compare);
 	assert.equal(comparison.negativeProfile, "overlay-drop");
 	assert.deepEqual(comparison.regressions, ["primary: run 1: positive DOM updates 0 < 10", "compare: run 1: positive DOM updates 0 < 10"]);
-	assert.match(formatStreamingBenchmarkUrlComparison(comparison, { id: "target", url: "", title: "" }), /negative profile: overlay-drop/);
+	const text = formatStreamingBenchmarkUrlComparison(comparison, { id: "target", url: "", title: "" });
+	assert.match(text, /negative profile: overlay-drop/);
+	assert.match(text, /primary selected-live: .*text=count=1, p50=12/);
+	assert.match(text, /compare selected-live: .*reasoning=count=1, p50=4/);
+	assert.match(text, /comparison selected-live: events 0, text 0, reasoning 0/);
+	assert.match(text, /primary live ratios: .*flushed\/expected=count=1, p50=0.375/);
+	assert.match(text, /compare live ratios: .*overlayEvents\/expected=count=1, p50=0/);
+	assert.match(text, /comparison live ratios: flushed\/expected 0, overlayEvents\/expected 0, flush\/enqueue 0, overlayUpdates\/flushed 0/);
 });
 
 test("pibo debug web streaming benchmark rejects missing expected regression value before target discovery", async () => {

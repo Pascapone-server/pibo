@@ -3414,6 +3414,20 @@ export function formatStreamingBenchmarkUrlComparison(comparison: StreamingBench
 		`compare summary: smoothness=${formatStats(comparison.compare.summary.smoothness)}, domP90=${formatStats(comparison.compare.summary.domGapP90Ms)}, sseTextP90=${formatStats(comparison.compare.summary.sseTextEventGapP90Ms)}, sseLag=${formatStats(comparison.compare.summary.sseTextLagOverFixtureScheduleP90Ms)}ms`,
 		`comparison: smoothness ${signed(comparison.comparison.smoothnessDelta)}, domP90Gap ${signed(comparison.comparison.domGapP90DeltaMs)}ms, domLagVsSchedule ${signed(comparison.comparison.domLagOverFixtureScheduleP90DeltaMs)}ms, sseText ${signed(comparison.comparison.sseTextEventDelta)}, sseP90Gap ${signed(comparison.comparison.sseChunkGapP90DeltaMs)}ms, sseTextLagVsSchedule ${signed(comparison.comparison.sseTextLagOverFixtureScheduleP90DeltaMs)}ms`,
 	];
+	if (comparison.primary.summary.selectedLiveEventCountAfterStart.count > 0 || comparison.compare.summary.selectedLiveEventCountAfterStart.count > 0) {
+		lines.push(
+			`primary selected-live: events=${formatStats(comparison.primary.summary.selectedLiveEventCountAfterStart)}, text=${formatStats(comparison.primary.summary.selectedLiveTextEventCountAfterStart)}, reasoning=${formatStats(comparison.primary.summary.selectedLiveReasoningEventCountAfterStart)}, transient=${formatStats(comparison.primary.summary.selectedLiveTransientIdCountAfterStart)}`,
+			`compare selected-live: events=${formatStats(comparison.compare.summary.selectedLiveEventCountAfterStart)}, text=${formatStats(comparison.compare.summary.selectedLiveTextEventCountAfterStart)}, reasoning=${formatStats(comparison.compare.summary.selectedLiveReasoningEventCountAfterStart)}, transient=${formatStats(comparison.compare.summary.selectedLiveTransientIdCountAfterStart)}`,
+			`comparison selected-live: events ${signed(comparison.comparison.selectedLiveEventDelta)}, text ${signed(comparison.comparison.selectedLiveTextEventDelta)}, reasoning ${signed(comparison.comparison.selectedLiveReasoningEventDelta)}`,
+		);
+	}
+	if (comparison.primary.summary.liveEnqueueToExpectedRatio.count > 0 || comparison.compare.summary.liveEnqueueToExpectedRatio.count > 0 || comparison.primary.summary.liveFlushedEventsToExpectedRatio.count > 0 || comparison.compare.summary.liveFlushedEventsToExpectedRatio.count > 0) {
+		lines.push(
+			`primary live ratios: expected=${formatStats(comparison.primary.summary.liveExpectedInputEventCount)}, flushed/expected=${formatStats(comparison.primary.summary.liveFlushedEventsToExpectedRatio)}, overlayEvents/expected=${formatStats(comparison.primary.summary.liveOverlayEventsToExpectedRatio)}, currentText/expected=${formatStats(comparison.primary.summary.liveCurrentOutputToExpectedTextBytesRatio)}, flush/enqueue=${formatStats(comparison.primary.summary.liveFlushToEnqueueRatio)}, overlayUpdates/flushed=${formatStats(comparison.primary.summary.liveOverlayUpdatesToFlushedEventsRatio)}`,
+			`compare live ratios: expected=${formatStats(comparison.compare.summary.liveExpectedInputEventCount)}, flushed/expected=${formatStats(comparison.compare.summary.liveFlushedEventsToExpectedRatio)}, overlayEvents/expected=${formatStats(comparison.compare.summary.liveOverlayEventsToExpectedRatio)}, currentText/expected=${formatStats(comparison.compare.summary.liveCurrentOutputToExpectedTextBytesRatio)}, flush/enqueue=${formatStats(comparison.compare.summary.liveFlushToEnqueueRatio)}, overlayUpdates/flushed=${formatStats(comparison.compare.summary.liveOverlayUpdatesToFlushedEventsRatio)}`,
+			`comparison live ratios: flushed/expected ${signed(comparison.comparison.liveFlushedEventsToExpectedRatioDelta)}, overlayEvents/expected ${signed(comparison.comparison.liveOverlayEventsToExpectedRatioDelta)}, flush/enqueue ${signed(comparison.comparison.liveFlushToEnqueueRatioDelta)}, overlayUpdates/flushed ${signed(comparison.comparison.liveOverlayUpdatesToFlushedEventsRatioDelta)}`,
+		);
+	}
 	if (comparison.negativeProfile) lines.push(`negative profile: ${comparison.negativeProfile}`);
 	if (comparison.regressions.length) {
 		lines.push("", "Regressions:");
