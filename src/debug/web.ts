@@ -125,6 +125,28 @@ type StreamingSmoothnessScore = {
 	firstVisibleMs?: number;
 };
 
+type StreamingBenchmarkEventSourceStreamProbe = {
+	url: string;
+	mode?: string;
+	role: "selected-live" | "room-summary" | "chat-events";
+	piboSessionId?: string;
+	roomId?: string;
+	sinceValues: string[];
+	openCountAfterStart: number;
+	errorCountAfterStart: number;
+	closeCountAfterStart: number;
+	forcedCloseCountAfterStart: number;
+	eventCount: number;
+	eventCountAfterStart: number;
+	textEventCount: number;
+	textEventCountAfterStart: number;
+	transientIdCount: number;
+	uniqueTransientIdCount: number;
+	durableIdCount: number;
+	otherIdCount: number;
+	lastEventId?: string;
+};
+
 type StreamingBenchmarkEventSourceProbe = {
 	requested: boolean;
 	installed: boolean;
@@ -137,7 +159,9 @@ type StreamingBenchmarkEventSourceProbe = {
 	forcedCloseCount: number;
 	forcedCloseCountAfterStart: number;
 	eventCount: number;
+	eventCountAfterStart: number;
 	textEventCount: number;
+	textEventCountAfterStart: number;
 	transientIdCount: number;
 	uniqueTransientIdCount: number;
 	durableIdCount: number;
@@ -147,6 +171,7 @@ type StreamingBenchmarkEventSourceProbe = {
 	lastTransientId?: string;
 	transientIdResetObserved: boolean;
 	reconnectObserved: boolean;
+	streams: StreamingBenchmarkEventSourceStreamProbe[];
 };
 
 type StreamingBenchmark = {
@@ -849,16 +874,20 @@ function summarizeEventSourceProbe(startedAt, requested, forcedReconnectAtMs) {
       forcedCloseCount: 0,
       forcedCloseCountAfterStart: 0,
       eventCount: 0,
+      eventCountAfterStart: 0,
       textEventCount: 0,
+      textEventCountAfterStart: 0,
       transientIdCount: 0,
       uniqueTransientIdCount: 0,
       durableIdCount: 0,
       otherIdCount: 0,
       transientIdResetObserved: false,
       reconnectObserved: false,
+      streams: [],
     };
   }
   const streamEvents = (Array.isArray(probe.events) ? probe.events : []).filter((event) => String(event.url || '').includes('/api/chat/events'));
+  const afterStartStreamEvents = streamEvents.filter((event) => typeof event.t === 'number' && event.t >= startedAt);
   const afterStartConnections = (Array.isArray(probe.connections) ? probe.connections : []).filter((event) => typeof event.t === 'number' && event.t >= startedAt && String(event.url || '').includes('/api/chat/events'));
   const ids = streamEvents.map((event) => event.lastEventId).filter(Boolean);
   const transientIds = ids.filter((id) => /^live:\d+$/.test(id));
@@ -866,6 +895,7 @@ function summarizeEventSourceProbe(startedAt, requested, forcedReconnectAtMs) {
   const otherIds = ids.filter((id) => !/^live:\d+$/.test(id) && !/^\d+:\d+$/.test(id));
   const forcedCloseCountAfterStart = afterStartConnections.filter((event) => event.kind === 'close' && event.forced).length;
   const openCountAfterStart = afterStartConnections.filter((event) => event.kind === 'open').length;
+  const streams = summarizeEventSourceStreams(streamEvents, afterStartConnections, startedAt);
   return {
     requested,
     installed: true,
@@ -878,7 +908,9 @@ function summarizeEventSourceProbe(startedAt, requested, forcedReconnectAtMs) {
     forcedCloseCount: Number(probe.forcedCloseCount || 0),
     forcedCloseCountAfterStart,
     eventCount: streamEvents.length,
+    eventCountAfterStart: afterStartStreamEvents.length,
     textEventCount: streamEvents.filter((event) => event.type === 'TEXT_MESSAGE_CONTENT').length,
+    textEventCountAfterStart: afterStartStreamEvents.filter((event) => event.type === 'TEXT_MESSAGE_CONTENT').length,
     transientIdCount: transientIds.length,
     uniqueTransientIdCount: new Set(transientIds).size,
     durableIdCount: durableIds.length,
@@ -888,7 +920,97 @@ function summarizeEventSourceProbe(startedAt, requested, forcedReconnectAtMs) {
     lastTransientId: transientIds.at(-1),
     transientIdResetObserved: new Set(transientIds).size < transientIds.length,
     reconnectObserved: forcedCloseCountAfterStart > 0 && openCountAfterStart > 0,
+    streams,
   };
+}
+function summarizeEventSourceStreams(streamEvents, afterStartConnections, startedAt) {
+  const groups = new Map();
+  const ensureGroup = (rawUrl) => {
+    const parsed = parseChatEventsProbeUrl(rawUrl);
+    const key = [parsed.role, parsed.piboSessionId || '', parsed.roomId || '', parsed.mode || '', parsed.url].join('|');
+    let group = groups.get(key);
+    if (!group) {
+      group = {
+        url: parsed.url,
+        mode: parsed.mode,
+        role: parsed.role,
+        piboSessionId: parsed.piboSessionId,
+        roomId: parsed.roomId,
+        sinceValues: [],
+        openCountAfterStart: 0,
+        errorCountAfterStart: 0,
+        closeCountAfterStart: 0,
+        forcedCloseCountAfterStart: 0,
+        events: [],
+      };
+      groups.set(key, group);
+    }
+    if (parsed.since && !group.sinceValues.includes(parsed.since)) group.sinceValues.push(parsed.since);
+    return group;
+  };
+  for (const event of streamEvents) ensureGroup(event.url).events.push(event);
+  for (const connection of afterStartConnections) {
+    const group = ensureGroup(connection.url);
+    if (connection.kind === 'open') group.openCountAfterStart += 1;
+    else if (connection.kind === 'error') group.errorCountAfterStart += 1;
+    else if (connection.kind === 'close') {
+      group.closeCountAfterStart += 1;
+      if (connection.forced) group.forcedCloseCountAfterStart += 1;
+    }
+  }
+  return Array.from(groups.values()).map((group) => {
+    const events = group.events;
+    const afterStartEvents = events.filter((event) => typeof event.t === 'number' && event.t >= startedAt);
+    const ids = events.map((event) => event.lastEventId).filter(Boolean);
+    const transientIds = ids.filter((id) => /^live:\d+$/.test(id));
+    const durableIds = ids.filter((id) => /^\d+:\d+$/.test(id));
+    const otherIds = ids.filter((id) => !/^live:\d+$/.test(id) && !/^\d+:\d+$/.test(id));
+    return {
+      url: group.url,
+      mode: group.mode,
+      role: group.role,
+      piboSessionId: group.piboSessionId,
+      roomId: group.roomId,
+      sinceValues: group.sinceValues,
+      openCountAfterStart: group.openCountAfterStart,
+      errorCountAfterStart: group.errorCountAfterStart,
+      closeCountAfterStart: group.closeCountAfterStart,
+      forcedCloseCountAfterStart: group.forcedCloseCountAfterStart,
+      eventCount: events.length,
+      eventCountAfterStart: afterStartEvents.length,
+      textEventCount: events.filter((event) => event.type === 'TEXT_MESSAGE_CONTENT').length,
+      textEventCountAfterStart: afterStartEvents.filter((event) => event.type === 'TEXT_MESSAGE_CONTENT').length,
+      transientIdCount: transientIds.length,
+      uniqueTransientIdCount: new Set(transientIds).size,
+      durableIdCount: durableIds.length,
+      otherIdCount: otherIds.length,
+      lastEventId: ids.at(-1),
+    };
+  }).sort((left, right) => roleSort(left.role) - roleSort(right.role) || left.url.localeCompare(right.url));
+}
+function parseChatEventsProbeUrl(rawUrl) {
+  let parsed;
+  try { parsed = new URL(String(rawUrl || ''), location.href); } catch { parsed = new URL('/api/chat/events', location.href); }
+  const params = parsed.searchParams;
+  const mode = params.get('mode') || undefined;
+  const piboSessionId = params.get('piboSessionId') || undefined;
+  const roomId = params.get('roomId') || undefined;
+  const role = mode === 'summary' || (roomId && !piboSessionId) ? 'room-summary' : (mode === 'live' || piboSessionId ? 'selected-live' : 'chat-events');
+  const withoutResume = new URL(parsed.href);
+  withoutResume.searchParams.delete('since');
+  return {
+    url: withoutResume.pathname + (withoutResume.search ? withoutResume.search : ''),
+    mode,
+    role,
+    piboSessionId,
+    roomId,
+    since: params.get('since') || undefined,
+  };
+}
+function roleSort(role) {
+  if (role === 'selected-live') return 0;
+  if (role === 'room-summary') return 1;
+  return 2;
 }
 function streamingBenchmarkRegressions(result) {
   const failures = [];
@@ -917,6 +1039,9 @@ function streamingBenchmarkRegressions(result) {
     if (result.eventSource.forcedCloseCountAfterStart < 1) failures.push('EventSource forced close was not observed');
     if (result.eventSource.openCountAfterStart < 1) failures.push('EventSource reconnect open was not observed');
     if (result.eventSource.transientIdCount < 1) failures.push('EventSource transient live ids were not observed');
+    const selectedLive = Array.isArray(result.eventSource.streams) ? result.eventSource.streams.find((stream) => stream.role === 'selected-live') : undefined;
+    if (!selectedLive) failures.push('EventSource selected-live stream was not observed');
+    if (selectedLive && expectedDeltas !== undefined && selectedLive.textEventCountAfterStart < expectedDeltas) failures.push('selected-live text events after start ' + selectedLive.textEventCountAfterStart + ' < fixture deltas ' + expectedDeltas);
   }
   if (longTaskMax > 50) failures.push('long task max ' + Math.round(longTaskMax * 1000) / 1000 + 'ms exceeds 50ms');
   return failures;
@@ -1783,7 +1908,12 @@ function formatStreamingBenchmark(benchmark: StreamingBenchmark, target: Browser
 		`longTasks: count=${benchmark.longTasks.count}, max=${benchmark.longTasks.maxMs}ms, total=${benchmark.longTasks.totalMs}ms`,
 	];
 	if (benchmark.fixture) lines.push(`fixture: mode=${benchmark.fixture.mode} profile=${jsonShort(benchmark.fixture.profile)} available=${benchmark.fixture.available} started=${benchmark.fixture.started} deltas=${jsonShort(benchmark.fixture.deltaCount)} cadence=${jsonShort(benchmark.fixture.cadenceMs)}ms session=${jsonShort(benchmark.fixture.piboSessionId)}${benchmark.fixture.error ? ` error=${benchmark.fixture.error}` : ""}`);
-	if (benchmark.eventSource) lines.push(`eventSource: requested=${benchmark.eventSource.requested} installed=${benchmark.eventSource.installed} forcedClose=${benchmark.eventSource.forcedCloseCountAfterStart} reconnectOpen=${benchmark.eventSource.openCountAfterStart} text=${benchmark.eventSource.textEventCount} transient=${benchmark.eventSource.uniqueTransientIdCount}/${benchmark.eventSource.transientIdCount} reset=${benchmark.eventSource.transientIdResetObserved} last=${jsonShort(benchmark.eventSource.lastEventId)} reconnectObserved=${benchmark.eventSource.reconnectObserved}`);
+	if (benchmark.eventSource) {
+		lines.push(`eventSource: requested=${benchmark.eventSource.requested} installed=${benchmark.eventSource.installed} forcedClose=${benchmark.eventSource.forcedCloseCountAfterStart} reconnectOpen=${benchmark.eventSource.openCountAfterStart} text=${benchmark.eventSource.textEventCount} afterStart=${benchmark.eventSource.textEventCountAfterStart} transient=${benchmark.eventSource.uniqueTransientIdCount}/${benchmark.eventSource.transientIdCount} reset=${benchmark.eventSource.transientIdResetObserved} last=${jsonShort(benchmark.eventSource.lastEventId)} reconnectObserved=${benchmark.eventSource.reconnectObserved}`);
+		for (const stream of benchmark.eventSource.streams ?? []) {
+			lines.push(`eventSource stream: role=${stream.role} mode=${jsonShort(stream.mode)} session=${jsonShort(stream.piboSessionId)} room=${jsonShort(stream.roomId)} text=${stream.textEventCount} afterStart=${stream.textEventCountAfterStart} events=${stream.eventCount} opens=${stream.openCountAfterStart} forcedClose=${stream.forcedCloseCountAfterStart} transient=${stream.uniqueTransientIdCount}/${stream.transientIdCount} since=${jsonShort(stream.sinceValues.join(","))} url=${stream.url}`);
+		}
+	}
 	if (benchmark.regressions.length) {
 		lines.push("", "Regressions:");
 		for (const regression of benchmark.regressions) lines.push(`- ${regression}`);
