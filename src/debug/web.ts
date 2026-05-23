@@ -83,6 +83,64 @@ type WebWatch = {
 	action?: { requested: string; performed: boolean; error?: string };
 };
 
+type NumberStats = {
+	count: number;
+	min?: number;
+	p50?: number;
+	p90?: number;
+	p99?: number;
+	max?: number;
+	avg?: number;
+};
+
+type StreamingDebugCounters = Record<string, unknown> & {
+	eventCount?: number;
+	textDeltaCount?: number;
+	textDeltaBytes?: number;
+	enqueueCount?: number;
+	flushCount?: number;
+	overlayUpdateCount?: number;
+	overlayEventCount?: number;
+	traceRefreshCompletedCount?: number;
+	traceRefreshFailedCount?: number;
+	currentOutputLength?: number;
+	traceBaseOutputLength?: number;
+	lastDurableCursor?: string;
+	lastTransientLiveId?: string;
+};
+
+type StreamingBenchmark = {
+	kind: "streaming-benchmark";
+	createdAt: string;
+	url: string;
+	title: string;
+	durationMs: number;
+	debug: {
+		enabledRequested: boolean;
+		available: boolean;
+		reset: boolean;
+		before?: StreamingDebugCounters;
+		after?: StreamingDebugCounters;
+		delta?: Record<string, number>;
+	};
+	dom: {
+		selector: string;
+		targetCountStart: number;
+		targetCountEnd: number;
+		lengthStart: number;
+		lengthEnd: number;
+		updateCount: number;
+		positiveUpdateCount: number;
+		firstPositiveUpdateMs?: number;
+		lastPositiveUpdateMs?: number;
+		gapsMs: NumberStats;
+		positiveCharJumps: NumberStats;
+	};
+	raf: { count: number; gapsMs: NumberStats };
+	longTasks: { count: number; totalMs: number; maxMs: number };
+	warnings: string[];
+};
+
 export async function runDebugWeb(args: string[]): Promise<void> {
 	if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
 		printWebDiscovery();
@@ -173,10 +231,12 @@ function printScenarioHelp(): void {
 
 Usage:
   pibo debug web scenario new-session [--manual|--act] [--duration ms] [--json] [--artifact]
+  pibo debug web scenario streaming-benchmark [--duration ms] [--json] [--artifact]
 
-Default:
-  --manual waits while you click New Session yourself.
-  --act clicks the discovered New Session button after the watcher starts.
+Defaults:
+  new-session --manual waits while you click New Session yourself.
+  new-session --act clicks the discovered New Session button after the watcher starts.
+  streaming-benchmark enables debugStreaming for future events, observes assistant DOM increments, and snapshots window.__piboStreamingDebug.
 `);
 }
 
@@ -308,10 +368,20 @@ async function runScenario(options: WebOptions): Promise<void> {
 		throw new Error(`Unexpected pibo debug web scenario argument "${options.positionals[1]}". Run pibo debug web scenario --help.`);
 	}
 	if (options.act && options.manual) throw new Error("Use either --manual or --act, not both.");
-	if (scenario !== "new-session") throw new Error(`Unknown pibo debug web scenario "${scenario}". Run pibo debug web scenario --help.`);
+	if (scenario !== "new-session" && scenario !== "streaming-benchmark") throw new Error(`Unknown pibo debug web scenario "${scenario}". Run pibo debug web scenario --help.`);
+	if (scenario === "streaming-benchmark" && (options.act || options.manual)) throw new Error("streaming-benchmark does not support --act or --manual. Start or observe the stream separately, then run the scenario.");
 	const durationMs = parseDuration(options.duration);
 	const { client, target } = await connectTarget({ ...options, preset: "app" });
 	try {
+		if (scenario === "streaming-benchmark") {
+			const benchmark = await runStreamingBenchmark(client, durationMs);
+			if (options.json) console.log(JSON.stringify({ target: compactTarget(target), scenario, benchmark }, null, 2));
+			else console.log(limitStdout(formatStreamingBenchmark(benchmark, target)));
+			const artifact = await writeArtifact(`scenario-${scenario}`, benchmark);
+			if (!options.json) console.log(`Artifact: ${artifact}`);
+			return;
+		}
+
 		const watch = await runBrowserWatch(client, presetScope("app"), durationMs, {
 			...options,
 			act: options.act,
@@ -382,6 +452,10 @@ async function runBrowserWatch(client: CdpClient, scope: string, durationMs: num
 	return client.evaluate<WebWatch>(expression, durationMs + 10_000);
 }
 
+async function runStreamingBenchmark(client: CdpClient, durationMs: number): Promise<StreamingBenchmark> {
+	return client.evaluate<StreamingBenchmark>(buildStreamingBenchmarkExpression(durationMs), durationMs + 10_000);
+}
+
 function buildSnapshotExpression(options: { scope: string; maxNodes: number; maxDepth: number; textLimit: number; includeText: boolean; includeLayout: boolean }): string {
 	return `(() => {
   const options = ${JSON.stringify(options)};
@@ -396,6 +470,179 @@ function buildWatchExpression(options: { scope: string; durationMs: number; maxN
   ${browserSnapshotLibrary()}
   return await runWatch(options);
 })()`;
+}
+
+function buildStreamingBenchmarkExpression(durationMs: number): string {
+	return `(async () => {
+  const options = ${JSON.stringify({ durationMs })};
+  ${browserStreamingBenchmarkLibrary()}
+  return await runStreamingBenchmark(options);
+})()`;
+}
+
+function browserStreamingBenchmarkLibrary(): string {
+	return String.raw`
+const ASSISTANT_SELECTOR = '[data-pibo-component="MarkdownRendererHost"][data-pibo-markdown-kind="assistant-message"]';
+function nowIso() { return new Date().toISOString(); }
+function cloneDebugSnapshot(value) {
+  if (!value || typeof value !== 'object') return undefined;
+  try { return JSON.parse(JSON.stringify(value)); } catch { return undefined; }
+}
+function numericDelta(before, after, keys) {
+  const delta = {};
+  for (const key of keys) {
+    const left = before && typeof before[key] === 'number' ? before[key] : 0;
+    const right = after && typeof after[key] === 'number' ? after[key] : 0;
+    delta[key] = right - left;
+  }
+  return delta;
+}
+function stats(values) {
+  const nums = values.filter((value) => Number.isFinite(value)).slice().sort((a, b) => a - b);
+  if (!nums.length) return { count: 0 };
+  const pick = (q) => nums[Math.min(nums.length - 1, Math.max(0, Math.floor((nums.length - 1) * q)))];
+  const avg = nums.reduce((sum, value) => sum + value, 0) / nums.length;
+  return {
+    count: nums.length,
+    min: Math.round(nums[0] * 1000) / 1000,
+    p50: Math.round(pick(0.50) * 1000) / 1000,
+    p90: Math.round(pick(0.90) * 1000) / 1000,
+    p99: Math.round(pick(0.99) * 1000) / 1000,
+    max: Math.round(nums[nums.length - 1] * 1000) / 1000,
+    avg: Math.round(avg * 1000) / 1000,
+  };
+}
+function assistantTargets() {
+  return Array.from(document.querySelectorAll(ASSISTANT_SELECTOR));
+}
+function selectedAssistantText() {
+  const targets = assistantTargets();
+  const target = targets[targets.length - 1];
+  return target ? (target.innerText || target.textContent || '') : '';
+}
+async function runStreamingBenchmark(options) {
+  const startedAt = performance.now();
+  const warnings = [];
+  let reset = false;
+  try { localStorage.setItem('pibo.chat.debugStreaming', '1'); } catch (error) { warnings.push('failed to set debugStreaming localStorage: ' + String(error)); }
+  if (typeof window.__piboStreamingDebugReset === 'function') {
+    try { window.__piboStreamingDebugReset(); reset = true; } catch (error) { warnings.push('failed to reset __piboStreamingDebug: ' + String(error)); }
+  }
+
+  const debugBefore = cloneDebugSnapshot(window.__piboStreamingDebug);
+  const initialText = selectedAssistantText();
+  const targetCountStart = assistantTargets().length;
+  const updates = [];
+  const positiveJumps = [];
+  let currentLength = initialText.length;
+  let lastPositiveAt;
+  let firstPositiveUpdateMs;
+  const sample = () => {
+    const text = selectedAssistantText();
+    const length = text.length;
+    if (length === currentLength) return;
+    const t = performance.now() - startedAt;
+    const delta = length - currentLength;
+    updates.push({ t, length, delta });
+    if (delta > 0) {
+      positiveJumps.push(delta);
+      firstPositiveUpdateMs ??= t;
+      lastPositiveAt = t;
+    }
+    currentLength = length;
+  };
+  const observer = new MutationObserver(sample);
+  observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+
+  const rafGaps = [];
+  let rafCount = 0;
+  let lastRaf;
+  let rafHandle;
+  const onRaf = (t) => {
+    rafCount += 1;
+    if (lastRaf !== undefined) rafGaps.push(t - lastRaf);
+    lastRaf = t;
+    rafHandle = requestAnimationFrame(onRaf);
+  };
+  rafHandle = requestAnimationFrame(onRaf);
+
+  const longTasks = [];
+  let perfObserver;
+  if (typeof PerformanceObserver !== 'undefined') {
+    try {
+      perfObserver = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) longTasks.push(entry.duration || 0);
+      });
+      perfObserver.observe({ entryTypes: ['longtask'] });
+    } catch {
+      warnings.push('longtask PerformanceObserver unavailable');
+    }
+  } else {
+    warnings.push('PerformanceObserver unavailable');
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, options.durationMs));
+  sample();
+  observer.disconnect();
+  if (rafHandle !== undefined) cancelAnimationFrame(rafHandle);
+  try { perfObserver && perfObserver.disconnect(); } catch {}
+
+  const debugAfter = cloneDebugSnapshot(window.__piboStreamingDebug);
+  if (!debugAfter) warnings.push('window.__piboStreamingDebug was absent; run with ?debugStreaming=1 or start a fresh stream after this command enables localStorage');
+  const positiveUpdates = updates.filter((update) => update.delta > 0);
+  const positiveGaps = [];
+  for (let i = 1; i < positiveUpdates.length; i++) positiveGaps.push(positiveUpdates[i].t - positiveUpdates[i - 1].t);
+  return {
+    kind: 'streaming-benchmark',
+    createdAt: nowIso(),
+    url: location.href,
+    title: document.title,
+    durationMs: options.durationMs,
+    debug: {
+      enabledRequested: true,
+      available: Boolean(debugAfter),
+      reset,
+      before: debugBefore,
+      after: debugAfter,
+      delta: numericDelta(debugBefore, debugAfter, [
+        'eventCount',
+        'textDeltaCount',
+        'textDeltaBytes',
+        'reasoningDeltaCount',
+        'reasoningDeltaBytes',
+        'enqueueCount',
+        'flushCount',
+        'flushedEventCount',
+        'overlayUpdateCount',
+        'traceRefreshStartedCount',
+        'traceRefreshCompletedCount',
+        'traceRefreshFailedCount',
+        'traceBaseUpdateCount',
+      ]),
+    },
+    dom: {
+      selector: ASSISTANT_SELECTOR,
+      targetCountStart,
+      targetCountEnd: assistantTargets().length,
+      lengthStart: initialText.length,
+      lengthEnd: currentLength,
+      updateCount: updates.length,
+      positiveUpdateCount: positiveUpdates.length,
+      firstPositiveUpdateMs: firstPositiveUpdateMs === undefined ? undefined : Math.round(firstPositiveUpdateMs),
+      lastPositiveUpdateMs: lastPositiveAt === undefined ? undefined : Math.round(lastPositiveAt),
+      gapsMs: stats(positiveGaps),
+      positiveCharJumps: stats(positiveJumps),
+    },
+    raf: { count: rafCount, gapsMs: stats(rafGaps) },
+    longTasks: {
+      count: longTasks.length,
+      totalMs: Math.round(longTasks.reduce((sum, value) => sum + value, 0) * 1000) / 1000,
+      maxMs: Math.round((longTasks.length ? Math.max(...longTasks) : 0) * 1000) / 1000,
+    },
+    warnings,
+  };
+}
+`;
 }
 
 function browserSnapshotLibrary(): string {
@@ -897,6 +1144,38 @@ function formatWatchEvent(event: WatchEvent): string {
 
 function hasSnapshotDiff(diff: ReturnType<typeof diffSnapshots>): boolean {
 	return Boolean(diff.added.length || diff.removed.length || diff.changed.length);
+}
+
+function formatStreamingBenchmark(benchmark: StreamingBenchmark, target: BrowserUseCdpTarget | { id: string; url: string; title: string }): string {
+	const debugDelta: Record<string, number> = benchmark.debug.delta ?? {};
+	const debugAfter: StreamingDebugCounters = benchmark.debug.after ?? {};
+	const lines = [
+		`# Web Streaming Benchmark, ${(benchmark.durationMs / 1000).toFixed(1)}s`,
+		`# target: ${target.id} ${target.url || benchmark.url}`,
+		`debug: available=${benchmark.debug.available} reset=${benchmark.debug.reset}`,
+		`events: text=${numberField(debugDelta, "textDeltaCount")} (${numberField(debugDelta, "textDeltaBytes")} bytes), reasoning=${numberField(debugDelta, "reasoningDeltaCount")}, enqueue=${numberField(debugDelta, "enqueueCount")}, flush=${numberField(debugDelta, "flushCount")}, overlayUpdates=${numberField(debugDelta, "overlayUpdateCount")}`,
+		`state: overlayEvents=${jsonShort(debugAfter.overlayEventCount)} currentOutput=${jsonShort(debugAfter.currentOutputLength)} traceBase=${jsonShort(debugAfter.traceBaseOutputLength)} durable=${jsonShort(debugAfter.lastDurableCursor)} transient=${jsonShort(debugAfter.lastTransientLiveId)}`,
+		`dom: targets=${benchmark.dom.targetCountStart}->${benchmark.dom.targetCountEnd}, length=${benchmark.dom.lengthStart}->${benchmark.dom.lengthEnd}, updates=${benchmark.dom.updateCount}, positive=${benchmark.dom.positiveUpdateCount}, firstPositive=${jsonShort(benchmark.dom.firstPositiveUpdateMs)}ms`,
+		`dom gaps: ${formatStats(benchmark.dom.gapsMs)}`,
+		`dom jumps: ${formatStats(benchmark.dom.positiveCharJumps)} chars`,
+		`raf: count=${benchmark.raf.count}, gaps=${formatStats(benchmark.raf.gapsMs)}`,
+		`longTasks: count=${benchmark.longTasks.count}, max=${benchmark.longTasks.maxMs}ms, total=${benchmark.longTasks.totalMs}ms`,
+	];
+	if (benchmark.warnings.length) {
+		lines.push("", "Warnings:");
+		for (const warning of benchmark.warnings) lines.push(`- ${warning}`);
+	}
+	return lines.join("\n");
+}
+
+function numberField(record: Record<string, unknown>, key: string): number {
+	const value = record[key];
+	return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function formatStats(stats: NumberStats): string {
+	if (!stats.count) return "count=0";
+	return `count=${stats.count}, p50=${stats.p50}, p90=${stats.p90}, p99=${stats.p99}, max=${stats.max}, avg=${stats.avg}`;
 }
 
 function formatCompactSnapshotDelta(diff: ReturnType<typeof diffSnapshots>, limit = 8): string[] {

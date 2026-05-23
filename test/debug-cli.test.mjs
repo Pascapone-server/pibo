@@ -36,6 +36,17 @@ test("pibo debug web watch rejects action flags", async () => {
 	);
 });
 
+test("pibo debug web streaming benchmark rejects action flags before target discovery", async () => {
+	await assert.rejects(
+		execFileAsync("node", [cliPath, "debug", "web", "scenario", "streaming-benchmark", "--act"]),
+		(error) => {
+			assert.match(error.stderr, /streaming-benchmark does not support --act or --manual/);
+			assert.doesNotMatch(error.stderr, /No attachable CDP target/);
+			return true;
+		},
+	);
+});
+
 test("web render flicker detection does not match a removal to an earlier add", () => {
 	const opt = makeWatchNode("session-row:opt", { "data-pibo-session-id": "opt" });
 	const real = makeWatchNode("session-row:real", { "data-pibo-session-id": "real" });

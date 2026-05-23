@@ -1,0 +1,98 @@
+{
+  "kind": "streaming-benchmark",
+  "createdAt": "2026-05-22T23:58:35.696Z",
+  "url": "data:text/html,<html><title>Streaming Fixture</title><body data-pibo-debug=\"chat-app\"><div data-pibo-component=\"MarkdownRendererHost\" data-pibo-markdown-kind=\"assistant-message\">hello</div><script>window.__piboStreamingDebug={eventCount:1,textDeltaCount:1,textDeltaBytes:5,enqueueCount:1,flushCount:1,overlayUpdateCount:1,overlayEventCount:1,currentOutputLength:5,lastTransientLiveId:\"live:0\"};window.__piboStreamingDebugReset=function(){window.__piboStreamingDebug={eventCount:0,textDeltaCount:0,textDeltaBytes:0,enqueueCount:0,flushCount:0,overlayUpdateCount:0,overlayEventCount:0,currentOutputLength:5,lastTransientLiveId:\"live:0\"};return window.__piboStreamingDebug};let i=0; const id=setInterval(()=>{i++;document.querySelector(\"[data-pibo-component=MarkdownRendererHost]\").textContent+=\" \"+i; window.__piboStreamingDebug.textDeltaCount+=1; window.__piboStreamingDebug.textDeltaBytes+=2; window.__piboStreamingDebug.enqueueCount+=1; window.__piboStreamingDebug.flushCount+=1; window.__piboStreamingDebug.overlayUpdateCount+=1; window.__piboStreamingDebug.overlayEventCount=i; window.__piboStreamingDebug.currentOutputLength=document.querySelector(\"[data-pibo-component=MarkdownRendererHost]\").textContent.length; window.__piboStreamingDebug.lastTransientLiveId=\"live:\"+i; if(i>=8) clearInterval(id);},200);</script></body></html>",
+  "title": "Streaming Fixture",
+  "durationMs": 1200,
+  "debug": {
+    "enabledRequested": true,
+    "available": true,
+    "reset": true,
+    "before": {
+      "eventCount": 0,
+      "textDeltaCount": 0,
+      "textDeltaBytes": 0,
+      "enqueueCount": 0,
+      "flushCount": 0,
+      "overlayUpdateCount": 0,
+      "overlayEventCount": 0,
+      "currentOutputLength": 5,
+      "lastTransientLiveId": "live:0"
+    },
+    "after": {
+      "eventCount": 0,
+      "textDeltaCount": 6,
+      "textDeltaBytes": 12,
+      "enqueueCount": 6,
+      "flushCount": 6,
+      "overlayUpdateCount": 6,
+      "overlayEventCount": 7,
+      "currentOutputLength": 19,
+      "lastTransientLiveId": "live:7"
+    },
+    "delta": {
+      "eventCount": 0,
+      "textDeltaCount": 6,
+      "textDeltaBytes": 12,
+      "reasoningDeltaCount": 0,
+      "reasoningDeltaBytes": 0,
+      "enqueueCount": 6,
+      "flushCount": 6,
+      "flushedEventCount": 0,
+      "overlayUpdateCount": 6,
+      "traceRefreshStartedCount": 0,
+      "traceRefreshCompletedCount": 0,
+      "traceRefreshFailedCount": 0,
+      "traceBaseUpdateCount": 0
+    }
+  },
+  "dom": {
+    "selector": "[data-pibo-component=\"MarkdownRendererHost\"][data-pibo-markdown-kind=\"assistant-message\"]",
+    "targetCountStart": 1,
+    "targetCountEnd": 1,
+    "lengthStart": 7,
+    "lengthEnd": 19,
+    "updateCount": 6,
+    "positiveUpdateCount": 6,
+    "firstPositiveUpdateMs": 9,
+    "lastPositiveUpdateMs": 1009,
+    "gapsMs": {
+      "count": 5,
+      "min": 199.9,
+      "p50": 200,
+      "p90": 200,
+      "p99": 200,
+      "max": 200.1,
+      "avg": 200
+    },
+    "positiveCharJumps": {
+      "count": 6,
+      "min": 2,
+      "p50": 2,
+      "p90": 2,
+      "p99": 2,
+      "max": 2,
+      "avg": 2
+    }
+  },
+  "raf": {
+    "count": 73,
+    "gapsMs": {
+      "count": 72,
+      "min": 16.5,
+      "p50": 16.7,
+      "p90": 16.7,
+      "p99": 16.8,
+      "max": 16.8,
+      "avg": 16.665
+    }
+  },
+  "longTasks": {
+    "count": 0,
+    "totalMs": 0,
+    "maxMs": 0
+  },
+  "warnings": [
+    "failed to set debugStreaming localStorage: SecurityError: Failed to read the 'localStorage' property from 'Window': Storage is disabled inside 'data:' URLs."
+  ]
+}
