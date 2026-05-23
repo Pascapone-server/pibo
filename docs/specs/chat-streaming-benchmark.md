@@ -149,7 +149,7 @@ Collected from `window.__piboStreamingDebug` when `?debugStreaming=1` or local s
 - current output and trace base output lengths;
 - trace refresh count/duration;
 - first text, enqueue, flush, and overlay-update latency;
-- preservation ratios normalized by fixture/provider/debug expected input.
+- preservation ratios split by denominator: enqueue/flushed frames normalized to expected stream frames, overlay/current text normalized to expected text and reasoning input.
 
 ### DOM
 
