@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { PiboDataStore } from "../dist/data/pibo-store.js";
 import { PiboReliabilityStore } from "../dist/reliability/store.js";
-import { attachStreamingProviderTelemetryToBenchmark, collectStreamingProviderTelemetryFromSelectedBrowserSession, collectStreamingProviderTelemetryFromSession, collectStreamingProviderTelemetryFromTurn, evaluateStreamingBenchmarkAssertion, evaluateStreamingBenchmarkUrlComparisonRegressions, evaluateStreamingLivePipelineRegressions, evaluateStreamingProviderRegressions, formatWatch, inferWatchFlickers, resolveStreamingBenchmarkHostedCompareUrlFromValues, summarizeStreamingBenchmarks, summarizeStreamingLivePipeline, summarizeStreamingProviderPreservation, summarizeStreamingProviderTelemetry } from "../dist/debug/web.js";
+import { attachStreamingProviderTelemetryToBenchmark, collectStreamingProviderTelemetryFromSelectedBrowserSession, collectStreamingProviderTelemetryFromSession, collectStreamingProviderTelemetryFromTurn, evaluateStreamingBenchmarkAssertion, evaluateStreamingBenchmarkUrlComparisonRegressions, evaluateStreamingLivePipelineRegressions, evaluateStreamingProviderRegressions, formatStreamingBenchmarkAssertionSummary, formatWatch, inferWatchFlickers, resolveStreamingBenchmarkHostedCompareUrlFromValues, summarizeStreamingBenchmarks, summarizeStreamingLivePipeline, summarizeStreamingProviderPreservation, summarizeStreamingProviderTelemetry } from "../dist/debug/web.js";
 
 const execFileAsyncRaw = promisify(execFile);
 const cliPath = resolve("dist/bin/pibo.js");
@@ -81,6 +81,17 @@ test("streaming benchmark assertion fails on unexpected or missing expected regr
 	assert.equal(assertion.passed, false);
 	assert.deepEqual(assertion.unexpectedRegressions, ["fixture did not start"]);
 	assert.deepEqual(assertion.missingExpectedRegressionPatterns, ["DOM max jump"]);
+});
+
+test("streaming benchmark assertion summary reports matched expected regressions", () => {
+	const assertion = evaluateStreamingBenchmarkAssertion(
+		[
+			"positive DOM updates 3 < 10",
+			"fixture did not start",
+		],
+		["positive DOM updates", "DOM max jump"],
+	);
+	assert.equal(formatStreamingBenchmarkAssertionSummary(assertion), "expected regressions: passed=false matched=1/2 expected=1 unexpected=1 missing=1");
 });
 
 test("streaming hosted compare URL resolution prefers env and supports optional absence", () => {

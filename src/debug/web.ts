@@ -390,6 +390,7 @@ type StreamingBenchmark = {
 	cadence?: StreamingBenchmarkCadence;
 	livePipeline?: StreamingBenchmarkLivePipeline;
 	providerPreservation?: StreamingBenchmarkProviderPreservation;
+	negativeProfile?: StreamingNegativeProfile;
 	score: StreamingSmoothnessScore;
 	regressions: string[];
 	warnings: string[];
@@ -525,6 +526,7 @@ type StreamingBenchmarkGroup = {
 	createdAt: string;
 	durationMs: number;
 	runs: StreamingBenchmark[];
+	negativeProfile?: StreamingNegativeProfile;
 	summary: StreamingBenchmarkSummary;
 	comparison?: StreamingBenchmarkComparison;
 	regressions: string[];
@@ -819,7 +821,7 @@ async function runScenario(options: WebOptions): Promise<void> {
 		if (scenario === "streaming-benchmark") {
 			const baseline = streamingOptions.from ? await readStreamingBenchmarkRuns(streamingOptions.from) : undefined;
 			const providerTelemetryRequested = providerTelemetryModes.length > 0;
-			const runOptions = { startFixture: streamingOptions.fixture, startBackendFixture: streamingOptions.backendFixture, fixtureProfile, fixtureMix, simulateReconnect: streamingOptions.simulateReconnect, simulateTraceCatchup: streamingOptions.simulateTraceCatchup, simulateOverlayDrop: streamingOptions.simulateOverlayDrop };
+			const runOptions = { startFixture: streamingOptions.fixture, startBackendFixture: streamingOptions.backendFixture, fixtureProfile, fixtureMix, simulateReconnect: streamingOptions.simulateReconnect, simulateTraceCatchup: streamingOptions.simulateTraceCatchup, simulateOverlayDrop: streamingOptions.simulateOverlayDrop, negativeProfile };
 			const primaryUrl = await currentBrowserUrl(client);
 			const rawBenchmarks = await runStreamingBenchmarkSeries(client, runs, durationMs, runOptions);
 			const primaryProviderTelemetry = providerTelemetryRequested ? await collectStreamingProviderTelemetryForOptions(streamingOptions, client) : undefined;
@@ -918,7 +920,7 @@ async function runBrowserWatch(client: CdpClient, scope: string, durationMs: num
 	return client.evaluate<WebWatch>(expression, durationMs + 10_000);
 }
 
-type RunStreamingBenchmarkOptions = { startFixture?: boolean; startBackendFixture?: boolean; fixtureProfile?: StreamingFixtureProfile; fixtureMix?: StreamingFixtureMix; simulateReconnect?: boolean; simulateTraceCatchup?: boolean; simulateOverlayDrop?: boolean; providerTelemetry?: StreamingBenchmarkProviderTelemetry };
+type RunStreamingBenchmarkOptions = { startFixture?: boolean; startBackendFixture?: boolean; fixtureProfile?: StreamingFixtureProfile; fixtureMix?: StreamingFixtureMix; simulateReconnect?: boolean; simulateTraceCatchup?: boolean; simulateOverlayDrop?: boolean; negativeProfile?: StreamingNegativeProfile; providerTelemetry?: StreamingBenchmarkProviderTelemetry };
 
 async function runStreamingBenchmarkSeries(client: CdpClient, runs: number, durationMs: number, options: RunStreamingBenchmarkOptions): Promise<StreamingBenchmark[]> {
 	if (options.startFixture) await navigateStreamingBenchmarkFixture(client, options.fixtureProfile ?? "steady", options.fixtureMix ?? "text");
@@ -935,7 +937,7 @@ async function runStreamingBenchmark(client: CdpClient, durationMs: number, opti
 	const withProvider = { ...benchmark, provider: options.providerTelemetry };
 	const scored = { ...withProvider, score: scoreStreamingBenchmark(withProvider), providerPreservation: summarizeStreamingProviderPreservation(withProvider) };
 	const withLivePipeline = { ...scored, livePipeline: summarizeStreamingLivePipeline(scored) };
-	const withCadence = { ...withLivePipeline, cadence: summarizeStreamingCadence(withLivePipeline) };
+	const withCadence = { ...withLivePipeline, cadence: summarizeStreamingCadence(withLivePipeline), negativeProfile: options.negativeProfile };
 	return { ...withCadence, regressions: [...withCadence.regressions, ...evaluateStreamingLivePipelineRegressions(withCadence), ...evaluateStreamingProviderRegressions(withCadence)] };
 }
 
@@ -2940,6 +2942,11 @@ function ratioToProvider(numerator: number | undefined, denominator: number | un
 	return round3(numerator / denominator);
 }
 
+function commonStreamingNegativeProfile(runs: readonly StreamingBenchmark[]): StreamingNegativeProfile | undefined {
+	const profile = runs[0]?.negativeProfile;
+	return profile && runs.every((run) => run.negativeProfile === profile) ? profile : undefined;
+}
+
 function summarizeStreamingBenchmarkGroup(runs: StreamingBenchmark[], baselineRuns?: StreamingBenchmark[]): StreamingBenchmarkGroup {
 	const summary = summarizeStreamingBenchmarks(runs);
 	return {
@@ -2947,6 +2954,7 @@ function summarizeStreamingBenchmarkGroup(runs: StreamingBenchmark[], baselineRu
 		createdAt: new Date().toISOString(),
 		durationMs: runs[0]?.durationMs ?? 0,
 		runs,
+		negativeProfile: commonStreamingNegativeProfile(runs),
 		summary,
 		comparison: baselineRuns?.length ? compareStreamingBenchmarkSummaries(summarizeStreamingBenchmarks(baselineRuns), summary) : undefined,
 		regressions: runs.flatMap((run, index) => run.regressions.map((regression) => `run ${index + 1}: ${regression}`)),
@@ -3087,6 +3095,11 @@ export function evaluateStreamingBenchmarkAssertion(regressions: readonly string
 		missingExpectedRegressionPatterns,
 		passed: unexpectedRegressions.length === 0 && missingExpectedRegressionPatterns.length === 0,
 	};
+}
+
+export function formatStreamingBenchmarkAssertionSummary(assertion: StreamingBenchmarkAssertion): string {
+	const matchedPatternCount = assertion.expectedRegressionPatterns.length - assertion.missingExpectedRegressionPatterns.length;
+	return `expected regressions: passed=${assertion.passed} matched=${matchedPatternCount}/${assertion.expectedRegressionPatterns.length} expected=${assertion.expectedRegressions.length} unexpected=${assertion.unexpectedRegressions.length} missing=${assertion.missingExpectedRegressionPatterns.length}`;
 }
 
 function formatStreamingBenchmarkAssertionError(assertion: StreamingBenchmarkAssertion): string {
@@ -3311,6 +3324,7 @@ function formatStreamingBenchmark(benchmark: StreamingBenchmark, target: Browser
 		`raf: count=${benchmark.raf.count}, gaps=${formatStats(benchmark.raf.gapsMs)}`,
 		`longTasks: count=${benchmark.longTasks.count}, max=${benchmark.longTasks.maxMs}ms, total=${benchmark.longTasks.totalMs}ms`,
 	];
+	if (benchmark.negativeProfile) lines.push(`negative profile: ${benchmark.negativeProfile}`);
 	if (benchmark.fixture) lines.push(`fixture: mode=${benchmark.fixture.mode} profile=${jsonShort(benchmark.fixture.profile)} mix=${jsonShort(benchmark.fixture.mix)} simulation=${jsonShort(benchmark.fixture.simulation)} available=${benchmark.fixture.available} started=${benchmark.fixture.started} deltas=${jsonShort(benchmark.fixture.deltaCount)} reasoningDeltas=${jsonShort(benchmark.fixture.reasoningDeltaCount)} cadence=${jsonShort(benchmark.fixture.cadenceMs)}ms scheduleGaps=${benchmark.fixture.scheduleGapsMs ? formatStats(benchmark.fixture.scheduleGapsMs) : "count=0"} session=${jsonShort(benchmark.fixture.piboSessionId)}${benchmark.fixture.error ? ` error=${benchmark.fixture.error}` : ""}`);
 	if (benchmark.cadence) lines.push(`cadence: scheduleP90=${benchmark.cadence.fixtureScheduleGapP90Ms}ms, domP90=${jsonShort(benchmark.cadence.domGapP90Ms)}ms (lag=${jsonShort(benchmark.cadence.domLagOverScheduleP90Ms)}ms ratio=${jsonShort(benchmark.cadence.domToScheduleP90Ratio)}), sseTextP90=${jsonShort(benchmark.cadence.sseTextGapP90Ms)}ms (lag=${jsonShort(benchmark.cadence.sseTextLagOverScheduleP90Ms)}ms ratio=${jsonShort(benchmark.cadence.sseTextToScheduleP90Ratio)})`);
 	if (benchmark.provider) lines.push(`provider: requested=${benchmark.provider.requested} available=${benchmark.provider.available} id=${benchmark.provider.providerRequestId} model=${jsonShort(benchmark.provider.model)} status=${jsonShort(benchmark.provider.status)} text=${benchmark.provider.textDeltaCount} reasoning=${benchmark.provider.reasoningDeltaCount} textBytes=${formatStats(benchmark.provider.textDeltaBytes)} textGaps=${formatStats(benchmark.provider.textDeltaGapsMs)} firstText=${jsonShort(benchmark.provider.firstTextLatencyMs)}ms parseErrors=${jsonShort(benchmark.provider.parseErrorCount)} unknown=${jsonShort(benchmark.provider.unknownEventCount)} pages=${benchmark.provider.eventPageCount} truncated=${benchmark.provider.truncated}${benchmark.provider.error ? ` error=${benchmark.provider.error}` : ""}`);
@@ -3329,7 +3343,7 @@ function formatStreamingBenchmark(benchmark: StreamingBenchmark, target: Browser
 		for (const regression of benchmark.regressions) lines.push(`- ${regression}`);
 	}
 	if (benchmark.assertion) {
-		lines.push("", `Expected regression assertion: passed=${benchmark.assertion.passed} expected=${benchmark.assertion.expectedRegressions.length} unexpected=${benchmark.assertion.unexpectedRegressions.length} missing=${benchmark.assertion.missingExpectedRegressionPatterns.length}`);
+		lines.push("", formatStreamingBenchmarkAssertionSummary(benchmark.assertion));
 		for (const pattern of benchmark.assertion.missingExpectedRegressionPatterns) lines.push(`- missing expected: ${pattern}`);
 	}
 	if (benchmark.warnings.length) {
@@ -3349,6 +3363,7 @@ function formatStreamingBenchmarkGroup(group: StreamingBenchmarkGroup, target: B
 		`dom jumps p90=${formatStats(group.summary.domJumpP90Chars)}, max=${formatStats(group.summary.domJumpMaxChars)} chars`,
 		`firstVisible=${formatStats(group.summary.firstVisibleMs)}, longTaskMax=${formatStats(group.summary.longTaskMaxMs)}`,
 	];
+	if (group.negativeProfile) lines.push(`negative profile: ${group.negativeProfile}`);
 	if (group.summary.fixtureScheduleGapP90Ms.count > 0) lines.push(`fixture: scheduleGapP90=${formatStats(group.summary.fixtureScheduleGapP90Ms)}`);
 	if (group.summary.domLagOverFixtureScheduleP90Ms.count > 0 || group.summary.sseTextLagOverFixtureScheduleP90Ms.count > 0) lines.push(`cadence lag: domP90-scheduleP90=${formatStats(group.summary.domLagOverFixtureScheduleP90Ms)}ms, sseTextP90-scheduleP90=${formatStats(group.summary.sseTextLagOverFixtureScheduleP90Ms)}ms, domRatio=${formatStats(group.summary.domToFixtureScheduleP90Ratio)}, sseRatio=${formatStats(group.summary.sseTextToFixtureScheduleP90Ratio)}`);
 	if (group.summary.debugEnqueueCount.count > 0 || group.summary.debugFlushCount.count > 0 || group.summary.debugOverlayUpdateCount.count > 0) lines.push(`live pipeline: enqueue=${formatStats(group.summary.debugEnqueueCount)}, flush=${formatStats(group.summary.debugFlushCount)}, flushedEvents=${formatStats(group.summary.debugFlushedEventCount)}, overlayUpdates=${formatStats(group.summary.debugOverlayUpdateCount)}, overlayEvents=${formatStats(group.summary.debugOverlayEventCount)}, currentOutput=${formatStats(group.summary.debugCurrentOutputLength)}, traceBase=${formatStats(group.summary.debugTraceBaseOutputLength)}`);
@@ -3376,7 +3391,7 @@ function formatStreamingBenchmarkGroup(group: StreamingBenchmarkGroup, target: B
 		for (const regression of group.regressions) lines.push(`- ${regression}`);
 	}
 	if (group.assertion) {
-		lines.push("", `Expected regression assertion: passed=${group.assertion.passed} expected=${group.assertion.expectedRegressions.length} unexpected=${group.assertion.unexpectedRegressions.length} missing=${group.assertion.missingExpectedRegressionPatterns.length}`);
+		lines.push("", formatStreamingBenchmarkAssertionSummary(group.assertion));
 		for (const pattern of group.assertion.missingExpectedRegressionPatterns) lines.push(`- missing expected: ${pattern}`);
 	}
 	if (group.warnings.length) {
@@ -3400,7 +3415,7 @@ function formatStreamingBenchmarkUrlComparison(comparison: StreamingBenchmarkUrl
 		lines.push("", "Regressions:");
 		for (const regression of comparison.regressions) lines.push(`- ${regression}`);
 	}
-	if (comparison.assertion) lines.push("", `Expected regression assertion: passed=${comparison.assertion.passed} expected=${comparison.assertion.expectedRegressions.length} unexpected=${comparison.assertion.unexpectedRegressions.length} missing=${comparison.assertion.missingExpectedRegressionPatterns.length}`);
+	if (comparison.assertion) lines.push("", formatStreamingBenchmarkAssertionSummary(comparison.assertion));
 	if (comparison.warnings.length) {
 		lines.push("", "Warnings:");
 		for (const warning of comparison.warnings) lines.push(`- ${warning}`);
