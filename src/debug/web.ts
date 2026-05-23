@@ -148,6 +148,8 @@ type StreamingBenchmarkEventSourceStreamProbe = {
 	reasoningEventCountAfterStart: number;
 	transientIdCount: number;
 	uniqueTransientIdCount: number;
+	transientIdCountAfterStart: number;
+	uniqueTransientIdCountAfterStart: number;
 	durableIdCount: number;
 	otherIdCount: number;
 	lastEventId?: string;
@@ -172,6 +174,8 @@ type StreamingBenchmarkEventSourceProbe = {
 	reasoningEventCountAfterStart: number;
 	transientIdCount: number;
 	uniqueTransientIdCount: number;
+	transientIdCountAfterStart: number;
+	uniqueTransientIdCountAfterStart: number;
 	durableIdCount: number;
 	otherIdCount: number;
 	lastEventId?: string;
@@ -271,6 +275,20 @@ type StreamingBenchmarkSummary = {
 	traceMaxAssistantOutputLength: NumberStats;
 	traceFinalAssistantOutputLength: NumberStats;
 	traceDurableEventDelta: NumberStats;
+	eventSourceTextEventCountAfterStart: NumberStats;
+	eventSourceReasoningEventCountAfterStart: NumberStats;
+	eventSourceForcedCloseCountAfterStart: NumberStats;
+	eventSourceReconnectOpenCountAfterStart: NumberStats;
+	eventSourceTransientIdCountAfterStart: NumberStats;
+	selectedLiveTextEventCountAfterStart: NumberStats;
+	selectedLiveReasoningEventCountAfterStart: NumberStats;
+	selectedLiveEventCountAfterStart: NumberStats;
+	selectedLiveForcedCloseCountAfterStart: NumberStats;
+	selectedLiveReconnectOpenCountAfterStart: NumberStats;
+	selectedLiveTransientIdCountAfterStart: NumberStats;
+	roomSummaryEventCountAfterStart: NumberStats;
+	roomSummaryTextEventCountAfterStart: NumberStats;
+	roomSummaryReasoningEventCountAfterStart: NumberStats;
 };
 
 type StreamingBenchmarkComparison = {
@@ -284,6 +302,11 @@ type StreamingBenchmarkComparison = {
 	traceLiveVersionCountDelta?: number;
 	traceMaxAssistantOutputDelta?: number;
 	traceDurableEventDeltaDelta?: number;
+	eventSourceTextEventDelta?: number;
+	eventSourceReasoningEventDelta?: number;
+	selectedLiveTextEventDelta?: number;
+	selectedLiveReasoningEventDelta?: number;
+	selectedLiveEventDelta?: number;
 };
 
 type StreamingBenchmarkGroup = {
@@ -394,7 +417,7 @@ Defaults:
   new-session --act clicks the discovered New Session button after the watcher starts.
   streaming-benchmark enables debugStreaming for future events, observes assistant DOM increments, and snapshots window.__piboStreamingDebug.
   streaming-benchmark --fixture navigates the target to a deterministic in-browser stream fixture before measuring.
-  streaming-benchmark --backend-fixture posts to /api/chat/debug/streaming-fixture so the real app consumes deterministic /api/chat/events frames.
+  streaming-benchmark --backend-fixture posts to /api/chat/debug/streaming-fixture and records EventSource metrics while the real app consumes deterministic /api/chat/events frames.
   streaming-benchmark --fixture-profile selects steady cadence, deterministic jitter, or bursty fixture timing.
   streaming-benchmark --fixture-mix includes text-only or mixed reasoning/text deltas.
   streaming-benchmark --simulate-reconnect reloads the app with an EventSource probe, forces one live stream close, and verifies reconnect/transient ids.
@@ -548,10 +571,7 @@ async function runScenario(options: WebOptions): Promise<void> {
 	try {
 		if (scenario === "streaming-benchmark") {
 			if (options.fixture) await navigateStreamingBenchmarkFixture(client, fixtureProfile, fixtureMix);
-			if (options.backendFixture) {
-				if (options.simulateReconnect || options.simulateTraceCatchup) await prepareStreamingBenchmarkEventSourceProbe(client);
-				else await enableStreamingDebugForCurrentApp(client);
-			}
+			if (options.backendFixture) await prepareStreamingBenchmarkEventSourceProbe(client);
 			const benchmarks: StreamingBenchmark[] = [];
 			for (let run = 0; run < runs; run++) {
 				benchmarks.push(await runStreamingBenchmark(client, durationMs, { startFixture: options.fixture, startBackendFixture: options.backendFixture, fixtureProfile, fixtureMix, simulateReconnect: options.simulateReconnect, simulateTraceCatchup: options.simulateTraceCatchup }));
@@ -1060,6 +1080,8 @@ function summarizeEventSourceProbe(startedAt, requested, forcedReconnectAtMs, te
       reasoningEventCountAfterStart: 0,
       transientIdCount: 0,
       uniqueTransientIdCount: 0,
+      transientIdCountAfterStart: 0,
+      uniqueTransientIdCountAfterStart: 0,
       durableIdCount: 0,
       otherIdCount: 0,
       transientIdResetObserved: false,
@@ -1075,7 +1097,9 @@ function summarizeEventSourceProbe(startedAt, requested, forcedReconnectAtMs, te
   const afterStartStreamEvents = streamEvents.filter((event) => typeof event.t === 'number' && event.t >= startedAt);
   const afterStartConnections = (Array.isArray(probe.connections) ? probe.connections : []).filter((event) => typeof event.t === 'number' && event.t >= startedAt && String(event.url || '').includes('/api/chat/events'));
   const ids = streamEvents.map((event) => event.lastEventId).filter(Boolean);
+  const afterStartIds = afterStartStreamEvents.map((event) => event.lastEventId).filter(Boolean);
   const transientIds = ids.filter((id) => /^live:\d+$/.test(id));
+  const afterStartTransientIds = afterStartIds.filter((id) => /^live:\d+$/.test(id));
   const durableIds = ids.filter((id) => /^\d+:\d+$/.test(id));
   const otherIds = ids.filter((id) => !/^live:\d+$/.test(id) && !/^\d+:\d+$/.test(id));
   const forcedCloseCountAfterStart = afterStartConnections.filter((event) => event.kind === 'close' && event.forced).length;
@@ -1100,6 +1124,8 @@ function summarizeEventSourceProbe(startedAt, requested, forcedReconnectAtMs, te
     reasoningEventCountAfterStart: afterStartStreamEvents.filter((event) => event.type === 'REASONING_MESSAGE_CONTENT').length,
     transientIdCount: transientIds.length,
     uniqueTransientIdCount: new Set(transientIds).size,
+    transientIdCountAfterStart: afterStartTransientIds.length,
+    uniqueTransientIdCountAfterStart: new Set(afterStartTransientIds).size,
     durableIdCount: durableIds.length,
     otherIdCount: otherIds.length,
     lastEventId: ids.at(-1),
@@ -1153,7 +1179,9 @@ function summarizeEventSourceStreams(streamEvents, afterStartConnections, starte
     const events = group.events;
     const afterStartEvents = events.filter((event) => typeof event.t === 'number' && event.t >= startedAt);
     const ids = events.map((event) => event.lastEventId).filter(Boolean);
+    const afterStartIds = afterStartEvents.map((event) => event.lastEventId).filter(Boolean);
     const transientIds = ids.filter((id) => /^live:\d+$/.test(id));
+    const afterStartTransientIds = afterStartIds.filter((id) => /^live:\d+$/.test(id));
     const durableIds = ids.filter((id) => /^\d+:\d+$/.test(id));
     const otherIds = ids.filter((id) => !/^live:\d+$/.test(id) && !/^\d+:\d+$/.test(id));
     return {
@@ -1175,6 +1203,8 @@ function summarizeEventSourceStreams(streamEvents, afterStartConnections, starte
       reasoningEventCountAfterStart: afterStartEvents.filter((event) => event.type === 'REASONING_MESSAGE_CONTENT').length,
       transientIdCount: transientIds.length,
       uniqueTransientIdCount: new Set(transientIds).size,
+      transientIdCountAfterStart: afterStartTransientIds.length,
+      uniqueTransientIdCountAfterStart: new Set(afterStartTransientIds).size,
       durableIdCount: durableIds.length,
       otherIdCount: otherIds.length,
       lastEventId: ids.at(-1),
@@ -1219,6 +1249,7 @@ function streamingBenchmarkRegressions(result) {
   const firstPositiveMs = typeof result.dom.firstPositiveUpdateMs === 'number' ? result.dom.firstPositiveUpdateMs : undefined;
   const longTaskMax = result.longTasks.length ? Math.max(...result.longTasks) : 0;
   const traceCatchupRequested = Boolean(result.eventSource && result.eventSource.textDropRequested);
+  const reconnectRequested = Boolean(result.eventSource && typeof result.eventSource.forcedReconnectAtMs === 'number');
   if (!result.debugAfter) failures.push('debug counters unavailable');
   if (fixture) {
     if (!fixture.available) failures.push('fixture unavailable');
@@ -1253,9 +1284,9 @@ function streamingBenchmarkRegressions(result) {
     if (traceCatchupRequested) {
       if (selectedLive && selectedLive.textEventCountAfterStart > Math.max(1, (expectedDeltas || 0) - 2)) failures.push('trace catch-up selected-live text was not suppressed');
     } else {
-      if (result.eventSource.forcedCloseCountAfterStart < 1) failures.push('EventSource forced close was not observed');
-      if (result.eventSource.openCountAfterStart < 1) failures.push('EventSource reconnect open was not observed');
-      if (result.eventSource.transientIdCount < 1) failures.push('EventSource transient live ids were not observed');
+      if (reconnectRequested && result.eventSource.forcedCloseCountAfterStart < 1) failures.push('EventSource forced close was not observed');
+      if (reconnectRequested && result.eventSource.openCountAfterStart < 1) failures.push('EventSource reconnect open was not observed');
+      if (result.eventSource.transientIdCountAfterStart < 1) failures.push('EventSource transient live ids were not observed');
     }
   }
   if (longTaskMax > 50) failures.push('long task max ' + Math.round(longTaskMax * 1000) / 1000 + 'ms exceeds 50ms');
@@ -1265,9 +1296,7 @@ function assistantTargets() {
   return Array.from(document.querySelectorAll(ASSISTANT_SELECTOR));
 }
 function selectedAssistantText() {
-  const targets = assistantTargets();
-  const target = targets[targets.length - 1];
-  return target ? (target.innerText || target.textContent || '') : '';
+  return assistantTargets().map((target) => target.innerText || target.textContent || '').join('\n');
 }
 async function runStreamingBenchmark(options) {
   const startedAt = performance.now();
@@ -1434,7 +1463,7 @@ async function runStreamingBenchmark(options) {
     piboSessionId: fixtureConfig && typeof fixtureConfig.piboSessionId === 'string' ? fixtureConfig.piboSessionId : undefined,
     error: backendFixtureError,
   } : undefined;
-  const eventSourceSummary = summarizeEventSourceProbe(startedAt, Boolean(options.simulateReconnect || options.simulateTraceCatchup), options.reconnectAtMs, Boolean(options.simulateTraceCatchup), options.traceCatchupDropMs);
+  const eventSourceSummary = summarizeEventSourceProbe(startedAt, Boolean(options.startBackendFixture), options.reconnectAtMs, Boolean(options.simulateTraceCatchup), options.traceCatchupDropMs);
   const traceSummary = traceProbe && traceProbe.result;
   const regressions = streamingBenchmarkRegressions({
     debugAfter,
@@ -2086,6 +2115,20 @@ function summarizeStreamingBenchmarks(runs: StreamingBenchmark[]): StreamingBenc
 		traceMaxAssistantOutputLength: numericStats(runs.map((run) => run.trace?.maxAssistantOutputLength)),
 		traceFinalAssistantOutputLength: numericStats(runs.map((run) => run.trace?.finalAssistantOutputLength)),
 		traceDurableEventDelta: numericStats(runs.map((run) => traceDurableEventDelta(run.trace))),
+		eventSourceTextEventCountAfterStart: numericStats(runs.map((run) => run.eventSource?.textEventCountAfterStart)),
+		eventSourceReasoningEventCountAfterStart: numericStats(runs.map((run) => run.eventSource?.reasoningEventCountAfterStart)),
+		eventSourceForcedCloseCountAfterStart: numericStats(runs.map((run) => run.eventSource?.forcedCloseCountAfterStart)),
+		eventSourceReconnectOpenCountAfterStart: numericStats(runs.map((run) => run.eventSource?.openCountAfterStart)),
+		eventSourceTransientIdCountAfterStart: numericStats(runs.map((run) => run.eventSource?.transientIdCountAfterStart)),
+		selectedLiveTextEventCountAfterStart: numericStats(runs.map((run) => selectedLiveStream(run)?.textEventCountAfterStart)),
+		selectedLiveReasoningEventCountAfterStart: numericStats(runs.map((run) => selectedLiveStream(run)?.reasoningEventCountAfterStart)),
+		selectedLiveEventCountAfterStart: numericStats(runs.map((run) => selectedLiveStream(run)?.eventCountAfterStart)),
+		selectedLiveForcedCloseCountAfterStart: numericStats(runs.map((run) => selectedLiveStream(run)?.forcedCloseCountAfterStart)),
+		selectedLiveReconnectOpenCountAfterStart: numericStats(runs.map((run) => selectedLiveStream(run)?.openCountAfterStart)),
+		selectedLiveTransientIdCountAfterStart: numericStats(runs.map((run) => selectedLiveStream(run)?.transientIdCountAfterStart)),
+		roomSummaryEventCountAfterStart: numericStats(runs.map((run) => roomSummaryStream(run)?.eventCountAfterStart)),
+		roomSummaryTextEventCountAfterStart: numericStats(runs.map((run) => roomSummaryStream(run)?.textEventCountAfterStart)),
+		roomSummaryReasoningEventCountAfterStart: numericStats(runs.map((run) => roomSummaryStream(run)?.reasoningEventCountAfterStart)),
 	};
 }
 
@@ -2101,7 +2144,20 @@ function compareStreamingBenchmarkSummaries(baseline: StreamingBenchmarkSummary,
 		traceLiveVersionCountDelta: statDelta(current.traceLiveVersionCount, baseline.traceLiveVersionCount),
 		traceMaxAssistantOutputDelta: statDelta(current.traceMaxAssistantOutputLength, baseline.traceMaxAssistantOutputLength),
 		traceDurableEventDeltaDelta: statDelta(current.traceDurableEventDelta, baseline.traceDurableEventDelta),
+		eventSourceTextEventDelta: statDelta(current.eventSourceTextEventCountAfterStart, baseline.eventSourceTextEventCountAfterStart),
+		eventSourceReasoningEventDelta: statDelta(current.eventSourceReasoningEventCountAfterStart, baseline.eventSourceReasoningEventCountAfterStart),
+		selectedLiveTextEventDelta: statDelta(current.selectedLiveTextEventCountAfterStart, baseline.selectedLiveTextEventCountAfterStart),
+		selectedLiveReasoningEventDelta: statDelta(current.selectedLiveReasoningEventCountAfterStart, baseline.selectedLiveReasoningEventCountAfterStart),
+		selectedLiveEventDelta: statDelta(current.selectedLiveEventCountAfterStart, baseline.selectedLiveEventCountAfterStart),
 	};
+}
+
+function selectedLiveStream(run: StreamingBenchmark): StreamingBenchmarkEventSourceStreamProbe | undefined {
+	return run.eventSource?.streams.find((stream) => stream.role === "selected-live");
+}
+
+function roomSummaryStream(run: StreamingBenchmark): StreamingBenchmarkEventSourceStreamProbe | undefined {
+	return run.eventSource?.streams.find((stream) => stream.role === "room-summary");
 }
 
 function traceDurableEventDelta(trace: StreamingBenchmarkTraceProbe | undefined): number | undefined {
@@ -2174,9 +2230,9 @@ function formatStreamingBenchmark(benchmark: StreamingBenchmark, target: Browser
 	];
 	if (benchmark.fixture) lines.push(`fixture: mode=${benchmark.fixture.mode} profile=${jsonShort(benchmark.fixture.profile)} mix=${jsonShort(benchmark.fixture.mix)} simulation=${jsonShort(benchmark.fixture.simulation)} available=${benchmark.fixture.available} started=${benchmark.fixture.started} deltas=${jsonShort(benchmark.fixture.deltaCount)} reasoningDeltas=${jsonShort(benchmark.fixture.reasoningDeltaCount)} cadence=${jsonShort(benchmark.fixture.cadenceMs)}ms session=${jsonShort(benchmark.fixture.piboSessionId)}${benchmark.fixture.error ? ` error=${benchmark.fixture.error}` : ""}`);
 	if (benchmark.eventSource) {
-		lines.push(`eventSource: requested=${benchmark.eventSource.requested} installed=${benchmark.eventSource.installed} forcedClose=${benchmark.eventSource.forcedCloseCountAfterStart} reconnectOpen=${benchmark.eventSource.openCountAfterStart} text=${benchmark.eventSource.textEventCount} afterStart=${benchmark.eventSource.textEventCountAfterStart} reasoning=${benchmark.eventSource.reasoningEventCount} reasoningAfterStart=${benchmark.eventSource.reasoningEventCountAfterStart} transient=${benchmark.eventSource.uniqueTransientIdCount}/${benchmark.eventSource.transientIdCount} reset=${benchmark.eventSource.transientIdResetObserved} droppedText=${benchmark.eventSource.textDropTextEventCount} last=${jsonShort(benchmark.eventSource.lastEventId)} reconnectObserved=${benchmark.eventSource.reconnectObserved}`);
+		lines.push(`eventSource: requested=${benchmark.eventSource.requested} installed=${benchmark.eventSource.installed} forcedClose=${benchmark.eventSource.forcedCloseCountAfterStart} reconnectOpen=${benchmark.eventSource.openCountAfterStart} text=${benchmark.eventSource.textEventCount} afterStart=${benchmark.eventSource.textEventCountAfterStart} reasoning=${benchmark.eventSource.reasoningEventCount} reasoningAfterStart=${benchmark.eventSource.reasoningEventCountAfterStart} transient=${benchmark.eventSource.uniqueTransientIdCountAfterStart}/${benchmark.eventSource.transientIdCountAfterStart} reset=${benchmark.eventSource.transientIdResetObserved} droppedText=${benchmark.eventSource.textDropTextEventCount} last=${jsonShort(benchmark.eventSource.lastEventId)} reconnectObserved=${benchmark.eventSource.reconnectObserved}`);
 		for (const stream of benchmark.eventSource.streams ?? []) {
-			lines.push(`eventSource stream: role=${stream.role} mode=${jsonShort(stream.mode)} session=${jsonShort(stream.piboSessionId)} room=${jsonShort(stream.roomId)} text=${stream.textEventCount} afterStart=${stream.textEventCountAfterStart} reasoning=${stream.reasoningEventCount} reasoningAfterStart=${stream.reasoningEventCountAfterStart} events=${stream.eventCount} opens=${stream.openCountAfterStart} forcedClose=${stream.forcedCloseCountAfterStart} transient=${stream.uniqueTransientIdCount}/${stream.transientIdCount} since=${jsonShort(stream.sinceValues.join(","))} url=${stream.url}`);
+			lines.push(`eventSource stream: role=${stream.role} mode=${jsonShort(stream.mode)} session=${jsonShort(stream.piboSessionId)} room=${jsonShort(stream.roomId)} text=${stream.textEventCount} afterStart=${stream.textEventCountAfterStart} reasoning=${stream.reasoningEventCount} reasoningAfterStart=${stream.reasoningEventCountAfterStart} events=${stream.eventCount} opens=${stream.openCountAfterStart} forcedClose=${stream.forcedCloseCountAfterStart} transient=${stream.uniqueTransientIdCountAfterStart}/${stream.transientIdCountAfterStart} since=${jsonShort(stream.sinceValues.join(","))} url=${stream.url}`);
 		}
 	}
 	if (benchmark.trace) lines.push(`trace: requested=${benchmark.trace.requested} samples=${benchmark.trace.sampleCount} fetches=${benchmark.trace.fetchCount} failed=${benchmark.trace.failedFetchCount} liveVersions=${benchmark.trace.liveVersionCount} firstLive=${jsonShort(benchmark.trace.firstLiveVersionMs)}ms assistantMax=${benchmark.trace.maxAssistantOutputLength} assistantFinal=${jsonShort(benchmark.trace.finalAssistantOutputLength)} durableEvents=${jsonShort(benchmark.trace.durableEventCountStart)}->${jsonShort(benchmark.trace.durableEventCountEnd)} session=${jsonShort(benchmark.trace.piboSessionId)}`);
@@ -2201,10 +2257,14 @@ function formatStreamingBenchmarkGroup(group: StreamingBenchmarkGroup, target: B
 		`dom jumps p90=${formatStats(group.summary.domJumpP90Chars)}, max=${formatStats(group.summary.domJumpMaxChars)} chars`,
 		`firstVisible=${formatStats(group.summary.firstVisibleMs)}, longTaskMax=${formatStats(group.summary.longTaskMaxMs)}`,
 	];
+	if (group.summary.eventSourceTextEventCountAfterStart.count > 0 || group.summary.eventSourceReasoningEventCountAfterStart.count > 0) lines.push(`eventSource: textAfterStart=${formatStats(group.summary.eventSourceTextEventCountAfterStart)}, reasoningAfterStart=${formatStats(group.summary.eventSourceReasoningEventCountAfterStart)}, forcedClose=${formatStats(group.summary.eventSourceForcedCloseCountAfterStart)}, reconnectOpen=${formatStats(group.summary.eventSourceReconnectOpenCountAfterStart)}, transient=${formatStats(group.summary.eventSourceTransientIdCountAfterStart)}`);
+	if (group.summary.selectedLiveEventCountAfterStart.count > 0) lines.push(`selected-live: eventsAfterStart=${formatStats(group.summary.selectedLiveEventCountAfterStart)}, textAfterStart=${formatStats(group.summary.selectedLiveTextEventCountAfterStart)}, reasoningAfterStart=${formatStats(group.summary.selectedLiveReasoningEventCountAfterStart)}, forcedClose=${formatStats(group.summary.selectedLiveForcedCloseCountAfterStart)}, reconnectOpen=${formatStats(group.summary.selectedLiveReconnectOpenCountAfterStart)}, transient=${formatStats(group.summary.selectedLiveTransientIdCountAfterStart)}`);
+	if (group.summary.roomSummaryEventCountAfterStart.count > 0) lines.push(`room-summary: eventsAfterStart=${formatStats(group.summary.roomSummaryEventCountAfterStart)}, textAfterStart=${formatStats(group.summary.roomSummaryTextEventCountAfterStart)}, reasoningAfterStart=${formatStats(group.summary.roomSummaryReasoningEventCountAfterStart)}`);
 	if (group.summary.traceSampleCount.count > 0) lines.push(`trace: samples=${formatStats(group.summary.traceSampleCount)}, liveVersions=${formatStats(group.summary.traceLiveVersionCount)}, firstLive=${formatStats(group.summary.traceFirstLiveVersionMs)}ms, assistantMax=${formatStats(group.summary.traceMaxAssistantOutputLength)}, assistantFinal=${formatStats(group.summary.traceFinalAssistantOutputLength)}, durableEventDelta=${formatStats(group.summary.traceDurableEventDelta)}`);
 	if (group.comparison) {
 		let comparison = `comparison vs baseline (${group.comparison.baselineRuns} runs): smoothness ${signed(group.comparison.smoothnessDelta)}, domP90Gap ${signed(group.comparison.domGapP90DeltaMs)}ms, domPositive ${signed(group.comparison.domPositiveUpdateDelta)}, maxJump ${signed(group.comparison.domJumpMaxDeltaChars)} chars, longTaskMax ${signed(group.comparison.longTaskMaxDeltaMs)}ms`;
 		if (group.summary.traceSampleCount.count > 0 || group.comparison.traceLiveVersionCountDelta !== undefined || group.comparison.traceMaxAssistantOutputDelta !== undefined || group.comparison.traceDurableEventDeltaDelta !== undefined) comparison += `, traceLiveVersions ${signed(group.comparison.traceLiveVersionCountDelta)}, traceAssistantMax ${signed(group.comparison.traceMaxAssistantOutputDelta)}, traceDurableEventDelta ${signed(group.comparison.traceDurableEventDeltaDelta)}`;
+		if (group.summary.eventSourceTextEventCountAfterStart.count > 0 || group.summary.selectedLiveEventCountAfterStart.count > 0 || group.comparison.eventSourceTextEventDelta !== undefined || group.comparison.selectedLiveTextEventDelta !== undefined) comparison += `, eventSourceText ${signed(group.comparison.eventSourceTextEventDelta)}, eventSourceReasoning ${signed(group.comparison.eventSourceReasoningEventDelta)}, selectedLiveEvents ${signed(group.comparison.selectedLiveEventDelta)}, selectedLiveText ${signed(group.comparison.selectedLiveTextEventDelta)}, selectedLiveReasoning ${signed(group.comparison.selectedLiveReasoningEventDelta)}`;
 		lines.push(comparison);
 	}
 	if (group.regressions.length) {
