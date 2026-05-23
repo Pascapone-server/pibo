@@ -3231,6 +3231,7 @@ function SessionTracePane({
 	const pendingStreamEventsBySession = useRef(new Map<string, ChatStreamEvent[]>());
 	const pendingStreamFrame = useRef<number | undefined>(undefined);
 	const pendingStreamTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+	const firstLiveContentFlushKeysBySession = useRef(new Map<string, Set<string>>());
 	const liveEventSeqRef = useRef(0);
 	const latestLiveStreamIdBySession = useRef(new Map<string, number>());
 	const selectedLiveStreamRef = useRef<SelectedLiveEventStream | null>(null);
@@ -3509,11 +3510,13 @@ function SessionTracePane({
 	}, [flushPendingStreamEvents, selectedPiboSessionId]);
 
 	const enqueueStreamEvent = useCallback((piboSessionId: string, event: ChatStreamEvent, flushImmediately = false) => {
+		resetLiveContentFlushTracking(firstLiveContentFlushKeysBySession.current, piboSessionId, event);
+		const shouldFlushImmediately = flushImmediately || consumeFirstLiveContentFlush(firstLiveContentFlushKeysBySession.current, piboSessionId, event);
 		const pending = pendingStreamEventsBySession.current.get(piboSessionId) ?? [];
 		pending.push(event);
 		pendingStreamEventsBySession.current.set(piboSessionId, pending);
-		recordStreamingDebugEnqueue(piboSessionId, event, pending.length, flushImmediately);
-		if (flushImmediately || piboSessionId !== selectedPiboSessionId) {
+		recordStreamingDebugEnqueue(piboSessionId, event, pending.length, shouldFlushImmediately);
+		if (shouldFlushImmediately || piboSessionId !== selectedPiboSessionId) {
 			flushPendingStreamEvents(piboSessionId);
 		} else {
 			schedulePendingStreamFlush();
@@ -9624,6 +9627,38 @@ function eventShouldRefreshNavigation(event: ChatStreamEvent): boolean {
 	return event.type === "RUN_STARTED" || event.type === "RUN_FINISHED" || event.type === "RUN_ERROR" || event.type === "TEXT_MESSAGE_END";
 }
 
+function resetLiveContentFlushTracking(keysBySession: Map<string, Set<string>>, piboSessionId: string, event: ChatStreamEvent): void {
+	if (event.type === "RUN_STARTED" || event.type === "RUN_FINISHED" || event.type === "RUN_ERROR") {
+		keysBySession.delete(piboSessionId);
+		return;
+	}
+	const startedKey = liveContentFlushKeyForStartedEvent(event);
+	if (startedKey) keysBySession.get(piboSessionId)?.delete(startedKey);
+}
+
+function consumeFirstLiveContentFlush(keysBySession: Map<string, Set<string>>, piboSessionId: string, event: ChatStreamEvent): boolean {
+	const key = liveContentFlushKey(event);
+	if (!key) return false;
+	let keys = keysBySession.get(piboSessionId);
+	if (!keys) {
+		keys = new Set<string>();
+		keysBySession.set(piboSessionId, keys);
+	}
+	if (keys.has(key)) return false;
+	keys.add(key);
+	return true;
+}
+
+function liveContentFlushKey(event: ChatStreamEvent): string | undefined {
+	if (event.type === "TEXT_MESSAGE_CONTENT" || event.type === "REASONING_MESSAGE_CONTENT") return `${event.type}:${event.messageId}`;
+	return undefined;
+}
+
+function liveContentFlushKeyForStartedEvent(event: ChatStreamEvent): string | undefined {
+	if (event.type === "TEXT_MESSAGE_START") return `TEXT_MESSAGE_CONTENT:${event.messageId}`;
+	if (event.type === "REASONING_MESSAGE_START") return `REASONING_MESSAGE_CONTENT:${event.messageId}`;
+	return undefined;
+}
 
 function compactRawEvents(events: RawEvent[]): CompactRawEvent[] {
 	const compacted: CompactRawEvent[] = [];
