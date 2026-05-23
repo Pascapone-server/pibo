@@ -34,6 +34,8 @@ export type StreamingDebugSnapshot = {
 	markdownRenderCount: number;
 	markdownRenderPlainCount: number;
 	markdownRenderFullCount: number;
+	markdownRenderCommonMarkCount: number;
+	markdownRenderGfmCount: number;
 	markdownRenderDurationMsTotal: number;
 	markdownRenderDurationMsLast?: number;
 	markdownRenderDurationMsMax?: number;
@@ -41,6 +43,10 @@ export type StreamingDebugSnapshot = {
 	markdownRenderPlainDurationMsMax?: number;
 	markdownRenderFullDurationMsTotal: number;
 	markdownRenderFullDurationMsMax?: number;
+	markdownRenderCommonMarkDurationMsTotal: number;
+	markdownRenderCommonMarkDurationMsMax?: number;
+	markdownRenderGfmDurationMsTotal: number;
+	markdownRenderGfmDurationMsMax?: number;
 	traceRefreshScheduledCount: number;
 	traceRefreshStartedCount: number;
 	traceRefreshCompletedCount: number;
@@ -172,7 +178,7 @@ export function recordStreamingDebugLiveTraceCompute(piboSessionId: string, dura
 	});
 }
 
-export function recordStreamingDebugMarkdownRender(mode: "plain" | "full", durationMs: number): void {
+export function recordStreamingDebugMarkdownRender(mode: "plain" | "commonmark" | "gfm", durationMs: number): void {
 	updateStreamingDebugSnapshot((snapshot) => {
 		const roundedDurationMs = roundDebugDurationMs(durationMs);
 		snapshot.markdownRenderCount += 1;
@@ -187,6 +193,15 @@ export function recordStreamingDebugMarkdownRender(mode: "plain" | "full", durat
 			snapshot.markdownRenderFullCount += 1;
 			snapshot.markdownRenderFullDurationMsTotal += roundedDurationMs;
 			snapshot.markdownRenderFullDurationMsMax = Math.max(snapshot.markdownRenderFullDurationMsMax ?? 0, roundedDurationMs);
+			if (mode === "gfm") {
+				snapshot.markdownRenderGfmCount += 1;
+				snapshot.markdownRenderGfmDurationMsTotal += roundedDurationMs;
+				snapshot.markdownRenderGfmDurationMsMax = Math.max(snapshot.markdownRenderGfmDurationMsMax ?? 0, roundedDurationMs);
+			} else {
+				snapshot.markdownRenderCommonMarkCount += 1;
+				snapshot.markdownRenderCommonMarkDurationMsTotal += roundedDurationMs;
+				snapshot.markdownRenderCommonMarkDurationMsMax = Math.max(snapshot.markdownRenderCommonMarkDurationMsMax ?? 0, roundedDurationMs);
+			}
 		}
 	});
 }
@@ -301,9 +316,13 @@ function createStreamingDebugSnapshot(): StreamingDebugSnapshot {
 		markdownRenderCount: 0,
 		markdownRenderPlainCount: 0,
 		markdownRenderFullCount: 0,
+		markdownRenderCommonMarkCount: 0,
+		markdownRenderGfmCount: 0,
 		markdownRenderDurationMsTotal: 0,
 		markdownRenderPlainDurationMsTotal: 0,
 		markdownRenderFullDurationMsTotal: 0,
+		markdownRenderCommonMarkDurationMsTotal: 0,
+		markdownRenderGfmDurationMsTotal: 0,
 		traceRefreshScheduledCount: 0,
 		traceRefreshStartedCount: 0,
 		traceRefreshCompletedCount: 0,

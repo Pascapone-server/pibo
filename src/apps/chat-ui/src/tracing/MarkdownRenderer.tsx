@@ -144,7 +144,7 @@ function languageFromClassName(className?: string): string | undefined {
 	return language;
 }
 
-function recordMarkdownRenderIfEnabled(mode: "plain" | "full", startedAt: number | undefined): void {
+function recordMarkdownRenderIfEnabled(mode: "plain" | "commonmark" | "gfm", startedAt: number | undefined): void {
 	if (startedAt === undefined) return;
 	const endedAt = typeof performance === "undefined" ? Date.now() : performance.now();
 	recordStreamingDebugMarkdownRender(mode, endedAt - startedAt);
@@ -167,18 +167,20 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ children }: Mar
 	const startedAt = isStreamingDebugEnabled()
 		? (typeof performance === "undefined" ? Date.now() : performance.now())
 		: undefined;
-	let mode: "plain" | "full" = "full";
+	let mode: "plain" | "commonmark" | "gfm" = "commonmark";
 	let element: ReactElement;
 	if (isPlainMarkdownText(children)) {
 		mode = "plain";
 		element = <p data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="p">{children}</p>;
 	} else {
+		const useGfm = requiresGfmMarkdown(children);
+		mode = useGfm ? "gfm" : "commonmark";
 		// ReactMarkdown is a synchronous parser/render function; call it directly so debug timings include its parse/tree-build work.
 		element = ReactMarkdown({
 			allowedElements,
 			children,
 			components,
-			remarkPlugins: requiresGfmMarkdown(children) ? gfmRemarkPlugins : commonMarkRemarkPlugins,
+			remarkPlugins: useGfm ? gfmRemarkPlugins : commonMarkRemarkPlugins,
 			skipHtml: true,
 			urlTransform: safeUrlTransform,
 		});
