@@ -93,6 +93,7 @@ import {
 	recordStreamingDebugTraceRefreshScheduled,
 	recordStreamingDebugTraceRefreshStart,
 	recordStreamingDebugTraceState,
+	shouldDropStreamingBenchmarkOverlayEvent,
 } from "./streamingDebug";
 
 type Area = "sessions" | "projects" | "workflows" | "cron" | "ralph" | "agents" | "context" | "settings";
@@ -3649,6 +3650,7 @@ function SessionTracePane({
 			if (liveStream?.events === events) liveStream.lastActivityAt = Date.now();
 			recordLatestLiveStreamId(targetPiboSessionId, event);
 			recordStreamingDebugStreamEvent(targetPiboSessionId, event, message.lastEventId, events.readyState);
+			if (shouldDropStreamingBenchmarkOverlayEvent(event)) return;
 			const flushImmediately = event.type !== "TEXT_MESSAGE_CONTENT" && event.type !== "REASONING_MESSAGE_CONTENT";
 			if (targetPiboSessionId === selectedPiboSessionId) {
 				enqueueStreamEvent(targetPiboSessionId, event, flushImmediately);

@@ -14,6 +14,7 @@ const DEFAULT_EVENT_LIMIT = 500;
 const DEFAULT_TEXT_LIMIT = 80;
 const STDOUT_BUDGET = 12_000;
 const BATCH_NEGATIVE_EXPECTED_REGRESSIONS = ["positive DOM updates", "DOM max jump", "SSE text events per chunk", "live pipeline flush/enqueue", "live pipeline overlay updates/flushed"] as const;
+const OVERLAY_DROP_NEGATIVE_EXPECTED_REGRESSIONS = ["positive DOM updates", "live pipeline flushed events/expected", "live pipeline overlay events/expected", "live pipeline current text/expected"] as const;
 const LIVE_PIPELINE_MIN_PRESERVATION_RATIO = 0.95;
 const LIVE_PIPELINE_MIN_FLUSH_RATIO = 0.75;
 const URL_COMPARISON_MAX_SMOOTHNESS_DROP = 15;
@@ -47,6 +48,7 @@ type WebOptions = {
 	backendFixture: boolean;
 	simulateReconnect: boolean;
 	simulateTraceCatchup: boolean;
+	simulateOverlayDrop: boolean;
 	assertHealthy: boolean;
 	expectedRegressionPatterns: string[];
 	from?: string;
@@ -340,6 +342,15 @@ type StreamingBenchmarkTraceProbe = {
 	samples: StreamingBenchmarkTraceProbeSample[];
 };
 
+type StreamingBenchmarkOverlayDrop = {
+	requested: boolean;
+	installed: boolean;
+	dropTypes: string[];
+	droppedCount: number;
+	passedCount: number;
+	lastDroppedType?: string;
+};
+
 type StreamingBenchmark = {
 	kind: "streaming-benchmark";
 	createdAt: string;
@@ -370,10 +381,11 @@ type StreamingBenchmark = {
 	};
 	raf: { count: number; gapsMs: NumberStats };
 	longTasks: { count: number; totalMs: number; maxMs: number };
-	fixture?: { requested: boolean; mode: "browser" | "backend"; profile?: string; mix?: string; simulation?: "reconnect" | "trace-catchup"; available: boolean; started: boolean; deltaCount?: number; reasoningDeltaCount?: number; cadenceMs?: number; scheduleMs?: number[]; scheduleGapsMs?: NumberStats; reasoningScheduleMs?: number[]; reasoningScheduleGapsMs?: NumberStats; textBytes?: number; reasoningBytes?: number; piboSessionId?: string; error?: string };
+	fixture?: { requested: boolean; mode: "browser" | "backend"; profile?: string; mix?: string; simulation?: "reconnect" | "trace-catchup" | "overlay-drop"; available: boolean; started: boolean; deltaCount?: number; reasoningDeltaCount?: number; cadenceMs?: number; scheduleMs?: number[]; scheduleGapsMs?: NumberStats; reasoningScheduleMs?: number[]; reasoningScheduleGapsMs?: NumberStats; textBytes?: number; reasoningBytes?: number; piboSessionId?: string; error?: string };
 	eventSource?: StreamingBenchmarkEventSourceProbe;
 	sse?: StreamingBenchmarkSseProbe;
 	trace?: StreamingBenchmarkTraceProbe;
+	overlayDrop?: StreamingBenchmarkOverlayDrop;
 	provider?: StreamingBenchmarkProviderTelemetry;
 	cadence?: StreamingBenchmarkCadence;
 	livePipeline?: StreamingBenchmarkLivePipeline;
@@ -461,7 +473,7 @@ type StreamingBenchmarkSummary = {
 	providerDomPositiveTextRatio: NumberStats;
 };
 
-type StreamingNegativeProfile = "batch";
+type StreamingNegativeProfile = "batch" | "overlay-drop";
 
 type StreamingBenchmarkComparison = {
 	baselineRuns: number;
@@ -624,7 +636,7 @@ function printScenarioHelp(): void {
 
 Usage:
   pibo debug web scenario new-session [--manual|--act] [--duration ms] [--json] [--artifact]
-  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--fixture-profile steady|jitter|burst|batch] [--fixture-mix text|reasoning-text] [--simulate-reconnect|--simulate-trace-catchup] [--duration ms] [--runs n] [--from artifact.json] [--provider-request-id pr_...|--provider-session-id ps_...|--provider-turn-id turn_...|--provider-selected-session] [--compare-url url|--compare-hosted|--compare-hosted-if-configured] [--assert] [--expect-regression text] [--negative-profile batch] [--json] [--artifact]
+  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--fixture-profile steady|jitter|burst|batch] [--fixture-mix text|reasoning-text] [--simulate-reconnect|--simulate-trace-catchup] [--duration ms] [--runs n] [--from artifact.json] [--provider-request-id pr_...|--provider-session-id ps_...|--provider-turn-id turn_...|--provider-selected-session] [--compare-url url|--compare-hosted|--compare-hosted-if-configured] [--assert] [--expect-regression text] [--negative-profile batch|overlay-drop] [--json] [--artifact]
 
 Defaults:
   new-session --manual waits while you click New Session yourself.
@@ -645,6 +657,7 @@ Defaults:
   streaming-benchmark --assert exits non-zero when fixture/debug/DOM/provider preservation gates fail.
   streaming-benchmark --expect-regression marks a required regression substring for controlled negative benchmarks; unexpected or missing expected regressions still fail with --assert.
   streaming-benchmark --negative-profile batch expands to the backend batch reasoning/text fixture with required controlled regression assertions.
+  streaming-benchmark --negative-profile overlay-drop preserves SSE/EventSource input but drops live-overlay text/reasoning enqueue for a controlled pipeline-preservation failure.
 `);
 }
 
@@ -785,7 +798,9 @@ async function runScenario(options: WebOptions): Promise<void> {
 	if (scenario === "streaming-benchmark" && streamingOptions.fixtureMix && !streamingOptions.fixture && !streamingOptions.backendFixture) throw new Error("--fixture-mix requires --fixture or --backend-fixture.");
 	if (scenario === "streaming-benchmark" && streamingOptions.simulateReconnect && !streamingOptions.backendFixture) throw new Error("--simulate-reconnect requires --backend-fixture.");
 	if (scenario === "streaming-benchmark" && streamingOptions.simulateTraceCatchup && !streamingOptions.backendFixture) throw new Error("--simulate-trace-catchup requires --backend-fixture.");
+	if (scenario === "streaming-benchmark" && streamingOptions.simulateOverlayDrop && !streamingOptions.backendFixture) throw new Error("overlay-drop simulation requires --backend-fixture.");
 	if (scenario === "streaming-benchmark" && streamingOptions.simulateReconnect && streamingOptions.simulateTraceCatchup) throw new Error("Use either --simulate-reconnect or --simulate-trace-catchup, not both.");
+	if (scenario === "streaming-benchmark" && [streamingOptions.simulateReconnect, streamingOptions.simulateTraceCatchup, streamingOptions.simulateOverlayDrop].filter(Boolean).length > 1) throw new Error("Use only one streaming simulation mode.");
 	const providerTelemetryModes = [streamingOptions.providerRequestId ? "--provider-request-id" : undefined, streamingOptions.providerSessionId ? "--provider-session-id" : undefined, streamingOptions.providerTurnId ? "--provider-turn-id" : undefined, streamingOptions.providerSelectedSession ? "--provider-selected-session" : undefined].filter(Boolean);
 	if (scenario === "streaming-benchmark" && providerTelemetryModes.length > 1) throw new Error(`Use only one provider telemetry source flag: ${providerTelemetryModes.join(", ")}.`);
 	const hostedCompareModes = [streamingOptions.compareUrl ? "--compare-url" : undefined, streamingOptions.compareHosted ? "--compare-hosted" : undefined, streamingOptions.compareHostedIfConfigured ? "--compare-hosted-if-configured" : undefined].filter(Boolean);
@@ -804,7 +819,7 @@ async function runScenario(options: WebOptions): Promise<void> {
 		if (scenario === "streaming-benchmark") {
 			const baseline = streamingOptions.from ? await readStreamingBenchmarkRuns(streamingOptions.from) : undefined;
 			const providerTelemetryRequested = providerTelemetryModes.length > 0;
-			const runOptions = { startFixture: streamingOptions.fixture, startBackendFixture: streamingOptions.backendFixture, fixtureProfile, fixtureMix, simulateReconnect: streamingOptions.simulateReconnect, simulateTraceCatchup: streamingOptions.simulateTraceCatchup };
+			const runOptions = { startFixture: streamingOptions.fixture, startBackendFixture: streamingOptions.backendFixture, fixtureProfile, fixtureMix, simulateReconnect: streamingOptions.simulateReconnect, simulateTraceCatchup: streamingOptions.simulateTraceCatchup, simulateOverlayDrop: streamingOptions.simulateOverlayDrop };
 			const primaryUrl = await currentBrowserUrl(client);
 			const rawBenchmarks = await runStreamingBenchmarkSeries(client, runs, durationMs, runOptions);
 			const primaryProviderTelemetry = providerTelemetryRequested ? await collectStreamingProviderTelemetryForOptions(streamingOptions, client) : undefined;
@@ -903,7 +918,7 @@ async function runBrowserWatch(client: CdpClient, scope: string, durationMs: num
 	return client.evaluate<WebWatch>(expression, durationMs + 10_000);
 }
 
-type RunStreamingBenchmarkOptions = { startFixture?: boolean; startBackendFixture?: boolean; fixtureProfile?: StreamingFixtureProfile; fixtureMix?: StreamingFixtureMix; simulateReconnect?: boolean; simulateTraceCatchup?: boolean; providerTelemetry?: StreamingBenchmarkProviderTelemetry };
+type RunStreamingBenchmarkOptions = { startFixture?: boolean; startBackendFixture?: boolean; fixtureProfile?: StreamingFixtureProfile; fixtureMix?: StreamingFixtureMix; simulateReconnect?: boolean; simulateTraceCatchup?: boolean; simulateOverlayDrop?: boolean; providerTelemetry?: StreamingBenchmarkProviderTelemetry };
 
 async function runStreamingBenchmarkSeries(client: CdpClient, runs: number, durationMs: number, options: RunStreamingBenchmarkOptions): Promise<StreamingBenchmark[]> {
 	if (options.startFixture) await navigateStreamingBenchmarkFixture(client, options.fixtureProfile ?? "steady", options.fixtureMix ?? "text");
@@ -1395,9 +1410,9 @@ function buildWatchExpression(options: { scope: string; durationMs: number; maxN
 })()`;
 }
 
-function buildStreamingBenchmarkExpression(durationMs: number, input: { startFixture?: boolean; startBackendFixture?: boolean; fixtureProfile?: StreamingFixtureProfile; fixtureMix?: StreamingFixtureMix; simulateReconnect?: boolean; simulateTraceCatchup?: boolean } = {}): string {
+function buildStreamingBenchmarkExpression(durationMs: number, input: { startFixture?: boolean; startBackendFixture?: boolean; fixtureProfile?: StreamingFixtureProfile; fixtureMix?: StreamingFixtureMix; simulateReconnect?: boolean; simulateTraceCatchup?: boolean; simulateOverlayDrop?: boolean } = {}): string {
 	return `(async () => {
-  const options = ${JSON.stringify({ durationMs, startFixture: Boolean(input.startFixture), startBackendFixture: Boolean(input.startBackendFixture), fixtureProfile: input.fixtureProfile ?? "steady", fixtureMix: input.fixtureMix ?? "text", simulateReconnect: Boolean(input.simulateReconnect), simulateTraceCatchup: Boolean(input.simulateTraceCatchup), reconnectAtMs: input.simulateReconnect ? 325 : undefined, traceCatchupDropMs: input.simulateTraceCatchup ? 1300 : undefined })};
+  const options = ${JSON.stringify({ durationMs, startFixture: Boolean(input.startFixture), startBackendFixture: Boolean(input.startBackendFixture), fixtureProfile: input.fixtureProfile ?? "steady", fixtureMix: input.fixtureMix ?? "text", simulateReconnect: Boolean(input.simulateReconnect), simulateTraceCatchup: Boolean(input.simulateTraceCatchup), simulateOverlayDrop: Boolean(input.simulateOverlayDrop), reconnectAtMs: input.simulateReconnect ? 325 : undefined, traceCatchupDropMs: input.simulateTraceCatchup ? 1300 : undefined })};
   ${browserStreamingBenchmarkLibrary()}
   return await runStreamingBenchmark(options);
 })()`;
@@ -1440,6 +1455,32 @@ function fetchWithTimeout(url, init, timeoutMs) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+function installOverlayDropSimulation(enabled) {
+  if (!enabled) {
+    delete window.__piboStreamingBenchmarkShouldDropOverlayEvent;
+    delete window.__piboStreamingBenchmarkOverlayDrop;
+    return undefined;
+  }
+  const state = {
+    requested: true,
+    installed: true,
+    dropTypes: ['TEXT_MESSAGE_CONTENT', 'REASONING_MESSAGE_CONTENT'],
+    droppedCount: 0,
+    passedCount: 0,
+  };
+  window.__piboStreamingBenchmarkOverlayDrop = state;
+  window.__piboStreamingBenchmarkShouldDropOverlayEvent = (event) => {
+    const type = event && typeof event.type === 'string' ? event.type : '';
+    if (state.dropTypes.includes(type)) {
+      state.droppedCount += 1;
+      state.lastDroppedType = type;
+      return true;
+    }
+    state.passedCount += 1;
+    return false;
+  };
+  return state;
 }
 function numberArray(value) {
   return Array.isArray(value) ? value.filter((item) => typeof item === 'number' && Number.isFinite(item)) : [];
@@ -1935,6 +1976,7 @@ async function runStreamingBenchmark(options) {
   if (typeof window.__piboStreamingDebugReset === 'function') {
     try { window.__piboStreamingDebugReset(); reset = true; } catch (error) { warnings.push('failed to reset __piboStreamingDebug: ' + String(error)); }
   }
+  const overlayDrop = installOverlayDropSimulation(Boolean(options.simulateOverlayDrop));
 
   const debugBefore = cloneDebugSnapshot(window.__piboStreamingDebug);
   const initialText = selectedAssistantText();
@@ -2057,6 +2099,8 @@ async function runStreamingBenchmark(options) {
   try { perfObserver && perfObserver.disconnect(); } catch {}
 
   const debugAfter = cloneDebugSnapshot(window.__piboStreamingDebug);
+  const overlayDropSummary = overlayDrop ? cloneDebugSnapshot(window.__piboStreamingBenchmarkOverlayDrop) : undefined;
+  installOverlayDropSimulation(false);
   if (!debugAfter) warnings.push('window.__piboStreamingDebug was absent; run with ?debugStreaming=1 or start a fresh stream after this command enables localStorage');
   const positiveUpdates = updates.filter((update) => update.delta > 0);
   const positiveGaps = [];
@@ -2087,7 +2131,7 @@ async function runStreamingBenchmark(options) {
     mode: options.startBackendFixture ? 'backend' : 'browser',
     profile: fixtureConfig && typeof fixtureConfig.profile === 'string' ? fixtureConfig.profile : options.fixtureProfile,
     mix: fixtureConfig && typeof fixtureConfig.mix === 'string' ? fixtureConfig.mix : options.fixtureMix,
-    simulation: options.simulateTraceCatchup ? 'trace-catchup' : (options.simulateReconnect ? 'reconnect' : undefined),
+    simulation: options.simulateTraceCatchup ? 'trace-catchup' : (options.simulateReconnect ? 'reconnect' : (options.simulateOverlayDrop ? 'overlay-drop' : undefined)),
     available: options.startBackendFixture ? !backendFixtureError : typeof window.__piboStreamingFixtureStart === 'function',
     started: fixtureStarted,
     deltaCount: fixtureConfig && typeof fixtureConfig.deltaCount === 'number' ? fixtureConfig.deltaCount : undefined,
@@ -2152,6 +2196,7 @@ async function runStreamingBenchmark(options) {
     eventSource: eventSourceSummary,
     sse: sseSummary,
     trace: traceSummary,
+    overlayDrop: overlayDropSummary,
     regressions,
     warnings,
   };
@@ -2458,6 +2503,7 @@ function parseOptions(args: string[]): WebOptions {
 		backendFixture: false,
 		simulateReconnect: false,
 		simulateTraceCatchup: false,
+		simulateOverlayDrop: false,
 		assertHealthy: false,
 		expectedRegressionPatterns: [],
 		providerSelectedSession: false,
@@ -2573,8 +2619,8 @@ function parseFixtureMix(value?: string): StreamingFixtureMix {
 
 function parseNegativeProfile(value?: string): StreamingNegativeProfile | undefined {
 	if (!value) return undefined;
-	if (value === "batch") return value;
-	throw new Error("--negative-profile must be batch");
+	if (value === "batch" || value === "overlay-drop") return value;
+	throw new Error("--negative-profile must be batch or overlay-drop");
 }
 
 function applyNegativeStreamingProfile(options: WebOptions, profile: StreamingNegativeProfile): WebOptions {
@@ -2585,15 +2631,17 @@ function applyNegativeStreamingProfile(options: WebOptions, profile: StreamingNe
 	if (options.fixtureMix) conflictingFlags.push("--fixture-mix");
 	if (options.simulateReconnect) conflictingFlags.push("--simulate-reconnect");
 	if (options.simulateTraceCatchup) conflictingFlags.push("--simulate-trace-catchup");
+	if (options.simulateOverlayDrop) conflictingFlags.push("--simulate-overlay-drop");
 	if (options.expectedRegressionPatterns.length > 0) conflictingFlags.push("--expect-regression");
 	if (conflictingFlags.length > 0) throw new Error(`--negative-profile ${profile} already selects fixture settings and expected regressions; remove ${conflictingFlags.join(", ")}`);
 	return {
 		...options,
 		backendFixture: true,
-		fixtureProfile: "batch",
+		fixtureProfile: profile === "batch" ? "batch" : "steady",
 		fixtureMix: "reasoning-text",
+		simulateOverlayDrop: profile === "overlay-drop",
 		assertHealthy: true,
-		expectedRegressionPatterns: [...BATCH_NEGATIVE_EXPECTED_REGRESSIONS],
+		expectedRegressionPatterns: profile === "batch" ? [...BATCH_NEGATIVE_EXPECTED_REGRESSIONS] : [...OVERLAY_DROP_NEGATIVE_EXPECTED_REGRESSIONS],
 	};
 }
 

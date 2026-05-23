@@ -38,7 +38,7 @@ test("pibo debug web watch rejects action flags", async () => {
 
 test("pibo debug web streaming benchmark help advertises the deterministic fixture", async () => {
 	const help = await execFileAsync("node", [cliPath, "debug", "web", "scenario", "--help"]);
-	assert.match(help.stdout, /streaming-benchmark \[--fixture\|--backend-fixture\].*\[--fixture-profile steady\|jitter\|burst\|batch\].*\[--fixture-mix text\|reasoning-text\].*\[--simulate-reconnect\|--simulate-trace-catchup\].*\[--provider-request-id pr_\.\.\.\|--provider-session-id ps_\.\.\.\|--provider-turn-id turn_\.\.\.\|--provider-selected-session\].*\[--compare-url url\|--compare-hosted\|--compare-hosted-if-configured\].*\[--assert\].*\[--expect-regression text\].*\[--negative-profile batch\]/);
+	assert.match(help.stdout, /streaming-benchmark \[--fixture\|--backend-fixture\].*\[--fixture-profile steady\|jitter\|burst\|batch\].*\[--fixture-mix text\|reasoning-text\].*\[--simulate-reconnect\|--simulate-trace-catchup\].*\[--provider-request-id pr_\.\.\.\|--provider-session-id ps_\.\.\.\|--provider-turn-id turn_\.\.\.\|--provider-selected-session\].*\[--compare-url url\|--compare-hosted\|--compare-hosted-if-configured\].*\[--assert\].*\[--expect-regression text\].*\[--negative-profile batch\|overlay-drop\]/);
 	assert.match(help.stdout, /deterministic in-browser stream fixture/);
 	assert.match(help.stdout, /real app consumes deterministic \/api\/chat\/events frames/);
 	assert.match(help.stdout, /--fixture-profile selects steady cadence, deterministic jitter, bursty timing, or intentional batch stress/);
@@ -54,6 +54,7 @@ test("pibo debug web streaming benchmark help advertises the deterministic fixtu
 	assert.match(help.stdout, /--assert exits non-zero when fixture\/debug\/DOM\/provider preservation gates fail/);
 	assert.match(help.stdout, /--expect-regression marks a required regression substring/);
 	assert.match(help.stdout, /--negative-profile batch expands to the backend batch reasoning\/text fixture/);
+	assert.match(help.stdout, /--negative-profile overlay-drop preserves SSE\/EventSource input/);
 });
 
 test("streaming benchmark assertion matches expected controlled regressions", () => {
@@ -573,7 +574,7 @@ test("pibo debug web streaming benchmark rejects invalid negative profile before
 	await assert.rejects(
 		execFileAsync("node", [cliPath, "debug", "web", "scenario", "streaming-benchmark", "--negative-profile", "random"]),
 		(error) => {
-			assert.match(error.stderr, /--negative-profile must be batch/);
+			assert.match(error.stderr, /--negative-profile must be batch or overlay-drop/);
 			assert.doesNotMatch(error.stderr, /No attachable CDP target/);
 			return true;
 		},

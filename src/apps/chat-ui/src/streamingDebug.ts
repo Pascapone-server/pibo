@@ -1,6 +1,7 @@
 type StreamingDebugWindow = Window & typeof globalThis & {
 	__piboStreamingDebug?: StreamingDebugSnapshot;
 	__piboStreamingDebugReset?: () => StreamingDebugSnapshot | undefined;
+	__piboStreamingBenchmarkShouldDropOverlayEvent?: (event: StreamingDebugEvent) => boolean;
 };
 
 let streamingDebugEnabledCache: boolean | undefined;
@@ -168,6 +169,16 @@ export function recordStreamingDebugTraceState(piboSessionId: string, state: { o
 		if (state.traceBaseOutputLength !== undefined) snapshot.traceBaseOutputLength = state.traceBaseOutputLength;
 		if (state.currentOutputLength !== undefined) snapshot.currentOutputLength = state.currentOutputLength;
 	});
+}
+
+export function shouldDropStreamingBenchmarkOverlayEvent(event: StreamingDebugEvent): boolean {
+	const win = streamingDebugWindow();
+	if (!win?.__piboStreamingBenchmarkShouldDropOverlayEvent) return false;
+	try {
+		return Boolean(win.__piboStreamingBenchmarkShouldDropOverlayEvent(event));
+	} catch {
+		return false;
+	}
 }
 
 export function classifyStreamingDebugEventId(value: string | undefined): "missing" | "transient" | "durable" | "other" {
