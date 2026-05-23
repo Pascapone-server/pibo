@@ -61,6 +61,7 @@ type WebOptions = {
 	includeLayout: boolean;
 	compact: boolean;
 	output?: string;
+	jsonOutput?: string;
 };
 
 type SnapshotNode = {
@@ -718,12 +719,13 @@ function printReportHelp(): void {
 	console.log(`pibo debug web report - render saved debug artifacts
 
 Usage:
-  pibo debug web report streaming-benchmark --from artifact.json [--compact] [--output report.md] [--json] [--artifact]
+  pibo debug web report streaming-benchmark --from artifact.json [--compact] [--output report.md] [--json-output report.json] [--json] [--artifact]
 
 Reports:
   streaming-benchmark  Summarize saved pibo debug web scenario streaming-benchmark JSON as Markdown.
   --compact            Render reviewer-friendly Markdown tables instead of the detailed line report.
   --output             Write the Markdown report to a specific file path.
+  --json-output        Write the normalized JSON report payload to a specific file path.
 
 Next:
   pibo debug web scenario streaming-benchmark --backend-fixture --assert --artifact
@@ -949,12 +951,16 @@ async function runReport(options: WebOptions): Promise<void> {
 	const markdown = options.compact ? formatStreamingBenchmarkCompactReport(benchmark, target) : formatStreamingBenchmarkResult(benchmark, target);
 	const format = options.compact ? "compact" : "detailed";
 	const output = options.output ? await writeReportOutput(options.output, markdown) : undefined;
-	if (options.json) console.log(JSON.stringify({ report, source: options.from, format, output, markdown }, null, 2));
-	else if (output) console.log(`Wrote report: ${output}`);
-	else console.log(markdown);
-	if (options.artifact) {
-		const artifact = await writeTextArtifact(options.compact ? "report-streaming-benchmark-compact" : "report-streaming-benchmark", "md", markdown);
-		if (!options.json) console.log(`Artifact: ${artifact}`);
+	const artifact = options.artifact ? await writeTextArtifact(options.compact ? "report-streaming-benchmark-compact" : "report-streaming-benchmark", "md", markdown) : undefined;
+	const jsonOutput = options.jsonOutput ? path.resolve(options.jsonOutput) : undefined;
+	const jsonPayload = { report, source: options.from, format, target, output, artifact, jsonOutput, markdown, benchmark };
+	if (options.jsonOutput) await writeReportOutput(options.jsonOutput, JSON.stringify(jsonPayload, null, 2));
+	if (options.json) console.log(JSON.stringify(jsonPayload, null, 2));
+	else {
+		if (output) console.log(`Wrote report: ${output}`);
+		else console.log(markdown);
+		if (artifact) console.log(`Artifact: ${artifact}`);
+		if (jsonOutput) console.log(`Wrote report JSON: ${jsonOutput}`);
 	}
 }
 
@@ -2672,6 +2678,8 @@ function parseOptions(args: string[]): WebOptions {
 		else if (arg === "--compact") options.compact = true;
 		else if (arg === "--output") options.output = requireValue(args, ++index, arg);
 		else if (arg.startsWith("--output=")) options.output = arg.slice("--output=".length);
+		else if (arg === "--json-output") options.jsonOutput = requireValue(args, ++index, arg);
+		else if (arg.startsWith("--json-output=")) options.jsonOutput = arg.slice("--json-output=".length);
 		else if (arg === "--cdp-url") options.cdpUrl = requireValue(args, ++index, arg);
 		else if (arg.startsWith("--cdp-url=")) options.cdpUrl = arg.slice("--cdp-url=".length);
 		else if (arg === "--target") options.target = requireValue(args, ++index, arg);

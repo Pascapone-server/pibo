@@ -37,6 +37,8 @@ test("pibo debug web watch rejects action flags", async () => {
 });
 
 test("pibo debug web report renders saved streaming benchmark artifacts without CDP", async () => {
+	const help = await execFileAsync("node", [cliPath, "debug", "web", "report", "--help"]);
+	assert.match(help.stdout, /--json-output\s+Write the normalized JSON report payload/);
 	const cwd = await makeEmptyCwd();
 	try {
 		const artifact = join(cwd, "streaming-benchmark.json");
@@ -88,6 +90,16 @@ test("pibo debug web report renders saved streaming benchmark artifacts without 
 		const writtenReport = await readFile(output, "utf-8");
 		assert.match(writtenReport, /# Web Streaming Benchmark Compact Report/);
 		assert.match(writtenReport, /\| DOM \| positive 12, max jump 2 chars \| p90 gap 101ms, first visible 145ms \|/);
+		const jsonOutput = join(cwd, "reports", "streaming-compact.json");
+		const jsonOutputReport = await execFileAsync("node", [cliPath, "debug", "web", "report", "streaming-benchmark", "--from", artifact, "--compact", "--json-output", jsonOutput], { cwd });
+		assert.match(jsonOutputReport.stdout, /Wrote report JSON: .*streaming-compact\.json/);
+		const writtenJson = JSON.parse(await readFile(jsonOutput, "utf-8"));
+		assert.equal(writtenJson.format, "compact");
+		assert.equal(writtenJson.benchmark.kind, "streaming-benchmark");
+		assert.match(writtenJson.markdown, /# Web Streaming Benchmark Compact Report/);
+		const stdoutJsonReport = await execFileAsync("node", [cliPath, "debug", "web", "report", "streaming-benchmark", "--from", artifact, "--compact", "--json"], { cwd });
+		const stdoutJson = JSON.parse(stdoutJsonReport.stdout);
+		assert.equal(stdoutJson.benchmark.kind, "streaming-benchmark");
 	} finally {
 		await rm(cwd, { recursive: true, force: true });
 	}
