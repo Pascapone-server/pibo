@@ -26,6 +26,7 @@ type WebOptions = {
 	fixture: boolean;
 	backendFixture: boolean;
 	simulateReconnect: boolean;
+	simulateTraceCatchup: boolean;
 	assertHealthy: boolean;
 	from?: string;
 	act: boolean;
@@ -171,6 +172,10 @@ type StreamingBenchmarkEventSourceProbe = {
 	lastTransientId?: string;
 	transientIdResetObserved: boolean;
 	reconnectObserved: boolean;
+	textDropRequested: boolean;
+	textDropDurationMs?: number;
+	textDropCount: number;
+	textDropTextEventCount: number;
 	streams: StreamingBenchmarkEventSourceStreamProbe[];
 };
 
@@ -203,7 +208,7 @@ type StreamingBenchmark = {
 	};
 	raf: { count: number; gapsMs: NumberStats };
 	longTasks: { count: number; totalMs: number; maxMs: number };
-	fixture?: { requested: boolean; mode: "browser" | "backend"; profile?: string; available: boolean; started: boolean; deltaCount?: number; cadenceMs?: number; piboSessionId?: string; error?: string };
+	fixture?: { requested: boolean; mode: "browser" | "backend"; profile?: string; simulation?: "reconnect" | "trace-catchup"; available: boolean; started: boolean; deltaCount?: number; cadenceMs?: number; textBytes?: number; piboSessionId?: string; error?: string };
 	eventSource?: StreamingBenchmarkEventSourceProbe;
 	score: StreamingSmoothnessScore;
 	regressions: string[];
@@ -336,7 +341,7 @@ function printScenarioHelp(): void {
 
 Usage:
   pibo debug web scenario new-session [--manual|--act] [--duration ms] [--json] [--artifact]
-  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--fixture-profile steady|jitter|burst] [--simulate-reconnect] [--duration ms] [--runs n] [--from artifact.json] [--assert] [--json] [--artifact]
+  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--fixture-profile steady|jitter|burst] [--simulate-reconnect|--simulate-trace-catchup] [--duration ms] [--runs n] [--from artifact.json] [--assert] [--json] [--artifact]
 
 Defaults:
   new-session --manual waits while you click New Session yourself.
@@ -346,6 +351,7 @@ Defaults:
   streaming-benchmark --backend-fixture posts to /api/chat/debug/streaming-fixture so the real app consumes deterministic /api/chat/events frames.
   streaming-benchmark --fixture-profile selects steady cadence, deterministic jitter, or bursty fixture timing.
   streaming-benchmark --simulate-reconnect reloads the app with an EventSource probe, forces one live stream close, and verifies reconnect/transient ids.
+  streaming-benchmark --simulate-trace-catchup suppresses backend live text deltas and verifies trace snapshot recovery.
   streaming-benchmark --runs repeats the same scenario and reports medians; --from compares against a prior benchmark artifact.
   streaming-benchmark --assert exits non-zero when fixture/debug/DOM smoothness gates fail.
 `);
@@ -484,6 +490,8 @@ async function runScenario(options: WebOptions): Promise<void> {
 	if (scenario === "streaming-benchmark" && options.fixture && options.backendFixture) throw new Error("Use either --fixture or --backend-fixture, not both.");
 	if (scenario === "streaming-benchmark" && options.fixtureProfile && !options.fixture && !options.backendFixture) throw new Error("--fixture-profile requires --fixture or --backend-fixture.");
 	if (scenario === "streaming-benchmark" && options.simulateReconnect && !options.backendFixture) throw new Error("--simulate-reconnect requires --backend-fixture.");
+	if (scenario === "streaming-benchmark" && options.simulateTraceCatchup && !options.backendFixture) throw new Error("--simulate-trace-catchup requires --backend-fixture.");
+	if (scenario === "streaming-benchmark" && options.simulateReconnect && options.simulateTraceCatchup) throw new Error("Use either --simulate-reconnect or --simulate-trace-catchup, not both.");
 	const fixtureProfile = parseFixtureProfile(options.fixtureProfile);
 	const durationMs = parseDuration(options.duration);
 	const runs = parseRuns(options.runs);
@@ -492,12 +500,12 @@ async function runScenario(options: WebOptions): Promise<void> {
 		if (scenario === "streaming-benchmark") {
 			if (options.fixture) await navigateStreamingBenchmarkFixture(client, fixtureProfile);
 			if (options.backendFixture) {
-				if (options.simulateReconnect) await prepareStreamingBenchmarkReconnectProbe(client);
+				if (options.simulateReconnect || options.simulateTraceCatchup) await prepareStreamingBenchmarkEventSourceProbe(client);
 				else await enableStreamingDebugForCurrentApp(client);
 			}
 			const benchmarks: StreamingBenchmark[] = [];
 			for (let run = 0; run < runs; run++) {
-				benchmarks.push(await runStreamingBenchmark(client, durationMs, { startFixture: options.fixture, startBackendFixture: options.backendFixture, fixtureProfile, simulateReconnect: options.simulateReconnect }));
+				benchmarks.push(await runStreamingBenchmark(client, durationMs, { startFixture: options.fixture, startBackendFixture: options.backendFixture, fixtureProfile, simulateReconnect: options.simulateReconnect, simulateTraceCatchup: options.simulateTraceCatchup }));
 			}
 			const baseline = options.from ? await readStreamingBenchmarkRuns(options.from) : undefined;
 			const benchmark: StreamingBenchmark | StreamingBenchmarkGroup = runs === 1
@@ -582,13 +590,13 @@ async function runBrowserWatch(client: CdpClient, scope: string, durationMs: num
 	return client.evaluate<WebWatch>(expression, durationMs + 10_000);
 }
 
-async function runStreamingBenchmark(client: CdpClient, durationMs: number, options: { startFixture?: boolean; startBackendFixture?: boolean; fixtureProfile?: StreamingFixtureProfile; simulateReconnect?: boolean } = {}): Promise<StreamingBenchmark> {
+async function runStreamingBenchmark(client: CdpClient, durationMs: number, options: { startFixture?: boolean; startBackendFixture?: boolean; fixtureProfile?: StreamingFixtureProfile; simulateReconnect?: boolean; simulateTraceCatchup?: boolean } = {}): Promise<StreamingBenchmark> {
 	await client.send("Page.bringToFront").catch(() => undefined);
 	const benchmark = await client.evaluate<Omit<StreamingBenchmark, "score">>(buildStreamingBenchmarkExpression(durationMs, options), durationMs + 10_000);
 	return { ...benchmark, score: scoreStreamingBenchmark(benchmark) };
 }
 
-async function prepareStreamingBenchmarkReconnectProbe(client: CdpClient): Promise<void> {
+async function prepareStreamingBenchmarkEventSourceProbe(client: CdpClient): Promise<void> {
 	await client.send("Page.enable").catch(() => undefined);
 	await client.send("Page.addScriptToEvaluateOnNewDocument", { source: streamingBenchmarkEventSourceProbeScript() }, 5_000);
 	const state = await client.evaluate<{ href: string }>(`(() => {
@@ -641,12 +649,20 @@ function streamingBenchmarkEventSourceProbeScript(): string {
     errorCount: 0,
     closeCount: 0,
     forcedCloseCount: 0,
+    textDropRequested: false,
+    textDropDurationMs: undefined,
+    textDropUntil: 0,
+    textDropCount: 0,
+    textDropTextEventCount: 0,
     events: [],
     connections: [],
   };
   Object.defineProperty(probe, '_instances', { value: [], enumerable: false, configurable: false });
   function at() { return typeof performance === 'undefined' ? Date.now() : performance.now(); }
   function isChatEventsUrl(url) { return String(url || '').includes('/api/chat/events'); }
+  function parseMessageType(message) {
+    try { return JSON.parse(message.data).type; } catch { return undefined; }
+  }
   function pushConnection(kind, info, extra) {
     probe.connections.push({ t: at(), kind, url: info.url, ...(extra || {}) });
     if (probe.connections.length > 200) probe.connections.splice(0, probe.connections.length - 200);
@@ -664,8 +680,7 @@ function streamingBenchmarkEventSourceProbeScript(): string {
       pushConnection('error', info, { readyState: events.readyState });
     });
     events.addEventListener('pibo', (message) => {
-      let type;
-      try { type = JSON.parse(message.data).type; } catch {}
+      const type = parseMessageType(message);
       const record = { t: at(), url: info.url, lastEventId: message.lastEventId || '', type: typeof type === 'string' ? type : undefined };
       probe.events.push(record);
       if (probe.events.length > 1000) probe.events.splice(0, probe.events.length - 1000);
@@ -684,6 +699,15 @@ function streamingBenchmarkEventSourceProbeScript(): string {
   WrappedEventSource.prototype = OriginalEventSource.prototype;
   Object.setPrototypeOf(WrappedEventSource, OriginalEventSource);
   window.EventSource = WrappedEventSource;
+  window.__piboStreamingBenchmarkMarkTextDropRequested = (durationMs) => {
+    const duration = Math.max(0, Number(durationMs || 0));
+    probe.textDropRequested = true;
+    probe.textDropDurationMs = duration;
+    probe.textDropUntil = at() + duration;
+    probe.textDropCount = 0;
+    probe.textDropTextEventCount = 0;
+    return { durationMs: duration };
+  };
   window.__piboStreamingBenchmarkForceReconnect = () => {
     let closed = 0;
     for (const entry of probe._instances) {
@@ -812,9 +836,9 @@ function buildWatchExpression(options: { scope: string; durationMs: number; maxN
 })()`;
 }
 
-function buildStreamingBenchmarkExpression(durationMs: number, input: { startFixture?: boolean; startBackendFixture?: boolean; fixtureProfile?: StreamingFixtureProfile; simulateReconnect?: boolean } = {}): string {
+function buildStreamingBenchmarkExpression(durationMs: number, input: { startFixture?: boolean; startBackendFixture?: boolean; fixtureProfile?: StreamingFixtureProfile; simulateReconnect?: boolean; simulateTraceCatchup?: boolean } = {}): string {
 	return `(async () => {
-  const options = ${JSON.stringify({ durationMs, startFixture: Boolean(input.startFixture), startBackendFixture: Boolean(input.startBackendFixture), fixtureProfile: input.fixtureProfile ?? "steady", simulateReconnect: Boolean(input.simulateReconnect), reconnectAtMs: input.simulateReconnect ? 325 : undefined })};
+  const options = ${JSON.stringify({ durationMs, startFixture: Boolean(input.startFixture), startBackendFixture: Boolean(input.startBackendFixture), fixtureProfile: input.fixtureProfile ?? "steady", simulateReconnect: Boolean(input.simulateReconnect), simulateTraceCatchup: Boolean(input.simulateTraceCatchup), reconnectAtMs: input.simulateReconnect ? 325 : undefined, traceCatchupDropMs: input.simulateTraceCatchup ? 1300 : undefined })};
   ${browserStreamingBenchmarkLibrary()}
   return await runStreamingBenchmark(options);
 })()`;
@@ -858,7 +882,7 @@ function fetchWithTimeout(url, init, timeoutMs) {
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
-function summarizeEventSourceProbe(startedAt, requested, forcedReconnectAtMs) {
+function summarizeEventSourceProbe(startedAt, requested, forcedReconnectAtMs, textDropRequested, textDropDurationMs) {
   const probe = window.__piboStreamingBenchmarkEventSourceProbe;
   if (!requested && !probe) return undefined;
   if (!probe) {
@@ -883,6 +907,10 @@ function summarizeEventSourceProbe(startedAt, requested, forcedReconnectAtMs) {
       otherIdCount: 0,
       transientIdResetObserved: false,
       reconnectObserved: false,
+      textDropRequested: Boolean(textDropRequested),
+      textDropDurationMs,
+      textDropCount: 0,
+      textDropTextEventCount: 0,
       streams: [],
     };
   }
@@ -920,6 +948,10 @@ function summarizeEventSourceProbe(startedAt, requested, forcedReconnectAtMs) {
     lastTransientId: transientIds.at(-1),
     transientIdResetObserved: new Set(transientIds).size < transientIds.length,
     reconnectObserved: forcedCloseCountAfterStart > 0 && openCountAfterStart > 0,
+    textDropRequested: Boolean(probe.textDropRequested || textDropRequested),
+    textDropDurationMs: Number(probe.textDropDurationMs || textDropDurationMs || 0) || undefined,
+    textDropCount: Number(probe.textDropCount || 0),
+    textDropTextEventCount: Number(probe.textDropTextEventCount || 0),
     streams,
   };
 }
@@ -1023,25 +1055,36 @@ function streamingBenchmarkRegressions(result) {
   const domJumpMax = result.dom.positiveCharJumps && typeof result.dom.positiveCharJumps.max === 'number' ? result.dom.positiveCharJumps.max : undefined;
   const firstPositiveMs = typeof result.dom.firstPositiveUpdateMs === 'number' ? result.dom.firstPositiveUpdateMs : undefined;
   const longTaskMax = result.longTasks.length ? Math.max(...result.longTasks) : 0;
+  const traceCatchupRequested = Boolean(result.eventSource && result.eventSource.textDropRequested);
   if (!result.debugAfter) failures.push('debug counters unavailable');
   if (fixture) {
     if (!fixture.available) failures.push('fixture unavailable');
     if (!fixture.started) failures.push('fixture did not start');
     if (fixture.error) failures.push('fixture error: ' + fixture.error);
-    if (expectedDeltas !== undefined && textDeltas < expectedDeltas) failures.push('text deltas ' + textDeltas + ' < fixture deltas ' + expectedDeltas);
-    if (expectedDeltas !== undefined && domPositive < Math.max(1, expectedDeltas - 2)) failures.push('positive DOM updates ' + domPositive + ' < ' + Math.max(1, expectedDeltas - 2));
-    if (domGapP90 !== undefined && domGapP90 > Math.max(300, cadenceMs * 3)) failures.push('DOM p90 gap ' + domGapP90 + 'ms exceeds gate');
-    if (domJumpMax !== undefined && domJumpMax > 4) failures.push('DOM max jump ' + domJumpMax + ' chars exceeds gate');
-    if (firstPositiveMs !== undefined && firstPositiveMs > 500) failures.push('first visible update ' + firstPositiveMs + 'ms exceeds gate');
+    if (!traceCatchupRequested && expectedDeltas !== undefined && textDeltas < expectedDeltas) failures.push('text deltas ' + textDeltas + ' < fixture deltas ' + expectedDeltas);
+    if (!traceCatchupRequested && expectedDeltas !== undefined && domPositive < Math.max(1, expectedDeltas - 2)) failures.push('positive DOM updates ' + domPositive + ' < ' + Math.max(1, expectedDeltas - 2));
+    if (!traceCatchupRequested && domGapP90 !== undefined && domGapP90 > Math.max(300, cadenceMs * 3)) failures.push('DOM p90 gap ' + domGapP90 + 'ms exceeds gate');
+    if (!traceCatchupRequested && domJumpMax !== undefined && domJumpMax > 4) failures.push('DOM max jump ' + domJumpMax + ' chars exceeds gate');
+    if (!traceCatchupRequested && firstPositiveMs !== undefined && firstPositiveMs > 500) failures.push('first visible update ' + firstPositiveMs + 'ms exceeds gate');
+    if (traceCatchupRequested) {
+      const traceRefreshes = result.debugDelta && typeof result.debugDelta.traceRefreshCompletedCount === 'number' ? result.debugDelta.traceRefreshCompletedCount : 0;
+      if (traceRefreshes < 1) failures.push('trace catch-up did not complete a trace refresh');
+      if (!result.dom || !(result.dom.lengthEnd > result.dom.lengthStart)) failures.push('trace catch-up did not advance visible DOM output');
+      if (expectedDeltas !== undefined && textDeltas > Math.max(1, expectedDeltas - 2)) failures.push('trace catch-up did not suppress live text deltas before recovery');
+    }
   }
   if (result.eventSource && result.eventSource.requested) {
-    if (!result.eventSource.installed) failures.push('EventSource reconnect probe unavailable');
-    if (result.eventSource.forcedCloseCountAfterStart < 1) failures.push('EventSource forced close was not observed');
-    if (result.eventSource.openCountAfterStart < 1) failures.push('EventSource reconnect open was not observed');
-    if (result.eventSource.transientIdCount < 1) failures.push('EventSource transient live ids were not observed');
+    if (!result.eventSource.installed) failures.push('EventSource probe unavailable');
     const selectedLive = Array.isArray(result.eventSource.streams) ? result.eventSource.streams.find((stream) => stream.role === 'selected-live') : undefined;
     if (!selectedLive) failures.push('EventSource selected-live stream was not observed');
-    if (selectedLive && expectedDeltas !== undefined && selectedLive.textEventCountAfterStart < expectedDeltas) failures.push('selected-live text events after start ' + selectedLive.textEventCountAfterStart + ' < fixture deltas ' + expectedDeltas);
+    if (!traceCatchupRequested && selectedLive && expectedDeltas !== undefined && selectedLive.textEventCountAfterStart < expectedDeltas) failures.push('selected-live text events after start ' + selectedLive.textEventCountAfterStart + ' < fixture deltas ' + expectedDeltas);
+    if (traceCatchupRequested) {
+      if (selectedLive && selectedLive.textEventCountAfterStart > Math.max(1, (expectedDeltas || 0) - 2)) failures.push('trace catch-up selected-live text was not suppressed');
+    } else {
+      if (result.eventSource.forcedCloseCountAfterStart < 1) failures.push('EventSource forced close was not observed');
+      if (result.eventSource.openCountAfterStart < 1) failures.push('EventSource reconnect open was not observed');
+      if (result.eventSource.transientIdCount < 1) failures.push('EventSource transient live ids were not observed');
+    }
   }
   if (longTaskMax > 50) failures.push('long task max ' + Math.round(longTaskMax * 1000) / 1000 + 'ms exceeds 50ms');
   return failures;
@@ -1135,6 +1178,11 @@ async function runStreamingBenchmark(options) {
     } else if (options.simulateReconnect) {
       warnings.push('EventSource reconnect simulation was requested but the probe is unavailable');
     }
+    if (options.simulateTraceCatchup && typeof window.__piboStreamingBenchmarkMarkTextDropRequested === 'function') {
+      try { window.__piboStreamingBenchmarkMarkTextDropRequested(options.traceCatchupDropMs || 1300); } catch (error) { warnings.push('failed to mark EventSource text drop request: ' + String(error)); }
+    } else if (options.simulateTraceCatchup) {
+      warnings.push('trace catch-up simulation was requested but the EventSource probe is unavailable');
+    }
     const piboSessionId = selectedSessionId();
     if (!piboSessionId) {
       backendFixtureError = 'selected Chat session not found in DOM';
@@ -1144,7 +1192,7 @@ async function runStreamingBenchmark(options) {
         const response = await fetchWithTimeout('/api/chat/debug/streaming-fixture', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ piboSessionId, profile: options.fixtureProfile, ...(options.simulateReconnect ? { cadenceMs: 150 } : {}) }),
+          body: JSON.stringify({ piboSessionId, profile: options.fixtureProfile, ...((options.simulateReconnect || options.simulateTraceCatchup) ? { cadenceMs: 150 } : {}), ...(options.simulateTraceCatchup ? { traceSnapshots: true, suppressLiveDeltas: true } : {}) }),
         }, 5000);
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload && payload.error ? payload.error : response.status + ' ' + response.statusText);
@@ -1191,20 +1239,22 @@ async function runStreamingBenchmark(options) {
     requested: true,
     mode: options.startBackendFixture ? 'backend' : 'browser',
     profile: fixtureConfig && typeof fixtureConfig.profile === 'string' ? fixtureConfig.profile : options.fixtureProfile,
+    simulation: options.simulateTraceCatchup ? 'trace-catchup' : (options.simulateReconnect ? 'reconnect' : undefined),
     available: options.startBackendFixture ? !backendFixtureError : typeof window.__piboStreamingFixtureStart === 'function',
     started: fixtureStarted,
     deltaCount: fixtureConfig && typeof fixtureConfig.deltaCount === 'number' ? fixtureConfig.deltaCount : undefined,
     cadenceMs: fixtureConfig && typeof fixtureConfig.cadenceMs === 'number' ? fixtureConfig.cadenceMs : undefined,
+    textBytes: fixtureConfig && typeof fixtureConfig.textBytes === 'number' ? fixtureConfig.textBytes : undefined,
     piboSessionId: fixtureConfig && typeof fixtureConfig.piboSessionId === 'string' ? fixtureConfig.piboSessionId : undefined,
     error: backendFixtureError,
   } : undefined;
-  const eventSourceSummary = summarizeEventSourceProbe(startedAt, Boolean(options.simulateReconnect), options.reconnectAtMs);
+  const eventSourceSummary = summarizeEventSourceProbe(startedAt, Boolean(options.simulateReconnect || options.simulateTraceCatchup), options.reconnectAtMs, Boolean(options.simulateTraceCatchup), options.traceCatchupDropMs);
   const regressions = streamingBenchmarkRegressions({
     debugAfter,
     debugDelta,
     fixture: fixtureSummary,
     eventSource: eventSourceSummary,
-    dom: { positiveUpdateCount: positiveUpdates.length, gapsMs: domGaps, positiveCharJumps: domJumps, firstPositiveUpdateMs },
+    dom: { lengthStart: initialText.length, lengthEnd: currentLength, positiveUpdateCount: positiveUpdates.length, gapsMs: domGaps, positiveCharJumps: domJumps, firstPositiveUpdateMs },
     longTasks,
   });
   return {
@@ -1547,6 +1597,7 @@ function parseOptions(args: string[]): WebOptions {
 		fixture: false,
 		backendFixture: false,
 		simulateReconnect: false,
+		simulateTraceCatchup: false,
 		assertHealthy: false,
 		act: false,
 		manual: false,
@@ -1560,6 +1611,7 @@ function parseOptions(args: string[]): WebOptions {
 		else if (arg === "--fixture") options.fixture = true;
 		else if (arg === "--backend-fixture") options.backendFixture = true;
 		else if (arg === "--simulate-reconnect") options.simulateReconnect = true;
+		else if (arg === "--simulate-trace-catchup") options.simulateTraceCatchup = true;
 		else if (arg === "--assert") options.assertHealthy = true;
 		else if (arg === "--act") options.act = true;
 		else if (arg === "--manual") options.manual = true;
@@ -1907,9 +1959,9 @@ function formatStreamingBenchmark(benchmark: StreamingBenchmark, target: Browser
 		`raf: count=${benchmark.raf.count}, gaps=${formatStats(benchmark.raf.gapsMs)}`,
 		`longTasks: count=${benchmark.longTasks.count}, max=${benchmark.longTasks.maxMs}ms, total=${benchmark.longTasks.totalMs}ms`,
 	];
-	if (benchmark.fixture) lines.push(`fixture: mode=${benchmark.fixture.mode} profile=${jsonShort(benchmark.fixture.profile)} available=${benchmark.fixture.available} started=${benchmark.fixture.started} deltas=${jsonShort(benchmark.fixture.deltaCount)} cadence=${jsonShort(benchmark.fixture.cadenceMs)}ms session=${jsonShort(benchmark.fixture.piboSessionId)}${benchmark.fixture.error ? ` error=${benchmark.fixture.error}` : ""}`);
+	if (benchmark.fixture) lines.push(`fixture: mode=${benchmark.fixture.mode} profile=${jsonShort(benchmark.fixture.profile)} simulation=${jsonShort(benchmark.fixture.simulation)} available=${benchmark.fixture.available} started=${benchmark.fixture.started} deltas=${jsonShort(benchmark.fixture.deltaCount)} cadence=${jsonShort(benchmark.fixture.cadenceMs)}ms session=${jsonShort(benchmark.fixture.piboSessionId)}${benchmark.fixture.error ? ` error=${benchmark.fixture.error}` : ""}`);
 	if (benchmark.eventSource) {
-		lines.push(`eventSource: requested=${benchmark.eventSource.requested} installed=${benchmark.eventSource.installed} forcedClose=${benchmark.eventSource.forcedCloseCountAfterStart} reconnectOpen=${benchmark.eventSource.openCountAfterStart} text=${benchmark.eventSource.textEventCount} afterStart=${benchmark.eventSource.textEventCountAfterStart} transient=${benchmark.eventSource.uniqueTransientIdCount}/${benchmark.eventSource.transientIdCount} reset=${benchmark.eventSource.transientIdResetObserved} last=${jsonShort(benchmark.eventSource.lastEventId)} reconnectObserved=${benchmark.eventSource.reconnectObserved}`);
+		lines.push(`eventSource: requested=${benchmark.eventSource.requested} installed=${benchmark.eventSource.installed} forcedClose=${benchmark.eventSource.forcedCloseCountAfterStart} reconnectOpen=${benchmark.eventSource.openCountAfterStart} text=${benchmark.eventSource.textEventCount} afterStart=${benchmark.eventSource.textEventCountAfterStart} transient=${benchmark.eventSource.uniqueTransientIdCount}/${benchmark.eventSource.transientIdCount} reset=${benchmark.eventSource.transientIdResetObserved} droppedText=${benchmark.eventSource.textDropTextEventCount} last=${jsonShort(benchmark.eventSource.lastEventId)} reconnectObserved=${benchmark.eventSource.reconnectObserved}`);
 		for (const stream of benchmark.eventSource.streams ?? []) {
 			lines.push(`eventSource stream: role=${stream.role} mode=${jsonShort(stream.mode)} session=${jsonShort(stream.piboSessionId)} room=${jsonShort(stream.roomId)} text=${stream.textEventCount} afterStart=${stream.textEventCountAfterStart} events=${stream.eventCount} opens=${stream.openCountAfterStart} forcedClose=${stream.forcedCloseCountAfterStart} transient=${stream.uniqueTransientIdCount}/${stream.transientIdCount} since=${jsonShort(stream.sinceValues.join(","))} url=${stream.url}`);
 		}

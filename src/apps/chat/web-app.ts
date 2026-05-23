@@ -1727,6 +1727,8 @@ type ChatStreamingFixtureBody = {
 	deltas?: unknown;
 	cadenceMs?: unknown;
 	profile?: unknown;
+	traceSnapshots?: unknown;
+	suppressLiveDeltas?: unknown;
 };
 
 type ChatStreamingFixtureProfile = "steady" | "jitter" | "burst";
@@ -2528,6 +2530,18 @@ function normalizeStreamingFixtureProfile(value: unknown): ChatStreamingFixtureP
 	if (value === undefined) return "steady";
 	if (value === "steady" || value === "jitter" || value === "burst") return value;
 	throw new PiboWebHttpError("profile must be steady, jitter, or burst", 400);
+}
+
+function normalizeStreamingFixtureTraceSnapshots(value: unknown): boolean {
+	if (value === undefined) return false;
+	if (typeof value === "boolean") return value;
+	throw new PiboWebHttpError("traceSnapshots must be a boolean", 400);
+}
+
+function normalizeStreamingFixtureSuppressLiveDeltas(value: unknown): boolean {
+	if (value === undefined) return false;
+	if (typeof value === "boolean") return value;
+	throw new PiboWebHttpError("suppressLiveDeltas must be a boolean", 400);
 }
 
 function buildStreamingFixtureSchedule(deltaCount: number, cadenceMs: number, profile: ChatStreamingFixtureProfile): number[] {
@@ -8108,9 +8122,15 @@ function startChatStreamingFixture(input: {
 	const deltas = normalizeStreamingFixtureDeltas(input.body.deltas);
 	const cadenceMs = normalizeStreamingFixtureCadenceMs(input.body.cadenceMs);
 	const profile = normalizeStreamingFixtureProfile(input.body.profile);
+	const traceSnapshots = normalizeStreamingFixtureTraceSnapshots(input.body.traceSnapshots);
+	const suppressLiveDeltas = normalizeStreamingFixtureSuppressLiveDeltas(input.body.suppressLiveDeltas);
 	const scheduleMs = buildStreamingFixtureSchedule(deltas.length, cadenceMs, profile);
 	const eventId = `streaming-fixture-${randomUUID()}`;
 	const emit = (event: PiboOutputEvent) => {
+		if (traceSnapshots && (event.type === "assistant_delta" || event.type === "assistant_message" || event.type === "message_finished")) {
+			input.state.outputCompactor.compact(event);
+		}
+		if (suppressLiveDeltas && event.type === "assistant_delta") return;
 		const liveEvent: TransientChatEvent = {
 			roomId: room.id,
 			piboSessionId: selectedSession.id,
@@ -8140,6 +8160,8 @@ function startChatStreamingFixture(input: {
 			deltaCount: deltas.length,
 			cadenceMs,
 			profile,
+			traceSnapshots,
+			suppressLiveDeltas,
 			scheduleMs,
 			textBytes: new TextEncoder().encode(finalText).length,
 		},
