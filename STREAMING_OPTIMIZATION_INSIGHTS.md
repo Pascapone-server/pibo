@@ -21,3 +21,6 @@ Append concise, reusable findings here. Do not paste raw logs.
 - Do not optimize animation by hiding missing deltas, adding artificial delays, or masking provider-side chunking.
 - Prefer changes that improve fixture-normalized DOM cadence, first visible latency, live-pipeline preservation, or long-task behavior without reducing SSE/EventSource preservation.
 - Use `--runs N` medians before claiming performance improvement.
+
+- Live overlay reducer batches must avoid per-delta full-array dedupe/copy work. Keep identity tracking batch-scoped and append into one copied events array; repeated `dedupeByIdentity([...events, event])` grows superlinearly with large streaming flushes.
+- If the browser benchmark reports `fixture error: signal is aborted without reason` while direct authenticated curl to `/api/chat/debug/streaming-fixture` works with an Origin header, treat it as an in-page/CDP/browser fixture-start blocker rather than a streaming transport result.
