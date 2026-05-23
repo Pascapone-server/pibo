@@ -487,11 +487,12 @@ test("streaming URL comparison preserves controlled negative profile in artifact
 		url: "http://direct.example/apps/chat/rooms/room/sessions/ps",
 		debug: { available: true, reset: true, before: {}, after: {}, delta: { textDeltaCount: 12, reasoningDeltaCount: 4 } },
 		fixture: { requested: true, mode: "backend", profile: "steady", mix: "reasoning-text", available: true, started: true, deltaCount: 12, reasoningDeltaCount: 4, textBytes: 24, scheduleGapsMs: { count: 11, p90: 100 } },
-		dom: { targetCountStart: 1, targetCountEnd: 1, lengthStart: 0, lengthEnd: 0, updateCount: 0, positiveUpdateCount: 0, gapsMs: { count: 0 }, positiveCharJumps: { count: 0 } },
+		dom: { targetCountStart: 1, targetCountEnd: 1, lengthStart: 0, lengthEnd: 0, updateCount: 0, positiveUpdateCount: 0, firstPositiveUpdateMs: 140, gapsMs: { count: 0 }, positiveCharJumps: { count: 0 } },
 		raf: { count: 10, gapsMs: { count: 9, p90: 16.7 } },
 		longTasks: { count: 0, maxMs: 0, totalMs: 0 },
-		eventSource: { streams: [{ role: "selected-live", eventCountAfterStart: 22, textEventCountAfterStart: 12, reasoningEventCountAfterStart: 4, transientIdCountAfterStart: 22 }] },
-		livePipeline: { expectedInputEventCount: 16, flushedEventsToExpectedRatio: 0.375, overlayEventsToExpectedRatio: 0, currentOutputToExpectedTextBytesRatio: 0, flushToEnqueueRatio: 0.5, overlayUpdatesToFlushedEventsRatio: 0.5 },
+		eventSource: { streams: [{ role: "selected-live", eventCountAfterStart: 22, textEventCountAfterStart: 12, reasoningEventCountAfterStart: 4, transientIdCountAfterStart: 22, firstTextEventMsAfterStart: 121 }] },
+		sse: { textEventCount: 12, reasoningEventCount: 4, firstTextEventMs: 119, chunkBytes: { count: 1, p50: 200 }, chunkGapsMs: { count: 1, p90: 100 }, textEventsPerChunk: { count: 1, p90: 1 }, textEventGapsMs: { count: 1, p90: 100 } },
+		livePipeline: { expectedInputEventCount: 16, flushedEventsToExpectedRatio: 0.375, overlayEventsToExpectedRatio: 0, currentOutputToExpectedTextBytesRatio: 0, flushToEnqueueRatio: 0.5, overlayUpdatesToFlushedEventsRatio: 0.5, firstTextDeltaMs: 120, firstEnqueueMs: 40, firstFlushMs: 42, firstOverlayUpdateMs: 44 },
 		score: { smoothness: 10, textDeltaCount: 12, domPositiveUpdateCount: 0 },
 		negativeProfile: "overlay-drop",
 		regressions: [regression],
@@ -512,6 +513,10 @@ test("streaming URL comparison preserves controlled negative profile in artifact
 	const comparison = summarizeStreamingBenchmarkUrlComparison("http://direct.example/apps/chat", "https://hosted.example/apps/chat", primary, compare);
 	assert.equal(comparison.negativeProfile, "overlay-drop");
 	assert.deepEqual(comparison.regressions, ["primary: run 1: positive DOM updates 0 < 10", "compare: run 1: positive DOM updates 0 < 10"]);
+	assert.equal(comparison.comparison.selectedLiveFirstTextEventDeltaMs, 0);
+	assert.equal(comparison.comparison.sseFirstTextEventDeltaMs, 0);
+	assert.equal(comparison.comparison.liveFirstTextDeltaDeltaMs, 0);
+	assert.equal(comparison.comparison.firstVisibleDeltaMs, 0);
 	const text = formatStreamingBenchmarkUrlComparison(comparison, { id: "target", url: "", title: "" });
 	assert.match(text, /negative profile: overlay-drop/);
 	assert.match(text, /primary selected-live: .*text=count=1, p50=12/);
@@ -520,6 +525,8 @@ test("streaming URL comparison preserves controlled negative profile in artifact
 	assert.match(text, /primary live ratios: .*flushed\/expected=count=1, p50=0.375/);
 	assert.match(text, /compare live ratios: .*overlayEvents\/expected=count=1, p50=0/);
 	assert.match(text, /comparison live ratios: flushed\/expected 0, overlayEvents\/expected 0, flush\/enqueue 0, overlayUpdates\/flushed 0/);
+	assert.match(text, /primary first latency: .*selectedLive=count=1, p50=121.*sse=count=1, p50=119.*liveText=count=1, p50=120.*domVisible=count=1, p50=140/);
+	assert.match(text, /comparison first latency: selectedLive 0ms, sse 0ms, liveText 0ms, liveEnqueue 0ms, liveFlush 0ms, liveOverlay 0ms, domVisible 0ms/);
 });
 
 test("pibo debug web streaming benchmark rejects missing expected regression value before target discovery", async () => {

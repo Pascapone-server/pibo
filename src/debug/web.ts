@@ -515,6 +515,14 @@ type StreamingBenchmarkComparison = {
 	domPositiveUpdateDelta?: number;
 	domJumpMaxDeltaChars?: number;
 	longTaskMaxDeltaMs?: number;
+	firstVisibleDeltaMs?: number;
+	liveFirstTextDeltaDeltaMs?: number;
+	liveFirstEnqueueDeltaMs?: number;
+	liveFirstFlushDeltaMs?: number;
+	liveFirstOverlayUpdateDeltaMs?: number;
+	sseFirstTextEventDeltaMs?: number;
+	selectedLiveFirstTextEventDeltaMs?: number;
+	providerFirstTextLatencyDeltaMs?: number;
 	debugEnqueueCountDelta?: number;
 	debugFlushCountDelta?: number;
 	debugOverlayUpdateCountDelta?: number;
@@ -3289,6 +3297,14 @@ function compareStreamingBenchmarkSummaries(baseline: StreamingBenchmarkSummary,
 		domPositiveUpdateDelta: statDelta(current.domPositiveUpdateCount, baseline.domPositiveUpdateCount),
 		domJumpMaxDeltaChars: statDelta(current.domJumpMaxChars, baseline.domJumpMaxChars),
 		longTaskMaxDeltaMs: statDelta(current.longTaskMaxMs, baseline.longTaskMaxMs),
+		firstVisibleDeltaMs: statDelta(current.firstVisibleMs, baseline.firstVisibleMs),
+		liveFirstTextDeltaDeltaMs: statDelta(current.liveFirstTextDeltaMs, baseline.liveFirstTextDeltaMs),
+		liveFirstEnqueueDeltaMs: statDelta(current.liveFirstEnqueueMs, baseline.liveFirstEnqueueMs),
+		liveFirstFlushDeltaMs: statDelta(current.liveFirstFlushMs, baseline.liveFirstFlushMs),
+		liveFirstOverlayUpdateDeltaMs: statDelta(current.liveFirstOverlayUpdateMs, baseline.liveFirstOverlayUpdateMs),
+		sseFirstTextEventDeltaMs: statDelta(current.sseFirstTextEventMs, baseline.sseFirstTextEventMs),
+		selectedLiveFirstTextEventDeltaMs: statDelta(current.selectedLiveFirstTextEventMsAfterStart, baseline.selectedLiveFirstTextEventMsAfterStart),
+		providerFirstTextLatencyDeltaMs: statDelta(current.providerFirstTextLatencyMs, baseline.providerFirstTextLatencyMs),
 		debugEnqueueCountDelta: statDelta(current.debugEnqueueCount, baseline.debugEnqueueCount),
 		debugFlushCountDelta: statDelta(current.debugFlushCount, baseline.debugFlushCount),
 		debugOverlayUpdateCountDelta: statDelta(current.debugOverlayUpdateCount, baseline.debugOverlayUpdateCount),
@@ -3526,6 +3542,13 @@ export function formatStreamingBenchmarkUrlComparison(comparison: StreamingBench
 			`comparison live ratios: flushed/expected ${signed(comparison.comparison.liveFlushedEventsToExpectedRatioDelta)}, overlayEvents/expected ${signed(comparison.comparison.liveOverlayEventsToExpectedRatioDelta)}, flush/enqueue ${signed(comparison.comparison.liveFlushToEnqueueRatioDelta)}, overlayUpdates/flushed ${signed(comparison.comparison.liveOverlayUpdatesToFlushedEventsRatioDelta)}`,
 		);
 	}
+	if (hasFirstLatencySummary(comparison.primary.summary) || hasFirstLatencySummary(comparison.compare.summary)) {
+		lines.push(
+			`primary first latency: selectedLive=${formatStats(comparison.primary.summary.selectedLiveFirstTextEventMsAfterStart)}ms, sse=${formatStats(comparison.primary.summary.sseFirstTextEventMs)}ms, liveText=${formatStats(comparison.primary.summary.liveFirstTextDeltaMs)}ms, liveEnqueue=${formatStats(comparison.primary.summary.liveFirstEnqueueMs)}ms, liveFlush=${formatStats(comparison.primary.summary.liveFirstFlushMs)}ms, liveOverlay=${formatStats(comparison.primary.summary.liveFirstOverlayUpdateMs)}ms, domVisible=${formatStats(comparison.primary.summary.firstVisibleMs)}ms, provider=${formatStats(comparison.primary.summary.providerFirstTextLatencyMs)}ms`,
+			`compare first latency: selectedLive=${formatStats(comparison.compare.summary.selectedLiveFirstTextEventMsAfterStart)}ms, sse=${formatStats(comparison.compare.summary.sseFirstTextEventMs)}ms, liveText=${formatStats(comparison.compare.summary.liveFirstTextDeltaMs)}ms, liveEnqueue=${formatStats(comparison.compare.summary.liveFirstEnqueueMs)}ms, liveFlush=${formatStats(comparison.compare.summary.liveFirstFlushMs)}ms, liveOverlay=${formatStats(comparison.compare.summary.liveFirstOverlayUpdateMs)}ms, domVisible=${formatStats(comparison.compare.summary.firstVisibleMs)}ms, provider=${formatStats(comparison.compare.summary.providerFirstTextLatencyMs)}ms`,
+			`comparison first latency: selectedLive ${signedMs(comparison.comparison.selectedLiveFirstTextEventDeltaMs)}, sse ${signedMs(comparison.comparison.sseFirstTextEventDeltaMs)}, liveText ${signedMs(comparison.comparison.liveFirstTextDeltaDeltaMs)}, liveEnqueue ${signedMs(comparison.comparison.liveFirstEnqueueDeltaMs)}, liveFlush ${signedMs(comparison.comparison.liveFirstFlushDeltaMs)}, liveOverlay ${signedMs(comparison.comparison.liveFirstOverlayUpdateDeltaMs)}, domVisible ${signedMs(comparison.comparison.firstVisibleDeltaMs)}, provider ${signedMs(comparison.comparison.providerFirstTextLatencyDeltaMs)}`,
+		);
+	}
 	if (comparison.negativeProfile) lines.push(`negative profile: ${comparison.negativeProfile}`);
 	if (comparison.regressions.length) {
 		lines.push("", "Regressions:");
@@ -3539,9 +3562,24 @@ export function formatStreamingBenchmarkUrlComparison(comparison: StreamingBench
 	return lines.join("\n");
 }
 
+function hasFirstLatencySummary(summary: StreamingBenchmarkSummary): boolean {
+	return summary.selectedLiveFirstTextEventMsAfterStart.count > 0
+		|| summary.sseFirstTextEventMs.count > 0
+		|| summary.liveFirstTextDeltaMs.count > 0
+		|| summary.liveFirstEnqueueMs.count > 0
+		|| summary.liveFirstFlushMs.count > 0
+		|| summary.liveFirstOverlayUpdateMs.count > 0
+		|| summary.firstVisibleMs.count > 0
+		|| summary.providerFirstTextLatencyMs.count > 0;
+}
+
 function signed(value: number | undefined): string {
 	if (value === undefined) return "n/a";
 	return value > 0 ? `+${value}` : String(value);
+}
+
+function signedMs(value: number | undefined): string {
+	return value === undefined ? "n/a" : `${signed(value)}ms`;
 }
 
 function numberField(record: Record<string, unknown>, key: string): number {
