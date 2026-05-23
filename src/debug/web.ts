@@ -282,6 +282,8 @@ type StreamingBenchmarkEventSourceStreamProbe = {
 	liveReplayEventCountAfterStart?: number;
 	liveReplayMissedCount?: number;
 	liveReplayMissedCountAfterStart?: number;
+	liveReplayDuplicateCount?: number;
+	liveReplayDuplicateCountAfterStart?: number;
 	liveReplayEvictedBeforeMax?: number;
 	liveReplayCursorLagMax?: number;
 	liveReplayCursorLagMaxAfterStart?: number;
@@ -2020,6 +2022,8 @@ function summarizeEventSourceStreams(streamEvents, afterStartConnections, starte
     const liveReplayReplayedCountAfterStart = afterStartEvents.reduce((total, event) => total + (typeof event.liveReplayReplayed === 'number' && Number.isFinite(event.liveReplayReplayed) ? event.liveReplayReplayed : 0), 0);
     const liveReplayMisses = events.filter((event) => event.liveReplayMissed === true);
     const afterStartLiveReplayMisses = afterStartEvents.filter((event) => event.liveReplayMissed === true);
+    const liveReplayDuplicateCount = countLiveReplayDuplicateIds(events);
+    const liveReplayDuplicateCountAfterStart = countLiveReplayDuplicateIds(events, startedAt);
     const liveReplayEvictedBeforeValues = events.map((event) => event.liveReplayEvictedBefore).filter((value) => typeof value === 'number' && Number.isFinite(value));
     const liveReplayCursorLagValues = events.map((event) => typeof event.liveReplayRequestedAfter === 'number' && Number.isFinite(event.liveReplayRequestedAfter) && typeof event.liveReplayNewestAvailable === 'number' && Number.isFinite(event.liveReplayNewestAvailable) ? Math.max(0, event.liveReplayNewestAvailable - event.liveReplayRequestedAfter) : undefined).filter((value) => typeof value === 'number' && Number.isFinite(value));
     const afterStartLiveReplayCursorLagValues = afterStartEvents.map((event) => typeof event.liveReplayRequestedAfter === 'number' && Number.isFinite(event.liveReplayRequestedAfter) && typeof event.liveReplayNewestAvailable === 'number' && Number.isFinite(event.liveReplayNewestAvailable) ? Math.max(0, event.liveReplayNewestAvailable - event.liveReplayRequestedAfter) : undefined).filter((value) => typeof value === 'number' && Number.isFinite(value));
@@ -2056,6 +2060,8 @@ function summarizeEventSourceStreams(streamEvents, afterStartConnections, starte
       liveReplayEventCountAfterStart: liveReplayReplayedCountAfterStart,
       liveReplayMissedCount: liveReplayMisses.length,
       liveReplayMissedCountAfterStart: afterStartLiveReplayMisses.length,
+      liveReplayDuplicateCount,
+      liveReplayDuplicateCountAfterStart,
       liveReplayEvictedBeforeMax: liveReplayEvictedBeforeValues.length ? Math.max(...liveReplayEvictedBeforeValues) : undefined,
       liveReplayCursorLagMax: liveReplayCursorLagValues.length ? Math.max(...liveReplayCursorLagValues) : undefined,
       liveReplayCursorLagMaxAfterStart: afterStartLiveReplayCursorLagValues.length ? Math.max(...afterStartLiveReplayCursorLagValues) : undefined,
@@ -2065,6 +2071,24 @@ function summarizeEventSourceStreams(streamEvents, afterStartConnections, starte
       firstReasoningEventMsAfterStart,
     };
   }).sort((left, right) => roleSort(left.role) - roleSort(right.role) || left.url.localeCompare(right.url));
+}
+function countLiveReplayDuplicateIds(events, startedAt) {
+  const seen = new Set();
+  let duplicateCount = 0;
+  const ordered = events.slice().sort((left, right) => Number(left.t || 0) - Number(right.t || 0));
+  for (const event of ordered) {
+    const requestedAfter = typeof event.liveReplayRequestedAfter === 'number' && Number.isFinite(event.liveReplayRequestedAfter) ? event.liveReplayRequestedAfter : undefined;
+    const newestAvailable = typeof event.liveReplayNewestAvailable === 'number' && Number.isFinite(event.liveReplayNewestAvailable) ? event.liveReplayNewestAvailable : undefined;
+    const replayed = typeof event.liveReplayReplayed === 'number' && Number.isFinite(event.liveReplayReplayed) ? event.liveReplayReplayed : 0;
+    const countThisStatus = startedAt === undefined || (typeof event.t === 'number' && event.t >= startedAt);
+    if (countThisStatus && replayed > 0 && requestedAfter !== undefined && newestAvailable !== undefined) {
+      for (const replayId of seen) {
+        if (replayId > requestedAfter && replayId <= newestAvailable) duplicateCount += 1;
+      }
+    }
+    if (typeof event.liveReplayId === 'number' && Number.isFinite(event.liveReplayId)) seen.add(event.liveReplayId);
+  }
+  return duplicateCount;
 }
 function parseChatEventsProbeUrl(rawUrl) {
   let parsed;
@@ -2141,8 +2165,9 @@ function streamingBenchmarkRegressions(result) {
           reasoningEventCountAfterStart: total.reasoningEventCountAfterStart + (stream.reasoningEventCountAfterStart || 0),
           liveReplayEventCountAfterStart: total.liveReplayEventCountAfterStart + (stream.liveReplayEventCountAfterStart || 0),
           liveReplayMissedCountAfterStart: total.liveReplayMissedCountAfterStart + (stream.liveReplayMissedCountAfterStart || 0),
+          liveReplayDuplicateCountAfterStart: total.liveReplayDuplicateCountAfterStart + (stream.liveReplayDuplicateCountAfterStart || 0),
           liveSinceValues: Array.from(new Set(total.liveSinceValues.concat(stream.liveSinceValues || []))),
-        }), { textEventCountAfterStart: 0, reasoningEventCountAfterStart: 0, liveReplayEventCountAfterStart: 0, liveReplayMissedCountAfterStart: 0, liveSinceValues: [] })
+        }), { textEventCountAfterStart: 0, reasoningEventCountAfterStart: 0, liveReplayEventCountAfterStart: 0, liveReplayMissedCountAfterStart: 0, liveReplayDuplicateCountAfterStart: 0, liveSinceValues: [] })
       : selectedLiveStreams[0];
     if (!selectedLive) failures.push('EventSource selected-live stream was not observed');
     if (!traceCatchupRequested && selectedLive && expectedDeltas !== undefined && selectedLive.textEventCountAfterStart < expectedDeltas) failures.push('selected-live text events after start ' + selectedLive.textEventCountAfterStart + ' < fixture deltas ' + expectedDeltas);
@@ -2153,6 +2178,7 @@ function streamingBenchmarkRegressions(result) {
       if (reconnectRequested && result.eventSource.forcedCloseCountAfterStart < 1) failures.push('EventSource forced close was not observed');
       if (reconnectRequested && result.eventSource.openCountAfterStart < 1) failures.push('EventSource reconnect open was not observed');
       if (reconnectRequested && selectedLive && (selectedLive.liveReplayMissedCountAfterStart || 0) > 0) failures.push('selected-live transient replay missed buffered events');
+      if (reconnectRequested && selectedLive && (selectedLive.liveReplayDuplicateCountAfterStart || 0) > 0) failures.push('selected-live transient replay duplicated already observed frames');
       if (reconnectRequested && selectedLive && (selectedLive.liveSinceValues || []).length > 0 && (selectedLive.liveReplayEventCountAfterStart || 0) < 1) failures.push('selected-live transient replay cursor did not replay buffered events');
       if (result.eventSource.transientIdCountAfterStart < 1) failures.push('EventSource transient live ids were not observed');
     }
@@ -3569,6 +3595,8 @@ function aggregateEventSourceStreams(streams: StreamingBenchmarkEventSourceStrea
 		liveReplayEventCountAfterStart: sum("liveReplayEventCountAfterStart"),
 		liveReplayMissedCount: sum("liveReplayMissedCount"),
 		liveReplayMissedCountAfterStart: sum("liveReplayMissedCountAfterStart"),
+		liveReplayDuplicateCount: sum("liveReplayDuplicateCount"),
+		liveReplayDuplicateCountAfterStart: sum("liveReplayDuplicateCountAfterStart"),
 		liveReplayEvictedBeforeMax: Math.max(...streams.map((stream) => stream.liveReplayEvictedBeforeMax).filter((value): value is number => typeof value === "number" && Number.isFinite(value)), 0) || undefined,
 		liveReplayCursorLagMax: Math.max(...streams.map((stream) => stream.liveReplayCursorLagMax).filter((value): value is number => typeof value === "number" && Number.isFinite(value)), 0) || undefined,
 		liveReplayCursorLagMaxAfterStart: Math.max(...streams.map((stream) => stream.liveReplayCursorLagMaxAfterStart).filter((value): value is number => typeof value === "number" && Number.isFinite(value)), 0) || undefined,
@@ -3881,6 +3909,7 @@ function formatSelectedLiveCompactCadence(stream: StreamingBenchmarkEventSourceS
 	const parts = [`first text ${jsonShort(stream.firstTextEventMsAfterStart)}ms`, `transient ${stream.uniqueTransientIdCountAfterStart}/${stream.transientIdCountAfterStart}`];
 	if ((stream.liveReplayEventCountAfterStart ?? 0) > 0 || (stream.liveSinceValues?.length ?? 0) > 0) parts.push(`replay ${jsonShort(stream.liveReplayEventCountAfterStart ?? 0)}`, `liveSince ${(stream.liveSinceValues ?? []).length}`);
 	if ((stream.liveReplayCursorLagMaxAfterStart ?? 0) > 0) parts.push(`replayLag ${jsonShort(stream.liveReplayCursorLagMaxAfterStart)}`);
+	if ((stream.liveReplayDuplicateCountAfterStart ?? 0) > 0) parts.push(`replayDup ${(stream.liveReplayDuplicateCountAfterStart ?? 0)}`);
 	if ((stream.liveReplayMissedCountAfterStart ?? 0) > 0) parts.push(`replayMiss ${(stream.liveReplayMissedCountAfterStart ?? 0)}`);
 	return parts.join(", ");
 }
@@ -3910,7 +3939,7 @@ function formatStreamingBenchmark(benchmark: StreamingBenchmark, target: Browser
 	if (benchmark.eventSource) {
 		lines.push(`eventSource: requested=${benchmark.eventSource.requested} installed=${benchmark.eventSource.installed} forcedClose=${benchmark.eventSource.forcedCloseCountAfterStart} reconnectOpen=${benchmark.eventSource.openCountAfterStart} text=${benchmark.eventSource.textEventCount} afterStart=${benchmark.eventSource.textEventCountAfterStart} firstText=${jsonShort(benchmark.eventSource.firstTextEventMsAfterStart)}ms reasoning=${benchmark.eventSource.reasoningEventCount} reasoningAfterStart=${benchmark.eventSource.reasoningEventCountAfterStart} transient=${benchmark.eventSource.uniqueTransientIdCountAfterStart}/${benchmark.eventSource.transientIdCountAfterStart} reset=${benchmark.eventSource.transientIdResetObserved} droppedText=${benchmark.eventSource.textDropTextEventCount} last=${jsonShort(benchmark.eventSource.lastEventId)} reconnectObserved=${benchmark.eventSource.reconnectObserved}`);
 		for (const stream of benchmark.eventSource.streams ?? []) {
-			lines.push(`eventSource stream: role=${stream.role} mode=${jsonShort(stream.mode)} session=${jsonShort(stream.piboSessionId)} room=${jsonShort(stream.roomId)} text=${stream.textEventCount} afterStart=${stream.textEventCountAfterStart} firstText=${jsonShort(stream.firstTextEventMsAfterStart)}ms reasoning=${stream.reasoningEventCount} reasoningAfterStart=${stream.reasoningEventCountAfterStart} events=${stream.eventCount} opens=${stream.openCountAfterStart} forcedClose=${stream.forcedCloseCountAfterStart} transient=${stream.uniqueTransientIdCountAfterStart}/${stream.transientIdCountAfterStart} liveReplay=${jsonShort(stream.liveReplayEventCountAfterStart)} liveReplayLag=${jsonShort(stream.liveReplayCursorLagMaxAfterStart)} liveReplayMiss=${jsonShort(stream.liveReplayMissedCountAfterStart)} liveReplayEvictedBefore=${jsonShort(stream.liveReplayEvictedBeforeMax)} liveSince=${jsonShort((stream.liveSinceValues ?? []).join(","))} since=${jsonShort(stream.sinceValues.join(","))} url=${stream.url}`);
+			lines.push(`eventSource stream: role=${stream.role} mode=${jsonShort(stream.mode)} session=${jsonShort(stream.piboSessionId)} room=${jsonShort(stream.roomId)} text=${stream.textEventCount} afterStart=${stream.textEventCountAfterStart} firstText=${jsonShort(stream.firstTextEventMsAfterStart)}ms reasoning=${stream.reasoningEventCount} reasoningAfterStart=${stream.reasoningEventCountAfterStart} events=${stream.eventCount} opens=${stream.openCountAfterStart} forcedClose=${stream.forcedCloseCountAfterStart} transient=${stream.uniqueTransientIdCountAfterStart}/${stream.transientIdCountAfterStart} liveReplay=${jsonShort(stream.liveReplayEventCountAfterStart)} liveReplayLag=${jsonShort(stream.liveReplayCursorLagMaxAfterStart)} liveReplayDup=${jsonShort(stream.liveReplayDuplicateCountAfterStart)} liveReplayMiss=${jsonShort(stream.liveReplayMissedCountAfterStart)} liveReplayEvictedBefore=${jsonShort(stream.liveReplayEvictedBeforeMax)} liveSince=${jsonShort((stream.liveSinceValues ?? []).join(","))} since=${jsonShort(stream.sinceValues.join(","))} url=${stream.url}`);
 		}
 	}
 	if (benchmark.sse) lines.push(`sse: requested=${benchmark.sse.requested} installed=${benchmark.sse.installed} status=${jsonShort(benchmark.sse.status)} firstChunk=${jsonShort(benchmark.sse.firstChunkMs)}ms firstText=${jsonShort(benchmark.sse.firstTextEventMs)}ms chunks=${benchmark.sse.chunkCount} chunkBytes=${formatStats(benchmark.sse.chunkBytes)} chunkGaps=${formatStats(benchmark.sse.chunkGapsMs)} textPerChunk=${formatStats(benchmark.sse.textEventsPerChunk)} text=${benchmark.sse.textEventCount} reasoning=${benchmark.sse.reasoningEventCount} textGaps=${formatStats(benchmark.sse.textEventGapsMs)} transient=${benchmark.sse.transientIdCount} durable=${benchmark.sse.durableIdCount} errors=${benchmark.sse.errors.length}`);

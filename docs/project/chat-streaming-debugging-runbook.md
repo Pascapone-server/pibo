@@ -107,7 +107,7 @@ Prefer these rows in compact reports:
 
 - **Provider/Pi**: upstream cadence and parse health.
 - **SSE transport**: text/reasoning preservation, chunk gaps, text events per chunk.
-- **EventSource selected-live**: browser-delivered live frames, transient id count, and reconnect replay/cursor-lag fields when `liveSince` is used.
+- **EventSource selected-live**: browser-delivered live frames, transient id count, and reconnect replay/cursor-lag/duplicate fields when `liveSince` is used.
 - **Live overlay**: enqueue/flush/overlay preservation ratios plus first live text, flush, and overlay latencies.
 - **DOM**: visible positive updates, max jump, p90 gap, first visible latency.
 - **Score**: aggregate smoothness plus regression/warning count.
