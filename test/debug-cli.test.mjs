@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { PiboDataStore } from "../dist/data/pibo-store.js";
 import { PiboReliabilityStore } from "../dist/reliability/store.js";
-import { attachStreamingProviderTelemetryToBenchmark, collectStreamingProviderTelemetryFromSelectedBrowserSession, collectStreamingProviderTelemetryFromSession, collectStreamingProviderTelemetryFromTurn, evaluateStreamingBenchmarkAssertion, evaluateStreamingBenchmarkUrlComparisonRegressions, evaluateStreamingProviderRegressions, formatWatch, inferWatchFlickers, resolveStreamingBenchmarkHostedCompareUrlFromValues, summarizeStreamingProviderPreservation, summarizeStreamingProviderTelemetry } from "../dist/debug/web.js";
+import { attachStreamingProviderTelemetryToBenchmark, collectStreamingProviderTelemetryFromSelectedBrowserSession, collectStreamingProviderTelemetryFromSession, collectStreamingProviderTelemetryFromTurn, evaluateStreamingBenchmarkAssertion, evaluateStreamingBenchmarkUrlComparisonRegressions, evaluateStreamingProviderRegressions, formatWatch, inferWatchFlickers, resolveStreamingBenchmarkHostedCompareUrlFromValues, summarizeStreamingBenchmarks, summarizeStreamingProviderPreservation, summarizeStreamingProviderTelemetry } from "../dist/debug/web.js";
 
 const execFileAsyncRaw = promisify(execFile);
 const cliPath = resolve("dist/bin/pibo.js");
@@ -87,6 +87,43 @@ test("streaming hosted compare URL resolution prefers env and supports optional 
 	assert.equal(resolveStreamingBenchmarkHostedCompareUrlFromValues({ PIBO_DEV_BASE_URL: "https://dev.example.test/" }, {}), "https://dev.example.test/apps/chat");
 	assert.equal(resolveStreamingBenchmarkHostedCompareUrlFromValues({}, { PIBO_DEV_PUBLIC_URL: "https://file.example.test/apps/chat" }), "https://file.example.test/apps/chat");
 	assert.equal(resolveStreamingBenchmarkHostedCompareUrlFromValues({ PIBO_DEV_PUBLIC_URL: "", PIBO_DEV_BASE_URL: "" }, {}), undefined);
+});
+
+test("streaming benchmark summaries include live pipeline debug counters", () => {
+	const run = (enqueueCount, traceRefreshCompletedCount) => ({
+		kind: "streaming-benchmark",
+		debug: {
+			delta: {
+				textDeltaCount: 12,
+				enqueueCount,
+				flushCount: enqueueCount - 1,
+				flushedEventCount: enqueueCount,
+				overlayUpdateCount: enqueueCount - 1,
+				traceRefreshScheduledCount: 2,
+				traceRefreshCompletedCount,
+				traceRefreshFailedCount: 0,
+			},
+			after: {
+				overlayEventCount: enqueueCount,
+				currentOutputLength: enqueueCount * 2,
+				traceBaseOutputLength: 4,
+				traceRefreshDurationMsMax: 25,
+			},
+		},
+		dom: { gapsMs: { count: 0 }, positiveCharJumps: { count: 0 }, positiveUpdateCount: enqueueCount },
+		longTasks: { maxMs: 0 },
+		regressions: [],
+		score: { smoothness: 50, textDeltaCount: 12, domPositiveUpdateCount: enqueueCount },
+	});
+	const summary = summarizeStreamingBenchmarks([run(12, 1), run(14, 2)]);
+	assert.equal(summary.debugEnqueueCount.p50, 12);
+	assert.equal(summary.debugFlushCount.p50, 11);
+	assert.equal(summary.debugFlushedEventCount.p90, 12);
+	assert.equal(summary.debugOverlayUpdateCount.p90, 11);
+	assert.equal(summary.debugOverlayEventCount.max, 14);
+	assert.equal(summary.debugTraceRefreshCompletedCount.max, 2);
+	assert.equal(summary.debugTraceRefreshDurationMaxMs.p50, 25);
+	assert.equal(summary.debugCurrentOutputLength.max, 28);
 });
 
 test("streaming provider preservation summary computes provider-to-transport ratios", () => {

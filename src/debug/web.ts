@@ -375,6 +375,17 @@ type StreamingBenchmarkSummary = {
 	firstVisibleMs: NumberStats;
 	longTaskMaxMs: NumberStats;
 	regressionCount: NumberStats;
+	debugEnqueueCount: NumberStats;
+	debugFlushCount: NumberStats;
+	debugFlushedEventCount: NumberStats;
+	debugOverlayUpdateCount: NumberStats;
+	debugOverlayEventCount: NumberStats;
+	debugTraceRefreshScheduledCount: NumberStats;
+	debugTraceRefreshCompletedCount: NumberStats;
+	debugTraceRefreshFailedCount: NumberStats;
+	debugTraceRefreshDurationMaxMs: NumberStats;
+	debugCurrentOutputLength: NumberStats;
+	debugTraceBaseOutputLength: NumberStats;
 	traceSampleCount: NumberStats;
 	traceLiveVersionCount: NumberStats;
 	traceFirstLiveVersionMs: NumberStats;
@@ -430,6 +441,10 @@ type StreamingBenchmarkComparison = {
 	domPositiveUpdateDelta?: number;
 	domJumpMaxDeltaChars?: number;
 	longTaskMaxDeltaMs?: number;
+	debugEnqueueCountDelta?: number;
+	debugFlushCountDelta?: number;
+	debugOverlayUpdateCountDelta?: number;
+	debugTraceRefreshCompletedCountDelta?: number;
 	traceLiveVersionCountDelta?: number;
 	traceMaxAssistantOutputDelta?: number;
 	traceDurableEventDeltaDelta?: number;
@@ -2936,7 +2951,7 @@ function formatStreamingBenchmarkAssertionError(assertion: StreamingBenchmarkAss
 	return `streaming benchmark assertions failed: ${parts.join("; ") || "unknown assertion failure"}`;
 }
 
-function summarizeStreamingBenchmarks(runs: StreamingBenchmark[]): StreamingBenchmarkSummary {
+export function summarizeStreamingBenchmarks(runs: StreamingBenchmark[]): StreamingBenchmarkSummary {
 	return {
 		runs: runs.length,
 		smoothness: numericStats(runs.map((run) => run.score.smoothness)),
@@ -2951,6 +2966,17 @@ function summarizeStreamingBenchmarks(runs: StreamingBenchmark[]): StreamingBenc
 		firstVisibleMs: numericStats(runs.map((run) => run.dom.firstPositiveUpdateMs)),
 		longTaskMaxMs: numericStats(runs.map((run) => run.longTasks.maxMs)),
 		regressionCount: numericStats(runs.map((run) => run.regressions.length)),
+		debugEnqueueCount: numericStats(runs.map((run) => streamingDebugDeltaNumber(run, "enqueueCount"))),
+		debugFlushCount: numericStats(runs.map((run) => streamingDebugDeltaNumber(run, "flushCount"))),
+		debugFlushedEventCount: numericStats(runs.map((run) => streamingDebugDeltaNumber(run, "flushedEventCount"))),
+		debugOverlayUpdateCount: numericStats(runs.map((run) => streamingDebugDeltaNumber(run, "overlayUpdateCount"))),
+		debugOverlayEventCount: numericStats(runs.map((run) => streamingDebugAfterNumber(run, "overlayEventCount"))),
+		debugTraceRefreshScheduledCount: numericStats(runs.map((run) => streamingDebugDeltaNumber(run, "traceRefreshScheduledCount"))),
+		debugTraceRefreshCompletedCount: numericStats(runs.map((run) => streamingDebugDeltaNumber(run, "traceRefreshCompletedCount"))),
+		debugTraceRefreshFailedCount: numericStats(runs.map((run) => streamingDebugDeltaNumber(run, "traceRefreshFailedCount"))),
+		debugTraceRefreshDurationMaxMs: numericStats(runs.map((run) => streamingDebugAfterNumber(run, "traceRefreshDurationMsMax"))),
+		debugCurrentOutputLength: numericStats(runs.map((run) => streamingDebugAfterNumber(run, "currentOutputLength"))),
+		debugTraceBaseOutputLength: numericStats(runs.map((run) => streamingDebugAfterNumber(run, "traceBaseOutputLength"))),
 		traceSampleCount: numericStats(runs.map((run) => run.trace?.sampleCount)),
 		traceLiveVersionCount: numericStats(runs.map((run) => run.trace?.liveVersionCount)),
 		traceFirstLiveVersionMs: numericStats(runs.map((run) => run.trace?.firstLiveVersionMs)),
@@ -3006,6 +3032,10 @@ function compareStreamingBenchmarkSummaries(baseline: StreamingBenchmarkSummary,
 		domPositiveUpdateDelta: statDelta(current.domPositiveUpdateCount, baseline.domPositiveUpdateCount),
 		domJumpMaxDeltaChars: statDelta(current.domJumpMaxChars, baseline.domJumpMaxChars),
 		longTaskMaxDeltaMs: statDelta(current.longTaskMaxMs, baseline.longTaskMaxMs),
+		debugEnqueueCountDelta: statDelta(current.debugEnqueueCount, baseline.debugEnqueueCount),
+		debugFlushCountDelta: statDelta(current.debugFlushCount, baseline.debugFlushCount),
+		debugOverlayUpdateCountDelta: statDelta(current.debugOverlayUpdateCount, baseline.debugOverlayUpdateCount),
+		debugTraceRefreshCompletedCountDelta: statDelta(current.debugTraceRefreshCompletedCount, baseline.debugTraceRefreshCompletedCount),
 		traceLiveVersionCountDelta: statDelta(current.traceLiveVersionCount, baseline.traceLiveVersionCount),
 		traceMaxAssistantOutputDelta: statDelta(current.traceMaxAssistantOutputLength, baseline.traceMaxAssistantOutputLength),
 		traceDurableEventDeltaDelta: statDelta(current.traceDurableEventDelta, baseline.traceDurableEventDelta),
@@ -3025,6 +3055,16 @@ function compareStreamingBenchmarkSummaries(baseline: StreamingBenchmarkSummary,
 		providerSelectedLiveReasoningRatioDelta: statDelta(current.providerSelectedLiveReasoningRatio, baseline.providerSelectedLiveReasoningRatio),
 		providerDomPositiveTextRatioDelta: statDelta(current.providerDomPositiveTextRatio, baseline.providerDomPositiveTextRatio),
 	};
+}
+
+function streamingDebugDeltaNumber(run: StreamingBenchmark, key: string): number | undefined {
+	const value = run.debug.delta?.[key];
+	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function streamingDebugAfterNumber(run: StreamingBenchmark, key: keyof StreamingDebugCounters): number | undefined {
+	const value = run.debug.after?.[key];
+	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function selectedLiveStream(run: StreamingBenchmark): StreamingBenchmarkEventSourceStreamProbe | undefined {
@@ -3148,6 +3188,8 @@ function formatStreamingBenchmarkGroup(group: StreamingBenchmarkGroup, target: B
 	];
 	if (group.summary.fixtureScheduleGapP90Ms.count > 0) lines.push(`fixture: scheduleGapP90=${formatStats(group.summary.fixtureScheduleGapP90Ms)}`);
 	if (group.summary.domLagOverFixtureScheduleP90Ms.count > 0 || group.summary.sseTextLagOverFixtureScheduleP90Ms.count > 0) lines.push(`cadence lag: domP90-scheduleP90=${formatStats(group.summary.domLagOverFixtureScheduleP90Ms)}ms, sseTextP90-scheduleP90=${formatStats(group.summary.sseTextLagOverFixtureScheduleP90Ms)}ms, domRatio=${formatStats(group.summary.domToFixtureScheduleP90Ratio)}, sseRatio=${formatStats(group.summary.sseTextToFixtureScheduleP90Ratio)}`);
+	if (group.summary.debugEnqueueCount.count > 0 || group.summary.debugFlushCount.count > 0 || group.summary.debugOverlayUpdateCount.count > 0) lines.push(`live pipeline: enqueue=${formatStats(group.summary.debugEnqueueCount)}, flush=${formatStats(group.summary.debugFlushCount)}, flushedEvents=${formatStats(group.summary.debugFlushedEventCount)}, overlayUpdates=${formatStats(group.summary.debugOverlayUpdateCount)}, overlayEvents=${formatStats(group.summary.debugOverlayEventCount)}, currentOutput=${formatStats(group.summary.debugCurrentOutputLength)}, traceBase=${formatStats(group.summary.debugTraceBaseOutputLength)}`);
+	if (group.summary.debugTraceRefreshScheduledCount.count > 0 || group.summary.debugTraceRefreshCompletedCount.count > 0 || group.summary.debugTraceRefreshFailedCount.count > 0) lines.push(`trace refresh: scheduled=${formatStats(group.summary.debugTraceRefreshScheduledCount)}, completed=${formatStats(group.summary.debugTraceRefreshCompletedCount)}, failed=${formatStats(group.summary.debugTraceRefreshFailedCount)}, maxDuration=${formatStats(group.summary.debugTraceRefreshDurationMaxMs)}ms`);
 	if (group.summary.providerTextDeltaCount.count > 0) lines.push(`provider: text=${formatStats(group.summary.providerTextDeltaCount)}, reasoning=${formatStats(group.summary.providerReasoningDeltaCount)}, textBytesP50=${formatStats(group.summary.providerTextDeltaBytesP50)}, textGapP90=${formatStats(group.summary.providerTextDeltaGapP90Ms)}ms, firstText=${formatStats(group.summary.providerFirstTextLatencyMs)}ms, parseErrors=${formatStats(group.summary.providerParseErrorCount)}, unknown=${formatStats(group.summary.providerUnknownEventCount)}`);
 	if (group.summary.providerSseTextRatio.count > 0 || group.summary.providerSelectedLiveTextRatio.count > 0) lines.push(`provider preservation: sseTextRatio=${formatStats(group.summary.providerSseTextRatio)}, selectedLiveTextRatio=${formatStats(group.summary.providerSelectedLiveTextRatio)}, domPositiveTextRatio=${formatStats(group.summary.providerDomPositiveTextRatio)}, sseReasoningRatio=${formatStats(group.summary.providerSseReasoningRatio)}, selectedLiveReasoningRatio=${formatStats(group.summary.providerSelectedLiveReasoningRatio)}`);
 	if (group.summary.eventSourceTextEventCountAfterStart.count > 0 || group.summary.eventSourceReasoningEventCountAfterStart.count > 0) lines.push(`eventSource: textAfterStart=${formatStats(group.summary.eventSourceTextEventCountAfterStart)}, reasoningAfterStart=${formatStats(group.summary.eventSourceReasoningEventCountAfterStart)}, forcedClose=${formatStats(group.summary.eventSourceForcedCloseCountAfterStart)}, reconnectOpen=${formatStats(group.summary.eventSourceReconnectOpenCountAfterStart)}, transient=${formatStats(group.summary.eventSourceTransientIdCountAfterStart)}`);
@@ -3157,6 +3199,7 @@ function formatStreamingBenchmarkGroup(group: StreamingBenchmarkGroup, target: B
 	if (group.summary.traceSampleCount.count > 0) lines.push(`trace: samples=${formatStats(group.summary.traceSampleCount)}, liveVersions=${formatStats(group.summary.traceLiveVersionCount)}, firstLive=${formatStats(group.summary.traceFirstLiveVersionMs)}ms, assistantMax=${formatStats(group.summary.traceMaxAssistantOutputLength)}, assistantFinal=${formatStats(group.summary.traceFinalAssistantOutputLength)}, durableEventDelta=${formatStats(group.summary.traceDurableEventDelta)}`);
 	if (group.comparison) {
 		let comparison = `comparison vs baseline (${group.comparison.baselineRuns} runs): smoothness ${signed(group.comparison.smoothnessDelta)}, domP90Gap ${signed(group.comparison.domGapP90DeltaMs)}ms, domPositive ${signed(group.comparison.domPositiveUpdateDelta)}, maxJump ${signed(group.comparison.domJumpMaxDeltaChars)} chars, longTaskMax ${signed(group.comparison.longTaskMaxDeltaMs)}ms`;
+		if (group.summary.debugEnqueueCount.count > 0 || group.comparison.debugEnqueueCountDelta !== undefined || group.comparison.debugFlushCountDelta !== undefined || group.comparison.debugOverlayUpdateCountDelta !== undefined || group.comparison.debugTraceRefreshCompletedCountDelta !== undefined) comparison += `, enqueue ${signed(group.comparison.debugEnqueueCountDelta)}, flush ${signed(group.comparison.debugFlushCountDelta)}, overlayUpdates ${signed(group.comparison.debugOverlayUpdateCountDelta)}, traceRefreshCompleted ${signed(group.comparison.debugTraceRefreshCompletedCountDelta)}`;
 		if (group.summary.traceSampleCount.count > 0 || group.comparison.traceLiveVersionCountDelta !== undefined || group.comparison.traceMaxAssistantOutputDelta !== undefined || group.comparison.traceDurableEventDeltaDelta !== undefined) comparison += `, traceLiveVersions ${signed(group.comparison.traceLiveVersionCountDelta)}, traceAssistantMax ${signed(group.comparison.traceMaxAssistantOutputDelta)}, traceDurableEventDelta ${signed(group.comparison.traceDurableEventDeltaDelta)}`;
 		if (group.summary.fixtureScheduleGapP90Ms.count > 0 || group.comparison.fixtureScheduleGapP90DeltaMs !== undefined) comparison += `, fixtureScheduleP90 ${signed(group.comparison.fixtureScheduleGapP90DeltaMs)}ms, domLagVsSchedule ${signed(group.comparison.domLagOverFixtureScheduleP90DeltaMs)}ms, sseTextLagVsSchedule ${signed(group.comparison.sseTextLagOverFixtureScheduleP90DeltaMs)}ms`;
 		if (group.summary.eventSourceTextEventCountAfterStart.count > 0 || group.summary.selectedLiveEventCountAfterStart.count > 0 || group.summary.sseTextEventCount.count > 0 || group.comparison.eventSourceTextEventDelta !== undefined || group.comparison.selectedLiveTextEventDelta !== undefined || group.comparison.sseTextEventDelta !== undefined) comparison += `, eventSourceText ${signed(group.comparison.eventSourceTextEventDelta)}, eventSourceReasoning ${signed(group.comparison.eventSourceReasoningEventDelta)}, sseText ${signed(group.comparison.sseTextEventDelta)}, sseP90Gap ${signed(group.comparison.sseChunkGapP90DeltaMs)}ms, selectedLiveEvents ${signed(group.comparison.selectedLiveEventDelta)}, selectedLiveText ${signed(group.comparison.selectedLiveTextEventDelta)}, selectedLiveReasoning ${signed(group.comparison.selectedLiveReasoningEventDelta)}`;
