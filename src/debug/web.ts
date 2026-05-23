@@ -24,6 +24,7 @@ type WebOptions = {
 	fixtureProfile?: string;
 	fixtureMix?: string;
 	negativeProfile?: string;
+	compareUrl?: string;
 	json: boolean;
 	artifact: boolean;
 	fixture: boolean;
@@ -387,6 +388,20 @@ type StreamingBenchmarkGroup = {
 	assertion?: StreamingBenchmarkAssertion;
 };
 
+type StreamingBenchmarkUrlComparison = {
+	kind: "streaming-benchmark-url-comparison";
+	createdAt: string;
+	durationMs: number;
+	primaryUrl: string;
+	compareUrl: string;
+	primary: StreamingBenchmarkGroup;
+	compare: StreamingBenchmarkGroup;
+	comparison: StreamingBenchmarkComparison;
+	regressions: string[];
+	warnings: string[];
+	assertion?: StreamingBenchmarkAssertion;
+};
+
 export async function runDebugWeb(args: string[]): Promise<void> {
 	if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
 		printWebDiscovery();
@@ -477,7 +492,7 @@ function printScenarioHelp(): void {
 
 Usage:
   pibo debug web scenario new-session [--manual|--act] [--duration ms] [--json] [--artifact]
-  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--fixture-profile steady|jitter|burst|batch] [--fixture-mix text|reasoning-text] [--simulate-reconnect|--simulate-trace-catchup] [--duration ms] [--runs n] [--from artifact.json] [--assert] [--expect-regression text] [--negative-profile batch] [--json] [--artifact]
+  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--fixture-profile steady|jitter|burst|batch] [--fixture-mix text|reasoning-text] [--simulate-reconnect|--simulate-trace-catchup] [--duration ms] [--runs n] [--from artifact.json] [--compare-url url] [--assert] [--expect-regression text] [--negative-profile batch] [--json] [--artifact]
 
 Defaults:
   new-session --manual waits while you click New Session yourself.
@@ -490,6 +505,7 @@ Defaults:
   streaming-benchmark --simulate-reconnect reloads the app with an EventSource probe, forces one live stream close, and verifies reconnect/transient ids.
   streaming-benchmark --simulate-trace-catchup suppresses backend live text deltas and verifies trace snapshot recovery.
   streaming-benchmark --runs repeats the same scenario and reports medians; --from compares against a prior benchmark artifact.
+  streaming-benchmark --compare-url runs the same backend fixture at another Chat URL, for direct-vs-hosted SSE comparison.
   streaming-benchmark --assert exits non-zero when fixture/debug/DOM smoothness gates fail.
   streaming-benchmark --expect-regression marks a required regression substring for controlled negative benchmarks; unexpected or missing expected regressions still fail with --assert.
   streaming-benchmark --negative-profile batch expands to the backend batch reasoning/text fixture with required controlled regression assertions.
@@ -634,6 +650,7 @@ async function runScenario(options: WebOptions): Promise<void> {
 	if (scenario === "streaming-benchmark" && streamingOptions.simulateReconnect && !streamingOptions.backendFixture) throw new Error("--simulate-reconnect requires --backend-fixture.");
 	if (scenario === "streaming-benchmark" && streamingOptions.simulateTraceCatchup && !streamingOptions.backendFixture) throw new Error("--simulate-trace-catchup requires --backend-fixture.");
 	if (scenario === "streaming-benchmark" && streamingOptions.simulateReconnect && streamingOptions.simulateTraceCatchup) throw new Error("Use either --simulate-reconnect or --simulate-trace-catchup, not both.");
+	if (scenario === "streaming-benchmark" && streamingOptions.compareUrl && !streamingOptions.backendFixture) throw new Error("--compare-url requires --backend-fixture so the benchmark can replay a deterministic stream at both URLs.");
 	const fixtureProfile = parseFixtureProfile(streamingOptions.fixtureProfile);
 	const fixtureMix = parseFixtureMix(streamingOptions.fixtureMix);
 	const durationMs = parseDuration(streamingOptions.duration);
@@ -641,16 +658,21 @@ async function runScenario(options: WebOptions): Promise<void> {
 	const { client, target } = await connectTarget({ ...options, preset: "app" });
 	try {
 		if (scenario === "streaming-benchmark") {
-			if (streamingOptions.fixture) await navigateStreamingBenchmarkFixture(client, fixtureProfile, fixtureMix);
-			if (streamingOptions.backendFixture) await prepareStreamingBenchmarkEventSourceProbe(client);
-			const benchmarks: StreamingBenchmark[] = [];
-			for (let run = 0; run < runs; run++) {
-				benchmarks.push(await runStreamingBenchmark(client, durationMs, { startFixture: streamingOptions.fixture, startBackendFixture: streamingOptions.backendFixture, fixtureProfile, fixtureMix, simulateReconnect: streamingOptions.simulateReconnect, simulateTraceCatchup: streamingOptions.simulateTraceCatchup }));
-			}
 			const baseline = streamingOptions.from ? await readStreamingBenchmarkRuns(streamingOptions.from) : undefined;
-			const benchmark: StreamingBenchmark | StreamingBenchmarkGroup = runs === 1
+			const runOptions = { startFixture: streamingOptions.fixture, startBackendFixture: streamingOptions.backendFixture, fixtureProfile, fixtureMix, simulateReconnect: streamingOptions.simulateReconnect, simulateTraceCatchup: streamingOptions.simulateTraceCatchup };
+			const primaryUrl = await currentBrowserUrl(client);
+			const benchmarks = await runStreamingBenchmarkSeries(client, runs, durationMs, runOptions);
+			let benchmark: StreamingBenchmark | StreamingBenchmarkGroup | StreamingBenchmarkUrlComparison = runs === 1
 				? benchmarks[0]
 				: summarizeStreamingBenchmarkGroup(benchmarks, baseline);
+			if (streamingOptions.compareUrl) {
+				const compareUrl = resolveStreamingBenchmarkCompareUrl(streamingOptions.compareUrl, primaryUrl);
+				await navigateStreamingBenchmarkTarget(client, compareUrl);
+				const compareRuns = await runStreamingBenchmarkSeries(client, runs, durationMs, runOptions);
+				const primaryGroup = summarizeStreamingBenchmarkGroup(benchmarks, baseline);
+				const compareGroup = summarizeStreamingBenchmarkGroup(compareRuns, benchmarks);
+				benchmark = summarizeStreamingBenchmarkUrlComparison(primaryUrl, compareUrl, primaryGroup, compareGroup);
+			}
 			const assertion = applyExpectedStreamingRegressions(benchmark, streamingOptions.expectedRegressionPatterns);
 			if (streamingOptions.json) console.log(JSON.stringify({ target: compactTarget(target), scenario, benchmark }, null, 2));
 			else console.log(limitStdout(formatStreamingBenchmarkResult(benchmark, target)));
@@ -730,7 +752,17 @@ async function runBrowserWatch(client: CdpClient, scope: string, durationMs: num
 	return client.evaluate<WebWatch>(expression, durationMs + 10_000);
 }
 
-async function runStreamingBenchmark(client: CdpClient, durationMs: number, options: { startFixture?: boolean; startBackendFixture?: boolean; fixtureProfile?: StreamingFixtureProfile; fixtureMix?: StreamingFixtureMix; simulateReconnect?: boolean; simulateTraceCatchup?: boolean } = {}): Promise<StreamingBenchmark> {
+type RunStreamingBenchmarkOptions = { startFixture?: boolean; startBackendFixture?: boolean; fixtureProfile?: StreamingFixtureProfile; fixtureMix?: StreamingFixtureMix; simulateReconnect?: boolean; simulateTraceCatchup?: boolean };
+
+async function runStreamingBenchmarkSeries(client: CdpClient, runs: number, durationMs: number, options: RunStreamingBenchmarkOptions): Promise<StreamingBenchmark[]> {
+	if (options.startFixture) await navigateStreamingBenchmarkFixture(client, options.fixtureProfile ?? "steady", options.fixtureMix ?? "text");
+	if (options.startBackendFixture) await prepareStreamingBenchmarkEventSourceProbe(client);
+	const benchmarks: StreamingBenchmark[] = [];
+	for (let run = 0; run < runs; run++) benchmarks.push(await runStreamingBenchmark(client, durationMs, options));
+	return benchmarks;
+}
+
+async function runStreamingBenchmark(client: CdpClient, durationMs: number, options: RunStreamingBenchmarkOptions = {}): Promise<StreamingBenchmark> {
 	await client.send("Page.bringToFront").catch(() => undefined);
 	const benchmarkTimeoutMs = durationMs + (options.startBackendFixture ? 20_000 : 10_000);
 	const benchmark = await client.evaluate<Omit<StreamingBenchmark, "score">>(buildStreamingBenchmarkExpression(durationMs, options), benchmarkTimeoutMs);
@@ -738,9 +770,15 @@ async function runStreamingBenchmark(client: CdpClient, durationMs: number, opti
 	return { ...scored, cadence: summarizeStreamingCadence(scored) };
 }
 
-async function prepareStreamingBenchmarkEventSourceProbe(client: CdpClient): Promise<void> {
+async function currentBrowserUrl(client: CdpClient): Promise<string> {
+	const state = await client.evaluate<{ href: string }>(`(() => ({ href: location.href }))()`, 5_000);
+	return state.href;
+}
+
+async function prepareStreamingBenchmarkEventSourceProbe(client: CdpClient, targetUrl?: string): Promise<void> {
 	await client.send("Page.enable").catch(() => undefined);
 	await client.send("Page.addScriptToEvaluateOnNewDocument", { source: streamingBenchmarkEventSourceProbeScript() }, 5_000);
+	if (targetUrl) await navigateStreamingBenchmarkTarget(client, targetUrl);
 	const state = await client.evaluate<{ href: string }>(`(() => {
   try { localStorage.setItem('pibo.chat.debugStreaming', '1'); } catch {}
   return { href: location.href };
@@ -2112,6 +2150,8 @@ function parseOptions(args: string[]): WebOptions {
 		else if (arg.startsWith("--fixture-mix=")) options.fixtureMix = arg.slice("--fixture-mix=".length);
 		else if (arg === "--negative-profile") options.negativeProfile = requireValue(args, ++index, arg);
 		else if (arg.startsWith("--negative-profile=")) options.negativeProfile = arg.slice("--negative-profile=".length);
+		else if (arg === "--compare-url") options.compareUrl = requireValue(args, ++index, arg);
+		else if (arg.startsWith("--compare-url=")) options.compareUrl = arg.slice("--compare-url=".length);
 		else if (arg === "--from") options.from = requireValue(args, ++index, arg);
 		else if (arg.startsWith("--from=")) options.from = arg.slice("--from=".length);
 		else options.positionals.push(arg);
@@ -2396,7 +2436,41 @@ function summarizeStreamingBenchmarkGroup(runs: StreamingBenchmark[], baselineRu
 	};
 }
 
-function applyExpectedStreamingRegressions(benchmark: StreamingBenchmark | StreamingBenchmarkGroup, expectedPatterns: readonly string[]): StreamingBenchmarkAssertion {
+function summarizeStreamingBenchmarkUrlComparison(primaryUrl: string, compareUrl: string, primary: StreamingBenchmarkGroup, compare: StreamingBenchmarkGroup): StreamingBenchmarkUrlComparison {
+	return {
+		kind: "streaming-benchmark-url-comparison",
+		createdAt: new Date().toISOString(),
+		durationMs: primary.durationMs,
+		primaryUrl,
+		compareUrl,
+		primary,
+		compare,
+		comparison: compareStreamingBenchmarkSummaries(primary.summary, compare.summary),
+		regressions: [
+			...primary.regressions.map((regression) => `primary: ${regression}`),
+			...compare.regressions.map((regression) => `compare: ${regression}`),
+		],
+		warnings: [
+			...primary.warnings.map((warning) => `primary: ${warning}`),
+			...compare.warnings.map((warning) => `compare: ${warning}`),
+		],
+	};
+}
+
+function resolveStreamingBenchmarkCompareUrl(rawCompareUrl: string, primaryUrl: string): string {
+	const primary = new URL(primaryUrl);
+	const compare = new URL(rawCompareUrl, primary);
+	const comparePath = compare.pathname.replace(/\/+$/, "");
+	const primaryPath = primary.pathname.replace(/\/+$/, "");
+	if ((comparePath === "" || comparePath === "/apps/chat") && primaryPath.startsWith("/apps/chat/")) {
+		compare.pathname = primary.pathname;
+		compare.search = primary.search;
+	}
+	compare.searchParams.set("debugStreaming", "1");
+	return compare.toString();
+}
+
+function applyExpectedStreamingRegressions(benchmark: StreamingBenchmark | StreamingBenchmarkGroup | StreamingBenchmarkUrlComparison, expectedPatterns: readonly string[]): StreamingBenchmarkAssertion {
 	const assertion = evaluateStreamingBenchmarkAssertion(benchmark.regressions, expectedPatterns);
 	if (expectedPatterns.length > 0) benchmark.assertion = assertion;
 	return assertion;
@@ -2523,7 +2597,11 @@ function traceDurableEventDelta(trace: StreamingBenchmarkTraceProbe | undefined)
 async function readStreamingBenchmarkRuns(file: string): Promise<StreamingBenchmark[]> {
 	const parsed = JSON.parse(await readFile(file, "utf8"));
 	const value = parsed.benchmark ?? parsed;
-	const runs = value.kind === "streaming-benchmark-runs" ? value.runs : [value];
+	const runs = value.kind === "streaming-benchmark-runs"
+		? value.runs
+		: value.kind === "streaming-benchmark-url-comparison"
+			? [...(value.primary?.runs ?? []), ...(value.compare?.runs ?? [])]
+			: [value];
 	return runs.filter((run: Partial<StreamingBenchmark>) => run.kind === "streaming-benchmark").map((run: StreamingBenchmark) => {
 		const scored = { ...run, score: run.score ?? scoreStreamingBenchmark(run) };
 		return { ...scored, cadence: run.cadence ?? summarizeStreamingCadence(scored) };
@@ -2563,7 +2641,8 @@ function round3(value: number): number {
 	return Math.round(value * 1000) / 1000;
 }
 
-function formatStreamingBenchmarkResult(benchmark: StreamingBenchmark | StreamingBenchmarkGroup, target: BrowserUseCdpTarget | { id: string; url: string; title: string }): string {
+function formatStreamingBenchmarkResult(benchmark: StreamingBenchmark | StreamingBenchmarkGroup | StreamingBenchmarkUrlComparison, target: BrowserUseCdpTarget | { id: string; url: string; title: string }): string {
+	if (benchmark.kind === "streaming-benchmark-url-comparison") return formatStreamingBenchmarkUrlComparison(benchmark, target);
 	return benchmark.kind === "streaming-benchmark-runs" ? formatStreamingBenchmarkGroup(benchmark, target) : formatStreamingBenchmark(benchmark, target);
 }
 
@@ -2643,6 +2722,28 @@ function formatStreamingBenchmarkGroup(group: StreamingBenchmarkGroup, target: B
 	if (group.warnings.length) {
 		lines.push("", "Warnings:");
 		for (const warning of group.warnings) lines.push(`- ${warning}`);
+	}
+	return lines.join("\n");
+}
+
+function formatStreamingBenchmarkUrlComparison(comparison: StreamingBenchmarkUrlComparison, target: BrowserUseCdpTarget | { id: string; url: string; title: string }): string {
+	const lines = [
+		`# Web Streaming Benchmark URL Comparison, ${comparison.primary.runs.length} runs x ${(comparison.durationMs / 1000).toFixed(1)}s`,
+		`# target: ${target.id} ${target.url || comparison.primaryUrl}`,
+		`primary: ${comparison.primaryUrl}`,
+		`compare: ${comparison.compareUrl}`,
+		`primary summary: smoothness=${formatStats(comparison.primary.summary.smoothness)}, domP90=${formatStats(comparison.primary.summary.domGapP90Ms)}, sseTextP90=${formatStats(comparison.primary.summary.sseTextEventGapP90Ms)}, sseLag=${formatStats(comparison.primary.summary.sseTextLagOverFixtureScheduleP90Ms)}ms`,
+		`compare summary: smoothness=${formatStats(comparison.compare.summary.smoothness)}, domP90=${formatStats(comparison.compare.summary.domGapP90Ms)}, sseTextP90=${formatStats(comparison.compare.summary.sseTextEventGapP90Ms)}, sseLag=${formatStats(comparison.compare.summary.sseTextLagOverFixtureScheduleP90Ms)}ms`,
+		`comparison: smoothness ${signed(comparison.comparison.smoothnessDelta)}, domP90Gap ${signed(comparison.comparison.domGapP90DeltaMs)}ms, domLagVsSchedule ${signed(comparison.comparison.domLagOverFixtureScheduleP90DeltaMs)}ms, sseText ${signed(comparison.comparison.sseTextEventDelta)}, sseP90Gap ${signed(comparison.comparison.sseChunkGapP90DeltaMs)}ms, sseTextLagVsSchedule ${signed(comparison.comparison.sseTextLagOverFixtureScheduleP90DeltaMs)}ms`,
+	];
+	if (comparison.regressions.length) {
+		lines.push("", "Regressions:");
+		for (const regression of comparison.regressions) lines.push(`- ${regression}`);
+	}
+	if (comparison.assertion) lines.push("", `Expected regression assertion: passed=${comparison.assertion.passed} expected=${comparison.assertion.expectedRegressions.length} unexpected=${comparison.assertion.unexpectedRegressions.length} missing=${comparison.assertion.missingExpectedRegressionPatterns.length}`);
+	if (comparison.warnings.length) {
+		lines.push("", "Warnings:");
+		for (const warning of comparison.warnings) lines.push(`- ${warning}`);
 	}
 	return lines.join("\n");
 }
