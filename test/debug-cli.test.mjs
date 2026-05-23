@@ -36,6 +36,12 @@ test("pibo debug web watch rejects action flags", async () => {
 	);
 });
 
+test("pibo debug web streaming benchmark help advertises the deterministic fixture", async () => {
+	const help = await execFileAsync("node", [cliPath, "debug", "web", "scenario", "--help"]);
+	assert.match(help.stdout, /streaming-benchmark \[--fixture\]/);
+	assert.match(help.stdout, /deterministic in-browser stream fixture/);
+});
+
 test("pibo debug web streaming benchmark rejects action flags before target discovery", async () => {
 	await assert.rejects(
 		execFileAsync("node", [cliPath, "debug", "web", "scenario", "streaming-benchmark", "--act"]),

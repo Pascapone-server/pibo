@@ -43,4 +43,5 @@ This file is the shared memory for the Streaming Ralph loop. Keep it concise and
 - Add a deterministic streaming fixture: fixed number of deltas, fixed cadence, optional jitter, optional reconnect.
 - Add browser-level regression checks for DOM update cadence against the deterministic fixture.
 - `?debugStreaming=1` now exposes `window.__piboStreamingDebug` counters for browser-side streaming probes. Keep hot-path debug helpers cheap when disabled; guard expensive trace-output calculations with `isStreamingDebugEnabled()`.
-- `pibo debug web scenario streaming-benchmark` can attach to any CDP target, enable debugStreaming for future app events, and collect DOM increment, rAF, long-task, and `window.__piboStreamingDebug` counter deltas. Use a deterministic data-URL fixture to validate the collector without provider credentials.
+- `pibo debug web scenario streaming-benchmark` can attach to any CDP target, enable debugStreaming for future app events, and collect DOM increment, rAF, long-task, and `window.__piboStreamingDebug` counter deltas. Use `--fixture` to run a deterministic in-browser stream without provider credentials.
+- Browser timer and rAF cadence can be throttled on background CDP targets; streaming benchmarks should call `Page.bringToFront` before measuring or fixture cadence may collapse to ~1s gaps.

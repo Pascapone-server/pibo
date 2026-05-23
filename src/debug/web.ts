@@ -21,6 +21,7 @@ type WebOptions = {
 	duration?: string;
 	json: boolean;
 	artifact: boolean;
+	fixture: boolean;
 	from?: string;
 	act: boolean;
 	manual: boolean;
@@ -138,6 +139,7 @@ type StreamingBenchmark = {
 	};
 	raf: { count: number; gapsMs: NumberStats };
 	longTasks: { count: number; totalMs: number; maxMs: number };
+	fixture?: { requested: boolean; available: boolean; started: boolean; deltaCount?: number; cadenceMs?: number };
 	warnings: string[];
 };
 
@@ -231,12 +233,13 @@ function printScenarioHelp(): void {
 
 Usage:
   pibo debug web scenario new-session [--manual|--act] [--duration ms] [--json] [--artifact]
-  pibo debug web scenario streaming-benchmark [--duration ms] [--json] [--artifact]
+  pibo debug web scenario streaming-benchmark [--fixture] [--duration ms] [--json] [--artifact]
 
 Defaults:
   new-session --manual waits while you click New Session yourself.
   new-session --act clicks the discovered New Session button after the watcher starts.
   streaming-benchmark enables debugStreaming for future events, observes assistant DOM increments, and snapshots window.__piboStreamingDebug.
+  streaming-benchmark --fixture navigates the target to a deterministic in-browser stream fixture before measuring.
 `);
 }
 
@@ -374,7 +377,8 @@ async function runScenario(options: WebOptions): Promise<void> {
 	const { client, target } = await connectTarget({ ...options, preset: "app" });
 	try {
 		if (scenario === "streaming-benchmark") {
-			const benchmark = await runStreamingBenchmark(client, durationMs);
+			if (options.fixture) await navigateStreamingBenchmarkFixture(client);
+			const benchmark = await runStreamingBenchmark(client, durationMs, { startFixture: options.fixture });
 			if (options.json) console.log(JSON.stringify({ target: compactTarget(target), scenario, benchmark }, null, 2));
 			else console.log(limitStdout(formatStreamingBenchmark(benchmark, target)));
 			const artifact = await writeArtifact(`scenario-${scenario}`, benchmark);
@@ -452,8 +456,97 @@ async function runBrowserWatch(client: CdpClient, scope: string, durationMs: num
 	return client.evaluate<WebWatch>(expression, durationMs + 10_000);
 }
 
-async function runStreamingBenchmark(client: CdpClient, durationMs: number): Promise<StreamingBenchmark> {
-	return client.evaluate<StreamingBenchmark>(buildStreamingBenchmarkExpression(durationMs), durationMs + 10_000);
+async function runStreamingBenchmark(client: CdpClient, durationMs: number, options: { startFixture?: boolean } = {}): Promise<StreamingBenchmark> {
+	await client.send("Page.bringToFront").catch(() => undefined);
+	return client.evaluate<StreamingBenchmark>(buildStreamingBenchmarkExpression(durationMs, options), durationMs + 10_000);
+}
+
+async function navigateStreamingBenchmarkFixture(client: CdpClient): Promise<void> {
+	const url = `data:text/html;charset=utf-8,${encodeURIComponent(streamingBenchmarkFixtureHtml())}`;
+	await client.send("Page.enable").catch(() => undefined);
+	await client.send("Page.navigate", { url }, 5_000);
+	await client.send("Page.bringToFront").catch(() => undefined);
+	await client.evaluate("new Promise((resolve) => { if (document.readyState === 'complete') resolve(true); else addEventListener('load', () => resolve(true), { once: true }); })", 5_000);
+}
+
+function streamingBenchmarkFixtureHtml(): string {
+	return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Streaming Benchmark Fixture</title>
+<style>body{font-family:system-ui,sans-serif;margin:24px;line-height:1.4} [data-pibo-component]{white-space:pre-wrap}</style>
+</head>
+<body data-pibo-debug="chat-app">
+<h1>Streaming Benchmark Fixture</h1>
+<div data-pibo-component="MarkdownRendererHost" data-pibo-markdown-kind="assistant-message">hello</div>
+<script>
+(() => {
+  const target = document.querySelector('[data-pibo-component="MarkdownRendererHost"]');
+  const deltas = [' a', ' b', ' c', ' d', ' e', ' f', ' g', ' h', ' i', ' j', ' k', ' l'];
+  const cadenceMs = 100;
+  let timer;
+  let index = 0;
+  function snapshot() {
+    return {
+      eventCount: 0,
+      textDeltaCount: 0,
+      textDeltaBytes: 0,
+      reasoningDeltaCount: 0,
+      reasoningDeltaBytes: 0,
+      enqueueCount: 0,
+      flushCount: 0,
+      flushedEventCount: 0,
+      overlayUpdateCount: 0,
+      overlayEventCount: 0,
+      traceRefreshStartedCount: 0,
+      traceRefreshCompletedCount: 0,
+      traceRefreshFailedCount: 0,
+      traceBaseUpdateCount: 0,
+      traceBaseOutputLength: 0,
+      currentOutputLength: target.textContent.length,
+      lastDurableCursor: undefined,
+      lastTransientLiveId: 'live:-1',
+    };
+  }
+  window.__piboStreamingDebugReset = () => {
+    if (timer) clearInterval(timer);
+    timer = undefined;
+    index = 0;
+    target.textContent = 'hello';
+    window.__piboStreamingDebug = snapshot();
+    return window.__piboStreamingDebug;
+  };
+  window.__piboStreamingFixtureConfig = { deltaCount: deltas.length, cadenceMs };
+  window.__piboStreamingFixtureStart = () => {
+    window.__piboStreamingDebugReset();
+    timer = setInterval(() => {
+      const delta = deltas[index];
+      target.textContent += delta;
+      const debug = window.__piboStreamingDebug;
+      debug.eventCount += 1;
+      debug.textDeltaCount += 1;
+      debug.textDeltaBytes += delta.length;
+      debug.enqueueCount += 1;
+      debug.flushCount += 1;
+      debug.flushedEventCount += 1;
+      debug.overlayUpdateCount += 1;
+      debug.overlayEventCount = index + 1;
+      debug.currentOutputLength = target.textContent.length;
+      debug.lastTransientLiveId = 'live:' + index;
+      index += 1;
+      if (index >= deltas.length) {
+        clearInterval(timer);
+        timer = undefined;
+      }
+    }, cadenceMs);
+    return window.__piboStreamingFixtureConfig;
+  };
+  window.__piboStreamingDebugReset();
+})();
+</script>
+</body>
+</html>`;
 }
 
 function buildSnapshotExpression(options: { scope: string; maxNodes: number; maxDepth: number; textLimit: number; includeText: boolean; includeLayout: boolean }): string {
@@ -472,9 +565,9 @@ function buildWatchExpression(options: { scope: string; durationMs: number; maxN
 })()`;
 }
 
-function buildStreamingBenchmarkExpression(durationMs: number): string {
+function buildStreamingBenchmarkExpression(durationMs: number, input: { startFixture?: boolean } = {}): string {
 	return `(async () => {
-  const options = ${JSON.stringify({ durationMs })};
+  const options = ${JSON.stringify({ durationMs, startFixture: Boolean(input.startFixture) })};
   ${browserStreamingBenchmarkLibrary()}
   return await runStreamingBenchmark(options);
 })()`;
@@ -581,6 +674,16 @@ async function runStreamingBenchmark(options) {
     warnings.push('PerformanceObserver unavailable');
   }
 
+  let fixtureStarted = false;
+  let fixtureConfig;
+  if (options.startFixture) {
+    if (typeof window.__piboStreamingFixtureStart === 'function') {
+      try { fixtureConfig = window.__piboStreamingFixtureStart(); fixtureStarted = true; } catch (error) { warnings.push('failed to start streaming fixture: ' + String(error)); }
+    } else {
+      warnings.push('streaming fixture was requested but window.__piboStreamingFixtureStart is unavailable');
+    }
+  }
+
   await new Promise((resolve) => setTimeout(resolve, options.durationMs));
   sample();
   observer.disconnect();
@@ -639,6 +742,13 @@ async function runStreamingBenchmark(options) {
       totalMs: Math.round(longTasks.reduce((sum, value) => sum + value, 0) * 1000) / 1000,
       maxMs: Math.round((longTasks.length ? Math.max(...longTasks) : 0) * 1000) / 1000,
     },
+    fixture: options.startFixture ? {
+      requested: true,
+      available: typeof window.__piboStreamingFixtureStart === 'function',
+      started: fixtureStarted,
+      deltaCount: fixtureConfig && typeof fixtureConfig.deltaCount === 'number' ? fixtureConfig.deltaCount : undefined,
+      cadenceMs: fixtureConfig && typeof fixtureConfig.cadenceMs === 'number' ? fixtureConfig.cadenceMs : undefined,
+    } : undefined,
     warnings,
   };
 }
@@ -940,6 +1050,7 @@ function parseOptions(args: string[]): WebOptions {
 		positionals: [],
 		json: false,
 		artifact: false,
+		fixture: false,
 		act: false,
 		manual: false,
 		includeText: false,
@@ -949,6 +1060,7 @@ function parseOptions(args: string[]): WebOptions {
 		const arg = args[index];
 		if (arg === "--json") options.json = true;
 		else if (arg === "--artifact") options.artifact = true;
+		else if (arg === "--fixture") options.fixture = true;
 		else if (arg === "--act") options.act = true;
 		else if (arg === "--manual") options.manual = true;
 		else if (arg === "--include-text") options.includeText = true;
@@ -1161,6 +1273,7 @@ function formatStreamingBenchmark(benchmark: StreamingBenchmark, target: Browser
 		`raf: count=${benchmark.raf.count}, gaps=${formatStats(benchmark.raf.gapsMs)}`,
 		`longTasks: count=${benchmark.longTasks.count}, max=${benchmark.longTasks.maxMs}ms, total=${benchmark.longTasks.totalMs}ms`,
 	];
+	if (benchmark.fixture) lines.push(`fixture: available=${benchmark.fixture.available} started=${benchmark.fixture.started} deltas=${jsonShort(benchmark.fixture.deltaCount)} cadence=${jsonShort(benchmark.fixture.cadenceMs)}ms`);
 	if (benchmark.warnings.length) {
 		lines.push("", "Warnings:");
 		for (const warning of benchmark.warnings) lines.push(`- ${warning}`);
