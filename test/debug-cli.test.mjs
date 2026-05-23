@@ -38,10 +38,11 @@ test("pibo debug web watch rejects action flags", async () => {
 
 test("pibo debug web streaming benchmark help advertises the deterministic fixture", async () => {
 	const help = await execFileAsync("node", [cliPath, "debug", "web", "scenario", "--help"]);
-	assert.match(help.stdout, /streaming-benchmark \[--fixture\|--backend-fixture\].*\[--fixture-profile steady\|jitter\|burst\].*\[--assert\]/);
+	assert.match(help.stdout, /streaming-benchmark \[--fixture\|--backend-fixture\].*\[--fixture-profile steady\|jitter\|burst\].*\[--simulate-reconnect\].*\[--assert\]/);
 	assert.match(help.stdout, /deterministic in-browser stream fixture/);
 	assert.match(help.stdout, /real app consumes deterministic \/api\/chat\/events frames/);
 	assert.match(help.stdout, /--fixture-profile selects steady cadence, deterministic jitter, or bursty fixture timing/);
+	assert.match(help.stdout, /--simulate-reconnect reloads the app with an EventSource probe/);
 	assert.match(help.stdout, /--runs repeats the same scenario and reports medians/);
 	assert.match(help.stdout, /--assert exits non-zero/);
 });
@@ -73,6 +74,17 @@ test("pibo debug web streaming benchmark rejects invalid fixture profiles before
 		execFileAsync("node", [cliPath, "debug", "web", "scenario", "streaming-benchmark", "--backend-fixture", "--fixture-profile", "random"]),
 		(error) => {
 			assert.match(error.stderr, /--fixture-profile must be steady, jitter, or burst/);
+			assert.doesNotMatch(error.stderr, /No attachable CDP target/);
+			return true;
+		},
+	);
+});
+
+test("pibo debug web streaming benchmark rejects reconnect simulation without backend fixture before target discovery", async () => {
+	await assert.rejects(
+		execFileAsync("node", [cliPath, "debug", "web", "scenario", "streaming-benchmark", "--simulate-reconnect"]),
+		(error) => {
+			assert.match(error.stderr, /--simulate-reconnect requires --backend-fixture/);
 			assert.doesNotMatch(error.stderr, /No attachable CDP target/);
 			return true;
 		},

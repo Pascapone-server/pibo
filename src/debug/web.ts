@@ -25,6 +25,7 @@ type WebOptions = {
 	artifact: boolean;
 	fixture: boolean;
 	backendFixture: boolean;
+	simulateReconnect: boolean;
 	assertHealthy: boolean;
 	from?: string;
 	act: boolean;
@@ -124,6 +125,30 @@ type StreamingSmoothnessScore = {
 	firstVisibleMs?: number;
 };
 
+type StreamingBenchmarkEventSourceProbe = {
+	requested: boolean;
+	installed: boolean;
+	forcedReconnectAtMs?: number;
+	openCount: number;
+	openCountAfterStart: number;
+	errorCount: number;
+	errorCountAfterStart: number;
+	closeCount: number;
+	forcedCloseCount: number;
+	forcedCloseCountAfterStart: number;
+	eventCount: number;
+	textEventCount: number;
+	transientIdCount: number;
+	uniqueTransientIdCount: number;
+	durableIdCount: number;
+	otherIdCount: number;
+	lastEventId?: string;
+	firstTransientId?: string;
+	lastTransientId?: string;
+	transientIdResetObserved: boolean;
+	reconnectObserved: boolean;
+};
+
 type StreamingBenchmark = {
 	kind: "streaming-benchmark";
 	createdAt: string;
@@ -154,6 +179,7 @@ type StreamingBenchmark = {
 	raf: { count: number; gapsMs: NumberStats };
 	longTasks: { count: number; totalMs: number; maxMs: number };
 	fixture?: { requested: boolean; mode: "browser" | "backend"; profile?: string; available: boolean; started: boolean; deltaCount?: number; cadenceMs?: number; piboSessionId?: string; error?: string };
+	eventSource?: StreamingBenchmarkEventSourceProbe;
 	score: StreamingSmoothnessScore;
 	regressions: string[];
 	warnings: string[];
@@ -285,7 +311,7 @@ function printScenarioHelp(): void {
 
 Usage:
   pibo debug web scenario new-session [--manual|--act] [--duration ms] [--json] [--artifact]
-  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--fixture-profile steady|jitter|burst] [--duration ms] [--runs n] [--from artifact.json] [--assert] [--json] [--artifact]
+  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--fixture-profile steady|jitter|burst] [--simulate-reconnect] [--duration ms] [--runs n] [--from artifact.json] [--assert] [--json] [--artifact]
 
 Defaults:
   new-session --manual waits while you click New Session yourself.
@@ -294,6 +320,7 @@ Defaults:
   streaming-benchmark --fixture navigates the target to a deterministic in-browser stream fixture before measuring.
   streaming-benchmark --backend-fixture posts to /api/chat/debug/streaming-fixture so the real app consumes deterministic /api/chat/events frames.
   streaming-benchmark --fixture-profile selects steady cadence, deterministic jitter, or bursty fixture timing.
+  streaming-benchmark --simulate-reconnect reloads the app with an EventSource probe, forces one live stream close, and verifies reconnect/transient ids.
   streaming-benchmark --runs repeats the same scenario and reports medians; --from compares against a prior benchmark artifact.
   streaming-benchmark --assert exits non-zero when fixture/debug/DOM smoothness gates fail.
 `);
@@ -431,6 +458,7 @@ async function runScenario(options: WebOptions): Promise<void> {
 	if (scenario === "streaming-benchmark" && (options.act || options.manual)) throw new Error("streaming-benchmark does not support --act or --manual. Start or observe the stream separately, then run the scenario.");
 	if (scenario === "streaming-benchmark" && options.fixture && options.backendFixture) throw new Error("Use either --fixture or --backend-fixture, not both.");
 	if (scenario === "streaming-benchmark" && options.fixtureProfile && !options.fixture && !options.backendFixture) throw new Error("--fixture-profile requires --fixture or --backend-fixture.");
+	if (scenario === "streaming-benchmark" && options.simulateReconnect && !options.backendFixture) throw new Error("--simulate-reconnect requires --backend-fixture.");
 	const fixtureProfile = parseFixtureProfile(options.fixtureProfile);
 	const durationMs = parseDuration(options.duration);
 	const runs = parseRuns(options.runs);
@@ -438,10 +466,13 @@ async function runScenario(options: WebOptions): Promise<void> {
 	try {
 		if (scenario === "streaming-benchmark") {
 			if (options.fixture) await navigateStreamingBenchmarkFixture(client, fixtureProfile);
-			if (options.backendFixture) await enableStreamingDebugForCurrentApp(client);
+			if (options.backendFixture) {
+				if (options.simulateReconnect) await prepareStreamingBenchmarkReconnectProbe(client);
+				else await enableStreamingDebugForCurrentApp(client);
+			}
 			const benchmarks: StreamingBenchmark[] = [];
 			for (let run = 0; run < runs; run++) {
-				benchmarks.push(await runStreamingBenchmark(client, durationMs, { startFixture: options.fixture, startBackendFixture: options.backendFixture, fixtureProfile }));
+				benchmarks.push(await runStreamingBenchmark(client, durationMs, { startFixture: options.fixture, startBackendFixture: options.backendFixture, fixtureProfile, simulateReconnect: options.simulateReconnect }));
 			}
 			const baseline = options.from ? await readStreamingBenchmarkRuns(options.from) : undefined;
 			const benchmark: StreamingBenchmark | StreamingBenchmarkGroup = runs === 1
@@ -526,10 +557,26 @@ async function runBrowserWatch(client: CdpClient, scope: string, durationMs: num
 	return client.evaluate<WebWatch>(expression, durationMs + 10_000);
 }
 
-async function runStreamingBenchmark(client: CdpClient, durationMs: number, options: { startFixture?: boolean; startBackendFixture?: boolean; fixtureProfile?: StreamingFixtureProfile } = {}): Promise<StreamingBenchmark> {
+async function runStreamingBenchmark(client: CdpClient, durationMs: number, options: { startFixture?: boolean; startBackendFixture?: boolean; fixtureProfile?: StreamingFixtureProfile; simulateReconnect?: boolean } = {}): Promise<StreamingBenchmark> {
 	await client.send("Page.bringToFront").catch(() => undefined);
 	const benchmark = await client.evaluate<Omit<StreamingBenchmark, "score">>(buildStreamingBenchmarkExpression(durationMs, options), durationMs + 10_000);
 	return { ...benchmark, score: scoreStreamingBenchmark(benchmark) };
+}
+
+async function prepareStreamingBenchmarkReconnectProbe(client: CdpClient): Promise<void> {
+	await client.send("Page.enable").catch(() => undefined);
+	await client.send("Page.addScriptToEvaluateOnNewDocument", { source: streamingBenchmarkEventSourceProbeScript() }, 5_000);
+	const state = await client.evaluate<{ href: string }>(`(() => {
+  try { localStorage.setItem('pibo.chat.debugStreaming', '1'); } catch {}
+  return { href: location.href };
+})()`, 5_000);
+	const url = new URL(state.href);
+	if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("--simulate-reconnect requires an HTTP Chat Web target");
+	url.searchParams.set("debugStreaming", "1");
+	await client.send("Page.navigate", { url: url.toString() }, 5_000);
+	await client.send("Page.bringToFront").catch(() => undefined);
+	await client.evaluate("new Promise((resolve) => { if (document.readyState === 'complete') resolve(true); else addEventListener('load', () => resolve(true), { once: true }); })", 5_000);
+	await client.evaluate("new Promise((resolve) => setTimeout(resolve, 800))", 2_000);
 }
 
 async function navigateStreamingBenchmarkFixture(client: CdpClient, fixtureProfile: StreamingFixtureProfile): Promise<void> {
@@ -557,6 +604,80 @@ async function enableStreamingDebugForCurrentApp(client: CdpClient): Promise<voi
 }
 
 type StreamingFixtureProfile = "steady" | "jitter" | "burst";
+
+function streamingBenchmarkEventSourceProbeScript(): string {
+	return String.raw`
+(() => {
+  if (window.__piboStreamingBenchmarkEventSourceProbeInstalled || typeof window.EventSource !== 'function') return;
+  const OriginalEventSource = window.EventSource;
+  const probe = {
+    createdAt: new Date().toISOString(),
+    openCount: 0,
+    errorCount: 0,
+    closeCount: 0,
+    forcedCloseCount: 0,
+    events: [],
+    connections: [],
+  };
+  Object.defineProperty(probe, '_instances', { value: [], enumerable: false, configurable: false });
+  function at() { return typeof performance === 'undefined' ? Date.now() : performance.now(); }
+  function isChatEventsUrl(url) { return String(url || '').includes('/api/chat/events'); }
+  function pushConnection(kind, info, extra) {
+    probe.connections.push({ t: at(), kind, url: info.url, ...(extra || {}) });
+    if (probe.connections.length > 200) probe.connections.splice(0, probe.connections.length - 200);
+  }
+  function WrappedEventSource(url, init) {
+    const events = new OriginalEventSource(url, init);
+    const info = { url: String(url), createdAt: at(), closed: false, forcedClosing: false };
+    probe._instances.push({ events, info });
+    events.addEventListener('open', () => {
+      probe.openCount += 1;
+      pushConnection('open', info, { readyState: events.readyState });
+    });
+    events.addEventListener('error', () => {
+      probe.errorCount += 1;
+      pushConnection('error', info, { readyState: events.readyState });
+    });
+    events.addEventListener('pibo', (message) => {
+      let type;
+      try { type = JSON.parse(message.data).type; } catch {}
+      const record = { t: at(), url: info.url, lastEventId: message.lastEventId || '', type: typeof type === 'string' ? type : undefined };
+      probe.events.push(record);
+      if (probe.events.length > 1000) probe.events.splice(0, probe.events.length - 1000);
+    });
+    const originalClose = events.close.bind(events);
+    events.close = () => {
+      if (!info.closed) {
+        info.closed = true;
+        probe.closeCount += 1;
+        pushConnection('close', info, { forced: Boolean(info.forcedClosing), readyState: events.readyState });
+      }
+      return originalClose();
+    };
+    return events;
+  }
+  WrappedEventSource.prototype = OriginalEventSource.prototype;
+  Object.setPrototypeOf(WrappedEventSource, OriginalEventSource);
+  window.EventSource = WrappedEventSource;
+  window.__piboStreamingBenchmarkForceReconnect = () => {
+    let closed = 0;
+    for (const entry of probe._instances) {
+      if (!entry || !entry.events || !isChatEventsUrl(entry.info && entry.info.url)) continue;
+      if (entry.events.readyState === 2) continue;
+      entry.info.forcedClosing = true;
+      probe.forcedCloseCount += 1;
+      entry.events.close();
+      closed += 1;
+    }
+    window.dispatchEvent(new Event('online'));
+    window.dispatchEvent(new Event('focus'));
+    return closed;
+  };
+  window.__piboStreamingBenchmarkEventSourceProbe = probe;
+  window.__piboStreamingBenchmarkEventSourceProbeInstalled = true;
+})();
+`;
+}
 
 function streamingBenchmarkFixtureHtml(fixtureProfile: StreamingFixtureProfile): string {
 	return `<!doctype html>
@@ -666,9 +787,9 @@ function buildWatchExpression(options: { scope: string; durationMs: number; maxN
 })()`;
 }
 
-function buildStreamingBenchmarkExpression(durationMs: number, input: { startFixture?: boolean; startBackendFixture?: boolean; fixtureProfile?: StreamingFixtureProfile } = {}): string {
+function buildStreamingBenchmarkExpression(durationMs: number, input: { startFixture?: boolean; startBackendFixture?: boolean; fixtureProfile?: StreamingFixtureProfile; simulateReconnect?: boolean } = {}): string {
 	return `(async () => {
-  const options = ${JSON.stringify({ durationMs, startFixture: Boolean(input.startFixture), startBackendFixture: Boolean(input.startBackendFixture), fixtureProfile: input.fixtureProfile ?? "steady" })};
+  const options = ${JSON.stringify({ durationMs, startFixture: Boolean(input.startFixture), startBackendFixture: Boolean(input.startBackendFixture), fixtureProfile: input.fixtureProfile ?? "steady", simulateReconnect: Boolean(input.simulateReconnect), reconnectAtMs: input.simulateReconnect ? 325 : undefined })};
   ${browserStreamingBenchmarkLibrary()}
   return await runStreamingBenchmark(options);
 })()`;
@@ -712,6 +833,63 @@ function fetchWithTimeout(url, init, timeoutMs) {
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
+function summarizeEventSourceProbe(startedAt, requested, forcedReconnectAtMs) {
+  const probe = window.__piboStreamingBenchmarkEventSourceProbe;
+  if (!requested && !probe) return undefined;
+  if (!probe) {
+    return {
+      requested,
+      installed: false,
+      forcedReconnectAtMs,
+      openCount: 0,
+      openCountAfterStart: 0,
+      errorCount: 0,
+      errorCountAfterStart: 0,
+      closeCount: 0,
+      forcedCloseCount: 0,
+      forcedCloseCountAfterStart: 0,
+      eventCount: 0,
+      textEventCount: 0,
+      transientIdCount: 0,
+      uniqueTransientIdCount: 0,
+      durableIdCount: 0,
+      otherIdCount: 0,
+      transientIdResetObserved: false,
+      reconnectObserved: false,
+    };
+  }
+  const streamEvents = (Array.isArray(probe.events) ? probe.events : []).filter((event) => String(event.url || '').includes('/api/chat/events'));
+  const afterStartConnections = (Array.isArray(probe.connections) ? probe.connections : []).filter((event) => typeof event.t === 'number' && event.t >= startedAt && String(event.url || '').includes('/api/chat/events'));
+  const ids = streamEvents.map((event) => event.lastEventId).filter(Boolean);
+  const transientIds = ids.filter((id) => /^live:\d+$/.test(id));
+  const durableIds = ids.filter((id) => /^\d+:\d+$/.test(id));
+  const otherIds = ids.filter((id) => !/^live:\d+$/.test(id) && !/^\d+:\d+$/.test(id));
+  const forcedCloseCountAfterStart = afterStartConnections.filter((event) => event.kind === 'close' && event.forced).length;
+  const openCountAfterStart = afterStartConnections.filter((event) => event.kind === 'open').length;
+  return {
+    requested,
+    installed: true,
+    forcedReconnectAtMs,
+    openCount: Number(probe.openCount || 0),
+    openCountAfterStart,
+    errorCount: Number(probe.errorCount || 0),
+    errorCountAfterStart: afterStartConnections.filter((event) => event.kind === 'error').length,
+    closeCount: Number(probe.closeCount || 0),
+    forcedCloseCount: Number(probe.forcedCloseCount || 0),
+    forcedCloseCountAfterStart,
+    eventCount: streamEvents.length,
+    textEventCount: streamEvents.filter((event) => event.type === 'TEXT_MESSAGE_CONTENT').length,
+    transientIdCount: transientIds.length,
+    uniqueTransientIdCount: new Set(transientIds).size,
+    durableIdCount: durableIds.length,
+    otherIdCount: otherIds.length,
+    lastEventId: ids.at(-1),
+    firstTransientId: transientIds[0],
+    lastTransientId: transientIds.at(-1),
+    transientIdResetObserved: new Set(transientIds).size < transientIds.length,
+    reconnectObserved: forcedCloseCountAfterStart > 0 && openCountAfterStart > 0,
+  };
+}
 function streamingBenchmarkRegressions(result) {
   const failures = [];
   const fixture = result.fixture;
@@ -733,6 +911,12 @@ function streamingBenchmarkRegressions(result) {
     if (domGapP90 !== undefined && domGapP90 > Math.max(300, cadenceMs * 3)) failures.push('DOM p90 gap ' + domGapP90 + 'ms exceeds gate');
     if (domJumpMax !== undefined && domJumpMax > 4) failures.push('DOM max jump ' + domJumpMax + ' chars exceeds gate');
     if (firstPositiveMs !== undefined && firstPositiveMs > 500) failures.push('first visible update ' + firstPositiveMs + 'ms exceeds gate');
+  }
+  if (result.eventSource && result.eventSource.requested) {
+    if (!result.eventSource.installed) failures.push('EventSource reconnect probe unavailable');
+    if (result.eventSource.forcedCloseCountAfterStart < 1) failures.push('EventSource forced close was not observed');
+    if (result.eventSource.openCountAfterStart < 1) failures.push('EventSource reconnect open was not observed');
+    if (result.eventSource.transientIdCount < 1) failures.push('EventSource transient live ids were not observed');
   }
   if (longTaskMax > 50) failures.push('long task max ' + Math.round(longTaskMax * 1000) / 1000 + 'ms exceeds 50ms');
   return failures;
@@ -819,6 +1003,13 @@ async function runStreamingBenchmark(options) {
       warnings.push('streaming fixture was requested but window.__piboStreamingFixtureStart is unavailable');
     }
   } else if (options.startBackendFixture) {
+    if (options.simulateReconnect && typeof window.__piboStreamingBenchmarkForceReconnect === 'function') {
+      setTimeout(() => {
+        try { window.__piboStreamingBenchmarkForceReconnect(); } catch (error) { warnings.push('failed to force EventSource reconnect: ' + String(error)); }
+      }, options.reconnectAtMs || 325);
+    } else if (options.simulateReconnect) {
+      warnings.push('EventSource reconnect simulation was requested but the probe is unavailable');
+    }
     const piboSessionId = selectedSessionId();
     if (!piboSessionId) {
       backendFixtureError = 'selected Chat session not found in DOM';
@@ -828,7 +1019,7 @@ async function runStreamingBenchmark(options) {
         const response = await fetchWithTimeout('/api/chat/debug/streaming-fixture', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ piboSessionId, profile: options.fixtureProfile }),
+          body: JSON.stringify({ piboSessionId, profile: options.fixtureProfile, ...(options.simulateReconnect ? { cadenceMs: 150 } : {}) }),
         }, 5000);
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload && payload.error ? payload.error : response.status + ' ' + response.statusText);
@@ -853,6 +1044,8 @@ async function runStreamingBenchmark(options) {
   const positiveGaps = [];
   for (let i = 1; i < positiveUpdates.length; i++) positiveGaps.push(positiveUpdates[i].t - positiveUpdates[i - 1].t);
   const debugDelta = numericDelta(debugBefore, debugAfter, [
+    'liveOpenCount',
+    'liveErrorCount',
     'eventCount',
     'textDeltaCount',
     'textDeltaBytes',
@@ -880,10 +1073,12 @@ async function runStreamingBenchmark(options) {
     piboSessionId: fixtureConfig && typeof fixtureConfig.piboSessionId === 'string' ? fixtureConfig.piboSessionId : undefined,
     error: backendFixtureError,
   } : undefined;
+  const eventSourceSummary = summarizeEventSourceProbe(startedAt, Boolean(options.simulateReconnect), options.reconnectAtMs);
   const regressions = streamingBenchmarkRegressions({
     debugAfter,
     debugDelta,
     fixture: fixtureSummary,
+    eventSource: eventSourceSummary,
     dom: { positiveUpdateCount: positiveUpdates.length, gapsMs: domGaps, positiveCharJumps: domJumps, firstPositiveUpdateMs },
     longTasks,
   });
@@ -921,6 +1116,7 @@ async function runStreamingBenchmark(options) {
       maxMs: Math.round((longTasks.length ? Math.max(...longTasks) : 0) * 1000) / 1000,
     },
     fixture: fixtureSummary,
+    eventSource: eventSourceSummary,
     regressions,
     warnings,
   };
@@ -1225,6 +1421,7 @@ function parseOptions(args: string[]): WebOptions {
 		artifact: false,
 		fixture: false,
 		backendFixture: false,
+		simulateReconnect: false,
 		assertHealthy: false,
 		act: false,
 		manual: false,
@@ -1237,6 +1434,7 @@ function parseOptions(args: string[]): WebOptions {
 		else if (arg === "--artifact") options.artifact = true;
 		else if (arg === "--fixture") options.fixture = true;
 		else if (arg === "--backend-fixture") options.backendFixture = true;
+		else if (arg === "--simulate-reconnect") options.simulateReconnect = true;
 		else if (arg === "--assert") options.assertHealthy = true;
 		else if (arg === "--act") options.act = true;
 		else if (arg === "--manual") options.manual = true;
@@ -1575,7 +1773,7 @@ function formatStreamingBenchmark(benchmark: StreamingBenchmark, target: Browser
 		`# Web Streaming Benchmark, ${(benchmark.durationMs / 1000).toFixed(1)}s`,
 		`# target: ${target.id} ${target.url || benchmark.url}`,
 		`debug: available=${benchmark.debug.available} reset=${benchmark.debug.reset}`,
-		`events: text=${numberField(debugDelta, "textDeltaCount")} (${numberField(debugDelta, "textDeltaBytes")} bytes), reasoning=${numberField(debugDelta, "reasoningDeltaCount")}, enqueue=${numberField(debugDelta, "enqueueCount")}, flush=${numberField(debugDelta, "flushCount")}, overlayUpdates=${numberField(debugDelta, "overlayUpdateCount")}`,
+		`events: text=${numberField(debugDelta, "textDeltaCount")} (${numberField(debugDelta, "textDeltaBytes")} bytes), reasoning=${numberField(debugDelta, "reasoningDeltaCount")}, enqueue=${numberField(debugDelta, "enqueueCount")}, flush=${numberField(debugDelta, "flushCount")}, overlayUpdates=${numberField(debugDelta, "overlayUpdateCount")}, liveOpen=${numberField(debugDelta, "liveOpenCount")}, liveError=${numberField(debugDelta, "liveErrorCount")}`,
 		`state: overlayEvents=${jsonShort(debugAfter.overlayEventCount)} currentOutput=${jsonShort(debugAfter.currentOutputLength)} traceBase=${jsonShort(debugAfter.traceBaseOutputLength)} durable=${jsonShort(debugAfter.lastDurableCursor)} transient=${jsonShort(debugAfter.lastTransientLiveId)}`,
 		`score: smoothness=${benchmark.score.smoothness}, dom/provider updates=${benchmark.score.domPositiveUpdateCount}/${benchmark.score.textDeltaCount}`,
 		`dom: targets=${benchmark.dom.targetCountStart}->${benchmark.dom.targetCountEnd}, length=${benchmark.dom.lengthStart}->${benchmark.dom.lengthEnd}, updates=${benchmark.dom.updateCount}, positive=${benchmark.dom.positiveUpdateCount}, firstPositive=${jsonShort(benchmark.dom.firstPositiveUpdateMs)}ms`,
@@ -1585,6 +1783,7 @@ function formatStreamingBenchmark(benchmark: StreamingBenchmark, target: Browser
 		`longTasks: count=${benchmark.longTasks.count}, max=${benchmark.longTasks.maxMs}ms, total=${benchmark.longTasks.totalMs}ms`,
 	];
 	if (benchmark.fixture) lines.push(`fixture: mode=${benchmark.fixture.mode} profile=${jsonShort(benchmark.fixture.profile)} available=${benchmark.fixture.available} started=${benchmark.fixture.started} deltas=${jsonShort(benchmark.fixture.deltaCount)} cadence=${jsonShort(benchmark.fixture.cadenceMs)}ms session=${jsonShort(benchmark.fixture.piboSessionId)}${benchmark.fixture.error ? ` error=${benchmark.fixture.error}` : ""}`);
+	if (benchmark.eventSource) lines.push(`eventSource: requested=${benchmark.eventSource.requested} installed=${benchmark.eventSource.installed} forcedClose=${benchmark.eventSource.forcedCloseCountAfterStart} reconnectOpen=${benchmark.eventSource.openCountAfterStart} text=${benchmark.eventSource.textEventCount} transient=${benchmark.eventSource.uniqueTransientIdCount}/${benchmark.eventSource.transientIdCount} reset=${benchmark.eventSource.transientIdResetObserved} last=${jsonShort(benchmark.eventSource.lastEventId)} reconnectObserved=${benchmark.eventSource.reconnectObserved}`);
 	if (benchmark.regressions.length) {
 		lines.push("", "Regressions:");
 		for (const regression of benchmark.regressions) lines.push(`- ${regression}`);
