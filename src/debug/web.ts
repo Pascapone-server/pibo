@@ -206,6 +206,26 @@ type StreamingBenchmarkProviderPreservation = {
 	domPositiveToProviderTextRatio?: number;
 };
 
+type StreamingBenchmarkLivePipeline = {
+	expectedSource: "fixture" | "provider" | "debug";
+	expectedTextDeltaCount: number;
+	expectedReasoningDeltaCount: number;
+	expectedInputEventCount: number;
+	enqueueCount?: number;
+	flushCount?: number;
+	flushedEventCount?: number;
+	overlayUpdateCount?: number;
+	overlayEventCount?: number;
+	currentOutputLength?: number;
+	expectedTextBytes?: number;
+	enqueueToExpectedRatio?: number;
+	flushedEventsToExpectedRatio?: number;
+	overlayEventsToExpectedRatio?: number;
+	currentOutputToExpectedTextBytesRatio?: number;
+	flushToEnqueueRatio?: number;
+	overlayUpdatesToFlushedEventsRatio?: number;
+};
+
 type StreamingBenchmarkEventSourceStreamProbe = {
 	url: string;
 	mode?: string;
@@ -354,6 +374,7 @@ type StreamingBenchmark = {
 	trace?: StreamingBenchmarkTraceProbe;
 	provider?: StreamingBenchmarkProviderTelemetry;
 	cadence?: StreamingBenchmarkCadence;
+	livePipeline?: StreamingBenchmarkLivePipeline;
 	providerPreservation?: StreamingBenchmarkProviderPreservation;
 	score: StreamingSmoothnessScore;
 	regressions: string[];
@@ -386,6 +407,13 @@ type StreamingBenchmarkSummary = {
 	debugTraceRefreshDurationMaxMs: NumberStats;
 	debugCurrentOutputLength: NumberStats;
 	debugTraceBaseOutputLength: NumberStats;
+	liveExpectedInputEventCount: NumberStats;
+	liveEnqueueToExpectedRatio: NumberStats;
+	liveFlushedEventsToExpectedRatio: NumberStats;
+	liveOverlayEventsToExpectedRatio: NumberStats;
+	liveCurrentOutputToExpectedTextBytesRatio: NumberStats;
+	liveFlushToEnqueueRatio: NumberStats;
+	liveOverlayUpdatesToFlushedEventsRatio: NumberStats;
 	traceSampleCount: NumberStats;
 	traceLiveVersionCount: NumberStats;
 	traceFirstLiveVersionMs: NumberStats;
@@ -445,6 +473,11 @@ type StreamingBenchmarkComparison = {
 	debugFlushCountDelta?: number;
 	debugOverlayUpdateCountDelta?: number;
 	debugTraceRefreshCompletedCountDelta?: number;
+	liveEnqueueToExpectedRatioDelta?: number;
+	liveFlushedEventsToExpectedRatioDelta?: number;
+	liveOverlayEventsToExpectedRatioDelta?: number;
+	liveFlushToEnqueueRatioDelta?: number;
+	liveOverlayUpdatesToFlushedEventsRatioDelta?: number;
 	traceLiveVersionCountDelta?: number;
 	traceMaxAssistantOutputDelta?: number;
 	traceDurableEventDeltaDelta?: number;
@@ -884,7 +917,8 @@ async function runStreamingBenchmark(client: CdpClient, durationMs: number, opti
 	const benchmark = await client.evaluate<Omit<StreamingBenchmark, "score">>(buildStreamingBenchmarkExpression(durationMs, options), benchmarkTimeoutMs);
 	const withProvider = { ...benchmark, provider: options.providerTelemetry };
 	const scored = { ...withProvider, score: scoreStreamingBenchmark(withProvider), providerPreservation: summarizeStreamingProviderPreservation(withProvider) };
-	const withCadence = { ...scored, cadence: summarizeStreamingCadence(scored) };
+	const withLivePipeline = { ...scored, livePipeline: summarizeStreamingLivePipeline(scored) };
+	const withCadence = { ...withLivePipeline, cadence: summarizeStreamingCadence(withLivePipeline) };
 	return { ...withCadence, regressions: [...withCadence.regressions, ...evaluateStreamingProviderRegressions(withCadence)] };
 }
 
@@ -893,7 +927,7 @@ export function attachStreamingProviderTelemetryToBenchmark(benchmark: Streaming
 	const baseRegressions = benchmark.regressions.filter((regression) => !regression.startsWith("provider "));
 	const withProvider = { ...benchmark, provider: providerTelemetry };
 	const providerPreservation = summarizeStreamingProviderPreservation(withProvider);
-	const withProviderMetrics = { ...withProvider, providerPreservation };
+	const withProviderMetrics = { ...withProvider, providerPreservation, livePipeline: summarizeStreamingLivePipeline(withProvider) };
 	return {
 		...withProviderMetrics,
 		regressions: [...baseRegressions, ...evaluateStreamingProviderRegressions(withProviderMetrics)],
@@ -2766,6 +2800,47 @@ export function summarizeStreamingProviderPreservation(benchmark: { provider?: S
 	};
 }
 
+export function summarizeStreamingLivePipeline(benchmark: { debug?: Pick<StreamingBenchmark["debug"], "delta" | "after">; fixture?: StreamingBenchmark["fixture"]; provider?: StreamingBenchmarkProviderTelemetry }): StreamingBenchmarkLivePipeline | undefined {
+	const debugDelta = benchmark.debug?.delta ?? {};
+	const debugAfter = benchmark.debug?.after ?? {};
+	const fixtureTextCount = finiteNumber(benchmark.fixture?.deltaCount);
+	const fixtureReasoningCount = finiteNumber(benchmark.fixture?.reasoningDeltaCount);
+	const provider = benchmark.provider?.available ? benchmark.provider : undefined;
+	const debugTextCount = finiteNumber(debugDelta.textDeltaCount);
+	const debugReasoningCount = finiteNumber(debugDelta.reasoningDeltaCount);
+	const expectedSource = fixtureTextCount !== undefined || fixtureReasoningCount !== undefined ? "fixture" : provider ? "provider" : "debug";
+	const expectedTextDeltaCount = expectedSource === "fixture" ? (fixtureTextCount ?? 0) : expectedSource === "provider" ? provider?.textDeltaCount ?? 0 : debugTextCount ?? 0;
+	const expectedReasoningDeltaCount = expectedSource === "fixture" ? (fixtureReasoningCount ?? 0) : expectedSource === "provider" ? provider?.reasoningDeltaCount ?? 0 : debugReasoningCount ?? 0;
+	const expectedInputEventCount = expectedTextDeltaCount + expectedReasoningDeltaCount;
+	if (expectedInputEventCount <= 0) return undefined;
+	const enqueueCount = finiteNumber(debugDelta.enqueueCount);
+	const flushCount = finiteNumber(debugDelta.flushCount);
+	const flushedEventCount = finiteNumber(debugDelta.flushedEventCount);
+	const overlayUpdateCount = finiteNumber(debugDelta.overlayUpdateCount);
+	const overlayEventCount = finiteNumber(debugAfter.overlayEventCount);
+	const currentOutputLength = finiteNumber(debugAfter.currentOutputLength);
+	const expectedTextBytes = finiteNumber(benchmark.fixture?.textBytes);
+	return {
+		expectedSource,
+		expectedTextDeltaCount,
+		expectedReasoningDeltaCount,
+		expectedInputEventCount,
+		enqueueCount,
+		flushCount,
+		flushedEventCount,
+		overlayUpdateCount,
+		overlayEventCount,
+		currentOutputLength,
+		expectedTextBytes,
+		enqueueToExpectedRatio: ratioToProvider(enqueueCount, expectedInputEventCount),
+		flushedEventsToExpectedRatio: ratioToProvider(flushedEventCount, expectedInputEventCount),
+		overlayEventsToExpectedRatio: ratioToProvider(overlayEventCount, expectedInputEventCount),
+		currentOutputToExpectedTextBytesRatio: ratioToProvider(currentOutputLength, expectedTextBytes),
+		flushToEnqueueRatio: ratioToProvider(flushCount, enqueueCount),
+		overlayUpdatesToFlushedEventsRatio: ratioToProvider(overlayUpdateCount, flushedEventCount),
+	};
+}
+
 export function evaluateStreamingProviderRegressions(benchmark: { provider?: StreamingBenchmarkProviderTelemetry; providerPreservation?: StreamingBenchmarkProviderPreservation; sse?: StreamingBenchmarkSseProbe; eventSource?: Pick<StreamingBenchmarkEventSourceProbe, "requested"> }): string[] {
 	const provider = benchmark.provider;
 	if (!provider?.available) return [];
@@ -2977,6 +3052,13 @@ export function summarizeStreamingBenchmarks(runs: StreamingBenchmark[]): Stream
 		debugTraceRefreshDurationMaxMs: numericStats(runs.map((run) => streamingDebugAfterNumber(run, "traceRefreshDurationMsMax"))),
 		debugCurrentOutputLength: numericStats(runs.map((run) => streamingDebugAfterNumber(run, "currentOutputLength"))),
 		debugTraceBaseOutputLength: numericStats(runs.map((run) => streamingDebugAfterNumber(run, "traceBaseOutputLength"))),
+		liveExpectedInputEventCount: numericStats(runs.map((run) => streamingLivePipeline(run)?.expectedInputEventCount)),
+		liveEnqueueToExpectedRatio: numericStats(runs.map((run) => streamingLivePipeline(run)?.enqueueToExpectedRatio)),
+		liveFlushedEventsToExpectedRatio: numericStats(runs.map((run) => streamingLivePipeline(run)?.flushedEventsToExpectedRatio)),
+		liveOverlayEventsToExpectedRatio: numericStats(runs.map((run) => streamingLivePipeline(run)?.overlayEventsToExpectedRatio)),
+		liveCurrentOutputToExpectedTextBytesRatio: numericStats(runs.map((run) => streamingLivePipeline(run)?.currentOutputToExpectedTextBytesRatio)),
+		liveFlushToEnqueueRatio: numericStats(runs.map((run) => streamingLivePipeline(run)?.flushToEnqueueRatio)),
+		liveOverlayUpdatesToFlushedEventsRatio: numericStats(runs.map((run) => streamingLivePipeline(run)?.overlayUpdatesToFlushedEventsRatio)),
 		traceSampleCount: numericStats(runs.map((run) => run.trace?.sampleCount)),
 		traceLiveVersionCount: numericStats(runs.map((run) => run.trace?.liveVersionCount)),
 		traceFirstLiveVersionMs: numericStats(runs.map((run) => run.trace?.firstLiveVersionMs)),
@@ -3036,6 +3118,11 @@ function compareStreamingBenchmarkSummaries(baseline: StreamingBenchmarkSummary,
 		debugFlushCountDelta: statDelta(current.debugFlushCount, baseline.debugFlushCount),
 		debugOverlayUpdateCountDelta: statDelta(current.debugOverlayUpdateCount, baseline.debugOverlayUpdateCount),
 		debugTraceRefreshCompletedCountDelta: statDelta(current.debugTraceRefreshCompletedCount, baseline.debugTraceRefreshCompletedCount),
+		liveEnqueueToExpectedRatioDelta: statDelta(current.liveEnqueueToExpectedRatio, baseline.liveEnqueueToExpectedRatio),
+		liveFlushedEventsToExpectedRatioDelta: statDelta(current.liveFlushedEventsToExpectedRatio, baseline.liveFlushedEventsToExpectedRatio),
+		liveOverlayEventsToExpectedRatioDelta: statDelta(current.liveOverlayEventsToExpectedRatio, baseline.liveOverlayEventsToExpectedRatio),
+		liveFlushToEnqueueRatioDelta: statDelta(current.liveFlushToEnqueueRatio, baseline.liveFlushToEnqueueRatio),
+		liveOverlayUpdatesToFlushedEventsRatioDelta: statDelta(current.liveOverlayUpdatesToFlushedEventsRatio, baseline.liveOverlayUpdatesToFlushedEventsRatio),
 		traceLiveVersionCountDelta: statDelta(current.traceLiveVersionCount, baseline.traceLiveVersionCount),
 		traceMaxAssistantOutputDelta: statDelta(current.traceMaxAssistantOutputLength, baseline.traceMaxAssistantOutputLength),
 		traceDurableEventDeltaDelta: statDelta(current.traceDurableEventDelta, baseline.traceDurableEventDelta),
@@ -3055,6 +3142,10 @@ function compareStreamingBenchmarkSummaries(baseline: StreamingBenchmarkSummary,
 		providerSelectedLiveReasoningRatioDelta: statDelta(current.providerSelectedLiveReasoningRatio, baseline.providerSelectedLiveReasoningRatio),
 		providerDomPositiveTextRatioDelta: statDelta(current.providerDomPositiveTextRatio, baseline.providerDomPositiveTextRatio),
 	};
+}
+
+function streamingLivePipeline(run: StreamingBenchmark): StreamingBenchmarkLivePipeline | undefined {
+	return run.livePipeline ?? summarizeStreamingLivePipeline(run);
 }
 
 function streamingDebugDeltaNumber(run: StreamingBenchmark, key: string): number | undefined {
@@ -3091,7 +3182,8 @@ async function readStreamingBenchmarkRuns(file: string): Promise<StreamingBenchm
 	return runs.filter((run: Partial<StreamingBenchmark>) => run.kind === "streaming-benchmark").map((run: StreamingBenchmark) => {
 		const scored = { ...run, score: run.score ?? scoreStreamingBenchmark(run) };
 		const withProviderPreservation = { ...scored, providerPreservation: run.providerPreservation ?? summarizeStreamingProviderPreservation(scored) };
-		return { ...withProviderPreservation, cadence: run.cadence ?? summarizeStreamingCadence(withProviderPreservation) };
+		const withLivePipeline = { ...withProviderPreservation, livePipeline: run.livePipeline ?? summarizeStreamingLivePipeline(withProviderPreservation) };
+		return { ...withLivePipeline, cadence: run.cadence ?? summarizeStreamingCadence(withLivePipeline) };
 	});
 }
 
@@ -3153,6 +3245,7 @@ function formatStreamingBenchmark(benchmark: StreamingBenchmark, target: Browser
 	if (benchmark.cadence) lines.push(`cadence: scheduleP90=${benchmark.cadence.fixtureScheduleGapP90Ms}ms, domP90=${jsonShort(benchmark.cadence.domGapP90Ms)}ms (lag=${jsonShort(benchmark.cadence.domLagOverScheduleP90Ms)}ms ratio=${jsonShort(benchmark.cadence.domToScheduleP90Ratio)}), sseTextP90=${jsonShort(benchmark.cadence.sseTextGapP90Ms)}ms (lag=${jsonShort(benchmark.cadence.sseTextLagOverScheduleP90Ms)}ms ratio=${jsonShort(benchmark.cadence.sseTextToScheduleP90Ratio)})`);
 	if (benchmark.provider) lines.push(`provider: requested=${benchmark.provider.requested} available=${benchmark.provider.available} id=${benchmark.provider.providerRequestId} model=${jsonShort(benchmark.provider.model)} status=${jsonShort(benchmark.provider.status)} text=${benchmark.provider.textDeltaCount} reasoning=${benchmark.provider.reasoningDeltaCount} textBytes=${formatStats(benchmark.provider.textDeltaBytes)} textGaps=${formatStats(benchmark.provider.textDeltaGapsMs)} firstText=${jsonShort(benchmark.provider.firstTextLatencyMs)}ms parseErrors=${jsonShort(benchmark.provider.parseErrorCount)} unknown=${jsonShort(benchmark.provider.unknownEventCount)} pages=${benchmark.provider.eventPageCount} truncated=${benchmark.provider.truncated}${benchmark.provider.error ? ` error=${benchmark.provider.error}` : ""}`);
 	if (benchmark.providerPreservation) lines.push(`provider preservation: sseTextRatio=${jsonShort(benchmark.providerPreservation.sseTextToProviderRatio)} selectedLiveTextRatio=${jsonShort(benchmark.providerPreservation.selectedLiveTextToProviderRatio)} domPositiveTextRatio=${jsonShort(benchmark.providerPreservation.domPositiveToProviderTextRatio)} sseReasoningRatio=${jsonShort(benchmark.providerPreservation.sseReasoningToProviderRatio)} selectedLiveReasoningRatio=${jsonShort(benchmark.providerPreservation.selectedLiveReasoningToProviderRatio)}`);
+	if (benchmark.livePipeline) lines.push(`live pipeline ratios: source=${benchmark.livePipeline.expectedSource} expected=${benchmark.livePipeline.expectedInputEventCount} enqueue=${jsonShort(benchmark.livePipeline.enqueueToExpectedRatio)} flushed=${jsonShort(benchmark.livePipeline.flushedEventsToExpectedRatio)} overlayEvents=${jsonShort(benchmark.livePipeline.overlayEventsToExpectedRatio)} currentText=${jsonShort(benchmark.livePipeline.currentOutputToExpectedTextBytesRatio)} flush/enqueue=${jsonShort(benchmark.livePipeline.flushToEnqueueRatio)} overlayUpdates/flushed=${jsonShort(benchmark.livePipeline.overlayUpdatesToFlushedEventsRatio)}`);
 	if (benchmark.eventSource) {
 		lines.push(`eventSource: requested=${benchmark.eventSource.requested} installed=${benchmark.eventSource.installed} forcedClose=${benchmark.eventSource.forcedCloseCountAfterStart} reconnectOpen=${benchmark.eventSource.openCountAfterStart} text=${benchmark.eventSource.textEventCount} afterStart=${benchmark.eventSource.textEventCountAfterStart} reasoning=${benchmark.eventSource.reasoningEventCount} reasoningAfterStart=${benchmark.eventSource.reasoningEventCountAfterStart} transient=${benchmark.eventSource.uniqueTransientIdCountAfterStart}/${benchmark.eventSource.transientIdCountAfterStart} reset=${benchmark.eventSource.transientIdResetObserved} droppedText=${benchmark.eventSource.textDropTextEventCount} last=${jsonShort(benchmark.eventSource.lastEventId)} reconnectObserved=${benchmark.eventSource.reconnectObserved}`);
 		for (const stream of benchmark.eventSource.streams ?? []) {
@@ -3189,6 +3282,7 @@ function formatStreamingBenchmarkGroup(group: StreamingBenchmarkGroup, target: B
 	if (group.summary.fixtureScheduleGapP90Ms.count > 0) lines.push(`fixture: scheduleGapP90=${formatStats(group.summary.fixtureScheduleGapP90Ms)}`);
 	if (group.summary.domLagOverFixtureScheduleP90Ms.count > 0 || group.summary.sseTextLagOverFixtureScheduleP90Ms.count > 0) lines.push(`cadence lag: domP90-scheduleP90=${formatStats(group.summary.domLagOverFixtureScheduleP90Ms)}ms, sseTextP90-scheduleP90=${formatStats(group.summary.sseTextLagOverFixtureScheduleP90Ms)}ms, domRatio=${formatStats(group.summary.domToFixtureScheduleP90Ratio)}, sseRatio=${formatStats(group.summary.sseTextToFixtureScheduleP90Ratio)}`);
 	if (group.summary.debugEnqueueCount.count > 0 || group.summary.debugFlushCount.count > 0 || group.summary.debugOverlayUpdateCount.count > 0) lines.push(`live pipeline: enqueue=${formatStats(group.summary.debugEnqueueCount)}, flush=${formatStats(group.summary.debugFlushCount)}, flushedEvents=${formatStats(group.summary.debugFlushedEventCount)}, overlayUpdates=${formatStats(group.summary.debugOverlayUpdateCount)}, overlayEvents=${formatStats(group.summary.debugOverlayEventCount)}, currentOutput=${formatStats(group.summary.debugCurrentOutputLength)}, traceBase=${formatStats(group.summary.debugTraceBaseOutputLength)}`);
+	if (group.summary.liveEnqueueToExpectedRatio.count > 0 || group.summary.liveFlushToEnqueueRatio.count > 0) lines.push(`live ratios: expected=${formatStats(group.summary.liveExpectedInputEventCount)}, enqueue/expected=${formatStats(group.summary.liveEnqueueToExpectedRatio)}, flushed/expected=${formatStats(group.summary.liveFlushedEventsToExpectedRatio)}, overlayEvents/expected=${formatStats(group.summary.liveOverlayEventsToExpectedRatio)}, currentText/expected=${formatStats(group.summary.liveCurrentOutputToExpectedTextBytesRatio)}, flush/enqueue=${formatStats(group.summary.liveFlushToEnqueueRatio)}, overlayUpdates/flushed=${formatStats(group.summary.liveOverlayUpdatesToFlushedEventsRatio)}`);
 	if (group.summary.debugTraceRefreshScheduledCount.count > 0 || group.summary.debugTraceRefreshCompletedCount.count > 0 || group.summary.debugTraceRefreshFailedCount.count > 0) lines.push(`trace refresh: scheduled=${formatStats(group.summary.debugTraceRefreshScheduledCount)}, completed=${formatStats(group.summary.debugTraceRefreshCompletedCount)}, failed=${formatStats(group.summary.debugTraceRefreshFailedCount)}, maxDuration=${formatStats(group.summary.debugTraceRefreshDurationMaxMs)}ms`);
 	if (group.summary.providerTextDeltaCount.count > 0) lines.push(`provider: text=${formatStats(group.summary.providerTextDeltaCount)}, reasoning=${formatStats(group.summary.providerReasoningDeltaCount)}, textBytesP50=${formatStats(group.summary.providerTextDeltaBytesP50)}, textGapP90=${formatStats(group.summary.providerTextDeltaGapP90Ms)}ms, firstText=${formatStats(group.summary.providerFirstTextLatencyMs)}ms, parseErrors=${formatStats(group.summary.providerParseErrorCount)}, unknown=${formatStats(group.summary.providerUnknownEventCount)}`);
 	if (group.summary.providerSseTextRatio.count > 0 || group.summary.providerSelectedLiveTextRatio.count > 0) lines.push(`provider preservation: sseTextRatio=${formatStats(group.summary.providerSseTextRatio)}, selectedLiveTextRatio=${formatStats(group.summary.providerSelectedLiveTextRatio)}, domPositiveTextRatio=${formatStats(group.summary.providerDomPositiveTextRatio)}, sseReasoningRatio=${formatStats(group.summary.providerSseReasoningRatio)}, selectedLiveReasoningRatio=${formatStats(group.summary.providerSelectedLiveReasoningRatio)}`);
@@ -3200,6 +3294,7 @@ function formatStreamingBenchmarkGroup(group: StreamingBenchmarkGroup, target: B
 	if (group.comparison) {
 		let comparison = `comparison vs baseline (${group.comparison.baselineRuns} runs): smoothness ${signed(group.comparison.smoothnessDelta)}, domP90Gap ${signed(group.comparison.domGapP90DeltaMs)}ms, domPositive ${signed(group.comparison.domPositiveUpdateDelta)}, maxJump ${signed(group.comparison.domJumpMaxDeltaChars)} chars, longTaskMax ${signed(group.comparison.longTaskMaxDeltaMs)}ms`;
 		if (group.summary.debugEnqueueCount.count > 0 || group.comparison.debugEnqueueCountDelta !== undefined || group.comparison.debugFlushCountDelta !== undefined || group.comparison.debugOverlayUpdateCountDelta !== undefined || group.comparison.debugTraceRefreshCompletedCountDelta !== undefined) comparison += `, enqueue ${signed(group.comparison.debugEnqueueCountDelta)}, flush ${signed(group.comparison.debugFlushCountDelta)}, overlayUpdates ${signed(group.comparison.debugOverlayUpdateCountDelta)}, traceRefreshCompleted ${signed(group.comparison.debugTraceRefreshCompletedCountDelta)}`;
+		if (group.summary.liveEnqueueToExpectedRatio.count > 0 || group.comparison.liveEnqueueToExpectedRatioDelta !== undefined || group.comparison.liveFlushToEnqueueRatioDelta !== undefined) comparison += `, enqueue/expected ${signed(group.comparison.liveEnqueueToExpectedRatioDelta)}, flushed/expected ${signed(group.comparison.liveFlushedEventsToExpectedRatioDelta)}, overlayEvents/expected ${signed(group.comparison.liveOverlayEventsToExpectedRatioDelta)}, flush/enqueue ${signed(group.comparison.liveFlushToEnqueueRatioDelta)}, overlayUpdates/flushed ${signed(group.comparison.liveOverlayUpdatesToFlushedEventsRatioDelta)}`;
 		if (group.summary.traceSampleCount.count > 0 || group.comparison.traceLiveVersionCountDelta !== undefined || group.comparison.traceMaxAssistantOutputDelta !== undefined || group.comparison.traceDurableEventDeltaDelta !== undefined) comparison += `, traceLiveVersions ${signed(group.comparison.traceLiveVersionCountDelta)}, traceAssistantMax ${signed(group.comparison.traceMaxAssistantOutputDelta)}, traceDurableEventDelta ${signed(group.comparison.traceDurableEventDeltaDelta)}`;
 		if (group.summary.fixtureScheduleGapP90Ms.count > 0 || group.comparison.fixtureScheduleGapP90DeltaMs !== undefined) comparison += `, fixtureScheduleP90 ${signed(group.comparison.fixtureScheduleGapP90DeltaMs)}ms, domLagVsSchedule ${signed(group.comparison.domLagOverFixtureScheduleP90DeltaMs)}ms, sseTextLagVsSchedule ${signed(group.comparison.sseTextLagOverFixtureScheduleP90DeltaMs)}ms`;
 		if (group.summary.eventSourceTextEventCountAfterStart.count > 0 || group.summary.selectedLiveEventCountAfterStart.count > 0 || group.summary.sseTextEventCount.count > 0 || group.comparison.eventSourceTextEventDelta !== undefined || group.comparison.selectedLiveTextEventDelta !== undefined || group.comparison.sseTextEventDelta !== undefined) comparison += `, eventSourceText ${signed(group.comparison.eventSourceTextEventDelta)}, eventSourceReasoning ${signed(group.comparison.eventSourceReasoningEventDelta)}, sseText ${signed(group.comparison.sseTextEventDelta)}, sseP90Gap ${signed(group.comparison.sseChunkGapP90DeltaMs)}ms, selectedLiveEvents ${signed(group.comparison.selectedLiveEventDelta)}, selectedLiveText ${signed(group.comparison.selectedLiveTextEventDelta)}, selectedLiveReasoning ${signed(group.comparison.selectedLiveReasoningEventDelta)}`;

@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { PiboDataStore } from "../dist/data/pibo-store.js";
 import { PiboReliabilityStore } from "../dist/reliability/store.js";
-import { attachStreamingProviderTelemetryToBenchmark, collectStreamingProviderTelemetryFromSelectedBrowserSession, collectStreamingProviderTelemetryFromSession, collectStreamingProviderTelemetryFromTurn, evaluateStreamingBenchmarkAssertion, evaluateStreamingBenchmarkUrlComparisonRegressions, evaluateStreamingProviderRegressions, formatWatch, inferWatchFlickers, resolveStreamingBenchmarkHostedCompareUrlFromValues, summarizeStreamingBenchmarks, summarizeStreamingProviderPreservation, summarizeStreamingProviderTelemetry } from "../dist/debug/web.js";
+import { attachStreamingProviderTelemetryToBenchmark, collectStreamingProviderTelemetryFromSelectedBrowserSession, collectStreamingProviderTelemetryFromSession, collectStreamingProviderTelemetryFromTurn, evaluateStreamingBenchmarkAssertion, evaluateStreamingBenchmarkUrlComparisonRegressions, evaluateStreamingProviderRegressions, formatWatch, inferWatchFlickers, resolveStreamingBenchmarkHostedCompareUrlFromValues, summarizeStreamingBenchmarks, summarizeStreamingLivePipeline, summarizeStreamingProviderPreservation, summarizeStreamingProviderTelemetry } from "../dist/debug/web.js";
 
 const execFileAsyncRaw = promisify(execFile);
 const cliPath = resolve("dist/bin/pibo.js");
@@ -95,6 +95,7 @@ test("streaming benchmark summaries include live pipeline debug counters", () =>
 		debug: {
 			delta: {
 				textDeltaCount: 12,
+				reasoningDeltaCount: 4,
 				enqueueCount,
 				flushCount: enqueueCount - 1,
 				flushedEventCount: enqueueCount,
@@ -110,6 +111,7 @@ test("streaming benchmark summaries include live pipeline debug counters", () =>
 				traceRefreshDurationMsMax: 25,
 			},
 		},
+		fixture: { available: true, requested: true, mode: "backend", started: true, deltaCount: 12, reasoningDeltaCount: 4, textBytes: 24 },
 		dom: { gapsMs: { count: 0 }, positiveCharJumps: { count: 0 }, positiveUpdateCount: enqueueCount },
 		longTasks: { maxMs: 0 },
 		regressions: [],
@@ -124,6 +126,31 @@ test("streaming benchmark summaries include live pipeline debug counters", () =>
 	assert.equal(summary.debugTraceRefreshCompletedCount.max, 2);
 	assert.equal(summary.debugTraceRefreshDurationMaxMs.p50, 25);
 	assert.equal(summary.debugCurrentOutputLength.max, 28);
+	assert.equal(summary.liveExpectedInputEventCount.p50, 16);
+	assert.equal(summary.liveEnqueueToExpectedRatio.p50, 0.75);
+	assert.equal(summary.liveFlushedEventsToExpectedRatio.p90, 0.75);
+	assert.equal(summary.liveOverlayEventsToExpectedRatio.max, 0.875);
+	assert.equal(summary.liveCurrentOutputToExpectedTextBytesRatio.max, 1.167);
+	assert.equal(summary.liveFlushToEnqueueRatio.p50, 0.917);
+	assert.equal(summary.liveOverlayUpdatesToFlushedEventsRatio.p50, 0.917);
+});
+
+test("streaming live pipeline summary computes fixture-normalized ratios", () => {
+	const summary = summarizeStreamingLivePipeline({
+		debug: {
+			delta: { enqueueCount: 22, flushCount: 20, flushedEventCount: 22, overlayUpdateCount: 20, textDeltaCount: 12, reasoningDeltaCount: 4 },
+			after: { overlayEventCount: 16, currentOutputLength: 24 },
+		},
+		fixture: { available: true, requested: true, mode: "backend", started: true, deltaCount: 12, reasoningDeltaCount: 4, textBytes: 24 },
+	});
+	assert.equal(summary.expectedSource, "fixture");
+	assert.equal(summary.expectedInputEventCount, 16);
+	assert.equal(summary.enqueueToExpectedRatio, 1.375);
+	assert.equal(summary.flushedEventsToExpectedRatio, 1.375);
+	assert.equal(summary.overlayEventsToExpectedRatio, 1);
+	assert.equal(summary.currentOutputToExpectedTextBytesRatio, 1);
+	assert.equal(summary.flushToEnqueueRatio, 0.909);
+	assert.equal(summary.overlayUpdatesToFlushedEventsRatio, 0.909);
 });
 
 test("streaming provider preservation summary computes provider-to-transport ratios", () => {
