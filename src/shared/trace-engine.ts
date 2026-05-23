@@ -368,17 +368,28 @@ export function patchTraceViewWithEvents(
 	if (!candidateEvents.length) return view;
 
 	const previousFlatNodes = flattenTraceNodes(view.nodes);
-	const allNodes = previousFlatNodes.map((node) => ({ ...node, children: [] }));
-	const byId = mapFlatTraceNodesById(allNodes);
+	const allNodes: PiboTraceNode[] = [];
+	const byId = new Map<string, PiboTraceNode>();
+	const previousById = new Map<string, PiboTraceNode>();
+	for (const previousNode of previousFlatNodes) {
+		previousById.set(previousNode.id, previousNode);
+		const nextNode = { ...previousNode, children: [] };
+		allNodes.push(nextNode);
+		byId.set(nextNode.id, nextNode);
+	}
 	const childByParent = new Map<string, Array<{ id: string; metadata?: Record<string, unknown> }>>();
 	const linkedChildByToolCallId = new Map<string, string>();
 	const openTranscriptEventIds = new Set<string>();
 	const appliedEvents: ChatWebStoredEvent[] = [];
+	let contentDeltaChangedNodeIds: Set<string> | undefined = new Set();
 
 	for (const event of candidateEvents) {
 		if (isConfirmedUserMessageEcho(allNodes, event)) continue;
 
 		appliedEvents.push(event);
+		const contentDeltaNodeId = contentDeltaPatchNodeId(event.payload as PiboOutputEvent);
+		if (contentDeltaChangedNodeIds && contentDeltaNodeId) contentDeltaChangedNodeIds.add(contentDeltaNodeId);
+		else contentDeltaChangedNodeIds = undefined;
 		applySingleEventToNodes(
 			allNodes,
 			byId,
@@ -398,7 +409,7 @@ export function patchTraceViewWithEvents(
 	if (eventsCanAffectAsyncAgentRunStatus(appliedEvents)) {
 		reconcileAsyncAgentRunStatuses(nestedNodes);
 	}
-	const sharedNodes = shareUnchangedTraceNodes(previousFlatNodes, nestedNodes);
+	const sharedNodes = shareUnchangedTraceNodes(previousById, nestedNodes, contentDeltaChangedNodeIds);
 
 	return {
 		...view,
@@ -413,6 +424,20 @@ function eventsCanAffectAsyncAgentRunStatus(events: readonly ChatWebStoredEvent[
 		const type = (event.payload as PiboOutputEvent).type;
 		return type !== "assistant_delta" && type !== "thinking_delta";
 	});
+}
+
+function contentDeltaPatchNodeId(event: PiboOutputEvent): string | undefined {
+	if (event.type === "assistant_delta") {
+		if (event.text.length === 0) return undefined;
+		const assistantId = assistantEventNodeId(event);
+		return assistantId ? assistantMessageNodeId(assistantId) : undefined;
+	}
+	if (event.type === "thinking_delta") {
+		if (event.text.length === 0) return undefined;
+		const thinkingId = thinkingEventNodeId(event);
+		return thinkingId ? thinkingNodeId(thinkingId) : undefined;
+	}
+	return undefined;
 }
 
 function mapFlatTraceNodesById(nodes: readonly PiboTraceNode[]): Map<string, PiboTraceNode> {
@@ -440,26 +465,37 @@ function traceNodeText(node: PiboTraceNode): string | undefined {
 }
 
 function shareUnchangedTraceNodes(
-	previousFlatNodes: readonly PiboTraceNode[],
+	previousById: ReadonlyMap<string, PiboTraceNode>,
 	nextNodes: readonly PiboTraceNode[],
+	contentDeltaChangedNodeIds?: ReadonlySet<string>,
 ): PiboTraceNode[] {
-	const previousById = mapFlatTraceNodesById(previousFlatNodes);
-	return nextNodes.map((node) => shareUnchangedTraceNode(previousById, node));
+	return nextNodes.map((node) => shareUnchangedTraceNode(previousById, node, contentDeltaChangedNodeIds));
 }
 
 function shareUnchangedTraceNode(
 	previousById: ReadonlyMap<string, PiboTraceNode>,
 	nextNode: PiboTraceNode,
+	contentDeltaChangedNodeIds?: ReadonlySet<string>,
 ): PiboTraceNode {
 	const previousNode = previousById.get(nextNode.id);
-	const sharedChildren = nextNode.children.map((child) => shareUnchangedTraceNode(previousById, child));
+	if (nextNode.children.length === 0) {
+		const childrenUnchanged = previousNode !== undefined && previousNode.children.length === 0;
+		if (previousNode && childrenUnchanged) {
+			if (contentDeltaChangedNodeIds && !contentDeltaChangedNodeIds.has(nextNode.id)) return previousNode;
+			if (traceNodeShallowEqual(previousNode, nextNode)) return previousNode;
+		}
+		return childrenUnchanged ? { ...nextNode, children: previousNode.children } : { ...nextNode, children: [] };
+	}
+
+	const sharedChildren = nextNode.children.map((child) => shareUnchangedTraceNode(previousById, child, contentDeltaChangedNodeIds));
 	const childrenUnchanged =
 		previousNode !== undefined &&
 		previousNode.children.length === sharedChildren.length &&
 		previousNode.children.every((child, index) => child === sharedChildren[index]);
 
-	if (previousNode && childrenUnchanged && traceNodeShallowEqual(previousNode, nextNode)) {
-		return previousNode;
+	if (previousNode && childrenUnchanged) {
+		if (contentDeltaChangedNodeIds && !contentDeltaChangedNodeIds.has(nextNode.id)) return previousNode;
+		if (traceNodeShallowEqual(previousNode, nextNode)) return previousNode;
 	}
 
 	return childrenUnchanged ? { ...nextNode, children: previousNode?.children ?? sharedChildren } : { ...nextNode, children: sharedChildren };
