@@ -111,6 +111,83 @@ test("pibo debug web report renders saved streaming benchmark artifacts without 
 	}
 });
 
+test("pibo debug web report emits compact URL comparison JSON rows", async () => {
+	const cwd = await makeEmptyCwd();
+	try {
+		const makeRun = (url, firstOffset = 0) => ({
+			kind: "streaming-benchmark",
+			createdAt: "2026-05-23T00:00:00.000Z",
+			url,
+			title: "Chat",
+			durationMs: 1800,
+			debug: {
+				enabledRequested: true,
+				available: true,
+				reset: true,
+				delta: { textDeltaCount: 12, textDeltaBytes: 24, reasoningDeltaCount: 4, enqueueCount: 22, flushCount: 20, flushedEventCount: 22, overlayUpdateCount: 20 },
+				after: { overlayEventCount: 16, currentOutputLength: 24, traceBaseOutputLength: 0 },
+			},
+			fixture: { requested: true, mode: "backend", profile: "steady", mix: "reasoning-text", available: true, started: true, deltaCount: 12, reasoningDeltaCount: 4, textBytes: 24, scheduleGapsMs: { count: 11, p90: 100 } },
+			dom: {
+				selector: "[data-pibo-component=MarkdownRendererHost]",
+				targetCountStart: 1,
+				targetCountEnd: 1,
+				lengthStart: 0,
+				lengthEnd: 24,
+				lengthMax: 24,
+				updateCount: 12,
+				positiveUpdateCount: 12,
+				firstPositiveUpdateMs: 145 + firstOffset,
+				gapsMs: { count: 11, p50: 100, p90: 101, p99: 103, max: 103, avg: 100.4 },
+				positiveCharJumps: { count: 12, p50: 2, p90: 2, p99: 2, max: 2, avg: 2 },
+			},
+			raf: { count: 100, gapsMs: { count: 99, p90: 16.8 } },
+			longTasks: { count: 0, totalMs: 0, maxMs: 0 },
+			eventSource: { streams: [{ role: "selected-live", eventCountAfterStart: 22, textEventCountAfterStart: 12, reasoningEventCountAfterStart: 4, transientIdCountAfterStart: 22, firstTextEventMsAfterStart: 121 + firstOffset }] },
+			sse: { textEventCount: 12, reasoningEventCount: 4, firstTextEventMs: 119 + firstOffset, chunkBytes: { count: 1, p50: 280 }, chunkGapsMs: { count: 1, p90: 100 }, textEventsPerChunk: { count: 1, p90: 1 }, textEventGapsMs: { count: 11, p90: 100 } },
+			livePipeline: { expectedInputEventCount: 16, flushedEventsToExpectedRatio: 1.375, overlayEventsToExpectedRatio: 1, currentOutputToExpectedTextBytesRatio: 1, flushToEnqueueRatio: 0.909, overlayUpdatesToFlushedEventsRatio: 0.909, firstTextDeltaMs: 120 + firstOffset, firstEnqueueMs: 40 + firstOffset, firstFlushMs: 42 + firstOffset, firstOverlayUpdateMs: 44 + firstOffset },
+			score: { smoothness: 58, textDeltaCount: 12, domPositiveUpdateCount: 12 },
+			regressions: [],
+			warnings: [],
+		});
+		const primaryRun = makeRun("http://direct.example/apps/chat/rooms/room/sessions/ps");
+		const compareRun = makeRun("https://hosted.example/apps/chat/rooms/room/sessions/ps", 5);
+		const artifact = join(cwd, "streaming-url-comparison.json");
+		await writeFile(artifact, JSON.stringify({
+			kind: "streaming-benchmark-url-comparison",
+			createdAt: "2026-05-23T00:00:00.000Z",
+			primaryUrl: primaryRun.url,
+			compareUrl: compareRun.url,
+			primary: { kind: "streaming-benchmark-runs", createdAt: "2026-05-23T00:00:00.000Z", durationMs: 1800, runs: [primaryRun], summary: {}, regressions: [], warnings: [] },
+			compare: { kind: "streaming-benchmark-runs", createdAt: "2026-05-23T00:00:00.000Z", durationMs: 1800, runs: [compareRun], summary: {}, regressions: [], warnings: [] },
+			comparison: {},
+			regressions: [],
+			warnings: [],
+		}, null, 2));
+		const jsonOutput = join(cwd, "reports", "streaming-url-compact.json");
+		await execFileAsync("node", [cliPath, "debug", "web", "report", "streaming-benchmark", "--from", artifact, "--compact", "--json-output", jsonOutput], { cwd });
+		const writtenJson = JSON.parse(await readFile(jsonOutput, "utf-8"));
+		assert.equal(writtenJson.benchmark.kind, "streaming-benchmark-url-comparison");
+		assert.deepEqual(writtenJson.rows.find((row) => row.metric === "First SSE text"), {
+			section: "compact-url-comparison",
+			metric: "First SSE text",
+			primaryP50: "119ms",
+			compareP50: "124ms",
+			delta: "+5ms",
+		});
+		assert.deepEqual(writtenJson.rows.find((row) => row.metric === "First live flush"), {
+			section: "compact-url-comparison",
+			metric: "First live flush",
+			primaryP50: "42ms",
+			compareP50: "47ms",
+			delta: "+5ms",
+		});
+		assert.match(writtenJson.markdown, /\| First live overlay \| 44ms \| 49ms \| \+5ms \|/);
+	} finally {
+		await rm(cwd, { recursive: true, force: true });
+	}
+});
+
 test("pibo debug web report recomputes streaming summaries for older artifacts", async () => {
 	const cwd = await makeEmptyCwd();
 	try {
