@@ -372,7 +372,9 @@ export function patchTraceViewWithEvents(
 	if (!appliedEvents.length) return view;
 
 	const nestedNodes = nestTraceNodes(allNodes);
-	reconcileAsyncAgentRunStatuses(nestedNodes);
+	if (eventsCanAffectAsyncAgentRunStatus(appliedEvents)) {
+		reconcileAsyncAgentRunStatuses(nestedNodes);
+	}
 	const sharedNodes = shareUnchangedTraceNodes(view.nodes, nestedNodes);
 
 	return {
@@ -381,6 +383,13 @@ export function patchTraceViewWithEvents(
 		nodes: sharedNodes,
 		latestStreamId: latestTraceStreamId(appliedEvents, view.latestStreamId),
 	};
+}
+
+function eventsCanAffectAsyncAgentRunStatus(events: readonly ChatWebStoredEvent[]): boolean {
+	return events.some((event) => {
+		const type = (event.payload as PiboOutputEvent).type;
+		return type !== "assistant_delta" && type !== "thinking_delta";
+	});
 }
 
 function isConfirmedUserMessageEcho(nodes: readonly PiboTraceNode[], event: ChatWebStoredEvent): boolean {
@@ -456,7 +465,16 @@ function traceNodeShallowEqual(left: PiboTraceNode, right: PiboTraceNode): boole
 function traceOrderKeyEqual(left: PiboTraceNode["orderKey"], right: PiboTraceNode["orderKey"]): boolean {
 	if (left === right) return true;
 	if (!left || !right) return false;
-	return JSON.stringify(left) === JSON.stringify(right);
+	return (
+		left.sourceRank === right.sourceRank &&
+		left.turnSeq === right.turnSeq &&
+		left.transcriptIndex === right.transcriptIndex &&
+		left.contentPartIndex === right.contentPartIndex &&
+		left.eventSequence === right.eventSequence &&
+		left.streamId === right.streamId &&
+		left.streamFrameIndex === right.streamFrameIndex &&
+		left.phaseRank === right.phaseRank
+	);
 }
 
 export function dedupeTraceEvents<T extends ChatWebStoredEvent>(events: readonly T[]): T[] {

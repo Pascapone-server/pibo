@@ -47,3 +47,5 @@ Append concise, reusable findings here. Do not paste raw logs.
 
 - Selected-live replay lag is healthy only when replayed ids were not already observed before reconnect. Track duplicate replay counts separately from lag/replayed counts so cursor safety does not hide redundant overlay work.
 - Reconnect replay status must be summarized for grouped `--runs N` artifacts, not only single-run reports; repeated reconnect benchmarks need p50 replay/liveSince/lag/duplicate/miss stats to spot flakiness across runs.
+- Content-only live overlay patches should not rerun async-agent run-status reconciliation. Assistant/reasoning deltas cannot update `pibo_run_start` snapshots, so skipping the trace-wide reconciliation scans on those flushes preserves status semantics while reducing large-trace patch cost.
+- Trace order key equality is a hot-path shallow-share check; compare fields directly instead of serializing order keys with `JSON.stringify` during every live overlay recompute.
