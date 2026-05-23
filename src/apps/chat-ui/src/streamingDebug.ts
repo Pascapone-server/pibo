@@ -38,6 +38,12 @@ export type StreamingDebugSnapshot = {
 	traceBaseOutputLength?: number;
 	currentOutputLength?: number;
 	lastEventAt?: string;
+	firstEventAt?: string;
+	firstTextDeltaAt?: string;
+	firstReasoningDeltaAt?: string;
+	firstEnqueueAt?: string;
+	firstFlushAt?: string;
+	firstOverlayUpdateAt?: string;
 	lastEventId?: string;
 	lastDurableCursor?: string;
 	lastTransientLiveId?: string;
@@ -89,9 +95,11 @@ export function recordStreamingDebugLiveError(piboSessionId: string, readyState:
 
 export function recordStreamingDebugStreamEvent(piboSessionId: string, event: StreamingDebugEvent, lastEventId: string | undefined, readyState: number): void {
 	updateStreamingDebug(piboSessionId, (snapshot) => {
+		const at = nowIso();
 		snapshot.eventCount += 1;
 		snapshot.eventTypeCounts[event.type] = (snapshot.eventTypeCounts[event.type] ?? 0) + 1;
-		snapshot.lastEventAt = nowIso();
+		snapshot.lastEventAt = at;
+		snapshot.firstEventAt ??= at;
 		snapshot.lastReadyState = readyState;
 		const eventId = lastEventId || event.streamFrameId;
 		if (eventId) {
@@ -101,9 +109,11 @@ export function recordStreamingDebugStreamEvent(piboSessionId: string, event: St
 			else if (kind === "transient") snapshot.lastTransientLiveId = eventId;
 		}
 		if (event.type === "TEXT_MESSAGE_CONTENT" && typeof event.delta === "string") {
+			snapshot.firstTextDeltaAt ??= at;
 			snapshot.textDeltaCount += 1;
 			snapshot.textDeltaBytes += textBytes(event.delta);
 		} else if (event.type === "REASONING_MESSAGE_CONTENT" && typeof event.delta === "string") {
+			snapshot.firstReasoningDeltaAt ??= at;
 			snapshot.reasoningDeltaCount += 1;
 			snapshot.reasoningDeltaBytes += textBytes(event.delta);
 		}
@@ -112,6 +122,7 @@ export function recordStreamingDebugStreamEvent(piboSessionId: string, event: St
 
 export function recordStreamingDebugEnqueue(piboSessionId: string, event: StreamingDebugEvent, pendingEventCount: number, flushImmediately: boolean): void {
 	updateStreamingDebug(piboSessionId, (snapshot) => {
+		snapshot.firstEnqueueAt ??= nowIso();
 		snapshot.enqueueCount += 1;
 		if (flushImmediately) snapshot.enqueueFlushImmediateCount += 1;
 		snapshot.pendingEventCount = pendingEventCount;
@@ -125,12 +136,15 @@ export function recordStreamingDebugEnqueue(piboSessionId: string, event: Stream
 
 export function recordStreamingDebugFlush(piboSessionId: string, flushedEventCount: number, overlayEventCount: number): void {
 	updateStreamingDebug(piboSessionId, (snapshot) => {
+		const at = nowIso();
+		snapshot.firstFlushAt ??= at;
+		snapshot.firstOverlayUpdateAt ??= at;
 		snapshot.flushCount += 1;
 		snapshot.flushedEventCount += flushedEventCount;
 		snapshot.pendingEventCount = 0;
 		snapshot.overlayUpdateCount += 1;
 		snapshot.overlayEventCount = overlayEventCount;
-		snapshot.lastFlushAt = nowIso();
+		snapshot.lastFlushAt = at;
 	});
 }
 

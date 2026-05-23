@@ -1,0 +1,1476 @@
+{
+  "target": {
+    "id": "5E5446EB0E5FF3DE702C5C393EB5C3A0",
+    "url": "http://127.0.0.1:4788/apps/chat/rooms/room_700b623f-c20c-4c74-bcb4-389d8daac410/sessions/ps_cf74f57f-9083-40d8-a6bc-133383fe4dbf?view=terminal&debugStreaming=1",
+    "title": "Pibo Web Chat",
+    "webSocketDebuggerUrl": "ws://127.0.0.1:33175/devtools/page/5E5446EB0E5FF3DE702C5C393EB5C3A0"
+  },
+  "scenario": "streaming-benchmark",
+  "benchmark": {
+    "kind": "streaming-benchmark-runs",
+    "createdAt": "2026-05-23T05:52:43.619Z",
+    "durationMs": 1800,
+    "runs": [
+      {
+        "kind": "streaming-benchmark",
+        "createdAt": "2026-05-23T05:52:41.767Z",
+        "url": "http://127.0.0.1:4788/apps/chat/rooms/room_700b623f-c20c-4c74-bcb4-389d8daac410/sessions/ps_cf74f57f-9083-40d8-a6bc-133383fe4dbf?view=terminal&debugStreaming=1",
+        "title": "Pibo Web Chat",
+        "durationMs": 1800,
+        "debug": {
+          "enabledRequested": true,
+          "available": true,
+          "reset": true,
+          "before": {
+            "enabled": true,
+            "startedAt": "2026-05-23T05:52:39.923Z",
+            "updatedAt": "2026-05-23T05:52:39.923Z",
+            "sessionIds": [],
+            "liveOpenCount": 0,
+            "liveErrorCount": 0,
+            "eventCount": 0,
+            "eventTypeCounts": {},
+            "textDeltaCount": 0,
+            "textDeltaBytes": 0,
+            "reasoningDeltaCount": 0,
+            "reasoningDeltaBytes": 0,
+            "enqueueCount": 0,
+            "enqueueFlushImmediateCount": 0,
+            "pendingEventCount": 0,
+            "flushCount": 0,
+            "flushedEventCount": 0,
+            "overlayUpdateCount": 0,
+            "overlayEventCount": 0,
+            "traceRefreshScheduledCount": 0,
+            "traceRefreshStartedCount": 0,
+            "traceRefreshCompletedCount": 0,
+            "traceRefreshFailedCount": 0,
+            "traceRefreshDurationMsTotal": 0,
+            "traceBaseUpdateCount": 0
+          },
+          "after": {
+            "enabled": true,
+            "startedAt": "2026-05-23T05:52:39.923Z",
+            "updatedAt": "2026-05-23T05:52:41.663Z",
+            "sessionIds": [
+              "ps_cf74f57f-9083-40d8-a6bc-133383fe4dbf"
+            ],
+            "liveOpenCount": 0,
+            "liveErrorCount": 0,
+            "eventCount": 22,
+            "eventTypeCounts": {
+              "RUN_STARTED": 1,
+              "REASONING_MESSAGE_START": 1,
+              "REASONING_MESSAGE_CONTENT": 4,
+              "TEXT_MESSAGE_START": 1,
+              "TEXT_MESSAGE_CONTENT": 12,
+              "REASONING_MESSAGE_END": 1,
+              "TEXT_MESSAGE_END": 1,
+              "RUN_FINISHED": 1
+            },
+            "textDeltaCount": 12,
+            "textDeltaBytes": 24,
+            "reasoningDeltaCount": 4,
+            "reasoningDeltaBytes": 24,
+            "enqueueCount": 22,
+            "enqueueFlushImmediateCount": 6,
+            "pendingEventCount": 0,
+            "flushCount": 20,
+            "flushedEventCount": 22,
+            "overlayUpdateCount": 20,
+            "overlayEventCount": 16,
+            "traceRefreshScheduledCount": 22,
+            "traceRefreshStartedCount": 1,
+            "traceRefreshCompletedCount": 1,
+            "traceRefreshFailedCount": 0,
+            "traceRefreshDurationMsTotal": 11.800000011920929,
+            "traceBaseUpdateCount": 0,
+            "selectedPiboSessionId": "ps_cf74f57f-9083-40d8-a6bc-133383fe4dbf",
+            "lastEventAt": "2026-05-23T05:52:41.257Z",
+            "firstEventAt": "2026-05-23T05:52:39.957Z",
+            "lastReadyState": 1,
+            "lastEventId": "live:21",
+            "lastTransientLiveId": "live:21",
+            "firstEnqueueAt": "2026-05-23T05:52:39.957Z",
+            "firstFlushAt": "2026-05-23T05:52:39.957Z",
+            "firstOverlayUpdateAt": "2026-05-23T05:52:39.957Z",
+            "lastFlushAt": "2026-05-23T05:52:41.258Z",
+            "lastTraceRefreshScheduledAt": "2026-05-23T05:52:41.257Z",
+            "lastTraceRefreshDelayMs": 300,
+            "traceBaseOutputLength": 0,
+            "currentOutputLength": 24,
+            "firstReasoningDeltaAt": "2026-05-23T05:52:40.005Z",
+            "firstTextDeltaAt": "2026-05-23T05:52:40.056Z",
+            "traceRefreshDurationMsLast": 12,
+            "traceRefreshDurationMsMax": 11.800000011920929
+          },
+          "delta": {
+            "liveOpenCount": 0,
+            "liveErrorCount": 0,
+            "eventCount": 22,
+            "textDeltaCount": 12,
+            "textDeltaBytes": 24,
+            "reasoningDeltaCount": 4,
+            "reasoningDeltaBytes": 24,
+            "enqueueCount": 22,
+            "flushCount": 20,
+            "flushedEventCount": 22,
+            "overlayUpdateCount": 20,
+            "traceRefreshStartedCount": 1,
+            "traceRefreshCompletedCount": 1,
+            "traceRefreshFailedCount": 0,
+            "traceBaseUpdateCount": 0
+          }
+        },
+        "dom": {
+          "selector": "[data-pibo-component=\"MarkdownRendererHost\"][data-pibo-markdown-kind=\"assistant-message\"]",
+          "targetCountStart": 0,
+          "targetCountEnd": 1,
+          "lengthStart": 0,
+          "lengthEnd": 23,
+          "lengthMax": 23,
+          "updateCount": 12,
+          "positiveUpdateCount": 12,
+          "firstPositiveUpdateMs": 182,
+          "lastPositiveUpdateMs": 1241,
+          "gapsMs": {
+            "count": 11,
+            "min": 60,
+            "p50": 100.1,
+            "p90": 100.2,
+            "p99": 100.2,
+            "max": 100.9,
+            "avg": 96.309
+          },
+          "positiveCharJumps": {
+            "count": 12,
+            "min": 1,
+            "p50": 2,
+            "p90": 2,
+            "p99": 2,
+            "max": 2,
+            "avg": 1.917
+          }
+        },
+        "raf": {
+          "count": 112,
+          "gapsMs": {
+            "count": 111,
+            "min": 16.5,
+            "p50": 16.7,
+            "p90": 16.7,
+            "p99": 16.8,
+            "max": 16.8,
+            "avg": 16.666
+          }
+        },
+        "longTasks": {
+          "count": 0,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "fixture": {
+          "requested": true,
+          "mode": "backend",
+          "profile": "steady",
+          "mix": "reasoning-text",
+          "available": true,
+          "started": true,
+          "deltaCount": 12,
+          "reasoningDeltaCount": 4,
+          "cadenceMs": 100,
+          "scheduleMs": [
+            100,
+            200,
+            300,
+            400,
+            500,
+            600,
+            700,
+            800,
+            900,
+            1000,
+            1100,
+            1200
+          ],
+          "scheduleGapsMs": {
+            "count": 12,
+            "min": 100,
+            "p50": 100,
+            "p90": 100,
+            "p99": 100,
+            "max": 100,
+            "avg": 100
+          },
+          "reasoningScheduleMs": [
+            50,
+            100,
+            150,
+            200
+          ],
+          "reasoningScheduleGapsMs": {
+            "count": 4,
+            "min": 50,
+            "p50": 50,
+            "p90": 50,
+            "p99": 50,
+            "max": 50,
+            "avg": 50
+          },
+          "textBytes": 24,
+          "reasoningBytes": 24,
+          "piboSessionId": "ps_cf74f57f-9083-40d8-a6bc-133383fe4dbf"
+        },
+        "eventSource": {
+          "requested": true,
+          "installed": true,
+          "openCount": 3,
+          "openCountAfterStart": 0,
+          "errorCount": 0,
+          "errorCountAfterStart": 0,
+          "closeCount": 0,
+          "forcedCloseCount": 0,
+          "forcedCloseCountAfterStart": 0,
+          "eventCount": 30,
+          "eventCountAfterStart": 28,
+          "textEventCount": 12,
+          "textEventCountAfterStart": 12,
+          "reasoningEventCount": 4,
+          "reasoningEventCountAfterStart": 4,
+          "transientIdCount": 28,
+          "uniqueTransientIdCount": 22,
+          "transientIdCountAfterStart": 28,
+          "uniqueTransientIdCountAfterStart": 22,
+          "durableIdCount": 0,
+          "otherIdCount": 0,
+          "lastEventId": "live:21",
+          "firstTransientId": "live:0",
+          "firstEventMsAfterStart": 33.6,
+          "firstTextEventMsAfterStart": 133.9,
+          "firstReasoningEventMsAfterStart": 82.9,
+          "lastTransientId": "live:21",
+          "transientIdResetObserved": true,
+          "reconnectObserved": false,
+          "textDropRequested": false,
+          "textDropCount": 0,
+          "textDropTextEventCount": 0,
+          "streams": [
+            {
+              "url": "/api/chat/events?piboSessionId=ps_cf74f57f-9083-40d8-a6bc-133383fe4dbf&mode=live",
+              "mode": "live",
+              "role": "selected-live",
+              "piboSessionId": "ps_cf74f57f-9083-40d8-a6bc-133383fe4dbf",
+              "sinceValues": [],
+              "openCountAfterStart": 0,
+              "errorCountAfterStart": 0,
+              "closeCountAfterStart": 0,
+              "forcedCloseCountAfterStart": 0,
+              "eventCount": 23,
+              "eventCountAfterStart": 22,
+              "textEventCount": 12,
+              "textEventCountAfterStart": 12,
+              "reasoningEventCount": 4,
+              "reasoningEventCountAfterStart": 4,
+              "transientIdCount": 22,
+              "uniqueTransientIdCount": 22,
+              "transientIdCountAfterStart": 22,
+              "uniqueTransientIdCountAfterStart": 22,
+              "durableIdCount": 0,
+              "otherIdCount": 0,
+              "lastEventId": "live:21",
+              "firstEventMsAfterStart": 34.5,
+              "firstTextEventMsAfterStart": 133.9,
+              "firstReasoningEventMsAfterStart": 82.9
+            },
+            {
+              "url": "/api/chat/events?roomId=room_700b623f-c20c-4c74-bcb4-389d8daac410&mode=summary",
+              "mode": "summary",
+              "role": "room-summary",
+              "roomId": "room_700b623f-c20c-4c74-bcb4-389d8daac410",
+              "sinceValues": [
+                "0:999999"
+              ],
+              "openCountAfterStart": 0,
+              "errorCountAfterStart": 0,
+              "closeCountAfterStart": 0,
+              "forcedCloseCountAfterStart": 0,
+              "eventCount": 7,
+              "eventCountAfterStart": 6,
+              "textEventCount": 0,
+              "textEventCountAfterStart": 0,
+              "reasoningEventCount": 0,
+              "reasoningEventCountAfterStart": 0,
+              "transientIdCount": 6,
+              "uniqueTransientIdCount": 6,
+              "transientIdCountAfterStart": 6,
+              "uniqueTransientIdCountAfterStart": 6,
+              "durableIdCount": 0,
+              "otherIdCount": 0,
+              "lastEventId": "live:5",
+              "firstEventMsAfterStart": 33.6
+            }
+          ]
+        },
+        "sse": {
+          "requested": true,
+          "installed": true,
+          "url": "/api/chat/events?piboSessionId=ps_cf74f57f-9083-40d8-a6bc-133383fe4dbf&mode=live&probe=streaming-benchmark-1779515559924",
+          "headers": {
+            "cache-control": "no-cache, no-transform",
+            "connection": "keep-alive",
+            "content-type": "text/event-stream; charset=utf-8",
+            "date": "Sat, 23 May 2026 05:52:39 GMT",
+            "transfer-encoding": "chunked",
+            "x-accel-buffering": "no"
+          },
+          "aborted": true,
+          "errors": [],
+          "chunkCount": 18,
+          "chunkBytes": {
+            "count": 18,
+            "min": 94,
+            "p50": 280,
+            "p90": 510,
+            "p99": 567,
+            "max": 848,
+            "avg": 343.222
+          },
+          "chunkGapsMs": {
+            "count": 17,
+            "min": 29.2,
+            "p50": 99.5,
+            "p90": 100.5,
+            "p99": 100.5,
+            "max": 101.7,
+            "avg": 78.124
+          },
+          "textEventsPerChunk": {
+            "count": 18,
+            "min": 0,
+            "p50": 1,
+            "p90": 1,
+            "p99": 1,
+            "max": 1,
+            "avg": 0.667
+          },
+          "eventCount": 23,
+          "textEventCount": 12,
+          "reasoningEventCount": 4,
+          "textDeltaBytes": {
+            "count": 12,
+            "min": 2,
+            "p50": 2,
+            "p90": 2,
+            "p99": 2,
+            "max": 2,
+            "avg": 2
+          },
+          "textEventGapsMs": {
+            "count": 11,
+            "min": 99.2,
+            "p50": 99.6,
+            "p90": 100.5,
+            "p99": 100.5,
+            "max": 100.5,
+            "avg": 99.873
+          },
+          "idCount": 22,
+          "transientIdCount": 22,
+          "durableIdCount": 0,
+          "otherIdCount": 0,
+          "status": 200,
+          "firstChunkMs": 6.5,
+          "firstEventMs": 6.5,
+          "firstReasoningEventMs": 83.3,
+          "firstTextEventMs": 134.3,
+          "lastEventId": "live:21"
+        },
+        "regressions": [],
+        "warnings": [],
+        "score": {
+          "smoothness": 57.677,
+          "domGapP50Ms": 100.1,
+          "domGapP90Ms": 100.2,
+          "domJumpP90Chars": 2,
+          "textDeltaCount": 12,
+          "domPositiveUpdateCount": 12,
+          "firstVisibleMs": 182
+        },
+        "livePipeline": {
+          "expectedSource": "fixture",
+          "expectedTextDeltaCount": 12,
+          "expectedReasoningDeltaCount": 4,
+          "expectedInputEventCount": 16,
+          "enqueueCount": 22,
+          "flushCount": 20,
+          "flushedEventCount": 22,
+          "overlayUpdateCount": 20,
+          "overlayEventCount": 16,
+          "currentOutputLength": 24,
+          "expectedTextBytes": 24,
+          "enqueueToExpectedRatio": 1.375,
+          "flushedEventsToExpectedRatio": 1.375,
+          "overlayEventsToExpectedRatio": 1,
+          "currentOutputToExpectedTextBytesRatio": 1,
+          "flushToEnqueueRatio": 0.909,
+          "overlayUpdatesToFlushedEventsRatio": 0.909,
+          "firstEventMs": 34,
+          "firstTextDeltaMs": 133,
+          "firstReasoningDeltaMs": 82,
+          "firstEnqueueMs": 34,
+          "firstFlushMs": 34,
+          "firstOverlayUpdateMs": 34
+        },
+        "cadence": {
+          "fixtureScheduleGapP90Ms": 100,
+          "domGapP90Ms": 100.2,
+          "sseTextGapP90Ms": 100.5,
+          "domLagOverScheduleP90Ms": 0.2,
+          "sseTextLagOverScheduleP90Ms": 0.5,
+          "domToScheduleP90Ratio": 1.002,
+          "sseTextToScheduleP90Ratio": 1.005
+        }
+      },
+      {
+        "kind": "streaming-benchmark",
+        "createdAt": "2026-05-23T05:52:43.615Z",
+        "url": "http://127.0.0.1:4788/apps/chat/rooms/room_700b623f-c20c-4c74-bcb4-389d8daac410/sessions/ps_cf74f57f-9083-40d8-a6bc-133383fe4dbf?view=terminal&debugStreaming=1",
+        "title": "Pibo Web Chat",
+        "durationMs": 1800,
+        "debug": {
+          "enabledRequested": true,
+          "available": true,
+          "reset": true,
+          "before": {
+            "enabled": true,
+            "startedAt": "2026-05-23T05:52:41.772Z",
+            "updatedAt": "2026-05-23T05:52:41.772Z",
+            "sessionIds": [],
+            "liveOpenCount": 0,
+            "liveErrorCount": 0,
+            "eventCount": 0,
+            "eventTypeCounts": {},
+            "textDeltaCount": 0,
+            "textDeltaBytes": 0,
+            "reasoningDeltaCount": 0,
+            "reasoningDeltaBytes": 0,
+            "enqueueCount": 0,
+            "enqueueFlushImmediateCount": 0,
+            "pendingEventCount": 0,
+            "flushCount": 0,
+            "flushedEventCount": 0,
+            "overlayUpdateCount": 0,
+            "overlayEventCount": 0,
+            "traceRefreshScheduledCount": 0,
+            "traceRefreshStartedCount": 0,
+            "traceRefreshCompletedCount": 0,
+            "traceRefreshFailedCount": 0,
+            "traceRefreshDurationMsTotal": 0,
+            "traceBaseUpdateCount": 0
+          },
+          "after": {
+            "enabled": true,
+            "startedAt": "2026-05-23T05:52:41.772Z",
+            "updatedAt": "2026-05-23T05:52:43.418Z",
+            "sessionIds": [
+              "ps_cf74f57f-9083-40d8-a6bc-133383fe4dbf"
+            ],
+            "liveOpenCount": 0,
+            "liveErrorCount": 0,
+            "eventCount": 22,
+            "eventTypeCounts": {
+              "RUN_STARTED": 1,
+              "REASONING_MESSAGE_START": 1,
+              "REASONING_MESSAGE_CONTENT": 4,
+              "TEXT_MESSAGE_START": 1,
+              "TEXT_MESSAGE_CONTENT": 12,
+              "REASONING_MESSAGE_END": 1,
+              "TEXT_MESSAGE_END": 1,
+              "RUN_FINISHED": 1
+            },
+            "textDeltaCount": 12,
+            "textDeltaBytes": 24,
+            "reasoningDeltaCount": 4,
+            "reasoningDeltaBytes": 24,
+            "enqueueCount": 22,
+            "enqueueFlushImmediateCount": 6,
+            "pendingEventCount": 0,
+            "flushCount": 20,
+            "flushedEventCount": 22,
+            "overlayUpdateCount": 20,
+            "overlayEventCount": 32,
+            "traceRefreshScheduledCount": 22,
+            "traceRefreshStartedCount": 1,
+            "traceRefreshCompletedCount": 1,
+            "traceRefreshFailedCount": 0,
+            "traceRefreshDurationMsTotal": 13.899999976158142,
+            "traceBaseUpdateCount": 0,
+            "selectedPiboSessionId": "ps_cf74f57f-9083-40d8-a6bc-133383fe4dbf",
+            "lastEventAt": "2026-05-23T05:52:43.104Z",
+            "firstEventAt": "2026-05-23T05:52:41.805Z",
+            "lastReadyState": 1,
+            "lastEventId": "live:43",
+            "lastTransientLiveId": "live:43",
+            "firstEnqueueAt": "2026-05-23T05:52:41.805Z",
+            "firstFlushAt": "2026-05-23T05:52:41.805Z",
+            "firstOverlayUpdateAt": "2026-05-23T05:52:41.805Z",
+            "lastFlushAt": "2026-05-23T05:52:43.105Z",
+            "lastTraceRefreshScheduledAt": "2026-05-23T05:52:43.104Z",
+            "lastTraceRefreshDelayMs": 300,
+            "traceBaseOutputLength": 0,
+            "currentOutputLength": 48,
+            "firstReasoningDeltaAt": "2026-05-23T05:52:41.854Z",
+            "firstTextDeltaAt": "2026-05-23T05:52:41.904Z",
+            "traceRefreshDurationMsLast": 14,
+            "traceRefreshDurationMsMax": 13.899999976158142
+          },
+          "delta": {
+            "liveOpenCount": 0,
+            "liveErrorCount": 0,
+            "eventCount": 22,
+            "textDeltaCount": 12,
+            "textDeltaBytes": 24,
+            "reasoningDeltaCount": 4,
+            "reasoningDeltaBytes": 24,
+            "enqueueCount": 22,
+            "flushCount": 20,
+            "flushedEventCount": 22,
+            "overlayUpdateCount": 20,
+            "traceRefreshStartedCount": 1,
+            "traceRefreshCompletedCount": 1,
+            "traceRefreshFailedCount": 0,
+            "traceBaseUpdateCount": 0
+          }
+        },
+        "dom": {
+          "selector": "[data-pibo-component=\"MarkdownRendererHost\"][data-pibo-markdown-kind=\"assistant-message\"]",
+          "targetCountStart": 1,
+          "targetCountEnd": 2,
+          "lengthStart": 23,
+          "lengthEnd": 47,
+          "lengthMax": 47,
+          "updateCount": 12,
+          "positiveUpdateCount": 12,
+          "firstPositiveUpdateMs": 143,
+          "lastPositiveUpdateMs": 1242,
+          "gapsMs": {
+            "count": 11,
+            "min": 98.8,
+            "p50": 99.9,
+            "p90": 100.3,
+            "p99": 100.3,
+            "max": 100.7,
+            "avg": 99.873
+          },
+          "positiveCharJumps": {
+            "count": 12,
+            "min": 2,
+            "p50": 2,
+            "p90": 2,
+            "p99": 2,
+            "max": 2,
+            "avg": 2
+          }
+        },
+        "raf": {
+          "count": 111,
+          "gapsMs": {
+            "count": 110,
+            "min": 16.5,
+            "p50": 16.7,
+            "p90": 16.7,
+            "p99": 16.8,
+            "max": 16.8,
+            "avg": 16.666
+          }
+        },
+        "longTasks": {
+          "count": 0,
+          "totalMs": 0,
+          "maxMs": 0
+        },
+        "fixture": {
+          "requested": true,
+          "mode": "backend",
+          "profile": "steady",
+          "mix": "reasoning-text",
+          "available": true,
+          "started": true,
+          "deltaCount": 12,
+          "reasoningDeltaCount": 4,
+          "cadenceMs": 100,
+          "scheduleMs": [
+            100,
+            200,
+            300,
+            400,
+            500,
+            600,
+            700,
+            800,
+            900,
+            1000,
+            1100,
+            1200
+          ],
+          "scheduleGapsMs": {
+            "count": 12,
+            "min": 100,
+            "p50": 100,
+            "p90": 100,
+            "p99": 100,
+            "max": 100,
+            "avg": 100
+          },
+          "reasoningScheduleMs": [
+            50,
+            100,
+            150,
+            200
+          ],
+          "reasoningScheduleGapsMs": {
+            "count": 4,
+            "min": 50,
+            "p50": 50,
+            "p90": 50,
+            "p99": 50,
+            "max": 50,
+            "avg": 50
+          },
+          "textBytes": 24,
+          "reasoningBytes": 24,
+          "piboSessionId": "ps_cf74f57f-9083-40d8-a6bc-133383fe4dbf"
+        },
+        "eventSource": {
+          "requested": true,
+          "installed": true,
+          "openCount": 3,
+          "openCountAfterStart": 0,
+          "errorCount": 0,
+          "errorCountAfterStart": 0,
+          "closeCount": 0,
+          "forcedCloseCount": 0,
+          "forcedCloseCountAfterStart": 0,
+          "eventCount": 58,
+          "eventCountAfterStart": 28,
+          "textEventCount": 24,
+          "textEventCountAfterStart": 12,
+          "reasoningEventCount": 8,
+          "reasoningEventCountAfterStart": 4,
+          "transientIdCount": 56,
+          "uniqueTransientIdCount": 44,
+          "transientIdCountAfterStart": 28,
+          "uniqueTransientIdCountAfterStart": 28,
+          "durableIdCount": 0,
+          "otherIdCount": 0,
+          "lastEventId": "live:43",
+          "firstTransientId": "live:0",
+          "firstEventMsAfterStart": 33,
+          "firstTextEventMsAfterStart": 131.8,
+          "firstReasoningEventMsAfterStart": 82.1,
+          "lastTransientId": "live:43",
+          "transientIdResetObserved": true,
+          "reconnectObserved": false,
+          "textDropRequested": false,
+          "textDropCount": 0,
+          "textDropTextEventCount": 0,
+          "streams": [
+            {
+              "url": "/api/chat/events?piboSessionId=ps_cf74f57f-9083-40d8-a6bc-133383fe4dbf&mode=live",
+              "mode": "live",
+              "role": "selected-live",
+              "piboSessionId": "ps_cf74f57f-9083-40d8-a6bc-133383fe4dbf",
+              "sinceValues": [],
+              "openCountAfterStart": 0,
+              "errorCountAfterStart": 0,
+              "closeCountAfterStart": 0,
+              "forcedCloseCountAfterStart": 0,
+              "eventCount": 45,
+              "eventCountAfterStart": 22,
+              "textEventCount": 24,
+              "textEventCountAfterStart": 12,
+              "reasoningEventCount": 8,
+              "reasoningEventCountAfterStart": 4,
+              "transientIdCount": 44,
+              "uniqueTransientIdCount": 44,
+              "transientIdCountAfterStart": 22,
+              "uniqueTransientIdCountAfterStart": 22,
+              "durableIdCount": 0,
+              "otherIdCount": 0,
+              "lastEventId": "live:43",
+              "firstEventMsAfterStart": 33.6,
+              "firstTextEventMsAfterStart": 131.8,
+              "firstReasoningEventMsAfterStart": 82.1
+            },
+            {
+              "url": "/api/chat/events?roomId=room_700b623f-c20c-4c74-bcb4-389d8daac410&mode=summary",
+              "mode": "summary",
+              "role": "room-summary",
+              "roomId": "room_700b623f-c20c-4c74-bcb4-389d8daac410",
+              "sinceValues": [
+                "0:999999"
+              ],
+              "openCountAfterStart": 0,
+              "errorCountAfterStart": 0,
+              "closeCountAfterStart": 0,
+              "forcedCloseCountAfterStart": 0,
+              "eventCount": 13,
+              "eventCountAfterStart": 6,
+              "textEventCount": 0,
+              "textEventCountAfterStart": 0,
+              "reasoningEventCount": 0,
+              "reasoningEventCountAfterStart": 0,
+              "transientIdCount": 12,
+              "uniqueTransientIdCount": 12,
+              "transientIdCountAfterStart": 6,
+              "uniqueTransientIdCountAfterStart": 6,
+              "durableIdCount": 0,
+              "otherIdCount": 0,
+              "lastEventId": "live:11",
+              "firstEventMsAfterStart": 33
+            }
+          ]
+        },
+        "sse": {
+          "requested": true,
+          "installed": true,
+          "url": "/api/chat/events?piboSessionId=ps_cf74f57f-9083-40d8-a6bc-133383fe4dbf&mode=live&probe=streaming-benchmark-1779515561772",
+          "headers": {
+            "cache-control": "no-cache, no-transform",
+            "connection": "keep-alive",
+            "content-type": "text/event-stream; charset=utf-8",
+            "date": "Sat, 23 May 2026 05:52:41 GMT",
+            "transfer-encoding": "chunked",
+            "x-accel-buffering": "no"
+          },
+          "aborted": true,
+          "errors": [],
+          "chunkCount": 18,
+          "chunkBytes": {
+            "count": 18,
+            "min": 94,
+            "p50": 280,
+            "p90": 510,
+            "p99": 567,
+            "max": 848,
+            "avg": 343.222
+          },
+          "chunkGapsMs": {
+            "count": 17,
+            "min": 29.2,
+            "p50": 99.3,
+            "p90": 100.6,
+            "p99": 100.6,
+            "max": 100.8,
+            "avg": 78.094
+          },
+          "textEventsPerChunk": {
+            "count": 18,
+            "min": 0,
+            "p50": 1,
+            "p90": 1,
+            "p99": 1,
+            "max": 1,
+            "avg": 0.667
+          },
+          "eventCount": 23,
+          "textEventCount": 12,
+          "reasoningEventCount": 4,
+          "textDeltaBytes": {
+            "count": 12,
+            "min": 2,
+            "p50": 2,
+            "p90": 2,
+            "p99": 2,
+            "max": 2,
+            "avg": 2
+          },
+          "textEventGapsMs": {
+            "count": 11,
+            "min": 99.2,
+            "p50": 100.2,
+            "p90": 100.6,
+            "p99": 100.6,
+            "max": 100.8,
+            "avg": 100.018
+          },
+          "idCount": 22,
+          "transientIdCount": 22,
+          "durableIdCount": 0,
+          "otherIdCount": 0,
+          "status": 200,
+          "firstChunkMs": 4.8,
+          "firstEventMs": 4.8,
+          "firstReasoningEventMs": 82.5,
+          "firstTextEventMs": 132,
+          "lastEventId": "live:21"
+        },
+        "regressions": [],
+        "warnings": [],
+        "score": {
+          "smoothness": 58.478,
+          "domGapP50Ms": 99.9,
+          "domGapP90Ms": 100.3,
+          "domJumpP90Chars": 2,
+          "textDeltaCount": 12,
+          "domPositiveUpdateCount": 12,
+          "firstVisibleMs": 143
+        },
+        "livePipeline": {
+          "expectedSource": "fixture",
+          "expectedTextDeltaCount": 12,
+          "expectedReasoningDeltaCount": 4,
+          "expectedInputEventCount": 16,
+          "enqueueCount": 22,
+          "flushCount": 20,
+          "flushedEventCount": 22,
+          "overlayUpdateCount": 20,
+          "overlayEventCount": 32,
+          "currentOutputLength": 48,
+          "expectedTextBytes": 24,
+          "enqueueToExpectedRatio": 1.375,
+          "flushedEventsToExpectedRatio": 1.375,
+          "overlayEventsToExpectedRatio": 2,
+          "currentOutputToExpectedTextBytesRatio": 2,
+          "flushToEnqueueRatio": 0.909,
+          "overlayUpdatesToFlushedEventsRatio": 0.909,
+          "firstEventMs": 33,
+          "firstTextDeltaMs": 132,
+          "firstReasoningDeltaMs": 82,
+          "firstEnqueueMs": 33,
+          "firstFlushMs": 33,
+          "firstOverlayUpdateMs": 33
+        },
+        "cadence": {
+          "fixtureScheduleGapP90Ms": 100,
+          "domGapP90Ms": 100.3,
+          "sseTextGapP90Ms": 100.6,
+          "domLagOverScheduleP90Ms": 0.3,
+          "sseTextLagOverScheduleP90Ms": 0.6,
+          "domToScheduleP90Ratio": 1.003,
+          "sseTextToScheduleP90Ratio": 1.006
+        }
+      }
+    ],
+    "summary": {
+      "runs": 2,
+      "smoothness": {
+        "count": 2,
+        "min": 57.677,
+        "p50": 57.677,
+        "p90": 57.677,
+        "p99": 57.677,
+        "max": 58.478,
+        "avg": 58.078
+      },
+      "textDeltaCount": {
+        "count": 2,
+        "min": 12,
+        "p50": 12,
+        "p90": 12,
+        "p99": 12,
+        "max": 12,
+        "avg": 12
+      },
+      "reasoningDeltaCount": {
+        "count": 2,
+        "min": 4,
+        "p50": 4,
+        "p90": 4,
+        "p99": 4,
+        "max": 4,
+        "avg": 4
+      },
+      "domPositiveUpdateCount": {
+        "count": 2,
+        "min": 12,
+        "p50": 12,
+        "p90": 12,
+        "p99": 12,
+        "max": 12,
+        "avg": 12
+      },
+      "domGapP50Ms": {
+        "count": 2,
+        "min": 99.9,
+        "p50": 99.9,
+        "p90": 99.9,
+        "p99": 99.9,
+        "max": 100.1,
+        "avg": 100
+      },
+      "domGapP90Ms": {
+        "count": 2,
+        "min": 100.2,
+        "p50": 100.2,
+        "p90": 100.2,
+        "p99": 100.2,
+        "max": 100.3,
+        "avg": 100.25
+      },
+      "domGapMaxMs": {
+        "count": 2,
+        "min": 100.7,
+        "p50": 100.7,
+        "p90": 100.7,
+        "p99": 100.7,
+        "max": 100.9,
+        "avg": 100.8
+      },
+      "domJumpP90Chars": {
+        "count": 2,
+        "min": 2,
+        "p50": 2,
+        "p90": 2,
+        "p99": 2,
+        "max": 2,
+        "avg": 2
+      },
+      "domJumpMaxChars": {
+        "count": 2,
+        "min": 2,
+        "p50": 2,
+        "p90": 2,
+        "p99": 2,
+        "max": 2,
+        "avg": 2
+      },
+      "firstVisibleMs": {
+        "count": 2,
+        "min": 143,
+        "p50": 143,
+        "p90": 143,
+        "p99": 143,
+        "max": 182,
+        "avg": 162.5
+      },
+      "longTaskMaxMs": {
+        "count": 2,
+        "min": 0,
+        "p50": 0,
+        "p90": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      },
+      "regressionCount": {
+        "count": 2,
+        "min": 0,
+        "p50": 0,
+        "p90": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      },
+      "debugEnqueueCount": {
+        "count": 2,
+        "min": 22,
+        "p50": 22,
+        "p90": 22,
+        "p99": 22,
+        "max": 22,
+        "avg": 22
+      },
+      "debugFlushCount": {
+        "count": 2,
+        "min": 20,
+        "p50": 20,
+        "p90": 20,
+        "p99": 20,
+        "max": 20,
+        "avg": 20
+      },
+      "debugFlushedEventCount": {
+        "count": 2,
+        "min": 22,
+        "p50": 22,
+        "p90": 22,
+        "p99": 22,
+        "max": 22,
+        "avg": 22
+      },
+      "debugOverlayUpdateCount": {
+        "count": 2,
+        "min": 20,
+        "p50": 20,
+        "p90": 20,
+        "p99": 20,
+        "max": 20,
+        "avg": 20
+      },
+      "debugOverlayEventCount": {
+        "count": 2,
+        "min": 16,
+        "p50": 16,
+        "p90": 16,
+        "p99": 16,
+        "max": 32,
+        "avg": 24
+      },
+      "debugTraceRefreshScheduledCount": {
+        "count": 0
+      },
+      "debugTraceRefreshCompletedCount": {
+        "count": 2,
+        "min": 1,
+        "p50": 1,
+        "p90": 1,
+        "p99": 1,
+        "max": 1,
+        "avg": 1
+      },
+      "debugTraceRefreshFailedCount": {
+        "count": 2,
+        "min": 0,
+        "p50": 0,
+        "p90": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      },
+      "debugTraceRefreshDurationMaxMs": {
+        "count": 2,
+        "min": 11.8,
+        "p50": 11.8,
+        "p90": 11.8,
+        "p99": 11.8,
+        "max": 13.9,
+        "avg": 12.85
+      },
+      "debugCurrentOutputLength": {
+        "count": 2,
+        "min": 24,
+        "p50": 24,
+        "p90": 24,
+        "p99": 24,
+        "max": 48,
+        "avg": 36
+      },
+      "debugTraceBaseOutputLength": {
+        "count": 2,
+        "min": 0,
+        "p50": 0,
+        "p90": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      },
+      "liveExpectedInputEventCount": {
+        "count": 2,
+        "min": 16,
+        "p50": 16,
+        "p90": 16,
+        "p99": 16,
+        "max": 16,
+        "avg": 16
+      },
+      "liveEnqueueToExpectedRatio": {
+        "count": 2,
+        "min": 1.375,
+        "p50": 1.375,
+        "p90": 1.375,
+        "p99": 1.375,
+        "max": 1.375,
+        "avg": 1.375
+      },
+      "liveFlushedEventsToExpectedRatio": {
+        "count": 2,
+        "min": 1.375,
+        "p50": 1.375,
+        "p90": 1.375,
+        "p99": 1.375,
+        "max": 1.375,
+        "avg": 1.375
+      },
+      "liveOverlayEventsToExpectedRatio": {
+        "count": 2,
+        "min": 1,
+        "p50": 1,
+        "p90": 1,
+        "p99": 1,
+        "max": 2,
+        "avg": 1.5
+      },
+      "liveCurrentOutputToExpectedTextBytesRatio": {
+        "count": 2,
+        "min": 1,
+        "p50": 1,
+        "p90": 1,
+        "p99": 1,
+        "max": 2,
+        "avg": 1.5
+      },
+      "liveFlushToEnqueueRatio": {
+        "count": 2,
+        "min": 0.909,
+        "p50": 0.909,
+        "p90": 0.909,
+        "p99": 0.909,
+        "max": 0.909,
+        "avg": 0.909
+      },
+      "liveOverlayUpdatesToFlushedEventsRatio": {
+        "count": 2,
+        "min": 0.909,
+        "p50": 0.909,
+        "p90": 0.909,
+        "p99": 0.909,
+        "max": 0.909,
+        "avg": 0.909
+      },
+      "liveFirstEventMs": {
+        "count": 2,
+        "min": 33,
+        "p50": 33,
+        "p90": 33,
+        "p99": 33,
+        "max": 34,
+        "avg": 33.5
+      },
+      "liveFirstTextDeltaMs": {
+        "count": 2,
+        "min": 132,
+        "p50": 132,
+        "p90": 132,
+        "p99": 132,
+        "max": 133,
+        "avg": 132.5
+      },
+      "liveFirstReasoningDeltaMs": {
+        "count": 2,
+        "min": 82,
+        "p50": 82,
+        "p90": 82,
+        "p99": 82,
+        "max": 82,
+        "avg": 82
+      },
+      "liveFirstEnqueueMs": {
+        "count": 2,
+        "min": 33,
+        "p50": 33,
+        "p90": 33,
+        "p99": 33,
+        "max": 34,
+        "avg": 33.5
+      },
+      "liveFirstFlushMs": {
+        "count": 2,
+        "min": 33,
+        "p50": 33,
+        "p90": 33,
+        "p99": 33,
+        "max": 34,
+        "avg": 33.5
+      },
+      "liveFirstOverlayUpdateMs": {
+        "count": 2,
+        "min": 33,
+        "p50": 33,
+        "p90": 33,
+        "p99": 33,
+        "max": 34,
+        "avg": 33.5
+      },
+      "traceSampleCount": {
+        "count": 0
+      },
+      "traceLiveVersionCount": {
+        "count": 0
+      },
+      "traceFirstLiveVersionMs": {
+        "count": 0
+      },
+      "traceMaxAssistantOutputLength": {
+        "count": 0
+      },
+      "traceFinalAssistantOutputLength": {
+        "count": 0
+      },
+      "traceDurableEventDelta": {
+        "count": 0
+      },
+      "fixtureScheduleGapP90Ms": {
+        "count": 2,
+        "min": 100,
+        "p50": 100,
+        "p90": 100,
+        "p99": 100,
+        "max": 100,
+        "avg": 100
+      },
+      "domLagOverFixtureScheduleP90Ms": {
+        "count": 2,
+        "min": 0.2,
+        "p50": 0.2,
+        "p90": 0.2,
+        "p99": 0.2,
+        "max": 0.3,
+        "avg": 0.25
+      },
+      "sseTextLagOverFixtureScheduleP90Ms": {
+        "count": 2,
+        "min": 0.5,
+        "p50": 0.5,
+        "p90": 0.5,
+        "p99": 0.5,
+        "max": 0.6,
+        "avg": 0.55
+      },
+      "domToFixtureScheduleP90Ratio": {
+        "count": 2,
+        "min": 1.002,
+        "p50": 1.002,
+        "p90": 1.002,
+        "p99": 1.002,
+        "max": 1.003,
+        "avg": 1.003
+      },
+      "sseTextToFixtureScheduleP90Ratio": {
+        "count": 2,
+        "min": 1.005,
+        "p50": 1.005,
+        "p90": 1.005,
+        "p99": 1.005,
+        "max": 1.006,
+        "avg": 1.006
+      },
+      "eventSourceTextEventCountAfterStart": {
+        "count": 2,
+        "min": 12,
+        "p50": 12,
+        "p90": 12,
+        "p99": 12,
+        "max": 12,
+        "avg": 12
+      },
+      "eventSourceReasoningEventCountAfterStart": {
+        "count": 2,
+        "min": 4,
+        "p50": 4,
+        "p90": 4,
+        "p99": 4,
+        "max": 4,
+        "avg": 4
+      },
+      "eventSourceForcedCloseCountAfterStart": {
+        "count": 2,
+        "min": 0,
+        "p50": 0,
+        "p90": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      },
+      "eventSourceReconnectOpenCountAfterStart": {
+        "count": 2,
+        "min": 0,
+        "p50": 0,
+        "p90": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      },
+      "eventSourceTransientIdCountAfterStart": {
+        "count": 2,
+        "min": 28,
+        "p50": 28,
+        "p90": 28,
+        "p99": 28,
+        "max": 28,
+        "avg": 28
+      },
+      "sseTextEventCount": {
+        "count": 2,
+        "min": 12,
+        "p50": 12,
+        "p90": 12,
+        "p99": 12,
+        "max": 12,
+        "avg": 12
+      },
+      "sseReasoningEventCount": {
+        "count": 2,
+        "min": 4,
+        "p50": 4,
+        "p90": 4,
+        "p99": 4,
+        "max": 4,
+        "avg": 4
+      },
+      "sseChunkBytesP50": {
+        "count": 2,
+        "min": 280,
+        "p50": 280,
+        "p90": 280,
+        "p99": 280,
+        "max": 280,
+        "avg": 280
+      },
+      "sseChunkGapP90Ms": {
+        "count": 2,
+        "min": 100.5,
+        "p50": 100.5,
+        "p90": 100.5,
+        "p99": 100.5,
+        "max": 100.6,
+        "avg": 100.55
+      },
+      "sseTextEventsPerChunkP90": {
+        "count": 2,
+        "min": 1,
+        "p50": 1,
+        "p90": 1,
+        "p99": 1,
+        "max": 1,
+        "avg": 1
+      },
+      "sseTextEventGapP90Ms": {
+        "count": 2,
+        "min": 100.5,
+        "p50": 100.5,
+        "p90": 100.5,
+        "p99": 100.5,
+        "max": 100.6,
+        "avg": 100.55
+      },
+      "sseFirstTextEventMs": {
+        "count": 2,
+        "min": 132,
+        "p50": 132,
+        "p90": 132,
+        "p99": 132,
+        "max": 134.3,
+        "avg": 133.15
+      },
+      "selectedLiveTextEventCountAfterStart": {
+        "count": 2,
+        "min": 12,
+        "p50": 12,
+        "p90": 12,
+        "p99": 12,
+        "max": 12,
+        "avg": 12
+      },
+      "selectedLiveReasoningEventCountAfterStart": {
+        "count": 2,
+        "min": 4,
+        "p50": 4,
+        "p90": 4,
+        "p99": 4,
+        "max": 4,
+        "avg": 4
+      },
+      "selectedLiveEventCountAfterStart": {
+        "count": 2,
+        "min": 22,
+        "p50": 22,
+        "p90": 22,
+        "p99": 22,
+        "max": 22,
+        "avg": 22
+      },
+      "selectedLiveForcedCloseCountAfterStart": {
+        "count": 2,
+        "min": 0,
+        "p50": 0,
+        "p90": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      },
+      "selectedLiveReconnectOpenCountAfterStart": {
+        "count": 2,
+        "min": 0,
+        "p50": 0,
+        "p90": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      },
+      "selectedLiveTransientIdCountAfterStart": {
+        "count": 2,
+        "min": 22,
+        "p50": 22,
+        "p90": 22,
+        "p99": 22,
+        "max": 22,
+        "avg": 22
+      },
+      "selectedLiveFirstTextEventMsAfterStart": {
+        "count": 2,
+        "min": 131.8,
+        "p50": 131.8,
+        "p90": 131.8,
+        "p99": 131.8,
+        "max": 133.9,
+        "avg": 132.85
+      },
+      "roomSummaryEventCountAfterStart": {
+        "count": 2,
+        "min": 6,
+        "p50": 6,
+        "p90": 6,
+        "p99": 6,
+        "max": 6,
+        "avg": 6
+      },
+      "roomSummaryTextEventCountAfterStart": {
+        "count": 2,
+        "min": 0,
+        "p50": 0,
+        "p90": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      },
+      "roomSummaryReasoningEventCountAfterStart": {
+        "count": 2,
+        "min": 0,
+        "p50": 0,
+        "p90": 0,
+        "p99": 0,
+        "max": 0,
+        "avg": 0
+      },
+      "providerTextDeltaCount": {
+        "count": 0
+      },
+      "providerReasoningDeltaCount": {
+        "count": 0
+      },
+      "providerTextDeltaBytesP50": {
+        "count": 0
+      },
+      "providerTextDeltaGapP90Ms": {
+        "count": 0
+      },
+      "providerFirstTextLatencyMs": {
+        "count": 0
+      },
+      "providerParseErrorCount": {
+        "count": 0
+      },
+      "providerUnknownEventCount": {
+        "count": 0
+      },
+      "providerSseTextRatio": {
+        "count": 0
+      },
+      "providerSseReasoningRatio": {
+        "count": 0
+      },
+      "providerSelectedLiveTextRatio": {
+        "count": 0
+      },
+      "providerSelectedLiveReasoningRatio": {
+        "count": 0
+      },
+      "providerDomPositiveTextRatio": {
+        "count": 0
+      }
+    },
+    "regressions": [],
+    "warnings": []
+  }
+}

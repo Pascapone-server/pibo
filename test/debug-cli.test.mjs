@@ -117,6 +117,12 @@ test("streaming benchmark summaries include live pipeline debug counters", () =>
 				traceRefreshFailedCount: 0,
 			},
 			after: {
+				startedAt: "2026-01-01T00:00:00.000Z",
+				firstReasoningDeltaAt: "2026-01-01T00:00:00.090Z",
+				firstTextDeltaAt: "2026-01-01T00:00:00.100Z",
+				firstEnqueueAt: "2026-01-01T00:00:00.110Z",
+				firstFlushAt: "2026-01-01T00:00:00.125Z",
+				firstOverlayUpdateAt: "2026-01-01T00:00:00.126Z",
 				overlayEventCount: enqueueCount,
 				currentOutputLength: enqueueCount * 2,
 				traceBaseOutputLength: 4,
@@ -124,6 +130,8 @@ test("streaming benchmark summaries include live pipeline debug counters", () =>
 			},
 		},
 		fixture: { available: true, requested: true, mode: "backend", started: true, deltaCount: 12, reasoningDeltaCount: 4, textBytes: 24 },
+		eventSource: { streams: [{ role: "selected-live", textEventCountAfterStart: 12, firstTextEventMsAfterStart: 103 }] },
+		sse: { textEventCount: 12, firstTextEventMs: 101, chunkBytes: {}, chunkGapsMs: {}, textEventsPerChunk: {}, textEventGapsMs: {} },
 		dom: { gapsMs: { count: 0 }, positiveCharJumps: { count: 0 }, positiveUpdateCount: enqueueCount },
 		longTasks: { maxMs: 0 },
 		regressions: [],
@@ -145,13 +153,27 @@ test("streaming benchmark summaries include live pipeline debug counters", () =>
 	assert.equal(summary.liveCurrentOutputToExpectedTextBytesRatio.max, 1.167);
 	assert.equal(summary.liveFlushToEnqueueRatio.p50, 0.917);
 	assert.equal(summary.liveOverlayUpdatesToFlushedEventsRatio.p50, 0.917);
+	assert.equal(summary.liveFirstTextDeltaMs.p50, 100);
+	assert.equal(summary.liveFirstReasoningDeltaMs.p50, 90);
+	assert.equal(summary.liveFirstEnqueueMs.p50, 110);
+	assert.equal(summary.liveFirstFlushMs.p50, 125);
+	assert.equal(summary.liveFirstOverlayUpdateMs.p50, 126);
+	assert.equal(summary.sseFirstTextEventMs.p50, 101);
+	assert.equal(summary.selectedLiveFirstTextEventMsAfterStart.p50, 103);
 });
 
 test("streaming live pipeline summary computes fixture-normalized ratios", () => {
 	const summary = summarizeStreamingLivePipeline({
 		debug: {
 			delta: { enqueueCount: 22, flushCount: 20, flushedEventCount: 22, overlayUpdateCount: 20, textDeltaCount: 12, reasoningDeltaCount: 4 },
-			after: { overlayEventCount: 16, currentOutputLength: 24 },
+			after: {
+				startedAt: "2026-01-01T00:00:00.000Z",
+				firstTextDeltaAt: "2026-01-01T00:00:00.120Z",
+				firstEnqueueAt: "2026-01-01T00:00:00.121Z",
+				firstFlushAt: "2026-01-01T00:00:00.130Z",
+				overlayEventCount: 16,
+				currentOutputLength: 24,
+			},
 		},
 		fixture: { available: true, requested: true, mode: "backend", started: true, deltaCount: 12, reasoningDeltaCount: 4, textBytes: 24 },
 	});
@@ -163,6 +185,9 @@ test("streaming live pipeline summary computes fixture-normalized ratios", () =>
 	assert.equal(summary.currentOutputToExpectedTextBytesRatio, 1);
 	assert.equal(summary.flushToEnqueueRatio, 0.909);
 	assert.equal(summary.overlayUpdatesToFlushedEventsRatio, 0.909);
+	assert.equal(summary.firstTextDeltaMs, 120);
+	assert.equal(summary.firstEnqueueMs, 121);
+	assert.equal(summary.firstFlushMs, 130);
 });
 
 test("streaming live pipeline regressions gate preservation and flush ratios", () => {
