@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { PiboDataStore } from "../dist/data/pibo-store.js";
 import { PiboReliabilityStore } from "../dist/reliability/store.js";
-import { attachStreamingProviderTelemetryToBenchmark, collectStreamingProviderTelemetryFromSelectedBrowserSession, collectStreamingProviderTelemetryFromSession, collectStreamingProviderTelemetryFromTurn, evaluateStreamingBenchmarkAssertion, evaluateStreamingBenchmarkUrlComparisonRegressions, evaluateStreamingProviderRegressions, formatWatch, inferWatchFlickers, resolveStreamingBenchmarkHostedCompareUrlFromValues, summarizeStreamingBenchmarks, summarizeStreamingLivePipeline, summarizeStreamingProviderPreservation, summarizeStreamingProviderTelemetry } from "../dist/debug/web.js";
+import { attachStreamingProviderTelemetryToBenchmark, collectStreamingProviderTelemetryFromSelectedBrowserSession, collectStreamingProviderTelemetryFromSession, collectStreamingProviderTelemetryFromTurn, evaluateStreamingBenchmarkAssertion, evaluateStreamingBenchmarkUrlComparisonRegressions, evaluateStreamingLivePipelineRegressions, evaluateStreamingProviderRegressions, formatWatch, inferWatchFlickers, resolveStreamingBenchmarkHostedCompareUrlFromValues, summarizeStreamingBenchmarks, summarizeStreamingLivePipeline, summarizeStreamingProviderPreservation, summarizeStreamingProviderTelemetry } from "../dist/debug/web.js";
 
 const execFileAsyncRaw = promisify(execFile);
 const cliPath = resolve("dist/bin/pibo.js");
@@ -151,6 +151,74 @@ test("streaming live pipeline summary computes fixture-normalized ratios", () =>
 	assert.equal(summary.currentOutputToExpectedTextBytesRatio, 1);
 	assert.equal(summary.flushToEnqueueRatio, 0.909);
 	assert.equal(summary.overlayUpdatesToFlushedEventsRatio, 0.909);
+});
+
+test("streaming live pipeline regressions gate preservation and flush ratios", () => {
+	assert.deepEqual(evaluateStreamingLivePipelineRegressions({
+		livePipeline: {
+			expectedSource: "fixture",
+			expectedTextDeltaCount: 12,
+			expectedReasoningDeltaCount: 4,
+			expectedInputEventCount: 16,
+			enqueueCount: 22,
+			flushCount: 20,
+			flushedEventCount: 22,
+			overlayUpdateCount: 20,
+			overlayEventCount: 16,
+			flushedEventsToExpectedRatio: 1.375,
+			overlayEventsToExpectedRatio: 1,
+			currentOutputToExpectedTextBytesRatio: 1,
+			flushToEnqueueRatio: 0.909,
+			overlayUpdatesToFlushedEventsRatio: 0.909,
+			expectedTextBytes: 24,
+		},
+	}), []);
+	assert.deepEqual(evaluateStreamingLivePipelineRegressions({
+		livePipeline: {
+			expectedSource: "fixture",
+			expectedTextDeltaCount: 12,
+			expectedReasoningDeltaCount: 4,
+			expectedInputEventCount: 16,
+			enqueueCount: 22,
+			flushCount: 13,
+			flushedEventCount: 14,
+			overlayUpdateCount: 13,
+			overlayEventCount: 13,
+			flushedEventsToExpectedRatio: 0.9,
+			overlayEventsToExpectedRatio: 0.8,
+			currentOutputToExpectedTextBytesRatio: 0.7,
+			flushToEnqueueRatio: 0.591,
+			overlayUpdatesToFlushedEventsRatio: 0.591,
+			expectedTextBytes: 24,
+		},
+	}), [
+		"live pipeline flushed events/expected ratio 0.9 < 0.95",
+		"live pipeline overlay events/expected ratio 0.8 < 0.95",
+		"live pipeline current text/expected bytes ratio 0.7 < 0.95",
+		"live pipeline flush/enqueue ratio 0.591 < 0.75",
+		"live pipeline overlay updates/flushed ratio 0.591 < 0.75",
+	]);
+	assert.deepEqual(evaluateStreamingLivePipelineRegressions({
+		livePipeline: {
+			expectedSource: "provider",
+			expectedTextDeltaCount: 12,
+			expectedReasoningDeltaCount: 0,
+			expectedInputEventCount: 12,
+		},
+	}), []);
+	assert.deepEqual(evaluateStreamingLivePipelineRegressions({
+		fixture: { simulation: "trace-catchup" },
+		livePipeline: {
+			expectedSource: "fixture",
+			expectedTextDeltaCount: 12,
+			expectedReasoningDeltaCount: 0,
+			expectedInputEventCount: 12,
+			flushedEventsToExpectedRatio: 0,
+			overlayEventsToExpectedRatio: 0,
+			flushToEnqueueRatio: 0,
+			overlayUpdatesToFlushedEventsRatio: 0,
+		},
+	}), []);
 });
 
 test("streaming provider preservation summary computes provider-to-transport ratios", () => {

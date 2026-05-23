@@ -13,7 +13,9 @@ const DEFAULT_DEPTH_LIMIT = 8;
 const DEFAULT_EVENT_LIMIT = 500;
 const DEFAULT_TEXT_LIMIT = 80;
 const STDOUT_BUDGET = 12_000;
-const BATCH_NEGATIVE_EXPECTED_REGRESSIONS = ["positive DOM updates", "DOM max jump", "SSE text events per chunk"] as const;
+const BATCH_NEGATIVE_EXPECTED_REGRESSIONS = ["positive DOM updates", "DOM max jump", "SSE text events per chunk", "live pipeline flush/enqueue", "live pipeline overlay updates/flushed"] as const;
+const LIVE_PIPELINE_MIN_PRESERVATION_RATIO = 0.95;
+const LIVE_PIPELINE_MIN_FLUSH_RATIO = 0.75;
 const URL_COMPARISON_MAX_SMOOTHNESS_DROP = 15;
 const URL_COMPARISON_MAX_DOM_LAG_DELTA_MS = 150;
 const URL_COMPARISON_MAX_SSE_LAG_DELTA_MS = 100;
@@ -919,18 +921,18 @@ async function runStreamingBenchmark(client: CdpClient, durationMs: number, opti
 	const scored = { ...withProvider, score: scoreStreamingBenchmark(withProvider), providerPreservation: summarizeStreamingProviderPreservation(withProvider) };
 	const withLivePipeline = { ...scored, livePipeline: summarizeStreamingLivePipeline(scored) };
 	const withCadence = { ...withLivePipeline, cadence: summarizeStreamingCadence(withLivePipeline) };
-	return { ...withCadence, regressions: [...withCadence.regressions, ...evaluateStreamingProviderRegressions(withCadence)] };
+	return { ...withCadence, regressions: [...withCadence.regressions, ...evaluateStreamingLivePipelineRegressions(withCadence), ...evaluateStreamingProviderRegressions(withCadence)] };
 }
 
 export function attachStreamingProviderTelemetryToBenchmark(benchmark: StreamingBenchmark, providerTelemetry: StreamingBenchmarkProviderTelemetry | undefined): StreamingBenchmark {
 	if (!providerTelemetry) return benchmark;
-	const baseRegressions = benchmark.regressions.filter((regression) => !regression.startsWith("provider "));
+	const baseRegressions = benchmark.regressions.filter((regression) => !regression.startsWith("provider ") && !regression.startsWith("live pipeline "));
 	const withProvider = { ...benchmark, provider: providerTelemetry };
 	const providerPreservation = summarizeStreamingProviderPreservation(withProvider);
 	const withProviderMetrics = { ...withProvider, providerPreservation, livePipeline: summarizeStreamingLivePipeline(withProvider) };
 	return {
 		...withProviderMetrics,
-		regressions: [...baseRegressions, ...evaluateStreamingProviderRegressions(withProviderMetrics)],
+		regressions: [...baseRegressions, ...evaluateStreamingLivePipelineRegressions(withProviderMetrics), ...evaluateStreamingProviderRegressions(withProviderMetrics)],
 	};
 }
 
@@ -2841,6 +2843,22 @@ export function summarizeStreamingLivePipeline(benchmark: { debug?: Pick<Streami
 	};
 }
 
+export function evaluateStreamingLivePipelineRegressions(benchmark: { livePipeline?: StreamingBenchmarkLivePipeline; fixture?: StreamingBenchmark["fixture"] }): string[] {
+	const pipeline = benchmark.livePipeline;
+	if (!pipeline || pipeline.expectedSource === "debug" || pipeline.expectedInputEventCount <= 0 || benchmark.fixture?.simulation === "trace-catchup") return [];
+	const hasLiveCounters = [pipeline.enqueueCount, pipeline.flushCount, pipeline.flushedEventCount, pipeline.overlayUpdateCount, pipeline.overlayEventCount].some((value) => value !== undefined);
+	if (!hasLiveCounters) return [];
+	const regressions: string[] = [];
+	pushMinimumRatioRegression(regressions, pipeline.flushedEventsToExpectedRatio, LIVE_PIPELINE_MIN_PRESERVATION_RATIO, "live pipeline flushed events/expected ratio");
+	pushMinimumRatioRegression(regressions, pipeline.overlayEventsToExpectedRatio, LIVE_PIPELINE_MIN_PRESERVATION_RATIO, "live pipeline overlay events/expected ratio");
+	if (pipeline.expectedTextDeltaCount > 0 && pipeline.expectedTextBytes !== undefined) {
+		pushMinimumRatioRegression(regressions, pipeline.currentOutputToExpectedTextBytesRatio, LIVE_PIPELINE_MIN_PRESERVATION_RATIO, "live pipeline current text/expected bytes ratio");
+	}
+	pushMinimumRatioRegression(regressions, pipeline.flushToEnqueueRatio, LIVE_PIPELINE_MIN_FLUSH_RATIO, "live pipeline flush/enqueue ratio");
+	pushMinimumRatioRegression(regressions, pipeline.overlayUpdatesToFlushedEventsRatio, LIVE_PIPELINE_MIN_FLUSH_RATIO, "live pipeline overlay updates/flushed ratio");
+	return regressions;
+}
+
 export function evaluateStreamingProviderRegressions(benchmark: { provider?: StreamingBenchmarkProviderTelemetry; providerPreservation?: StreamingBenchmarkProviderPreservation; sse?: StreamingBenchmarkSseProbe; eventSource?: Pick<StreamingBenchmarkEventSourceProbe, "requested"> }): string[] {
 	const provider = benchmark.provider;
 	if (!provider?.available) return [];
@@ -2861,6 +2879,10 @@ export function evaluateStreamingProviderRegressions(benchmark: { provider?: Str
 }
 
 function pushProviderRatioRegression(regressions: string[], ratio: number | undefined, minimum: number, label: string): void {
+	pushMinimumRatioRegression(regressions, ratio, minimum, label);
+}
+
+function pushMinimumRatioRegression(regressions: string[], ratio: number | undefined, minimum: number, label: string): void {
 	if (ratio === undefined) regressions.push(`${label} unavailable`);
 	else if (ratio < minimum) regressions.push(`${label} ${ratio} < ${minimum}`);
 }
