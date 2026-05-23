@@ -391,6 +391,7 @@ type StreamingBenchmark = {
 		available: boolean;
 		reset: boolean;
 		before?: StreamingDebugCounters;
+		stateBeforeReset?: StreamingDebugCounters;
 		after?: StreamingDebugCounters;
 		delta?: Record<string, number>;
 	};
@@ -2129,6 +2130,7 @@ async function runStreamingBenchmark(options) {
   const warnings = [];
   let reset = false;
   try { localStorage.setItem('pibo.chat.debugStreaming', '1'); } catch (error) { warnings.push('failed to set debugStreaming localStorage: ' + String(error)); }
+  const debugStateBeforeReset = cloneDebugSnapshot(window.__piboStreamingDebug);
   if (typeof window.__piboStreamingDebugReset === 'function') {
     try { window.__piboStreamingDebugReset(); reset = true; } catch (error) { warnings.push('failed to reset __piboStreamingDebug: ' + String(error)); }
   }
@@ -2325,6 +2327,7 @@ async function runStreamingBenchmark(options) {
       available: Boolean(debugAfter),
       reset,
       before: debugBefore,
+      stateBeforeReset: debugStateBeforeReset,
       after: debugAfter,
       delta: debugDelta,
     },
@@ -3012,8 +3015,9 @@ export function summarizeStreamingProviderPreservation(benchmark: { provider?: S
 	};
 }
 
-export function summarizeStreamingLivePipeline(benchmark: { debug?: Pick<StreamingBenchmark["debug"], "delta" | "after">; fixture?: StreamingBenchmark["fixture"]; provider?: StreamingBenchmarkProviderTelemetry }): StreamingBenchmarkLivePipeline | undefined {
+export function summarizeStreamingLivePipeline(benchmark: { debug?: Pick<StreamingBenchmark["debug"], "delta" | "stateBeforeReset" | "after">; fixture?: StreamingBenchmark["fixture"]; provider?: StreamingBenchmarkProviderTelemetry }): StreamingBenchmarkLivePipeline | undefined {
 	const debugDelta = benchmark.debug?.delta ?? {};
+	const debugStateBeforeReset = benchmark.debug?.stateBeforeReset ?? {};
 	const debugAfter = benchmark.debug?.after ?? {};
 	const fixtureTextCount = finiteNumber(benchmark.fixture?.deltaCount);
 	const fixtureReasoningCount = finiteNumber(benchmark.fixture?.reasoningDeltaCount);
@@ -3029,8 +3033,8 @@ export function summarizeStreamingLivePipeline(benchmark: { debug?: Pick<Streami
 	const flushCount = finiteNumber(debugDelta.flushCount);
 	const flushedEventCount = finiteNumber(debugDelta.flushedEventCount);
 	const overlayUpdateCount = finiteNumber(debugDelta.overlayUpdateCount);
-	const overlayEventCount = finiteNumber(debugAfter.overlayEventCount);
-	const currentOutputLength = finiteNumber(debugAfter.currentOutputLength);
+	const overlayEventCount = stateWindowNumber(debugAfter.overlayEventCount, debugStateBeforeReset.overlayEventCount);
+	const currentOutputLength = stateWindowNumber(debugAfter.currentOutputLength, debugStateBeforeReset.currentOutputLength);
 	const expectedTextBytes = finiteNumber(benchmark.fixture?.textBytes);
 	const debugStartedAt = typeof debugAfter.startedAt === "string" ? debugAfter.startedAt : undefined;
 	return {
@@ -3551,6 +3555,14 @@ function clampScore(value: number): number {
 
 function finiteNumber(value: unknown): number | undefined {
 	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function stateWindowNumber(afterValue: unknown, beforeValue: unknown): number | undefined {
+	const after = finiteNumber(afterValue);
+	if (after === undefined) return undefined;
+	const before = finiteNumber(beforeValue);
+	if (before === undefined || before <= 0 || after < before) return after;
+	return round3(after - before);
 }
 
 function elapsedIsoMs(startedAt: unknown, value: unknown): number | undefined {

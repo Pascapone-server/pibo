@@ -24,3 +24,4 @@ Append concise, reusable findings here. Do not paste raw logs.
 
 - Live overlay reducer batches must avoid per-delta full-array dedupe/copy work. Keep identity tracking batch-scoped and append into one copied events array; repeated `dedupeByIdentity([...events, event])` grows superlinearly with large streaming flushes.
 - If the browser benchmark reports `fixture error: signal is aborted without reason` while direct authenticated curl to `/api/chat/debug/streaming-fixture` works with an Origin header, treat it as an in-page/CDP/browser fixture-start blocker rather than a streaming transport result.
+- Multi-run backend fixtures reuse the selected session, so raw trace state (`overlayEventCount`, `currentOutputLength`) is cumulative across runs. Live preservation ratios should subtract the pre-reset trace state while keeping event/latency counters reset; otherwise healthy repeated runs can report misleading overlayEvents/currentText ratios above 1.

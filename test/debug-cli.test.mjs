@@ -369,6 +369,21 @@ test("streaming benchmark summaries include live pipeline debug counters", () =>
 	assert.equal(summary.selectedLiveFirstTextEventMsAfterStart.p50, 103);
 });
 
+test("streaming live pipeline summary subtracts pre-reset trace state", () => {
+	const summary = summarizeStreamingLivePipeline({
+		debug: {
+			delta: { enqueueCount: 22, flushCount: 20, flushedEventCount: 22, overlayUpdateCount: 20, textDeltaCount: 12, reasoningDeltaCount: 4 },
+			stateBeforeReset: { overlayEventCount: 32, currentOutputLength: 48 },
+			after: { overlayEventCount: 48, currentOutputLength: 72 },
+		},
+		fixture: { available: true, requested: true, mode: "backend", started: true, deltaCount: 12, reasoningDeltaCount: 4, textBytes: 24 },
+	});
+	assert.equal(summary.overlayEventCount, 16);
+	assert.equal(summary.currentOutputLength, 24);
+	assert.equal(summary.overlayEventsToExpectedRatio, 1);
+	assert.equal(summary.currentOutputToExpectedTextBytesRatio, 1);
+});
+
 test("streaming live pipeline summary computes fixture-normalized ratios", () => {
 	const summary = summarizeStreamingLivePipeline({
 		debug: {
