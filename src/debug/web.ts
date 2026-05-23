@@ -261,6 +261,7 @@ type StreamingBenchmarkEventSourceStreamProbe = {
 	piboSessionId?: string;
 	roomId?: string;
 	sinceValues: string[];
+	liveSinceValues?: string[];
 	openCountAfterStart: number;
 	errorCountAfterStart: number;
 	closeCountAfterStart: number;
@@ -277,6 +278,8 @@ type StreamingBenchmarkEventSourceStreamProbe = {
 	uniqueTransientIdCountAfterStart: number;
 	durableIdCount: number;
 	otherIdCount: number;
+	liveReplayEventCount?: number;
+	liveReplayEventCountAfterStart?: number;
 	lastEventId?: string;
 	firstEventMsAfterStart?: number;
 	firstTextEventMsAfterStart?: number;
@@ -1338,9 +1341,6 @@ function streamingBenchmarkEventSourceProbeScript(): string {
   Object.defineProperty(probe, '_instances', { value: [], enumerable: false, configurable: false });
   function at() { return typeof performance === 'undefined' ? Date.now() : performance.now(); }
   function isChatEventsUrl(url) { return String(url || '').includes('/api/chat/events'); }
-  function parseMessageType(message) {
-    try { return JSON.parse(message.data).type; } catch { return undefined; }
-  }
   function pushConnection(kind, info, extra) {
     probe.connections.push({ t: at(), kind, url: info.url, ...(extra || {}) });
     if (probe.connections.length > 200) probe.connections.splice(0, probe.connections.length - 200);
@@ -1358,8 +1358,16 @@ function streamingBenchmarkEventSourceProbeScript(): string {
       pushConnection('error', info, { readyState: events.readyState });
     });
     events.addEventListener('pibo', (message) => {
-      const type = parseMessageType(message);
-      const record = { t: at(), url: info.url, lastEventId: message.lastEventId || '', type: typeof type === 'string' ? type : undefined };
+      let payload;
+      try { payload = JSON.parse(message.data); } catch {}
+      const type = payload && typeof payload.type === 'string' ? payload.type : undefined;
+      const record = {
+        t: at(),
+        url: info.url,
+        lastEventId: message.lastEventId || '',
+        type: typeof type === 'string' ? type : undefined,
+        liveReplayId: payload && typeof payload.liveReplayId === 'number' && Number.isFinite(payload.liveReplayId) ? payload.liveReplayId : undefined,
+      };
       probe.events.push(record);
       if (probe.events.length > 1000) probe.events.splice(0, probe.events.length - 1000);
     });
@@ -1968,6 +1976,7 @@ function summarizeEventSourceStreams(streamEvents, afterStartConnections, starte
         piboSessionId: parsed.piboSessionId,
         roomId: parsed.roomId,
         sinceValues: [],
+        liveSinceValues: [],
         openCountAfterStart: 0,
         errorCountAfterStart: 0,
         closeCountAfterStart: 0,
@@ -1977,6 +1986,7 @@ function summarizeEventSourceStreams(streamEvents, afterStartConnections, starte
       groups.set(key, group);
     }
     if (parsed.since && !group.sinceValues.includes(parsed.since)) group.sinceValues.push(parsed.since);
+    if (parsed.liveSince && !group.liveSinceValues.includes(parsed.liveSince)) group.liveSinceValues.push(parsed.liveSince);
     return group;
   };
   for (const event of streamEvents) ensureGroup(event.url).events.push(event);
@@ -1996,6 +2006,8 @@ function summarizeEventSourceStreams(streamEvents, afterStartConnections, starte
     const afterStartIds = afterStartEvents.map((event) => event.lastEventId).filter(Boolean);
     const transientIds = ids.filter((id) => /^live:\d+$/.test(id));
     const afterStartTransientIds = afterStartIds.filter((id) => /^live:\d+$/.test(id));
+    const liveReplayEvents = events.filter((event) => typeof event.liveReplayId === 'number');
+    const afterStartLiveReplayEvents = afterStartEvents.filter((event) => typeof event.liveReplayId === 'number');
     const firstEventMsAfterStart = firstProbeEventMs(afterStartEvents, startedAt);
     const firstTextEventMsAfterStart = firstProbeEventMs(afterStartEvents, startedAt, 'TEXT_MESSAGE_CONTENT');
     const firstReasoningEventMsAfterStart = firstProbeEventMs(afterStartEvents, startedAt, 'REASONING_MESSAGE_CONTENT');
@@ -2008,6 +2020,7 @@ function summarizeEventSourceStreams(streamEvents, afterStartConnections, starte
       piboSessionId: group.piboSessionId,
       roomId: group.roomId,
       sinceValues: group.sinceValues,
+      liveSinceValues: group.liveSinceValues,
       openCountAfterStart: group.openCountAfterStart,
       errorCountAfterStart: group.errorCountAfterStart,
       closeCountAfterStart: group.closeCountAfterStart,
@@ -2024,6 +2037,8 @@ function summarizeEventSourceStreams(streamEvents, afterStartConnections, starte
       uniqueTransientIdCountAfterStart: new Set(afterStartTransientIds).size,
       durableIdCount: durableIds.length,
       otherIdCount: otherIds.length,
+      liveReplayEventCount: liveReplayEvents.length,
+      liveReplayEventCountAfterStart: afterStartLiveReplayEvents.length,
       lastEventId: ids.at(-1),
       firstEventMsAfterStart,
       firstTextEventMsAfterStart,
@@ -2041,6 +2056,7 @@ function parseChatEventsProbeUrl(rawUrl) {
   const role = mode === 'summary' || (roomId && !piboSessionId) ? 'room-summary' : (mode === 'live' || piboSessionId ? 'selected-live' : 'chat-events');
   const withoutResume = new URL(parsed.href);
   withoutResume.searchParams.delete('since');
+  withoutResume.searchParams.delete('liveSince');
   return {
     url: withoutResume.pathname + (withoutResume.search ? withoutResume.search : ''),
     mode,
@@ -2048,6 +2064,7 @@ function parseChatEventsProbeUrl(rawUrl) {
     piboSessionId,
     roomId,
     since: params.get('since') || undefined,
+    liveSince: params.get('liveSince') || undefined,
   };
 }
 function roleSort(role) {
@@ -3501,7 +3518,8 @@ function aggregateEventSourceStreams(streams: StreamingBenchmarkEventSourceStrea
 		role,
 		piboSessionId: first.piboSessionId,
 		roomId: first.roomId,
-		sinceValues: streams.flatMap((stream) => stream.sinceValues),
+		sinceValues: [...new Set(streams.flatMap((stream) => stream.sinceValues))],
+		liveSinceValues: [...new Set(streams.flatMap((stream) => stream.liveSinceValues ?? []))],
 		openCountAfterStart: sum("openCountAfterStart"),
 		errorCountAfterStart: sum("errorCountAfterStart"),
 		closeCountAfterStart: sum("closeCountAfterStart"),
@@ -3518,6 +3536,8 @@ function aggregateEventSourceStreams(streams: StreamingBenchmarkEventSourceStrea
 		uniqueTransientIdCountAfterStart: sum("uniqueTransientIdCountAfterStart"),
 		durableIdCount: sum("durableIdCount"),
 		otherIdCount: sum("otherIdCount"),
+		liveReplayEventCount: sum("liveReplayEventCount"),
+		liveReplayEventCountAfterStart: sum("liveReplayEventCountAfterStart"),
 		lastEventId: streams.at(-1)?.lastEventId,
 		firstEventMsAfterStart: min("firstEventMsAfterStart"),
 		firstTextEventMsAfterStart: min("firstTextEventMsAfterStart"),
@@ -3675,7 +3695,7 @@ function streamingBenchmarkCompactRunRows(benchmark: StreamingBenchmark): Stream
 		{ section: "compact", metric: "Provider ratios", preservation: benchmark.providerPreservation ? `SSE text ${jsonShort(benchmark.providerPreservation.sseTextToProviderRatio)}, selected-live text ${jsonShort(benchmark.providerPreservation.selectedLiveTextToProviderRatio)}, DOM/text ${jsonShort(benchmark.providerPreservation.domPositiveToProviderTextRatio)}` : "n/a", cadenceLatency: benchmark.providerPreservation ? `SSE reasoning ${jsonShort(benchmark.providerPreservation.sseReasoningToProviderRatio)}, selected-live reasoning ${jsonShort(benchmark.providerPreservation.selectedLiveReasoningToProviderRatio)}` : "n/a" },
 		{ section: "compact", metric: "SSE transport", preservation: benchmark.sse ? `text ${benchmark.sse.textEventCount}, reasoning ${benchmark.sse.reasoningEventCount}, transient ${benchmark.sse.transientIdCount}` : "n/a", cadenceLatency: benchmark.sse ? `text gap p90 ${statP90(benchmark.sse.textEventGapsMs, "ms")}, text/chunk p90 ${statP90(benchmark.sse.textEventsPerChunk)}, first text ${jsonShort(benchmark.sse.firstTextEventMs)}ms` : "n/a" },
 		{ section: "compact", metric: "Cadence lag", preservation: benchmark.cadence ? `fixture schedule p90 ${jsonShort(benchmark.cadence.fixtureScheduleGapP90Ms)}ms` : "n/a", cadenceLatency: benchmark.cadence ? `DOM lag ${jsonShort(benchmark.cadence.domLagOverScheduleP90Ms)}ms, SSE text lag ${jsonShort(benchmark.cadence.sseTextLagOverScheduleP90Ms)}ms` : "n/a" },
-		{ section: "compact", metric: "EventSource selected-live", preservation: selectedLive ? `text ${selectedLive.textEventCountAfterStart}, reasoning ${selectedLive.reasoningEventCountAfterStart}, events ${selectedLive.eventCount}` : "n/a", cadenceLatency: selectedLive ? `first text ${jsonShort(selectedLive.firstTextEventMsAfterStart)}ms, transient ${selectedLive.uniqueTransientIdCountAfterStart}/${selectedLive.transientIdCountAfterStart}` : "n/a" },
+		{ section: "compact", metric: "EventSource selected-live", preservation: selectedLive ? `text ${selectedLive.textEventCountAfterStart}, reasoning ${selectedLive.reasoningEventCountAfterStart}, events ${selectedLive.eventCount}` : "n/a", cadenceLatency: selectedLive ? formatSelectedLiveCompactCadence(selectedLive) : "n/a" },
 		{ section: "compact", metric: "Live overlay", preservation: benchmark.livePipeline ? `flushed/overlayExpected ${jsonShort(benchmark.livePipeline.flushedEventsToExpectedRatio)}, overlayEvents/inputExpected ${jsonShort(benchmark.livePipeline.overlayEventsToExpectedRatio)}, currentText/expected ${jsonShort(benchmark.livePipeline.currentOutputToExpectedTextBytesRatio)}` : "n/a", cadenceLatency: benchmark.livePipeline ? `first text ${jsonShort(benchmark.livePipeline.firstTextDeltaMs)}ms, first flush ${jsonShort(benchmark.livePipeline.firstFlushMs)}ms, first overlay ${jsonShort(benchmark.livePipeline.firstOverlayUpdateMs)}ms` : "n/a" },
 		{ section: "compact", metric: "Live trace compute", preservation: liveTraceComputeCount !== undefined ? `count ${jsonShort(liveTraceComputeCount)}, total ${jsonShort(liveTraceComputeTotalMs)}ms` : "n/a", cadenceLatency: liveTraceComputeMaxMs !== undefined ? `max ${jsonShort(liveTraceComputeMaxMs)}ms` : "n/a" },
 		{ section: "compact", metric: "DOM", preservation: `positive ${benchmark.dom.positiveUpdateCount}, max jump ${jsonShort(benchmark.dom.positiveCharJumps.max)} chars`, cadenceLatency: `p90 gap ${statP90(benchmark.dom.gapsMs, "ms")}, first visible ${jsonShort(benchmark.dom.firstPositiveUpdateMs)}ms` },
@@ -3733,7 +3753,7 @@ function formatStreamingBenchmarkCompactRun(benchmark: StreamingBenchmark, targe
 			["Provider ratios", benchmark.providerPreservation ? `SSE text ${jsonShort(benchmark.providerPreservation.sseTextToProviderRatio)}, selected-live text ${jsonShort(benchmark.providerPreservation.selectedLiveTextToProviderRatio)}, DOM/text ${jsonShort(benchmark.providerPreservation.domPositiveToProviderTextRatio)}` : "n/a", benchmark.providerPreservation ? `SSE reasoning ${jsonShort(benchmark.providerPreservation.sseReasoningToProviderRatio)}, selected-live reasoning ${jsonShort(benchmark.providerPreservation.selectedLiveReasoningToProviderRatio)}` : "n/a"],
 			["SSE transport", benchmark.sse ? `text ${benchmark.sse.textEventCount}, reasoning ${benchmark.sse.reasoningEventCount}, transient ${benchmark.sse.transientIdCount}` : "n/a", benchmark.sse ? `text gap p90 ${statP90(benchmark.sse.textEventGapsMs, "ms")}, text/chunk p90 ${statP90(benchmark.sse.textEventsPerChunk)}, first text ${jsonShort(benchmark.sse.firstTextEventMs)}ms` : "n/a"],
 			["Cadence lag", benchmark.cadence ? `fixture schedule p90 ${jsonShort(benchmark.cadence.fixtureScheduleGapP90Ms)}ms` : "n/a", benchmark.cadence ? `DOM lag ${jsonShort(benchmark.cadence.domLagOverScheduleP90Ms)}ms, SSE text lag ${jsonShort(benchmark.cadence.sseTextLagOverScheduleP90Ms)}ms` : "n/a"],
-			["EventSource selected-live", selectedLive ? `text ${selectedLive.textEventCountAfterStart}, reasoning ${selectedLive.reasoningEventCountAfterStart}, events ${selectedLive.eventCount}` : "n/a", selectedLive ? `first text ${jsonShort(selectedLive.firstTextEventMsAfterStart)}ms, transient ${selectedLive.uniqueTransientIdCountAfterStart}/${selectedLive.transientIdCountAfterStart}` : "n/a"],
+			["EventSource selected-live", selectedLive ? `text ${selectedLive.textEventCountAfterStart}, reasoning ${selectedLive.reasoningEventCountAfterStart}, events ${selectedLive.eventCount}` : "n/a", selectedLive ? formatSelectedLiveCompactCadence(selectedLive) : "n/a"],
 			["Live overlay", benchmark.livePipeline ? `flushed/overlayExpected ${jsonShort(benchmark.livePipeline.flushedEventsToExpectedRatio)}, overlayEvents/inputExpected ${jsonShort(benchmark.livePipeline.overlayEventsToExpectedRatio)}, currentText/expected ${jsonShort(benchmark.livePipeline.currentOutputToExpectedTextBytesRatio)}` : "n/a", benchmark.livePipeline ? `first text ${jsonShort(benchmark.livePipeline.firstTextDeltaMs)}ms, first flush ${jsonShort(benchmark.livePipeline.firstFlushMs)}ms, first overlay ${jsonShort(benchmark.livePipeline.firstOverlayUpdateMs)}ms` : "n/a"],
 			["Live trace compute", liveTraceComputeCount !== undefined ? `count ${jsonShort(liveTraceComputeCount)}, total ${jsonShort(liveTraceComputeTotalMs)}ms` : "n/a", liveTraceComputeMaxMs !== undefined ? `max ${jsonShort(liveTraceComputeMaxMs)}ms` : "n/a"],
 			["DOM", `positive ${benchmark.dom.positiveUpdateCount}, max jump ${jsonShort(benchmark.dom.positiveCharJumps.max)} chars`, `p90 gap ${statP90(benchmark.dom.gapsMs, "ms")}, first visible ${jsonShort(benchmark.dom.firstPositiveUpdateMs)}ms`],
@@ -3823,6 +3843,12 @@ function statP90(stats: NumberStats, unit = ""): string {
 	return stats.count && stats.p90 !== undefined ? `${stats.p90}${unit}` : "n/a";
 }
 
+function formatSelectedLiveCompactCadence(stream: StreamingBenchmarkEventSourceStreamProbe): string {
+	const parts = [`first text ${jsonShort(stream.firstTextEventMsAfterStart)}ms`, `transient ${stream.uniqueTransientIdCountAfterStart}/${stream.transientIdCountAfterStart}`];
+	if ((stream.liveReplayEventCountAfterStart ?? 0) > 0 || (stream.liveSinceValues?.length ?? 0) > 0) parts.push(`replay ${jsonShort(stream.liveReplayEventCountAfterStart ?? 0)}`, `liveSince ${(stream.liveSinceValues ?? []).length}`);
+	return parts.join(", ");
+}
+
 function formatStreamingBenchmark(benchmark: StreamingBenchmark, target: BrowserUseCdpTarget | { id: string; url: string; title: string }): string {
 	const debugDelta: Record<string, number> = benchmark.debug.delta ?? {};
 	const debugAfter: StreamingDebugCounters = benchmark.debug.after ?? {};
@@ -3848,7 +3874,7 @@ function formatStreamingBenchmark(benchmark: StreamingBenchmark, target: Browser
 	if (benchmark.eventSource) {
 		lines.push(`eventSource: requested=${benchmark.eventSource.requested} installed=${benchmark.eventSource.installed} forcedClose=${benchmark.eventSource.forcedCloseCountAfterStart} reconnectOpen=${benchmark.eventSource.openCountAfterStart} text=${benchmark.eventSource.textEventCount} afterStart=${benchmark.eventSource.textEventCountAfterStart} firstText=${jsonShort(benchmark.eventSource.firstTextEventMsAfterStart)}ms reasoning=${benchmark.eventSource.reasoningEventCount} reasoningAfterStart=${benchmark.eventSource.reasoningEventCountAfterStart} transient=${benchmark.eventSource.uniqueTransientIdCountAfterStart}/${benchmark.eventSource.transientIdCountAfterStart} reset=${benchmark.eventSource.transientIdResetObserved} droppedText=${benchmark.eventSource.textDropTextEventCount} last=${jsonShort(benchmark.eventSource.lastEventId)} reconnectObserved=${benchmark.eventSource.reconnectObserved}`);
 		for (const stream of benchmark.eventSource.streams ?? []) {
-			lines.push(`eventSource stream: role=${stream.role} mode=${jsonShort(stream.mode)} session=${jsonShort(stream.piboSessionId)} room=${jsonShort(stream.roomId)} text=${stream.textEventCount} afterStart=${stream.textEventCountAfterStart} firstText=${jsonShort(stream.firstTextEventMsAfterStart)}ms reasoning=${stream.reasoningEventCount} reasoningAfterStart=${stream.reasoningEventCountAfterStart} events=${stream.eventCount} opens=${stream.openCountAfterStart} forcedClose=${stream.forcedCloseCountAfterStart} transient=${stream.uniqueTransientIdCountAfterStart}/${stream.transientIdCountAfterStart} since=${jsonShort(stream.sinceValues.join(","))} url=${stream.url}`);
+			lines.push(`eventSource stream: role=${stream.role} mode=${jsonShort(stream.mode)} session=${jsonShort(stream.piboSessionId)} room=${jsonShort(stream.roomId)} text=${stream.textEventCount} afterStart=${stream.textEventCountAfterStart} firstText=${jsonShort(stream.firstTextEventMsAfterStart)}ms reasoning=${stream.reasoningEventCount} reasoningAfterStart=${stream.reasoningEventCountAfterStart} events=${stream.eventCount} opens=${stream.openCountAfterStart} forcedClose=${stream.forcedCloseCountAfterStart} transient=${stream.uniqueTransientIdCountAfterStart}/${stream.transientIdCountAfterStart} liveReplay=${jsonShort(stream.liveReplayEventCountAfterStart)} liveSince=${jsonShort((stream.liveSinceValues ?? []).join(","))} since=${jsonShort(stream.sinceValues.join(","))} url=${stream.url}`);
 		}
 	}
 	if (benchmark.sse) lines.push(`sse: requested=${benchmark.sse.requested} installed=${benchmark.sse.installed} status=${jsonShort(benchmark.sse.status)} firstChunk=${jsonShort(benchmark.sse.firstChunkMs)}ms firstText=${jsonShort(benchmark.sse.firstTextEventMs)}ms chunks=${benchmark.sse.chunkCount} chunkBytes=${formatStats(benchmark.sse.chunkBytes)} chunkGaps=${formatStats(benchmark.sse.chunkGapsMs)} textPerChunk=${formatStats(benchmark.sse.textEventsPerChunk)} text=${benchmark.sse.textEventCount} reasoning=${benchmark.sse.reasoningEventCount} textGaps=${formatStats(benchmark.sse.textEventGapsMs)} transient=${benchmark.sse.transientIdCount} durable=${benchmark.sse.durableIdCount} errors=${benchmark.sse.errors.length}`);

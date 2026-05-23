@@ -70,6 +70,7 @@ test("pibo debug web report renders saved streaming benchmark artifacts without 
 			},
 			raf: { count: 100, gapsMs: { count: 99, p50: 16.7, p90: 16.8, p99: 17, max: 17, avg: 16.7 } },
 			longTasks: { count: 0, totalMs: 0, maxMs: 0 },
+			eventSource: { streams: [{ role: "selected-live", eventCount: 26, eventCountAfterStart: 26, textEventCount: 12, textEventCountAfterStart: 12, reasoningEventCount: 4, reasoningEventCountAfterStart: 4, transientIdCount: 24, uniqueTransientIdCount: 17, transientIdCountAfterStart: 24, uniqueTransientIdCountAfterStart: 17, durableIdCount: 0, otherIdCount: 0, liveReplayEventCount: 24, liveReplayEventCountAfterStart: 24, sinceValues: [], liveSinceValues: ["153"], openCountAfterStart: 1, errorCountAfterStart: 0, closeCountAfterStart: 1, forcedCloseCountAfterStart: 1, firstTextEventMsAfterStart: 184 }] },
 			score: { smoothness: 58, textDeltaCount: 12, domPositiveUpdateCount: 12 },
 			regressions: [],
 			warnings: [],
@@ -83,6 +84,7 @@ test("pibo debug web report renders saved streaming benchmark artifacts without 
 		assert.match(compactReport.stdout, /# Web Streaming Benchmark Compact Report/);
 		assert.match(compactReport.stdout, /\| Layer \| Preservation \| Cadence \/ latency \|/);
 		assert.match(compactReport.stdout, /\| SSE transport \| n\/a \| n\/a \|/);
+		assert.match(compactReport.stdout, /\| EventSource selected-live \| text 12, reasoning 4, events 26 \| first text 184ms, transient 17\/24, replay 24, liveSince 1 \|/);
 		assert.match(compactReport.stdout, /\| DOM \| positive 12, max jump 2 chars \| p90 gap 101ms, first visible 145ms \|/);
 		const output = join(cwd, "reports", "streaming-compact.md");
 		const outputReport = await execFileAsync("node", [cliPath, "debug", "web", "report", "streaming-benchmark", "--from", artifact, "--compact", "--output", output], { cwd });
@@ -378,6 +380,31 @@ test("streaming benchmark summaries include live pipeline debug counters", () =>
 	assert.equal(summary.liveFirstOverlayUpdateMs.p50, 126);
 	assert.equal(summary.sseFirstTextEventMs.p50, 101);
 	assert.equal(summary.selectedLiveFirstTextEventMsAfterStart.p50, 103);
+});
+
+test("streaming benchmark summaries aggregate selected-live reconnect streams", () => {
+	const summary = summarizeStreamingBenchmarks([{
+		kind: "streaming-benchmark",
+		debug: { delta: { textDeltaCount: 12, reasoningDeltaCount: 4 }, after: {} },
+		fixture: { available: true, requested: true, mode: "backend", started: true, deltaCount: 12, reasoningDeltaCount: 4, textBytes: 24 },
+		eventSource: {
+			streams: [
+				{ role: "selected-live", url: "/api/chat/events?piboSessionId=ps_test&mode=live", sinceValues: [], liveSinceValues: [], eventCount: 12, eventCountAfterStart: 12, textEventCount: 7, textEventCountAfterStart: 7, reasoningEventCount: 2, reasoningEventCountAfterStart: 2, openCountAfterStart: 1, errorCountAfterStart: 0, closeCountAfterStart: 1, forcedCloseCountAfterStart: 1, transientIdCount: 12, uniqueTransientIdCount: 12, transientIdCountAfterStart: 12, uniqueTransientIdCountAfterStart: 12, durableIdCount: 0, otherIdCount: 0, firstTextEventMsAfterStart: 105 },
+				{ role: "selected-live", url: "/api/chat/events?piboSessionId=ps_test&mode=live", sinceValues: [], liveSinceValues: ["42"], eventCount: 8, eventCountAfterStart: 8, textEventCount: 5, textEventCountAfterStart: 5, reasoningEventCount: 2, reasoningEventCountAfterStart: 2, openCountAfterStart: 1, errorCountAfterStart: 0, closeCountAfterStart: 0, forcedCloseCountAfterStart: 0, transientIdCount: 8, uniqueTransientIdCount: 8, transientIdCountAfterStart: 8, uniqueTransientIdCountAfterStart: 8, durableIdCount: 0, otherIdCount: 0, liveReplayEventCount: 4, liveReplayEventCountAfterStart: 4, firstTextEventMsAfterStart: 212 },
+			],
+		},
+		dom: { gapsMs: { count: 0 }, positiveCharJumps: { count: 0 }, positiveUpdateCount: 12 },
+		longTasks: { maxMs: 0 },
+		regressions: [],
+		score: { smoothness: 50, textDeltaCount: 12, domPositiveUpdateCount: 12 },
+	}]);
+	assert.equal(summary.selectedLiveEventCountAfterStart.p50, 20);
+	assert.equal(summary.selectedLiveTextEventCountAfterStart.p50, 12);
+	assert.equal(summary.selectedLiveReasoningEventCountAfterStart.p50, 4);
+	assert.equal(summary.selectedLiveForcedCloseCountAfterStart.p50, 1);
+	assert.equal(summary.selectedLiveReconnectOpenCountAfterStart.p50, 2);
+	assert.equal(summary.selectedLiveTransientIdCountAfterStart.p50, 20);
+	assert.equal(summary.selectedLiveFirstTextEventMsAfterStart.p50, 105);
 });
 
 test("streaming live pipeline summary subtracts pre-reset trace state", () => {
