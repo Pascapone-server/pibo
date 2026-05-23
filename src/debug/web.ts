@@ -2,6 +2,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { getPiboHome } from "../core/pibo-home.js";
 import { listBrowserUseCdpTargets, selectBestChatTarget, formatBrowserUseTargets, type BrowserUseCdpTarget } from "../tools/browser-use-cdp.js";
+import { resolveDebugStore } from "./stores.js";
+import { inspectTelemetryProvider, inspectTelemetryProviderEvents } from "./telemetry.js";
 import { CdpClient } from "../tools/cdp-client.js";
 
 const DEFAULT_WATCH_DURATION_MS = 5_000;
@@ -29,6 +31,7 @@ type WebOptions = {
 	fixtureMix?: string;
 	negativeProfile?: string;
 	compareUrl?: string;
+	providerRequestId?: string;
 	compareHosted: boolean;
 	compareHostedIfConfigured: boolean;
 	json: boolean;
@@ -137,6 +140,40 @@ type StreamingSmoothnessScore = {
 	textDeltaCount: number;
 	domPositiveUpdateCount: number;
 	firstVisibleMs?: number;
+};
+
+type StreamingBenchmarkProviderTelemetry = {
+	requested: boolean;
+	available: boolean;
+	providerRequestId: string;
+	piboSessionId?: string;
+	turnId?: string;
+	provider?: string;
+	api?: string;
+	model?: string;
+	transport?: string;
+	status?: string;
+	startedAt?: string;
+	completedAt?: string;
+	httpStatus?: number;
+	upstreamResponseId?: string;
+	rawEventCount?: number;
+	normalizedEventCount?: number;
+	parseErrorCount?: number;
+	unknownEventCount?: number;
+	firstByteLatencyMs?: number;
+	firstTextLatencyMs?: number;
+	firstReasoningLatencyMs?: number;
+	eventTypeCounts?: Record<string, unknown>;
+	textDeltaCount: number;
+	reasoningDeltaCount: number;
+	textDeltaBytes: NumberStats;
+	reasoningDeltaBytes: NumberStats;
+	textDeltaGapsMs: NumberStats;
+	reasoningDeltaGapsMs: NumberStats;
+	eventPageCount: number;
+	truncated: boolean;
+	error?: string;
 };
 
 type StreamingBenchmarkCadence = {
@@ -295,6 +332,7 @@ type StreamingBenchmark = {
 	eventSource?: StreamingBenchmarkEventSourceProbe;
 	sse?: StreamingBenchmarkSseProbe;
 	trace?: StreamingBenchmarkTraceProbe;
+	provider?: StreamingBenchmarkProviderTelemetry;
 	cadence?: StreamingBenchmarkCadence;
 	score: StreamingSmoothnessScore;
 	regressions: string[];
@@ -347,6 +385,13 @@ type StreamingBenchmarkSummary = {
 	roomSummaryEventCountAfterStart: NumberStats;
 	roomSummaryTextEventCountAfterStart: NumberStats;
 	roomSummaryReasoningEventCountAfterStart: NumberStats;
+	providerTextDeltaCount: NumberStats;
+	providerReasoningDeltaCount: NumberStats;
+	providerTextDeltaBytesP50: NumberStats;
+	providerTextDeltaGapP90Ms: NumberStats;
+	providerFirstTextLatencyMs: NumberStats;
+	providerParseErrorCount: NumberStats;
+	providerUnknownEventCount: NumberStats;
 };
 
 type StreamingNegativeProfile = "batch";
@@ -498,7 +543,7 @@ function printScenarioHelp(): void {
 
 Usage:
   pibo debug web scenario new-session [--manual|--act] [--duration ms] [--json] [--artifact]
-  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--fixture-profile steady|jitter|burst|batch] [--fixture-mix text|reasoning-text] [--simulate-reconnect|--simulate-trace-catchup] [--duration ms] [--runs n] [--from artifact.json] [--compare-url url|--compare-hosted|--compare-hosted-if-configured] [--assert] [--expect-regression text] [--negative-profile batch] [--json] [--artifact]
+  pibo debug web scenario streaming-benchmark [--fixture|--backend-fixture] [--fixture-profile steady|jitter|burst|batch] [--fixture-mix text|reasoning-text] [--simulate-reconnect|--simulate-trace-catchup] [--duration ms] [--runs n] [--from artifact.json] [--provider-request-id pr_...] [--compare-url url|--compare-hosted|--compare-hosted-if-configured] [--assert] [--expect-regression text] [--negative-profile batch] [--json] [--artifact]
 
 Defaults:
   new-session --manual waits while you click New Session yourself.
@@ -514,6 +559,7 @@ Defaults:
   streaming-benchmark --compare-url runs the same backend fixture at another Chat URL, for direct-vs-hosted SSE comparison.
   streaming-benchmark --compare-hosted uses PIBO_DEV_PUBLIC_URL or PIBO_DEV_BASE_URL from the environment or .env.developer-host as the compare URL.
   streaming-benchmark --compare-hosted-if-configured runs the hosted comparison when a dev URL is configured; otherwise it records a warning and keeps the primary benchmark.
+  streaming-benchmark --provider-request-id attaches provider/Pi telemetry delta counts, byte stats, gap stats, parse errors, and first-text latency from pibo debug telemetry.
   streaming-benchmark --assert exits non-zero when fixture/debug/DOM smoothness gates fail.
   streaming-benchmark --expect-regression marks a required regression substring for controlled negative benchmarks; unexpected or missing expected regressions still fail with --assert.
   streaming-benchmark --negative-profile batch expands to the backend batch reasoning/text fixture with required controlled regression assertions.
@@ -673,7 +719,8 @@ async function runScenario(options: WebOptions): Promise<void> {
 	try {
 		if (scenario === "streaming-benchmark") {
 			const baseline = streamingOptions.from ? await readStreamingBenchmarkRuns(streamingOptions.from) : undefined;
-			const runOptions = { startFixture: streamingOptions.fixture, startBackendFixture: streamingOptions.backendFixture, fixtureProfile, fixtureMix, simulateReconnect: streamingOptions.simulateReconnect, simulateTraceCatchup: streamingOptions.simulateTraceCatchup };
+			const providerTelemetry = streamingOptions.providerRequestId ? collectStreamingProviderTelemetry(streamingOptions.providerRequestId) : undefined;
+			const runOptions = { startFixture: streamingOptions.fixture, startBackendFixture: streamingOptions.backendFixture, fixtureProfile, fixtureMix, simulateReconnect: streamingOptions.simulateReconnect, simulateTraceCatchup: streamingOptions.simulateTraceCatchup, providerTelemetry };
 			const primaryUrl = await currentBrowserUrl(client);
 			const benchmarks = await runStreamingBenchmarkSeries(client, runs, durationMs, runOptions);
 			let benchmark: StreamingBenchmark | StreamingBenchmarkGroup | StreamingBenchmarkUrlComparison = runs === 1
@@ -768,7 +815,7 @@ async function runBrowserWatch(client: CdpClient, scope: string, durationMs: num
 	return client.evaluate<WebWatch>(expression, durationMs + 10_000);
 }
 
-type RunStreamingBenchmarkOptions = { startFixture?: boolean; startBackendFixture?: boolean; fixtureProfile?: StreamingFixtureProfile; fixtureMix?: StreamingFixtureMix; simulateReconnect?: boolean; simulateTraceCatchup?: boolean };
+type RunStreamingBenchmarkOptions = { startFixture?: boolean; startBackendFixture?: boolean; fixtureProfile?: StreamingFixtureProfile; fixtureMix?: StreamingFixtureMix; simulateReconnect?: boolean; simulateTraceCatchup?: boolean; providerTelemetry?: StreamingBenchmarkProviderTelemetry };
 
 async function runStreamingBenchmarkSeries(client: CdpClient, runs: number, durationMs: number, options: RunStreamingBenchmarkOptions): Promise<StreamingBenchmark[]> {
 	if (options.startFixture) await navigateStreamingBenchmarkFixture(client, options.fixtureProfile ?? "steady", options.fixtureMix ?? "text");
@@ -782,13 +829,141 @@ async function runStreamingBenchmark(client: CdpClient, durationMs: number, opti
 	await client.send("Page.bringToFront").catch(() => undefined);
 	const benchmarkTimeoutMs = durationMs + (options.startBackendFixture ? 20_000 : 10_000);
 	const benchmark = await client.evaluate<Omit<StreamingBenchmark, "score">>(buildStreamingBenchmarkExpression(durationMs, options), benchmarkTimeoutMs);
-	const scored = { ...benchmark, score: scoreStreamingBenchmark(benchmark) };
+	const scored = { ...benchmark, provider: options.providerTelemetry, score: scoreStreamingBenchmark(benchmark) };
 	return { ...scored, cadence: summarizeStreamingCadence(scored) };
 }
 
 async function currentBrowserUrl(client: CdpClient): Promise<string> {
 	const state = await client.evaluate<{ href: string }>(`(() => ({ href: location.href }))()`, 5_000);
 	return state.href;
+}
+
+export function summarizeStreamingProviderTelemetry(input: { request: Record<string, unknown>; events: Array<Record<string, unknown>>; providerRequestId?: string; truncated?: boolean; eventPageCount?: number }): StreamingBenchmarkProviderTelemetry {
+	const request = input.request;
+	const startedAt = stringField(request, "startedAt");
+	const textEvents = input.events.filter(isProviderTextDeltaEvent);
+	const reasoningEvents = input.events.filter(isProviderReasoningDeltaEvent);
+	const textReceivedAt = textEvents.map((event) => stringField(event, "receivedAt")).filter((value): value is string => Boolean(value));
+	const reasoningReceivedAt = reasoningEvents.map((event) => stringField(event, "receivedAt")).filter((value): value is string => Boolean(value));
+	return {
+		requested: true,
+		available: true,
+		providerRequestId: input.providerRequestId ?? stringField(request, "providerRequestId") ?? "unknown",
+		piboSessionId: stringField(request, "piboSessionId"),
+		turnId: stringField(request, "turnId"),
+		provider: stringField(request, "provider"),
+		api: stringField(request, "api"),
+		model: stringField(request, "model"),
+		transport: stringField(request, "transport"),
+		status: stringField(request, "status"),
+		startedAt,
+		completedAt: stringField(request, "completedAt"),
+		httpStatus: optionalNumberField(request, "httpStatus"),
+		upstreamResponseId: stringField(request, "upstreamResponseId"),
+		rawEventCount: optionalNumberField(request, "rawEventCount"),
+		normalizedEventCount: optionalNumberField(request, "normalizedEventCount"),
+		parseErrorCount: optionalNumberField(request, "parseErrorCount"),
+		unknownEventCount: optionalNumberField(request, "unknownEventCount"),
+		firstByteLatencyMs: durationBetweenMs(startedAt, stringField(request, "firstByteAt")),
+		firstTextLatencyMs: durationBetweenMs(startedAt, textReceivedAt[0]),
+		firstReasoningLatencyMs: durationBetweenMs(startedAt, reasoningReceivedAt[0]),
+		eventTypeCounts: recordField(request, "eventTypeCounts"),
+		textDeltaCount: textEvents.length,
+		reasoningDeltaCount: reasoningEvents.length,
+		textDeltaBytes: numericStats(textEvents.map(providerDeltaBytes)),
+		reasoningDeltaBytes: numericStats(reasoningEvents.map(providerDeltaBytes)),
+		textDeltaGapsMs: numericStats(gapsBetweenIso(textReceivedAt)),
+		reasoningDeltaGapsMs: numericStats(gapsBetweenIso(reasoningReceivedAt)),
+		eventPageCount: input.eventPageCount ?? 1,
+		truncated: input.truncated === true,
+	};
+}
+
+function collectStreamingProviderTelemetry(providerRequestId: string): StreamingBenchmarkProviderTelemetry {
+	const store = resolveDebugStore("pibo-data");
+	const provider = inspectTelemetryProvider(store, providerRequestId);
+	if (!provider.available) return unavailableStreamingProviderTelemetry(providerRequestId, provider.message);
+	const events: Array<Record<string, unknown>> = [];
+	let after: string | undefined;
+	let pageCount = 0;
+	let truncated = false;
+	for (;;) {
+		const page = inspectTelemetryProviderEvents(store, providerRequestId, { limit: "200", after });
+		if (!page.available) return unavailableStreamingProviderTelemetry(providerRequestId, page.message);
+		pageCount += 1;
+		events.push(...page.rows as Array<Record<string, unknown>>);
+		if (!page.page.hasMore || page.page.nextAfterSequence === undefined) break;
+		if (pageCount >= 50) {
+			truncated = true;
+			break;
+		}
+		after = String(page.page.nextAfterSequence);
+	}
+	return summarizeStreamingProviderTelemetry({ request: provider.request as unknown as Record<string, unknown>, events, providerRequestId, truncated, eventPageCount: pageCount });
+}
+
+function unavailableStreamingProviderTelemetry(providerRequestId: string, message: string): StreamingBenchmarkProviderTelemetry {
+	return {
+		requested: true,
+		available: false,
+		providerRequestId,
+		textDeltaCount: 0,
+		reasoningDeltaCount: 0,
+		textDeltaBytes: numericStats([]),
+		reasoningDeltaBytes: numericStats([]),
+		textDeltaGapsMs: numericStats([]),
+		reasoningDeltaGapsMs: numericStats([]),
+		eventPageCount: 0,
+		truncated: false,
+		error: message,
+	};
+}
+
+function isProviderTextDeltaEvent(event: Record<string, unknown>): boolean {
+	return stringField(event, "normalizedType") === "assistant_delta" || stringField(event, "eventType") === "pi.text_delta";
+}
+
+function isProviderReasoningDeltaEvent(event: Record<string, unknown>): boolean {
+	const normalizedType = stringField(event, "normalizedType");
+	const eventType = stringField(event, "eventType") ?? "";
+	return normalizedType === "thinking_delta" || eventType === "pi.thinking_delta" || (eventType.includes("reasoning") && eventType.includes("delta"));
+}
+
+function providerDeltaBytes(event: Record<string, unknown>): number | undefined {
+	const safeFields = recordField(event, "safeFields");
+	return optionalNumberField(safeFields, "deltaBytes") ?? optionalNumberField(safeFields, "contentBytes") ?? optionalNumberField(event, "byteSize");
+}
+
+function gapsBetweenIso(values: readonly string[]): number[] {
+	const gaps: number[] = [];
+	let previous: number | undefined;
+	for (const value of values) {
+		const current = Date.parse(value);
+		if (!Number.isFinite(current)) continue;
+		if (previous !== undefined) gaps.push(round3(current - previous));
+		previous = current;
+	}
+	return gaps;
+}
+
+function durationBetweenMs(start?: string, end?: string): number | undefined {
+	if (!start || !end) return undefined;
+	const startMs = Date.parse(start);
+	const endMs = Date.parse(end);
+	if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return undefined;
+	return round3(endMs - startMs);
+}
+
+function stringField(value: unknown, key: string): string | undefined {
+	return isRecord(value) && typeof value[key] === "string" ? value[key] : undefined;
+}
+
+function recordField(value: unknown, key: string): Record<string, unknown> | undefined {
+	return isRecord(value) && isRecord(value[key]) ? value[key] : undefined;
+}
+
+function optionalNumberField(value: unknown, key: string): number | undefined {
+	return isRecord(value) && typeof value[key] === "number" && Number.isFinite(value[key]) ? value[key] : undefined;
 }
 
 async function prepareStreamingBenchmarkEventSourceProbe(client: CdpClient, targetUrl?: string): Promise<void> {
@@ -2170,6 +2345,8 @@ function parseOptions(args: string[]): WebOptions {
 		else if (arg.startsWith("--negative-profile=")) options.negativeProfile = arg.slice("--negative-profile=".length);
 		else if (arg === "--compare-url") options.compareUrl = requireValue(args, ++index, arg);
 		else if (arg.startsWith("--compare-url=")) options.compareUrl = arg.slice("--compare-url=".length);
+		else if (arg === "--provider-request-id") options.providerRequestId = requireValue(args, ++index, arg);
+		else if (arg.startsWith("--provider-request-id=")) options.providerRequestId = arg.slice("--provider-request-id=".length);
 		else if (arg === "--compare-hosted") options.compareHosted = true;
 		else if (arg === "--compare-hosted-if-configured") options.compareHostedIfConfigured = true;
 		else if (arg === "--from") options.from = requireValue(args, ++index, arg);
@@ -2644,6 +2821,13 @@ function summarizeStreamingBenchmarks(runs: StreamingBenchmark[]): StreamingBenc
 		roomSummaryEventCountAfterStart: numericStats(runs.map((run) => roomSummaryStream(run)?.eventCountAfterStart)),
 		roomSummaryTextEventCountAfterStart: numericStats(runs.map((run) => roomSummaryStream(run)?.textEventCountAfterStart)),
 		roomSummaryReasoningEventCountAfterStart: numericStats(runs.map((run) => roomSummaryStream(run)?.reasoningEventCountAfterStart)),
+		providerTextDeltaCount: numericStats(runs.map((run) => run.provider?.textDeltaCount)),
+		providerReasoningDeltaCount: numericStats(runs.map((run) => run.provider?.reasoningDeltaCount)),
+		providerTextDeltaBytesP50: numericStats(runs.map((run) => run.provider?.textDeltaBytes.p50)),
+		providerTextDeltaGapP90Ms: numericStats(runs.map((run) => run.provider?.textDeltaGapsMs.p90)),
+		providerFirstTextLatencyMs: numericStats(runs.map((run) => run.provider?.firstTextLatencyMs)),
+		providerParseErrorCount: numericStats(runs.map((run) => run.provider?.parseErrorCount)),
+		providerUnknownEventCount: numericStats(runs.map((run) => run.provider?.unknownEventCount)),
 	};
 }
 
@@ -2755,6 +2939,7 @@ function formatStreamingBenchmark(benchmark: StreamingBenchmark, target: Browser
 	];
 	if (benchmark.fixture) lines.push(`fixture: mode=${benchmark.fixture.mode} profile=${jsonShort(benchmark.fixture.profile)} mix=${jsonShort(benchmark.fixture.mix)} simulation=${jsonShort(benchmark.fixture.simulation)} available=${benchmark.fixture.available} started=${benchmark.fixture.started} deltas=${jsonShort(benchmark.fixture.deltaCount)} reasoningDeltas=${jsonShort(benchmark.fixture.reasoningDeltaCount)} cadence=${jsonShort(benchmark.fixture.cadenceMs)}ms scheduleGaps=${benchmark.fixture.scheduleGapsMs ? formatStats(benchmark.fixture.scheduleGapsMs) : "count=0"} session=${jsonShort(benchmark.fixture.piboSessionId)}${benchmark.fixture.error ? ` error=${benchmark.fixture.error}` : ""}`);
 	if (benchmark.cadence) lines.push(`cadence: scheduleP90=${benchmark.cadence.fixtureScheduleGapP90Ms}ms, domP90=${jsonShort(benchmark.cadence.domGapP90Ms)}ms (lag=${jsonShort(benchmark.cadence.domLagOverScheduleP90Ms)}ms ratio=${jsonShort(benchmark.cadence.domToScheduleP90Ratio)}), sseTextP90=${jsonShort(benchmark.cadence.sseTextGapP90Ms)}ms (lag=${jsonShort(benchmark.cadence.sseTextLagOverScheduleP90Ms)}ms ratio=${jsonShort(benchmark.cadence.sseTextToScheduleP90Ratio)})`);
+	if (benchmark.provider) lines.push(`provider: requested=${benchmark.provider.requested} available=${benchmark.provider.available} id=${benchmark.provider.providerRequestId} model=${jsonShort(benchmark.provider.model)} status=${jsonShort(benchmark.provider.status)} text=${benchmark.provider.textDeltaCount} reasoning=${benchmark.provider.reasoningDeltaCount} textBytes=${formatStats(benchmark.provider.textDeltaBytes)} textGaps=${formatStats(benchmark.provider.textDeltaGapsMs)} firstText=${jsonShort(benchmark.provider.firstTextLatencyMs)}ms parseErrors=${jsonShort(benchmark.provider.parseErrorCount)} unknown=${jsonShort(benchmark.provider.unknownEventCount)} pages=${benchmark.provider.eventPageCount} truncated=${benchmark.provider.truncated}${benchmark.provider.error ? ` error=${benchmark.provider.error}` : ""}`);
 	if (benchmark.eventSource) {
 		lines.push(`eventSource: requested=${benchmark.eventSource.requested} installed=${benchmark.eventSource.installed} forcedClose=${benchmark.eventSource.forcedCloseCountAfterStart} reconnectOpen=${benchmark.eventSource.openCountAfterStart} text=${benchmark.eventSource.textEventCount} afterStart=${benchmark.eventSource.textEventCountAfterStart} reasoning=${benchmark.eventSource.reasoningEventCount} reasoningAfterStart=${benchmark.eventSource.reasoningEventCountAfterStart} transient=${benchmark.eventSource.uniqueTransientIdCountAfterStart}/${benchmark.eventSource.transientIdCountAfterStart} reset=${benchmark.eventSource.transientIdResetObserved} droppedText=${benchmark.eventSource.textDropTextEventCount} last=${jsonShort(benchmark.eventSource.lastEventId)} reconnectObserved=${benchmark.eventSource.reconnectObserved}`);
 		for (const stream of benchmark.eventSource.streams ?? []) {
@@ -2790,6 +2975,7 @@ function formatStreamingBenchmarkGroup(group: StreamingBenchmarkGroup, target: B
 	];
 	if (group.summary.fixtureScheduleGapP90Ms.count > 0) lines.push(`fixture: scheduleGapP90=${formatStats(group.summary.fixtureScheduleGapP90Ms)}`);
 	if (group.summary.domLagOverFixtureScheduleP90Ms.count > 0 || group.summary.sseTextLagOverFixtureScheduleP90Ms.count > 0) lines.push(`cadence lag: domP90-scheduleP90=${formatStats(group.summary.domLagOverFixtureScheduleP90Ms)}ms, sseTextP90-scheduleP90=${formatStats(group.summary.sseTextLagOverFixtureScheduleP90Ms)}ms, domRatio=${formatStats(group.summary.domToFixtureScheduleP90Ratio)}, sseRatio=${formatStats(group.summary.sseTextToFixtureScheduleP90Ratio)}`);
+	if (group.summary.providerTextDeltaCount.count > 0) lines.push(`provider: text=${formatStats(group.summary.providerTextDeltaCount)}, reasoning=${formatStats(group.summary.providerReasoningDeltaCount)}, textBytesP50=${formatStats(group.summary.providerTextDeltaBytesP50)}, textGapP90=${formatStats(group.summary.providerTextDeltaGapP90Ms)}ms, firstText=${formatStats(group.summary.providerFirstTextLatencyMs)}ms, parseErrors=${formatStats(group.summary.providerParseErrorCount)}, unknown=${formatStats(group.summary.providerUnknownEventCount)}`);
 	if (group.summary.eventSourceTextEventCountAfterStart.count > 0 || group.summary.eventSourceReasoningEventCountAfterStart.count > 0) lines.push(`eventSource: textAfterStart=${formatStats(group.summary.eventSourceTextEventCountAfterStart)}, reasoningAfterStart=${formatStats(group.summary.eventSourceReasoningEventCountAfterStart)}, forcedClose=${formatStats(group.summary.eventSourceForcedCloseCountAfterStart)}, reconnectOpen=${formatStats(group.summary.eventSourceReconnectOpenCountAfterStart)}, transient=${formatStats(group.summary.eventSourceTransientIdCountAfterStart)}`);
 	if (group.summary.sseTextEventCount.count > 0 || group.summary.sseReasoningEventCount.count > 0) lines.push(`sse: text=${formatStats(group.summary.sseTextEventCount)}, reasoning=${formatStats(group.summary.sseReasoningEventCount)}, chunkBytesP50=${formatStats(group.summary.sseChunkBytesP50)}, chunkGapP90=${formatStats(group.summary.sseChunkGapP90Ms)}, textPerChunkP90=${formatStats(group.summary.sseTextEventsPerChunkP90)}, textGapP90=${formatStats(group.summary.sseTextEventGapP90Ms)}`);
 	if (group.summary.selectedLiveEventCountAfterStart.count > 0) lines.push(`selected-live: eventsAfterStart=${formatStats(group.summary.selectedLiveEventCountAfterStart)}, textAfterStart=${formatStats(group.summary.selectedLiveTextEventCountAfterStart)}, reasoningAfterStart=${formatStats(group.summary.selectedLiveReasoningEventCountAfterStart)}, forcedClose=${formatStats(group.summary.selectedLiveForcedCloseCountAfterStart)}, reconnectOpen=${formatStats(group.summary.selectedLiveReconnectOpenCountAfterStart)}, transient=${formatStats(group.summary.selectedLiveTransientIdCountAfterStart)}`);

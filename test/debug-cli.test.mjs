@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { PiboDataStore } from "../dist/data/pibo-store.js";
 import { PiboReliabilityStore } from "../dist/reliability/store.js";
-import { evaluateStreamingBenchmarkAssertion, evaluateStreamingBenchmarkUrlComparisonRegressions, formatWatch, inferWatchFlickers, resolveStreamingBenchmarkHostedCompareUrlFromValues } from "../dist/debug/web.js";
+import { evaluateStreamingBenchmarkAssertion, evaluateStreamingBenchmarkUrlComparisonRegressions, formatWatch, inferWatchFlickers, resolveStreamingBenchmarkHostedCompareUrlFromValues, summarizeStreamingProviderTelemetry } from "../dist/debug/web.js";
 
 const execFileAsyncRaw = promisify(execFile);
 const cliPath = resolve("dist/bin/pibo.js");
@@ -38,7 +38,7 @@ test("pibo debug web watch rejects action flags", async () => {
 
 test("pibo debug web streaming benchmark help advertises the deterministic fixture", async () => {
 	const help = await execFileAsync("node", [cliPath, "debug", "web", "scenario", "--help"]);
-	assert.match(help.stdout, /streaming-benchmark \[--fixture\|--backend-fixture\].*\[--fixture-profile steady\|jitter\|burst\|batch\].*\[--fixture-mix text\|reasoning-text\].*\[--simulate-reconnect\|--simulate-trace-catchup\].*\[--compare-url url\|--compare-hosted\|--compare-hosted-if-configured\].*\[--assert\].*\[--expect-regression text\].*\[--negative-profile batch\]/);
+	assert.match(help.stdout, /streaming-benchmark \[--fixture\|--backend-fixture\].*\[--fixture-profile steady\|jitter\|burst\|batch\].*\[--fixture-mix text\|reasoning-text\].*\[--simulate-reconnect\|--simulate-trace-catchup\].*\[--provider-request-id pr_\.\.\.\].*\[--compare-url url\|--compare-hosted\|--compare-hosted-if-configured\].*\[--assert\].*\[--expect-regression text\].*\[--negative-profile batch\]/);
 	assert.match(help.stdout, /deterministic in-browser stream fixture/);
 	assert.match(help.stdout, /real app consumes deterministic \/api\/chat\/events frames/);
 	assert.match(help.stdout, /--fixture-profile selects steady cadence, deterministic jitter, bursty timing, or intentional batch stress/);
@@ -49,6 +49,7 @@ test("pibo debug web streaming benchmark help advertises the deterministic fixtu
 	assert.match(help.stdout, /--compare-url runs the same backend fixture at another Chat URL/);
 	assert.match(help.stdout, /--compare-hosted uses PIBO_DEV_PUBLIC_URL or PIBO_DEV_BASE_URL/);
 	assert.match(help.stdout, /--compare-hosted-if-configured runs the hosted comparison when a dev URL is configured/);
+	assert.match(help.stdout, /--provider-request-id attaches provider\/Pi telemetry delta counts/);
 	assert.match(help.stdout, /--assert exits non-zero/);
 	assert.match(help.stdout, /--expect-regression marks a required regression substring/);
 	assert.match(help.stdout, /--negative-profile batch expands to the backend batch reasoning\/text fixture/);
@@ -85,6 +86,46 @@ test("streaming hosted compare URL resolution prefers env and supports optional 
 	assert.equal(resolveStreamingBenchmarkHostedCompareUrlFromValues({ PIBO_DEV_BASE_URL: "https://dev.example.test/" }, {}), "https://dev.example.test/apps/chat");
 	assert.equal(resolveStreamingBenchmarkHostedCompareUrlFromValues({}, { PIBO_DEV_PUBLIC_URL: "https://file.example.test/apps/chat" }), "https://file.example.test/apps/chat");
 	assert.equal(resolveStreamingBenchmarkHostedCompareUrlFromValues({ PIBO_DEV_PUBLIC_URL: "", PIBO_DEV_BASE_URL: "" }, {}), undefined);
+});
+
+test("streaming provider telemetry summary extracts delta bytes, gaps, and latencies", () => {
+	const summary = summarizeStreamingProviderTelemetry({
+		request: {
+			providerRequestId: "pr_fixture",
+			piboSessionId: "ps_fixture",
+			turnId: "turn_fixture",
+			provider: "openai",
+			api: "responses",
+			model: "gpt-fixture",
+			transport: "sse",
+			status: "completed",
+			startedAt: "2026-05-23T00:00:00.000Z",
+			firstByteAt: "2026-05-23T00:00:00.050Z",
+			completedAt: "2026-05-23T00:00:00.300Z",
+			parseErrorCount: 0,
+			unknownEventCount: 1,
+			rawEventCount: 5,
+			normalizedEventCount: 4,
+			eventTypeCounts: { "pi.text_delta": 3, "pi.thinking_delta": 1 },
+		},
+		events: [
+			{ normalizedType: "thinking_delta", eventType: "pi.thinking_delta", receivedAt: "2026-05-23T00:00:00.075Z", safeFields: { deltaBytes: 4 }, byteSize: 40 },
+			{ normalizedType: "assistant_delta", eventType: "pi.text_delta", receivedAt: "2026-05-23T00:00:00.100Z", safeFields: { deltaBytes: 2 }, byteSize: 20 },
+			{ normalizedType: "assistant_delta", eventType: "pi.text_delta", receivedAt: "2026-05-23T00:00:00.125Z", safeFields: { deltaBytes: 3 }, byteSize: 30 },
+			{ normalizedType: "assistant_delta", eventType: "pi.text_delta", receivedAt: "2026-05-23T00:00:00.175Z", safeFields: { deltaBytes: 5 }, byteSize: 50 },
+		],
+		eventPageCount: 1,
+	});
+	assert.equal(summary.available, true);
+	assert.equal(summary.providerRequestId, "pr_fixture");
+	assert.equal(summary.textDeltaCount, 3);
+	assert.equal(summary.reasoningDeltaCount, 1);
+	assert.equal(summary.textDeltaBytes.p50, 3);
+	assert.equal(summary.textDeltaGapsMs.max, 50);
+	assert.equal(summary.firstByteLatencyMs, 50);
+	assert.equal(summary.firstTextLatencyMs, 100);
+	assert.equal(summary.firstReasoningLatencyMs, 75);
+	assert.equal(summary.unknownEventCount, 1);
 });
 
 test("streaming URL comparison regressions gate hosted-vs-direct degradation", () => {
@@ -125,6 +166,17 @@ test("pibo debug web streaming benchmark rejects missing expected regression val
 		execFileAsync("node", [cliPath, "debug", "web", "scenario", "streaming-benchmark", "--expect-regression"]),
 		(error) => {
 			assert.match(error.stderr, /--expect-regression requires a value/);
+			assert.doesNotMatch(error.stderr, /No attachable CDP target/);
+			return true;
+		},
+	);
+});
+
+test("pibo debug web streaming benchmark rejects missing provider request id before target discovery", async () => {
+	await assert.rejects(
+		execFileAsync("node", [cliPath, "debug", "web", "scenario", "streaming-benchmark", "--provider-request-id"]),
+		(error) => {
+			assert.match(error.stderr, /--provider-request-id requires a value/);
 			assert.doesNotMatch(error.stderr, /No attachable CDP target/);
 			return true;
 		},
