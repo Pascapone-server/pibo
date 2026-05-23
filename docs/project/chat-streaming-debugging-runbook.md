@@ -109,7 +109,7 @@ Prefer these rows in compact reports:
 - **SSE transport**: text/reasoning preservation, chunk gaps, text events per chunk.
 - **EventSource selected-live**: browser-delivered live frames, transient id count, and reconnect replay/cursor-lag/duplicate fields when `liveSince` is used.
 - **Live overlay**: enqueue/flush/overlay preservation ratios plus first live text, flush, and overlay latencies.
-- **Markdown render**: renderer invocation count/plain/full split and total/max self-duration for assistant Markdown hosts when debug streaming is enabled.
+- **Markdown render**: renderer invocation count/plain/full split and total/max duration for assistant Markdown hosts when debug streaming is enabled; full-path timing includes synchronous ReactMarkdown/GFM parse and tree building.
 - **DOM**: visible positive updates, max jump, p90 gap, first visible latency.
 - **Score**: aggregate smoothness plus regression/warning count.
 
