@@ -31,6 +31,16 @@ export type StreamingDebugSnapshot = {
 	liveTraceComputeDurationMsTotal: number;
 	liveTraceComputeDurationMsLast?: number;
 	liveTraceComputeDurationMsMax?: number;
+	markdownRenderCount: number;
+	markdownRenderPlainCount: number;
+	markdownRenderFullCount: number;
+	markdownRenderDurationMsTotal: number;
+	markdownRenderDurationMsLast?: number;
+	markdownRenderDurationMsMax?: number;
+	markdownRenderPlainDurationMsTotal: number;
+	markdownRenderPlainDurationMsMax?: number;
+	markdownRenderFullDurationMsTotal: number;
+	markdownRenderFullDurationMsMax?: number;
 	traceRefreshScheduledCount: number;
 	traceRefreshStartedCount: number;
 	traceRefreshCompletedCount: number;
@@ -154,11 +164,30 @@ export function recordStreamingDebugFlush(piboSessionId: string, flushedEventCou
 
 export function recordStreamingDebugLiveTraceCompute(piboSessionId: string, durationMs: number): void {
 	updateStreamingDebug(piboSessionId, (snapshot) => {
-		const roundedDurationMs = Math.max(0, Math.round(durationMs * 1000) / 1000);
+		const roundedDurationMs = roundDebugDurationMs(durationMs);
 		snapshot.liveTraceComputeCount += 1;
 		snapshot.liveTraceComputeDurationMsLast = roundedDurationMs;
 		snapshot.liveTraceComputeDurationMsTotal += roundedDurationMs;
 		snapshot.liveTraceComputeDurationMsMax = Math.max(snapshot.liveTraceComputeDurationMsMax ?? 0, roundedDurationMs);
+	});
+}
+
+export function recordStreamingDebugMarkdownRender(mode: "plain" | "full", durationMs: number): void {
+	updateStreamingDebugSnapshot((snapshot) => {
+		const roundedDurationMs = roundDebugDurationMs(durationMs);
+		snapshot.markdownRenderCount += 1;
+		snapshot.markdownRenderDurationMsLast = roundedDurationMs;
+		snapshot.markdownRenderDurationMsTotal += roundedDurationMs;
+		snapshot.markdownRenderDurationMsMax = Math.max(snapshot.markdownRenderDurationMsMax ?? 0, roundedDurationMs);
+		if (mode === "plain") {
+			snapshot.markdownRenderPlainCount += 1;
+			snapshot.markdownRenderPlainDurationMsTotal += roundedDurationMs;
+			snapshot.markdownRenderPlainDurationMsMax = Math.max(snapshot.markdownRenderPlainDurationMsMax ?? 0, roundedDurationMs);
+		} else {
+			snapshot.markdownRenderFullCount += 1;
+			snapshot.markdownRenderFullDurationMsTotal += roundedDurationMs;
+			snapshot.markdownRenderFullDurationMsMax = Math.max(snapshot.markdownRenderFullDurationMsMax ?? 0, roundedDurationMs);
+		}
 	});
 }
 
@@ -217,10 +246,16 @@ export function classifyStreamingDebugEventId(value: string | undefined): "missi
 }
 
 function updateStreamingDebug(piboSessionId: string, updater: (snapshot: StreamingDebugSnapshot) => void): void {
+	updateStreamingDebugSnapshot((snapshot) => {
+		if (!snapshot.sessionIds.includes(piboSessionId)) snapshot.sessionIds.push(piboSessionId);
+		snapshot.selectedPiboSessionId = piboSessionId;
+		updater(snapshot);
+	});
+}
+
+function updateStreamingDebugSnapshot(updater: (snapshot: StreamingDebugSnapshot) => void): void {
 	const snapshot = ensureStreamingDebugSnapshot();
 	if (!snapshot) return;
-	if (!snapshot.sessionIds.includes(piboSessionId)) snapshot.sessionIds.push(piboSessionId);
-	snapshot.selectedPiboSessionId = piboSessionId;
 	updater(snapshot);
 	snapshot.updatedAt = nowIso();
 }
@@ -263,6 +298,12 @@ function createStreamingDebugSnapshot(): StreamingDebugSnapshot {
 		overlayEventCount: 0,
 		liveTraceComputeCount: 0,
 		liveTraceComputeDurationMsTotal: 0,
+		markdownRenderCount: 0,
+		markdownRenderPlainCount: 0,
+		markdownRenderFullCount: 0,
+		markdownRenderDurationMsTotal: 0,
+		markdownRenderPlainDurationMsTotal: 0,
+		markdownRenderFullDurationMsTotal: 0,
 		traceRefreshScheduledCount: 0,
 		traceRefreshStartedCount: 0,
 		traceRefreshCompletedCount: 0,
@@ -283,6 +324,10 @@ function textBytes(value: string): number {
 
 function nowIso(): string {
 	return new Date().toISOString();
+}
+
+function roundDebugDurationMs(durationMs: number): number {
+	return Math.max(0, Math.round(durationMs * 1000) / 1000);
 }
 
 function nowMs(): number {

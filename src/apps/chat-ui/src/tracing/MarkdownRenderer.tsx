@@ -1,7 +1,8 @@
-import { memo } from "react";
+import { memo, type ReactElement } from "react";
 import ReactMarkdown, { defaultUrlTransform, type Components, type UrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import prism from "../context/prism-client";
+import { isStreamingDebugEnabled, recordStreamingDebugMarkdownRender } from "../streamingDebug";
 import "prismjs/components/prism-bash";
 import "prismjs/components/prism-css";
 import "prismjs/components/prism-javascript";
@@ -131,6 +132,12 @@ function languageFromClassName(className?: string): string | undefined {
 	return language;
 }
 
+function recordMarkdownRenderIfEnabled(mode: "plain" | "full", startedAt: number | undefined): void {
+	if (startedAt === undefined) return;
+	const endedAt = typeof performance === "undefined" ? Date.now() : performance.now();
+	recordStreamingDebugMarkdownRender(mode, endedAt - startedAt);
+}
+
 const safeUrlTransform: UrlTransform = (url, key, node) => {
 	if (node.tagName !== "a" || key !== "href") return "";
 	const transformed = defaultUrlTransform(url);
@@ -145,18 +152,27 @@ const safeUrlTransform: UrlTransform = (url, key, node) => {
 };
 
 export const MarkdownRenderer = memo(function MarkdownRenderer({ children }: MarkdownRendererProps) {
+	const startedAt = isStreamingDebugEnabled()
+		? (typeof performance === "undefined" ? Date.now() : performance.now())
+		: undefined;
+	let mode: "plain" | "full" = "full";
+	let element: ReactElement;
 	if (isPlainMarkdownText(children)) {
-		return <p data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="p">{children}</p>;
+		mode = "plain";
+		element = <p data-pibo-component="MarkdownRenderer" data-pibo-markdown-node="p">{children}</p>;
+	} else {
+		element = (
+			<ReactMarkdown
+				allowedElements={allowedElements}
+				components={components}
+				remarkPlugins={remarkPlugins}
+				skipHtml
+				urlTransform={safeUrlTransform}
+			>
+				{children}
+			</ReactMarkdown>
+		);
 	}
-	return (
-		<ReactMarkdown
-			allowedElements={allowedElements}
-			components={components}
-			remarkPlugins={remarkPlugins}
-			skipHtml
-			urlTransform={safeUrlTransform}
-		>
-			{children}
-		</ReactMarkdown>
-	);
+	recordMarkdownRenderIfEnabled(mode, startedAt);
+	return element;
 });

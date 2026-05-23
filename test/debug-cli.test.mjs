@@ -52,8 +52,8 @@ test("pibo debug web report renders saved streaming benchmark artifacts without 
 				enabledRequested: true,
 				available: true,
 				reset: true,
-				delta: { textDeltaCount: 12, textDeltaBytes: 24, reasoningDeltaCount: 4, enqueueCount: 22, flushCount: 20, overlayUpdateCount: 20 },
-				after: { overlayEventCount: 16, currentOutputLength: 24, traceBaseOutputLength: 0 },
+				delta: { textDeltaCount: 12, textDeltaBytes: 24, reasoningDeltaCount: 4, enqueueCount: 22, flushCount: 20, overlayUpdateCount: 20, markdownRenderCount: 12, markdownRenderPlainCount: 12, markdownRenderFullCount: 0, markdownRenderDurationMsTotal: 1.5 },
+				after: { overlayEventCount: 16, currentOutputLength: 24, traceBaseOutputLength: 0, markdownRenderDurationMsMax: 0.25 },
 			},
 			dom: {
 				selector: "[data-pibo-component=MarkdownRendererHost]",
@@ -85,6 +85,7 @@ test("pibo debug web report renders saved streaming benchmark artifacts without 
 		assert.match(compactReport.stdout, /\| Layer \| Preservation \| Cadence \/ latency \|/);
 		assert.match(compactReport.stdout, /\| SSE transport \| n\/a \| n\/a \|/);
 		assert.match(compactReport.stdout, /\| EventSource selected-live \| text 12, reasoning 4, events 26 \| first text 184ms, transient 17\/24, replay 24, liveSince 1 \|/);
+		assert.match(compactReport.stdout, /\| Markdown render \| count 12, plain 12, full 0 \| total 1\.5ms, max 0\.25ms \|/);
 		assert.match(compactReport.stdout, /\| DOM \| positive 12, max jump 2 chars \| p90 gap 101ms, first visible 145ms \|/);
 		const output = join(cwd, "reports", "streaming-compact.md");
 		const outputReport = await execFileAsync("node", [cliPath, "debug", "web", "report", "streaming-benchmark", "--from", artifact, "--compact", "--output", output], { cwd });
@@ -99,6 +100,12 @@ test("pibo debug web report renders saved streaming benchmark artifacts without 
 		assert.equal(writtenJson.format, "compact");
 		assert.equal(writtenJson.benchmark.kind, "streaming-benchmark");
 		assert.match(writtenJson.markdown, /# Web Streaming Benchmark Compact Report/);
+		assert.deepEqual(writtenJson.rows.find((row) => row.metric === "Markdown render"), {
+			section: "compact",
+			metric: "Markdown render",
+			preservation: "count 12, plain 12, full 0",
+			cadenceLatency: "total 1.5ms, max 0.25ms",
+		});
 		assert.deepEqual(writtenJson.rows.find((row) => row.metric === "DOM"), {
 			section: "compact",
 			metric: "DOM",
@@ -327,6 +334,10 @@ test("streaming benchmark summaries include live pipeline debug counters", () =>
 				overlayUpdateCount: enqueueCount - 1,
 				liveTraceComputeCount: enqueueCount - 1,
 				liveTraceComputeDurationMsTotal: (enqueueCount - 1) * 0.25,
+				markdownRenderCount: enqueueCount + 2,
+				markdownRenderPlainCount: enqueueCount,
+				markdownRenderFullCount: 2,
+				markdownRenderDurationMsTotal: enqueueCount * 0.1,
 				traceRefreshScheduledCount: 2,
 				traceRefreshCompletedCount,
 				traceRefreshFailedCount: 0,
@@ -342,6 +353,9 @@ test("streaming benchmark summaries include live pipeline debug counters", () =>
 				currentOutputLength: (stateBaseline * 2) + (enqueueCount * 2),
 				traceBaseOutputLength: 4,
 				liveTraceComputeDurationMsMax: 0.5,
+				markdownRenderDurationMsMax: 0.4,
+				markdownRenderPlainDurationMsMax: 0.2,
+				markdownRenderFullDurationMsMax: 0.4,
 				traceRefreshDurationMsMax: 25,
 			},
 		},
@@ -362,6 +376,13 @@ test("streaming benchmark summaries include live pipeline debug counters", () =>
 	assert.equal(summary.debugLiveTraceComputeCount.p50, 11);
 	assert.equal(summary.debugLiveTraceComputeDurationTotalMs.p50, 2.75);
 	assert.equal(summary.debugLiveTraceComputeDurationMaxMs.p50, 0.5);
+	assert.equal(summary.debugMarkdownRenderCount.p50, 14);
+	assert.equal(summary.debugMarkdownRenderPlainCount.p50, 12);
+	assert.equal(summary.debugMarkdownRenderFullCount.p50, 2);
+	assert.equal(summary.debugMarkdownRenderDurationTotalMs.p50, 1.2);
+	assert.equal(summary.debugMarkdownRenderDurationMaxMs.p50, 0.4);
+	assert.equal(summary.debugMarkdownRenderPlainDurationMaxMs.p50, 0.2);
+	assert.equal(summary.debugMarkdownRenderFullDurationMaxMs.p50, 0.4);
 	assert.equal(summary.debugTraceRefreshCompletedCount.max, 2);
 	assert.equal(summary.debugTraceRefreshDurationMaxMs.p50, 25);
 	assert.equal(summary.debugCurrentOutputLength.max, 28);
