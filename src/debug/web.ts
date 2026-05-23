@@ -12,6 +12,10 @@ const DEFAULT_EVENT_LIMIT = 500;
 const DEFAULT_TEXT_LIMIT = 80;
 const STDOUT_BUDGET = 12_000;
 const BATCH_NEGATIVE_EXPECTED_REGRESSIONS = ["positive DOM updates", "DOM max jump", "SSE text events per chunk"] as const;
+const URL_COMPARISON_MAX_SMOOTHNESS_DROP = 15;
+const URL_COMPARISON_MAX_DOM_LAG_DELTA_MS = 150;
+const URL_COMPARISON_MAX_SSE_LAG_DELTA_MS = 100;
+const URL_COMPARISON_MAX_SSE_CHUNK_GAP_DELTA_MS = 100;
 
 type WebOptions = {
 	positionals: string[];
@@ -2437,6 +2441,7 @@ function summarizeStreamingBenchmarkGroup(runs: StreamingBenchmark[], baselineRu
 }
 
 function summarizeStreamingBenchmarkUrlComparison(primaryUrl: string, compareUrl: string, primary: StreamingBenchmarkGroup, compare: StreamingBenchmarkGroup): StreamingBenchmarkUrlComparison {
+	const summaryComparison = compareStreamingBenchmarkSummaries(primary.summary, compare.summary);
 	return {
 		kind: "streaming-benchmark-url-comparison",
 		createdAt: new Date().toISOString(),
@@ -2445,16 +2450,37 @@ function summarizeStreamingBenchmarkUrlComparison(primaryUrl: string, compareUrl
 		compareUrl,
 		primary,
 		compare,
-		comparison: compareStreamingBenchmarkSummaries(primary.summary, compare.summary),
+		comparison: summaryComparison,
 		regressions: [
 			...primary.regressions.map((regression) => `primary: ${regression}`),
 			...compare.regressions.map((regression) => `compare: ${regression}`),
+			...evaluateStreamingBenchmarkUrlComparisonRegressions(summaryComparison).map((regression) => `comparison: ${regression}`),
 		],
 		warnings: [
 			...primary.warnings.map((warning) => `primary: ${warning}`),
 			...compare.warnings.map((warning) => `compare: ${warning}`),
 		],
 	};
+}
+
+export function evaluateStreamingBenchmarkUrlComparisonRegressions(comparison: StreamingBenchmarkComparison): string[] {
+	const regressions: string[] = [];
+	if (comparison.smoothnessDelta !== undefined && comparison.smoothnessDelta < -URL_COMPARISON_MAX_SMOOTHNESS_DROP) {
+		regressions.push(`compare smoothness delta ${comparison.smoothnessDelta} below -${URL_COMPARISON_MAX_SMOOTHNESS_DROP}`);
+	}
+	if (comparison.domLagOverFixtureScheduleP90DeltaMs !== undefined && comparison.domLagOverFixtureScheduleP90DeltaMs > URL_COMPARISON_MAX_DOM_LAG_DELTA_MS) {
+		regressions.push(`compare DOM lag over schedule delta ${comparison.domLagOverFixtureScheduleP90DeltaMs}ms exceeds ${URL_COMPARISON_MAX_DOM_LAG_DELTA_MS}ms`);
+	}
+	if (comparison.sseTextLagOverFixtureScheduleP90DeltaMs !== undefined && comparison.sseTextLagOverFixtureScheduleP90DeltaMs > URL_COMPARISON_MAX_SSE_LAG_DELTA_MS) {
+		regressions.push(`compare SSE text lag over schedule delta ${comparison.sseTextLagOverFixtureScheduleP90DeltaMs}ms exceeds ${URL_COMPARISON_MAX_SSE_LAG_DELTA_MS}ms`);
+	}
+	if (comparison.sseChunkGapP90DeltaMs !== undefined && comparison.sseChunkGapP90DeltaMs > URL_COMPARISON_MAX_SSE_CHUNK_GAP_DELTA_MS) {
+		regressions.push(`compare SSE chunk p90 gap delta ${comparison.sseChunkGapP90DeltaMs}ms exceeds ${URL_COMPARISON_MAX_SSE_CHUNK_GAP_DELTA_MS}ms`);
+	}
+	if (comparison.sseTextEventDelta !== undefined && comparison.sseTextEventDelta < 0) regressions.push(`compare SSE text events delta ${comparison.sseTextEventDelta} below 0`);
+	if (comparison.selectedLiveTextEventDelta !== undefined && comparison.selectedLiveTextEventDelta < 0) regressions.push(`compare selected-live text events delta ${comparison.selectedLiveTextEventDelta} below 0`);
+	if (comparison.selectedLiveReasoningEventDelta !== undefined && comparison.selectedLiveReasoningEventDelta < 0) regressions.push(`compare selected-live reasoning events delta ${comparison.selectedLiveReasoningEventDelta} below 0`);
+	return regressions;
 }
 
 function resolveStreamingBenchmarkCompareUrl(rawCompareUrl: string, primaryUrl: string): string {

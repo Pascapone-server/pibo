@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { PiboDataStore } from "../dist/data/pibo-store.js";
 import { PiboReliabilityStore } from "../dist/reliability/store.js";
-import { evaluateStreamingBenchmarkAssertion, formatWatch, inferWatchFlickers } from "../dist/debug/web.js";
+import { evaluateStreamingBenchmarkAssertion, evaluateStreamingBenchmarkUrlComparisonRegressions, formatWatch, inferWatchFlickers } from "../dist/debug/web.js";
 
 const execFileAsyncRaw = promisify(execFile);
 const cliPath = resolve("dist/bin/pibo.js");
@@ -76,6 +76,39 @@ test("streaming benchmark assertion fails on unexpected or missing expected regr
 	assert.equal(assertion.passed, false);
 	assert.deepEqual(assertion.unexpectedRegressions, ["fixture did not start"]);
 	assert.deepEqual(assertion.missingExpectedRegressionPatterns, ["DOM max jump"]);
+});
+
+test("streaming URL comparison regressions gate hosted-vs-direct degradation", () => {
+	assert.deepEqual(evaluateStreamingBenchmarkUrlComparisonRegressions({
+		baselineRuns: 2,
+		currentRuns: 2,
+		smoothnessDelta: -1,
+		domLagOverFixtureScheduleP90DeltaMs: 2,
+		sseTextLagOverFixtureScheduleP90DeltaMs: 3,
+		sseChunkGapP90DeltaMs: 4,
+		sseTextEventDelta: 0,
+		selectedLiveTextEventDelta: 0,
+		selectedLiveReasoningEventDelta: 0,
+	}), []);
+	assert.deepEqual(evaluateStreamingBenchmarkUrlComparisonRegressions({
+		baselineRuns: 2,
+		currentRuns: 2,
+		smoothnessDelta: -16,
+		domLagOverFixtureScheduleP90DeltaMs: 151,
+		sseTextLagOverFixtureScheduleP90DeltaMs: 101,
+		sseChunkGapP90DeltaMs: 101,
+		sseTextEventDelta: -1,
+		selectedLiveTextEventDelta: -1,
+		selectedLiveReasoningEventDelta: -1,
+	}), [
+		"compare smoothness delta -16 below -15",
+		"compare DOM lag over schedule delta 151ms exceeds 150ms",
+		"compare SSE text lag over schedule delta 101ms exceeds 100ms",
+		"compare SSE chunk p90 gap delta 101ms exceeds 100ms",
+		"compare SSE text events delta -1 below 0",
+		"compare selected-live text events delta -1 below 0",
+		"compare selected-live reasoning events delta -1 below 0",
+	]);
 });
 
 test("pibo debug web streaming benchmark rejects missing expected regression value before target discovery", async () => {
