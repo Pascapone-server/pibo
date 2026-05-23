@@ -1020,7 +1020,7 @@ function createSseProbe(piboSessionId) {
   const result = {
     requested: true,
     installed: false,
-    url: '/api/chat/events?piboSessionId=' + encodeURIComponent(piboSessionId) + '&mode=live',
+    url: '/api/chat/events?piboSessionId=' + encodeURIComponent(piboSessionId) + '&mode=live&probe=streaming-benchmark-' + Date.now(),
     headers: {},
     aborted: false,
     errors: [],
@@ -1149,6 +1149,13 @@ function createSseProbe(piboSessionId) {
       return finalize();
     },
   };
+}
+async function waitForSseProbeReady(probe, timeoutMs) {
+  const started = performance.now();
+  while (performance.now() - started < timeoutMs) {
+    if (!probe || probe.installed || probe.status || (probe.errors && probe.errors.length)) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
 }
 function createTraceProbe(piboSessionId, startedAt, intervalMs) {
   const result = {
@@ -1583,7 +1590,7 @@ async function runStreamingBenchmark(options) {
       warnings.push('backend streaming fixture was requested but selected Chat session was not found');
     } else {
       sseProbe = createSseProbe(piboSessionId);
-      await new Promise((resolve) => setTimeout(resolve, 75));
+      await waitForSseProbeReady(sseProbe.result, 500);
       try {
         const response = await fetchWithTimeout('/api/chat/debug/streaming-fixture', {
           method: 'POST',
