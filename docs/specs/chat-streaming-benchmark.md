@@ -78,7 +78,8 @@ This is the default deterministic regression mode because it exercises:
 - `text`: assistant text deltas only.
 - `reasoning-text`: reasoning deltas plus assistant text deltas.
 - `markdown`: CommonMark assistant deltas with real emphasis markers that force the full Markdown renderer path without GFM plugins while keeping small per-delta visible jumps.
-- `gfm-markdown`: GFM assistant deltas with strikethrough markers that exercise GFM rendering while keeping small per-delta visible jumps. Simple strikethrough may use the GFM fast path; richer GFM still uses the full `remark-gfm` parser.
+- `gfm-markdown`: GFM assistant deltas with strikethrough markers that exercise GFM rendering while keeping small per-delta visible jumps. Simple strikethrough may use the GFM fast path.
+- `gfm-full-markdown`: GFM task-list assistant deltas that must exercise the full `remark-gfm` parser while keeping small per-delta visible jumps.
 
 ### Simulations
 
@@ -247,6 +248,7 @@ For Markdown rendering changes, also run the Markdown/GFM renderer fixtures:
 ```bash
 pibo debug web scenario streaming-benchmark --backend-fixture --fixture-mix markdown --runs 5 --assert --artifact
 pibo debug web scenario streaming-benchmark --backend-fixture --fixture-mix gfm-markdown --runs 5 --assert --artifact
+pibo debug web scenario streaming-benchmark --backend-fixture --fixture-mix gfm-full-markdown --runs 5 --assert --artifact
 ```
 
 Use `--runs 5` when comparing performance or smoothness changes.
