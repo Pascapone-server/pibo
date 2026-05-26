@@ -1,6 +1,7 @@
 export * from "./commandCatalog.js";
 export * from "./commandResults.js";
 export * from "./ownerViewModel.js";
+export * from "./prependedFirstItemIndex.js";
 export * from "./roomSessionViewModel.js";
 export * from "./statusViewModel.js";
 export * from "./terminalCards.js";

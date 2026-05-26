@@ -11,6 +11,10 @@ import { TerminalLoginCard } from "./TerminalLoginCard";
 import { TerminalModelCard } from "./TerminalModelCard";
 import { TerminalStatusCard } from "./TerminalStatusCard";
 import { TerminalThinkingCard } from "./TerminalThinkingCard";
+import {
+	createPrependedFirstItemIndexState,
+	nextPrependedFirstItemIndexState,
+} from "../../../../../session-ui/prependedFirstItemIndex.js";
 import { buildCompactTerminalRows, type CompactTerminalLine, type CompactTerminalRow } from "../../../../../session-ui/terminalRows.js";
 
 const SHOW_LATEST_THRESHOLD_PX = 180;
@@ -39,6 +43,9 @@ export function CompactTerminalSessionView({
 	onFork,
 	onOpenSession,
 	onThinkingLevelChange,
+	hasOlderTraceEvents,
+	isLoadingOlderTraceEvents,
+	onLoadOlderTracePage,
 	onModelChanged,
 }: ChatSessionViewProps) {
 	const rows = useMemo(
@@ -62,6 +69,7 @@ export function CompactTerminalSessionView({
 		contentKey: rows,
 		atBottomThreshold: SHOW_LATEST_THRESHOLD_PX,
 	});
+	const firstItemIndex = usePrependedFirstItemIndex(rows, traceView?.piboSessionId);
 
 	useEffect(() => {
 		setExpandedRows((current) => retainExistingExpandedRows(current, rows, expandThinking));
@@ -97,6 +105,11 @@ export function CompactTerminalSessionView({
 			return next;
 		});
 	};
+
+	const loadOlderAtStart = useCallback(() => {
+		if (!hasOlderTraceEvents || isLoadingOlderTraceEvents || !onLoadOlderTracePage) return;
+		void onLoadOlderTracePage();
+	}, [hasOlderTraceEvents, isLoadingOlderTraceEvents, onLoadOlderTracePage]);
 
 	const renderRow = useCallback((_: number, row: CompactTerminalRow) => (
 		<div className="px-4">
@@ -146,6 +159,7 @@ export function CompactTerminalSessionView({
 						key={traceView.piboSessionId}
 						ref={stickyView.virtuosoRef}
 						data={rows}
+						firstItemIndex={firstItemIndex}
 						initialTopMostItemIndex={INITIAL_BOTTOM_ITEM}
 						increaseViewportBy={VIRTUOSO_VIEWPORT}
 						defaultItemHeight={DEFAULT_ROW_HEIGHT_PX}
@@ -156,6 +170,7 @@ export function CompactTerminalSessionView({
 						atBottomThreshold={stickyView.atBottomThreshold}
 						followOutput={stickyView.followOutput}
 						totalListHeightChanged={stickyView.totalListHeightChanged}
+						startReached={loadOlderAtStart}
 						alignToBottom
 						components={virtuosoComponents}
 						itemContent={renderRow}
@@ -184,6 +199,19 @@ export function CompactTerminalSessionView({
 			) : null}
 		</section>
 	);
+}
+
+function usePrependedFirstItemIndex(rows: readonly CompactTerminalRow[], resetKey: string | undefined): number {
+	const stateRef = useRef(createPrependedFirstItemIndexState());
+
+	return useMemo(() => {
+		stateRef.current = nextPrependedFirstItemIndexState(
+			stateRef.current,
+			rows.map((row) => row.id),
+			resetKey,
+		);
+		return stateRef.current.firstItemIndex;
+	}, [resetKey, rows]);
 }
 
 function TerminalHeader({

@@ -38,6 +38,9 @@ export type ChatSessionViewProps = {
 	onFork(entryId: string): void;
 	onOpenSession(piboSessionId: string): void;
 	onThinkingLevelChange(level: ThinkingLevel): void;
+	hasOlderTraceEvents?: boolean;
+	isLoadingOlderTraceEvents?: boolean;
+	onLoadOlderTracePage?(): Promise<void>;
 	onModelChanged?(): Promise<void>;
 	onRefreshBootstrap?(): Promise<unknown>;
 	onError?(message: string | null): void;

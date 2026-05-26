@@ -3247,6 +3247,8 @@ function SessionTracePane({
 	const [traceEventLimit, setTraceEventLimit] = useState(DEFAULT_TRACE_EVENTS_PAGE_SIZE);
 	const [rawEventLimit, setRawEventLimit] = useState(DEFAULT_RAW_EVENTS_LIMIT);
 	const [baseTraceView, setBaseTraceView] = useState<PiboSessionTraceView | null>(null);
+	const [loadingOlderTracePage, setLoadingOlderTracePage] = useState(false);
+	const loadingOlderTracePageRef = useRef(false);
 	const [selectedWebAnnotationIds, setSelectedWebAnnotationIds] = useState<string[]>([]);
 	const [selectedUploadAttachmentsBySession, setSelectedUploadAttachmentsBySession] = useState<Record<string, UploadedChatAttachment[]>>({});
 	const [webAnnotationsPanelVisible, setWebAnnotationsPanelVisible] = useState(false);
@@ -3341,6 +3343,8 @@ function SessionTracePane({
 		setTraceEventLimit(DEFAULT_TRACE_EVENTS_PAGE_SIZE);
 		setRawEventLimit(DEFAULT_RAW_EVENTS_LIMIT);
 		setBaseTraceView(null);
+		setLoadingOlderTracePage(false);
+		loadingOlderTracePageRef.current = false;
 		setLiveTraceOverlay(null);
 		setSelectedWebAnnotationIds(selectedPiboSessionId ? readStoredSelectedWebAnnotationIds(selectedPiboSessionId) : []);
 		setWebAnnotationOverlayState(selectedPiboSessionId ? readStoredWebAnnotationOverlayState(selectedPiboSessionId) : null);
@@ -3463,7 +3467,7 @@ function SessionTracePane({
 	}, [baseTraceView, currentTraceComputation.liveTraceComputeDurationMs, currentTraceView, liveTraceOverlay, selectedPiboSessionId]);
 
 	const loadOlderTracePage = useCallback(async () => {
-		if (!selectedPiboSessionId || !currentTraceView?.nextBeforeSequence) return;
+		if (!selectedPiboSessionId || !currentTraceView?.nextBeforeSequence || loadingOlderTracePageRef.current) return;
 		const beforeSequence = currentTraceView.nextBeforeSequence;
 		const queryKey = chatTracePageQueryKey(selectedPiboSessionId, {
 			includeRawEvents: showRawEvents,
@@ -3471,29 +3475,38 @@ function SessionTracePane({
 			pageSize: DEFAULT_TRACE_EVENTS_PAGE_SIZE,
 			beforeSequence,
 		});
-		const olderTrace = await queryClient.fetchQuery({
-			queryKey,
-			queryFn: async () => {
-				const cached = queryClient.getQueryData<PiboSessionTraceView>(queryKey);
-				const response = await getTrace(selectedPiboSessionId, {
-					includeRawEvents: showRawEvents,
-					rawEventsLimit: rawEventLimit,
-					pageSize: DEFAULT_TRACE_EVENTS_PAGE_SIZE,
-					beforeSequence,
-					knownVersion: cached?.version,
-				});
-				if (response.notModified && cached) return cached;
-				if (!response.trace) throw new Error("Trace page response missing payload.");
-				return response.trace;
-			},
-			staleTime: TRACE_STALE_TIME_MS,
-			gcTime: TRACE_GC_TIME_MS,
-		});
-		startTransition(() => {
-			setBaseTraceView((current) => current ? mergeOlderTracePage(current, olderTrace) : olderTrace);
-			setTraceEventLimit((current) => current + (olderTrace.pageSize ?? DEFAULT_TRACE_EVENTS_PAGE_SIZE));
-		});
-	}, [currentTraceView?.nextBeforeSequence, queryClient, rawEventLimit, selectedPiboSessionId, showRawEvents]);
+		loadingOlderTracePageRef.current = true;
+		setLoadingOlderTracePage(true);
+		try {
+			const olderTrace = await queryClient.fetchQuery({
+				queryKey,
+				queryFn: async () => {
+					const cached = queryClient.getQueryData<PiboSessionTraceView>(queryKey);
+					const response = await getTrace(selectedPiboSessionId, {
+						includeRawEvents: showRawEvents,
+						rawEventsLimit: rawEventLimit,
+						pageSize: DEFAULT_TRACE_EVENTS_PAGE_SIZE,
+						beforeSequence,
+						knownVersion: cached?.version,
+					});
+					if (response.notModified && cached) return cached;
+					if (!response.trace) throw new Error("Trace page response missing payload.");
+					return response.trace;
+				},
+				staleTime: TRACE_STALE_TIME_MS,
+				gcTime: TRACE_GC_TIME_MS,
+			});
+			startTransition(() => {
+				setBaseTraceView((current) => current ? mergeOlderTracePage(current, olderTrace) : olderTrace);
+				setTraceEventLimit((current) => current + (olderTrace.pageSize ?? DEFAULT_TRACE_EVENTS_PAGE_SIZE));
+			});
+		} catch (caught) {
+			onError(errorMessage(caught));
+		} finally {
+			loadingOlderTracePageRef.current = false;
+			setLoadingOlderTracePage(false);
+		}
+	}, [currentTraceView?.nextBeforeSequence, onError, queryClient, rawEventLimit, selectedPiboSessionId, showRawEvents]);
 
 	const flushPendingStreamEvents = useCallback((piboSessionId: string) => {
 		const pending = pendingStreamEventsBySession.current.get(piboSessionId);
@@ -4028,10 +4041,10 @@ function SessionTracePane({
 						<button
 							type="button"
 							onClick={() => void loadOlderTracePage()}
-							disabled={tracePageQuery.isFetching}
+							disabled={loadingOlderTracePage}
 							className="rounded-sm border border-slate-700 px-3 py-1 text-xs text-slate-400 hover:border-[#11a4d4] hover:text-[#11a4d4] disabled:opacity-60"
 						>
-							{tracePageQuery.isFetching ? "Loading history…" : `Load older trace history (${Math.min(currentTraceView.eventLimit ?? traceEventLimit, currentTraceView.eventCount ?? traceEventLimit)} of ${currentTraceView.eventCount ?? "many"} events)`}
+							{loadingOlderTracePage ? "Loading history…" : `Load older session history (${Math.min(currentTraceView.eventLimit ?? traceEventLimit, currentTraceView.eventCount ?? traceEventLimit)} of ${currentTraceView.eventCount ?? "many"} events)`}
 						</button>
 					</div>
 				) : null}
@@ -4064,6 +4077,9 @@ function SessionTracePane({
 							await onRefreshBootstrap();
 							await onRefreshTrace();
 						},
+						hasOlderTraceEvents: currentTraceView?.hasOlderEvents,
+						isLoadingOlderTraceEvents: loadingOlderTracePage,
+						onLoadOlderTracePage: loadOlderTracePage,
 						onRefreshBootstrap,
 						onError,
 					})
